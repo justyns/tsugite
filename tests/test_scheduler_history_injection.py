@@ -79,7 +79,7 @@ class TestRecordSyntheticTurn:
         session_path.parent.mkdir(parents=True, exist_ok=True)
 
         with patch("tsugite.history.storage.get_history_dir", return_value=tmp_path / "history"):
-            SchedulerAdapter._record_synthetic_turn(mock_adapter, "justyn", _make_entry(), result)
+            SchedulerAdapter._record_synthetic_turn(mock_adapter, "alice", _make_entry(), result)
 
         assert session_path.exists()
         return [json.loads(line) for line in session_path.read_text().strip().split("\n")]
@@ -120,7 +120,7 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
 class TestInjectIntoUserSessions:
     @pytest.mark.asyncio
     async def test_resolves_discord_identity(self):
-        sa, mock_adapter = _make_scheduler_adapter(identity_map={"discord:123456789": "justyn"})
+        sa, mock_adapter = _make_scheduler_adapter(identity_map={"discord:123456789": "alice"})
         entry = _make_entry()
 
         with patch.object(sa, "_record_synthetic_turn") as mock_record:
@@ -129,7 +129,7 @@ class TestInjectIntoUserSessions:
         mock_record.assert_called_once()
         call_args = mock_record.call_args[0]
         assert call_args[0] is mock_adapter
-        assert call_args[1] == "justyn"
+        assert call_args[1] == "alice"
         assert call_args[2] is entry
         assert call_args[3] == "result"
 
@@ -161,7 +161,7 @@ class TestInjectIntoUserSessions:
         """inject_history=False prevents _inject_into_user_sessions from being called."""
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
-            identity_map={"discord:123456789": "justyn"},
+            identity_map={"discord:123456789": "alice"},
         )
         mock_adapter.handle_message = AsyncMock(return_value="done")
 
@@ -209,7 +209,7 @@ class TestResolveTargetSession:
         return SessionStore(tmp_path / "session_store.json")
 
     @staticmethod
-    def _add_session(store, sid, user_id="justyn", agent="bot"):
+    def _add_session(store, sid, user_id="alice", agent="bot"):
         from tsugite_daemon.session_store import Session, SessionSource
 
         s = Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id)
@@ -221,7 +221,7 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session=None, originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == "orig-sess"
 
@@ -229,23 +229,23 @@ class TestResolveTargetSession:
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session=None, originating_session_id=None)
-        assert resolve_target_session(entry, "justyn", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store, "bot") is None
 
     def test_explicit_session_id(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         self._add_session(store, "explicit-id")
         entry = _make_entry(target_session="explicit-id")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == "explicit-id"
 
     def test_name_lookup(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
-        named = store.get_or_create_named_session("justyn", "bot", "research")
+        named = store.get_or_create_named_session("alice", "bot", "research")
         entry = _make_entry(target_session="name:research")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == named.id
 
@@ -254,14 +254,14 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session="none", originating_session_id="orig-sess")
-        assert resolve_target_session(entry, "justyn", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store, "bot") is None
 
     def test_originating_explicit(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == "orig-sess"
 
@@ -269,13 +269,13 @@ class TestResolveTargetSession:
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session="does-not-exist")
-        assert resolve_target_session(entry, "justyn", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store, "bot") is None
 
     def test_originating_explicit_skipped_when_session_missing(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session="originating", originating_session_id=None)
-        assert resolve_target_session(entry, "justyn", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store, "bot") is None
 
     def test_originating_follows_superseded_chain(self, store):
         """A compacted originating session resolves to its successor."""
@@ -283,12 +283,12 @@ class TestResolveTargetSession:
         from tsugite_daemon.session_store import Session, SessionSource
 
         old = self._add_session(store, "orig-sess")
-        new = Session(id="new-sess", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn")
+        new = Session(id="new-sess", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="alice")
         store.create_session(new)
         store.update_session(old.id, superseded_by=new.id)
 
         entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == "new-sess"
 
@@ -303,7 +303,7 @@ class TestResolveTargetSession:
 
         entry = _make_entry(target_session="originating", originating_session_id="sess-a")
         # Returns whichever session the walk halts on, but must terminate.
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id in {"sess-a", "sess-b"}
 
@@ -315,7 +315,7 @@ class TestResolveTargetSession:
         store.set_primary_session(primary.id)
 
         entry = _make_entry(target_session=None, originating_session_id="orig-id")
-        result = resolve_target_session(entry, "justyn", store, "bot")
+        result = resolve_target_session(entry, "alice", store, "bot")
         assert result is not None
         assert result.id == "primary-id"
 
@@ -325,7 +325,7 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-id")
         entry = _make_entry(target_session="primary", originating_session_id="orig-id")
-        assert resolve_target_session(entry, "justyn", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store, "bot") is None
 
 
 class TestRecordSyntheticTurnWithResolver:
@@ -342,7 +342,7 @@ class TestRecordSyntheticTurnWithResolver:
         from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
         store = SessionStore(tmp_path / "session_store.json")
-        target = Session(id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="justyn")
+        target = Session(id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="alice")
         store.create_session(target)
         adapter = self._make_real_adapter(store)
         entry = _make_entry(target_session="resolved-target")
@@ -350,7 +350,7 @@ class TestRecordSyntheticTurnWithResolver:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
-            SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
+            SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
 
         assert (history_dir / "resolved-target.jsonl").exists()
 
@@ -364,6 +364,6 @@ class TestRecordSyntheticTurnWithResolver:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
         with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
-            SchedulerAdapter._record_synthetic_turn(adapter, "justyn", entry, "result")
+            SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
 
         assert list(history_dir.iterdir()) == []

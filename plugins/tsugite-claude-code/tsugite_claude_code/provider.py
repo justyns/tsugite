@@ -18,6 +18,9 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
     "claude_code/claude-fable-5": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
+    "claude_code/claude-opus-5": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
     "claude_code/claude-opus-4-8": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
@@ -39,11 +42,16 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
 }
 
 # Bare tier aliases track the newest model in that tier; version-pinned aliases
-# stay for reproducible configs.
+# stay for reproducible configs. Exception: opus stays on 4-8. Opus 5's replies
+# through Claude Code's resume path can leave an empty assistant block that wedges
+# the sidecar transcript (400 "text content blocks must be non-empty"), and the
+# fresh-session fallback only covers the first send, so opus-5 is opt-in via its
+# pinned alias until a mid-conversation poison recovers cleanly.
 _ALIASES = {
     "fable": "claude-fable-5",
     "fable-5": "claude-fable-5",
     "opus": "claude-opus-4-8",
+    "opus-5": "claude-opus-5",
     "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
@@ -86,11 +94,11 @@ class ClaudeCodeProvider:
     """
 
     cacheable = False
+    models_are_definitive = True  # CLI exposes a fixed model set; unlisted ids are typos
 
     def __init__(self, name: str = "claude_code"):
         self.name = name
         self._process = None
-        self._turn_count = 0
         self._resolved_model: str | None = None
 
         # Context set via set_context()
@@ -168,11 +176,10 @@ class ClaudeCodeProvider:
 
         # Never send empty content: the CLI would persist an empty text block
         # into its sidecar transcript, and the next --resume of that transcript
-        # is rejected wholesale (400 text content blocks must be non-empty).
-        if not user_content or not user_content.strip():
+        # is rejected wholesale (400 text content blocks must be non-empty). A
+        # block list (image turn) is never empty and skips this guard.
+        if isinstance(user_content, str) and not user_content.strip():
             user_content = "(empty message)"
-
-        self._turn_count += 1
 
         if stream:
             return self._stream(user_content, resume_fallback=first_turn)
@@ -289,8 +296,14 @@ class ClaudeCodeProvider:
             cache_read_input_tokens=cache_read,
         )
 
-    def _build_first_message(self, messages: list[dict]) -> str:
-        """Build the first user message, inlining attachments, skills, and history."""
+    def _build_first_message(self, messages: list[dict]) -> str | list[dict]:
+        """Build the first user message, inlining attachments, skills, and history.
+
+        Returns a bare string for text-only turns (transcripts unchanged). When
+        image attachments are present, returns an Anthropic content-block list
+        (one text block carrying the inlined context/history/task, plus one image
+        block per attachment); the CLI forwards those blocks to the API.
+        """
         parts = []
 
         include_context = not self._resume_session or self._resume_after_compaction
@@ -337,7 +350,39 @@ class ClaudeCodeProvider:
                 parts.append(content)
                 break
 
-        return "\n".join(parts)
+        text = "\n".join(parts)
+
+        # Image blocks are NOT gated on include_context: a resumed session (every
+        # ongoing daemon chat turn) has include_context false, but this turn's
+        # uploaded image belongs to this turn and isn't in the CLI transcript yet.
+        # The gate exists only to avoid re-inlining standing TEXT context.
+        image_blocks = self._image_blocks()
+        if not image_blocks:
+            return text
+        blocks: list[dict] = [{"type": "image", "source": src} for src in image_blocks]
+        # A leading, non-empty text block keeps the task/context ahead of the
+        # images; an empty text block would be rejected (400 must be non-empty).
+        if text.strip():
+            blocks.insert(0, {"type": "text", "text": text})
+        return blocks
+
+    def _image_blocks(self) -> list[dict]:
+        """base64 image `source` payloads for the API-supported image attachments.
+
+        Unsupported image types (svg/bmp/tiff) are skipped as defense-in-depth --
+        the daemon already routes them to the workspace-only path, so in practice
+        only standing agent-file images (essentially nonexistent) hit this filter.
+        """
+        from tsugite.attachments.base import SUPPORTED_INLINE_IMAGE_MEDIA_TYPES, AttachmentContentType
+
+        sources = []
+        for att in self._attachments:
+            if att.content_type != AttachmentContentType.IMAGE or not att.content:
+                continue
+            if att.mime_type not in SUPPORTED_INLINE_IMAGE_MEDIA_TYPES:
+                continue
+            sources.append({"type": "base64", "media_type": att.mime_type, "data": att.content})
+        return sources
 
     def _get_history_budget(self) -> int:
         info = self.get_model_info(self._resolved_model) if self._resolved_model else None
@@ -365,7 +410,6 @@ class ClaudeCodeProvider:
             self._compacted = self._process.compacted
             await self._process.stop()
             self._process = None
-            self._turn_count = 0
 
     def count_tokens(self, text: str, model: str) -> int:
         return default_count_tokens(text, model)

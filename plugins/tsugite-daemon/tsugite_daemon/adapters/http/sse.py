@@ -129,6 +129,10 @@ _BROADCAST_SKIP_EVENTS = frozenset(
         "final_result",
         "error",
         "cancelled",
+        # Live-only, own-tab hint that carries the sending turn's context split so
+        # its gutter shows during streaming; other surfaces read it off the recorded
+        # user_input, so broadcasting it would just double the work.
+        "user_context",
     }
 )
 
@@ -225,6 +229,13 @@ class SSEProgressHandler(JSONLUIHandler):
         yield 'data: {"type": "done"}\n\n'
 
 
+# Asks currently blocked in `ask_user`, keyed by their durable `ask_id`. An
+# answer targets an ask by this id (which is emitted, persisted and replayed on
+# reload) instead of a fragile session triple that a rotation or a reload can no
+# longer match. An entry lives only for the duration of its blocking `ask_user`.
+_PENDING_ASKS: dict[str, "HTTPInteractionBackend"] = {}
+
+
 class HTTPInteractionBackend:
     """Interaction backend for HTTP -- emits SSE events, blocks until response."""
 
@@ -234,20 +245,32 @@ class HTTPInteractionBackend:
         self._progress = progress
         self._event = threading.Event()
         self._response: Optional[str] = None
+        self._ask_id: Optional[str] = None
         self.pending_message: Optional[str] = None
 
     def ask_user(self, question: str, question_type: str = "text", options: Optional[list[str]] = None) -> str:
         self._event.clear()
         self._response = None
-        payload = {"question": question, "question_type": question_type}
+        ask_id = f"ask-{uuid4().hex[:8]}"
+        self._ask_id = ask_id
+        payload: dict[str, Any] = {"ask_id": ask_id, "question": question, "question_type": question_type}
         if options:
             payload["options"] = options
-        self._progress._emit("ask_user", payload)
-
-        if not self._event.wait(timeout=self.TIMEOUT):
-            raise RuntimeError("Timed out waiting for user response (HTTP)")
-        return self._response or ""
+        _PENDING_ASKS[ask_id] = self
+        try:
+            self._progress._emit("ask_user", payload)
+            if not self._event.wait(timeout=self.TIMEOUT):
+                raise RuntimeError("Timed out waiting for user response (HTTP)")
+            return self._response or ""
+        finally:
+            _PENDING_ASKS.pop(ask_id, None)
 
     def submit_response(self, response: str) -> None:
+        # Emit a durable ask_answered before releasing the blocked ask_user: a
+        # persisted ask_user with no matching ask_answered is what the UI
+        # re-renders as still-pending, so this is what clears it on reload.
         self._response = response
+        if self._ask_id is not None:
+            self._progress._emit("ask_answered", {"ask_id": self._ask_id, "answer": response})
+            self._ask_id = None
         self._event.set()

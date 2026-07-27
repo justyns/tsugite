@@ -100,9 +100,6 @@ class TokenStore:
                 return True
         return False
 
-    def has_admin_tokens(self) -> bool:
-        return self._storage.exists_any()
-
     # --- Agent tokens (temporary, with TTL) ---
 
     def issue(self, agent: str, schedule_id: str = "", ttl: int | None = None) -> str:

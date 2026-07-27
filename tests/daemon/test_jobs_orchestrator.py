@@ -7,11 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.jobs_orchestrator import (
-    MAX_VERIFY_ATTEMPTS,
     JobsOrchestrator,
     _parse_verifier_output,
 )
 from tsugite_daemon.session_store import FINISHED_STATUSES, Session, SessionStatus
+
+MAX_VERIFY_ATTEMPTS = 3
 
 
 class FakeStore:
@@ -492,12 +493,12 @@ async def test_loopback_worker_falls_back_to_registered_adapter_when_parent_look
 
 @pytest.mark.asyncio
 async def test_verifier_routes_through_parent_session_adapter_when_present(store, runner, orchestrator):
-    """Separate coverage of the parent-resolution path: when the parent session
-    IS in the store, the verifier routes through the parent's agent, NOT the
-    arbitrary first _adapters key."""
-    # Parent 'parent-1' is seeded with agent='default'; add a decoy _adapters entry
-    # that would win if the fallback (incorrectly) ran instead of parent resolution.
-    runner._adapters = {"decoy_key": object()}
+    """Separate coverage of the parent-resolution path: when the parent session IS
+    in the store AND its agent names a registered adapter, the verifier routes
+    through that agent, NOT the arbitrary first _adapters key."""
+    # Parent 'parent-1' is seeded with agent='default'; register it plus a decoy so
+    # the decoy would only win if the (registered) parent resolution failed to.
+    runner._adapters = {"default": object(), "decoy_key": object()}
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "worker output")
 
@@ -507,6 +508,39 @@ async def test_verifier_routes_through_parent_session_adapter_when_present(store
         "verifier must route through the parent session's agent when the parent resolves, "
         f"not the _adapters fallback; got agent={verifier_spawns[0].agent!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_verifier_falls_back_when_parent_agent_is_not_a_registered_adapter(store, runner, orchestrator):
+    """Hardened contract: a parent whose stored agent is NOT a registered adapter
+    (a daemon agent whose adapter key differs from its agent-file config name) is
+    not trusted blindly - it falls back to a registered adapter so the worker runs."""
+    # Parent seeded with agent='default', but only 'real_adapter' is registered.
+    runner._adapters = {"real_adapter": object()}
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+
+    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
+    assert len(verifier_spawns) == 1
+    assert verifier_spawns[0].agent == "real_adapter", (
+        f"an unregistered parent agent must fall back to a registered adapter, got {verifier_spawns[0].agent!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_verifier_prefers_the_running_adapter_over_the_parent(store, runner, orchestrator):
+    """The adapter running the spawning turn is the most reliable signal and wins
+    over the parent session's stored agent."""
+    from tsugite.agent_runner.helpers import set_current_daemon_agent
+
+    runner._adapters = {"running_adapter": object(), "default": object()}
+    set_current_daemon_agent("running_adapter")
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+
+    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
+    assert len(verifier_spawns) == 1
+    assert verifier_spawns[0].agent == "running_adapter"
 
 
 # ── real-SessionStore contract: get_session RAISES on miss ──
@@ -722,6 +756,31 @@ async def test_create_and_start_job_routes_through_parent_agent(store, runner, o
         spawned_by="user-slash",
     )
     assert started.agent == "support", f"worker must route through parent's adapter 'support', got {started.agent!r}"
+
+
+@pytest.mark.asyncio
+async def test_create_and_start_job_threads_delegation_files_to_worker(store, runner, orchestrator):
+    """files= handed to spawn_job ride the Job and land on the worker session's
+    metadata under `delegation_files`, where SessionRunner materializes them into
+    the worker's first-turn attachments."""
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1",
+        prompt="what is in this image?",
+        acceptance_criteria=[],
+        delegation_files=["/ws/uploads/photo.jpg"],
+    )
+    assert started.metadata["delegation_files"] == ["/ws/uploads/photo.jpg"]
+    assert store.get(job.id).delegation_files == ["/ws/uploads/photo.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_create_and_start_job_omits_delegation_files_key_when_none(store, runner, orchestrator):
+    """A job spawned without files must not stamp an empty delegation_files key on
+    the worker metadata (the runner keys off its presence)."""
+    _, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="plain task", acceptance_criteria=[]
+    )
+    assert "delegation_files" not in started.metadata
 
 
 def test_on_timeout_skips_cancel_when_worker_already_terminal(store, runner, orchestrator):

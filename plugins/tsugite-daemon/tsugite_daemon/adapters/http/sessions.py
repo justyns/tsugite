@@ -66,7 +66,7 @@ class SessionsMixin:
         from tsugite.models import UnsupportedEffortError, resolve_reasoning_effort
 
         try:
-            return resolve_reasoning_effort(self._resolve_session_model(adapter, session_id), value), None
+            return resolve_reasoning_effort(adapter.resolve_session_model(session_id), value), None
         except UnsupportedEffortError as err:
             return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
 
@@ -75,7 +75,7 @@ class SessionsMixin:
         return {
             "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
             "model": adapter.session_store.get_model_override(session_id),
-            "agent": session.agent if session else None,
+            "agent": session.agent,
         }
 
     async def _session_settings_get(self, request: Request) -> JSONResponse:
@@ -122,6 +122,20 @@ class SessionsMixin:
             if name not in self.adapters:
                 return JSONResponse({"error": f"unknown agent: {name}"}, status_code=400)
             adapter.session_store.set_agent_override(session_id, name)
+
+        # A model/effort change broadcasts a session_update so the same chat open
+        # in other tabs refreshes its chips live (one shape shared with /model,
+        # /effort). Emitted only when one of those actually changed.
+        if "model" in body or "reasoning_effort" in body:
+            self.event_bus.emit(
+                "session_update",
+                {
+                    "action": "settings",
+                    "id": session_id,
+                    "model": adapter.session_store.get_model_override(session_id),
+                    "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
+                },
+            )
 
         return JSONResponse(self._session_settings_payload(adapter, session_id))
 
@@ -369,6 +383,17 @@ class SessionsMixin:
             status_code=201,
         )
 
+    @staticmethod
+    def _query_int(value: Optional[str]) -> Optional[int]:
+        """Parse a non-negative int query param; None on absent/malformed."""
+        if value is None:
+            return None
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return None
+        return n if n >= 0 else None
+
     async def _api_session_events(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
             return err
@@ -377,8 +402,18 @@ class SessionsMixin:
             self.session_runner.store.get_session(session_id)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
-        events = self.session_runner.store.read_events(session_id)
-        return JSONResponse({"events": events})
+        after_id = self._query_int(request.query_params.get("after_id"))
+        before_id = self._query_int(request.query_params.get("before_id"))
+        limit = self._query_int(request.query_params.get("limit"))
+        # Opt-in windowing only: the bare call keeps its exact {"events": [...]}
+        # shape for other consumers.
+        if after_id is None and before_id is None and limit is None:
+            events = self.session_runner.store.read_events(session_id)
+            return JSONResponse({"events": events})
+        page = self.session_runner.store.read_events_page(
+            session_id, after_id=after_id, before_id=before_id, limit=limit
+        )
+        return JSONResponse(page)
 
     async def _api_get_metadata(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

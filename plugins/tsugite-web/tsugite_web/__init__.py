@@ -33,19 +33,15 @@ def web_search(query: str, max_results: int = 5) -> list[Dict[str, str]]:
         raise RuntimeError(f"Web search requires the ddgs package. {_WEB_EXTRA_HINT}") from e
 
     try:
-        results = []
         with DDGS() as ddgs:
-            search_results = ddgs.text(query, max_results=max_results)
-            for result in search_results:
-                results.append(
-                    {
-                        "title": result.get("title", ""),
-                        "url": result.get("href", ""),
-                        "snippet": result.get("body", ""),
-                    }
-                )
-
-        return results
+            return [
+                {
+                    "title": result.get("title", ""),
+                    "url": result.get("href", ""),
+                    "snippet": result.get("body", ""),
+                }
+                for result in ddgs.text(query, max_results=max_results)
+            ]
 
     except DDGSException as e:
         # ddgs raises instead of returning [] when a search simply finds

@@ -45,12 +45,12 @@ def _event_types(history_dir: Path, session_id: str) -> list[str]:
 
 
 def test_boot_repair_finalizes_in_flight_interactive_turn(tmp_path, history_dir):
-    store = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    store = SessionStore(tmp_path / "session_store.json")
     store.create_session(Session(id="s1", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
     store.begin_turn("s1")
     _seed_mid_turn_history(history_dir, "s1")
 
-    reopened = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    reopened = SessionStore(tmp_path / "session_store.json")
 
     types = _event_types(history_dir, "s1")
     assert types[-1] == "session_error", f"repair must append a terminal event; got tail {types[-3:]}"
@@ -64,7 +64,7 @@ def test_boot_repair_finalizes_in_flight_interactive_turn(tmp_path, history_dir)
 
 
 def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, history_dir):
-    store = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    store = SessionStore(tmp_path / "session_store.json")
     store.create_session(
         Session(
             id="s2",
@@ -76,36 +76,36 @@ def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, histor
     )
     _seed_mid_turn_history(history_dir, "s2")
 
-    reopened = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    reopened = SessionStore(tmp_path / "session_store.json")
 
     assert reopened.get_session("s2").status == SessionStatus.FAILED.value
     assert _event_types(history_dir, "s2")[-1] == "session_error"
 
 
 def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):
-    store = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    store = SessionStore(tmp_path / "session_store.json")
     store.create_session(Session(id="s3", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
     storage = SessionStorage.create(agent_name="test", model="m", session_path=history_dir / "s3.jsonl")
     storage.record("user_input", text="hi")
     storage.record("session_end", status="success")
     before = _event_types(history_dir, "s3")
 
-    SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    SessionStore(tmp_path / "session_store.json")
 
     assert _event_types(history_dir, "s3") == before, "clean sessions must not get repair events"
 
 
 def test_begin_and_end_turn_write_through(tmp_path, history_dir):
-    store = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    store = SessionStore(tmp_path / "session_store.json")
     store.create_session(Session(id="s4", agent="a", user_id="u"))
     store.begin_turn("s4")
-    assert SessionStore(tmp_path / "session_store.json", history_dir=history_dir).get_session("s4") is not None
+    assert SessionStore(tmp_path / "session_store.json").get_session("s4") is not None
 
     # Marker is durable mid-turn... (fresh store sees it; that reopen also
     # repairs, so assert against the db row via a plain reopen BEFORE repair
     # isn't possible - instead assert end_turn clears it durably.)
     store.end_turn("s4")
-    reopened = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    reopened = SessionStore(tmp_path / "session_store.json")
     assert reopened.get_session("s4").turn_in_flight is False
 
 
@@ -123,7 +123,7 @@ async def test_adapter_brackets_turn_with_in_flight_marker(tmp_path, history_dir
         async def stop(self):
             pass
 
-    store = SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    store = SessionStore(tmp_path / "session_store.json")
     store.create_session(Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"))
     adapter = _StubAdapter("test-agent", AgentConfig(workspace_dir=tmp_path / "ws", agent_file="default"), store)
 

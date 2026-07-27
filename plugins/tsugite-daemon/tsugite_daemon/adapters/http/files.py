@@ -1,5 +1,6 @@
 """FilesMixin: files HTTP handlers for HTTPServer."""
 
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tsugite.agent_inheritance import iter_agent_search_paths
+from tsugite.config import load_config
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.utils import parse_yaml_frontmatter
 from tsugite_daemon.adapters.http.helpers import (
@@ -107,7 +109,7 @@ class FilesMixin:
         if not resolved.exists():
             return JSONResponse({"error": "file not found"}, status_code=404)
         try:
-            content = resolved.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
         except OSError as e:
             return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
         return JSONResponse({"path": str(resolved), "content": content, "readonly": readonly})
@@ -131,7 +133,7 @@ class FilesMixin:
         if not resolved.exists():
             return JSONResponse({"error": "file not found"}, status_code=404)
         try:
-            resolved.write_text(content, encoding="utf-8")
+            await asyncio.to_thread(resolved.write_text, content, encoding="utf-8")
         except OSError as e:
             return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
         return JSONResponse({"status": "saved"})
@@ -148,16 +150,31 @@ class FilesMixin:
         return await self._save_md_file(request, self._get_allowed_agent_dirs())
 
     def _get_allowed_skill_dirs(self) -> list[tuple[Path, str, bool]]:
-        """Return (directory, source_label, is_readonly) for all skill directories."""
-        dirs: list[tuple[Path, str, bool]] = [(get_builtin_skills_path(), "builtin", True)]
-        seen: set[Path] = set()
+        """Return (directory, source_label, is_readonly) for all skill directories.
+
+        Mirrors agent-time skill discovery: builtins, each agent's workspace
+        skills, the global user dir, plus the shared `config.skill_paths` roots.
+        Shared roots are exposed read-only since they are a repo that should not
+        be edited through one agent's UI.
+        """
+        builtin = get_builtin_skills_path()
+        dirs: list[tuple[Path, str, bool]] = [(builtin, "builtin", True)]
+        seen: set[Path] = {builtin.resolve()}
         for cfg in self.agent_configs.values():
             for subdir in [cfg.workspace_dir / ".tsugite" / "skills", cfg.workspace_dir / "skills"]:
                 resolved = subdir.resolve()
                 if resolved not in seen:
                     seen.add(resolved)
                     dirs.append((subdir, "project", False))
-        dirs.append((Path.home() / ".config" / "tsugite" / "skills", "global", False))
+        global_dir = Path.home() / ".config" / "tsugite" / "skills"
+        seen.add(global_dir.resolve())
+        dirs.append((global_dir, "global", False))
+        for raw_path in load_config().skill_paths:
+            subdir = Path(raw_path).expanduser()
+            resolved = subdir.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                dirs.append((subdir, "shared", True))
         return dirs
 
     async def _list_skill_files(self, request: Request) -> JSONResponse:

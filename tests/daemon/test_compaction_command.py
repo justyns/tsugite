@@ -44,12 +44,11 @@ def adapter(agent_config, tmp_path):
 
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
-        with patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]):
-            return HTTPAgentAdapter(
-                agent_name="test-agent",
-                agent_config=agent_config,
-                session_store=session_store,
-            )
+        return HTTPAgentAdapter(
+            agent_name="test-agent",
+            agent_config=agent_config,
+            session_store=session_store,
+        )
 
 
 @pytest.fixture

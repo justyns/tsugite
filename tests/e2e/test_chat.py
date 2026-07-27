@@ -1,72 +1,50 @@
-"""Chat interaction tests."""
+"""Chat send/stream flow against the mocked adapter.
+
+`mock_chat` swaps in a fast fake `handle_message`; the second test needs the
+"in flight" window to actually be observable, so it overrides
+`e2e_adapter.handle_message` directly with a slow fake (same pattern the old
+suite used for its error-path test) after still calling `mock_chat(...)`
+first so its fixture-level teardown restores the real (tripwired)
+`handle_message` afterwards.
+"""
+
+import asyncio
+from unittest.mock import AsyncMock
+
+from playwright.sync_api import expect
 
 
-def test_send_message_shows_response(chat_page, mock_chat):
+def test_send_message_shows_streamed_response(chat_page, mock_chat):
     mock_chat("I can help with that!")
 
     page = chat_page
-    textarea = page.locator("textarea#message-input")
+    textarea = page.get_by_role("textbox", name="Message", exact=True)
     textarea.fill("Hello agent")
     textarea.press("Enter")
 
-    page.wait_for_selector(".console-turn.user", timeout=5000)
-    page.wait_for_selector(".console-turn.agent", timeout=15000)
-    assert "I can help with that!" in page.locator(".console-turn.agent").last.text_content()
+    expect(page.locator(".t-msg--user").last).to_contain_text("Hello agent")
+    expect(page.locator(".t-msg--ai").last).to_contain_text("I can help with that!", timeout=15000)
 
 
-def test_reaction_emoji_appears(chat_page, mock_chat):
-    mock_chat("Done!", events=[("reaction", {"emoji": "👍"})])
+def test_stop_button_flips_while_streaming(chat_page, mock_chat, e2e_adapter):
+    mock_chat("placeholder")
 
-    page = chat_page
-    textarea = page.locator("textarea#message-input")
-    textarea.fill("React to this")
-    textarea.press("Enter")
+    async def slow_handle(user_id, message, channel_context, custom_logger=None):
+        await asyncio.sleep(0.6)
+        return "Done after a beat"
 
-    page.wait_for_selector(".console-turn.agent", timeout=15000)
-    # Reactions attach to the user_input bubble as inline emoji spans.
-    user_bubble = page.locator(".console-turn.user .console-turn-bubble").first
-    page.wait_for_function(
-        "document.querySelector('.console-turn.user .console-turn-bubble')?.textContent?.includes('👍')",
-        timeout=3000,
-    )
-    assert "👍" in user_bubble.text_content()
-
-
-def test_tool_call_progress_display(chat_page, mock_chat):
-    """Tool calls during chat should render as expandable progress steps."""
-    mock_chat(
-        "Found 3 files.",
-        events=[
-            ("tool_result", {"tool": "list_files", "output": "file1.txt\nfile2.txt\nfile3.txt", "success": True}),
-        ],
-    )
+    e2e_adapter.handle_message = AsyncMock(side_effect=slow_handle)
 
     page = chat_page
-    textarea = page.locator("textarea#message-input")
-    textarea.fill("List the files")
+    textarea = page.get_by_role("textbox", name="Message", exact=True)
+    textarea.fill("Take your time")
     textarea.press("Enter")
 
-    page.wait_for_selector(".console-turn.agent", timeout=15000)
-    steps = page.locator(".console-codeblock .tool-step")
-    assert steps.count() > 0
-    assert "list_files" in steps.first.text_content()
+    send_button = page.locator('[data-act="send"]')
+    stop_button = page.locator('[data-act="stop"]')
+    expect(stop_button).to_be_visible(timeout=3000)
+    expect(send_button).to_have_count(0)
 
-
-def test_error_displayed_on_failure(chat_page, e2e_adapter):
-    """When the agent raises, the error message should appear in the progress block."""
-    from unittest.mock import AsyncMock
-
-    async def failing_handle(user_id, message, channel_context, custom_logger=None):
-        raise RuntimeError("Agent crashed: out of memory")
-
-    e2e_adapter.handle_message = AsyncMock(side_effect=failing_handle)
-
-    page = chat_page
-    textarea = page.locator("textarea#message-input")
-    textarea.fill("Do something")
-    textarea.press("Enter")
-
-    # Error event becomes a tool-step with an .err span inside the progress block.
-    page.wait_for_selector(".console-codeblock .tool-row .err", timeout=10000)
-    err_text = page.locator(".console-codeblock .tool-row").first.text_content()
-    assert "out of memory" in err_text
+    expect(page.locator(".t-msg--ai").last).to_contain_text("Done after a beat", timeout=15000)
+    expect(send_button).to_be_visible()
+    expect(stop_button).to_have_count(0)

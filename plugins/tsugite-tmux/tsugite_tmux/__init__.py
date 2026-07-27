@@ -42,6 +42,15 @@ def _session_exists(prefixed_name: str) -> bool:
     return result.returncode == 0
 
 
+def _require_session(name: str) -> str:
+    """Validate the name and return its prefixed session, raising if it doesn't exist."""
+    _validate_name(name)
+    prefixed = _prefixed(name)
+    if not _session_exists(prefixed):
+        raise RuntimeError(f"Session '{name}' not found. Use tmux_list() to see active sessions.")
+    return prefixed
+
+
 def _get_metadata_path() -> Path:
     return get_xdg_data_path("tmux") / "sessions.json"
 
@@ -189,14 +198,10 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
     Returns:
         Session output with ANSI escape codes stripped
     """
-    _validate_name(name)
-    prefixed = _prefixed(name)
     lines = max(1, min(lines, 5000))
 
     if source == "pane":
-        if not _session_exists(prefixed):
-            raise RuntimeError(f"Session '{name}' not found. Use tmux_list() to see active sessions.")
-
+        prefixed = _require_session(name)
         result = subprocess.run(
             ["tmux", "capture-pane", "-t", prefixed, "-p", "-S", f"-{lines}"],
             capture_output=True,
@@ -207,6 +212,7 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
         return _strip_ansi(result.stdout)
 
     elif source == "log":
+        _validate_name(name)
         log_file = _get_log_dir() / f"{name}.log"
         if not log_file.exists():
             raise RuntimeError(f"No log file found for session '{name}'.")
@@ -232,11 +238,7 @@ def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     Returns:
         Confirmation message
     """
-    _validate_name(name)
-    prefixed = _prefixed(name)
-
-    if not _session_exists(prefixed):
-        raise RuntimeError(f"Session '{name}' not found. Use tmux_list() to see active sessions.")
+    prefixed = _require_session(name)
 
     cmd = ["tmux", "send-keys", "-t", prefixed, keys]
     if enter:
@@ -246,7 +248,7 @@ def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"Failed to send keys: {result.stderr.strip()}")
 
-    return f"Sent {'keys' if not enter else 'command'} to session '{name}'"
+    return f"Sent {'command' if enter else 'keys'} to session '{name}'"
 
 
 @tool(category="tmux", parent_only=True)
@@ -271,11 +273,7 @@ def tmux_kill(name: str) -> str:
     Returns:
         Confirmation message
     """
-    _validate_name(name)
-    prefixed = _prefixed(name)
-
-    if not _session_exists(prefixed):
-        raise RuntimeError(f"Session '{name}' not found. Use tmux_list() to see active sessions.")
+    prefixed = _require_session(name)
 
     result = subprocess.run(
         ["tmux", "kill-session", "-t", prefixed],

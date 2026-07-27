@@ -173,7 +173,7 @@ async def _send_webhook(config, message: str) -> dict:
 
     from tsugite.user_agent import set_user_agent_header
 
-    body = _render_webhook_body(config.body_template, message) if config.body_template else message
+    body = _render_webhook_body(config.body_template, message)
     headers = dict(config.headers)
     set_user_agent_header(headers)
 
@@ -223,6 +223,7 @@ class Gateway:
         self._pty_manager = None
         self._jobs_orchestrator = None
         self._job_store = None
+        self._identity_map: dict[str, str] = {}
         self._shutting_down = False
 
     async def start(self):
@@ -249,37 +250,26 @@ class Gateway:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, _on_signal)
 
-        # Build reverse identity map: "discord:123456789" -> "justyn"
-        identity_map: dict[str, str] = {}
-        for canonical, platform_ids in self.config.identity_links.items():
-            for pid in platform_ids:
-                identity_map[pid] = canonical
+        # Build reverse identity map: "discord:123456789" -> "DiscordUsername". Kept on
+        # self (and passed to adapters BY REFERENCE) so a config reload can
+        # rebuild it in place for every holder at once.
+        identity_map: dict[str, str] = {
+            pid: canonical for canonical, platform_ids in self.config.identity_links.items() for pid in platform_ids
+        }
+        self._identity_map = identity_map
 
         # Build per-agent context limits
-        default_context_limit = 128000
         context_limits: dict[str, int] = {}
         for agent_name, agent_config in self.config.agents.items():
-            if agent_config.context_limit:
-                context_limit = agent_config.context_limit
-            elif agent_config.model:
-                from tsugite_daemon.memory import get_context_limit
-
-                context_limit = get_context_limit(agent_config.model, fallback=default_context_limit)
-                logger.info("[%s] Auto-detected context limit: %d tokens", agent_name, context_limit)
-            else:
-                context_limit = default_context_limit
-
+            context_limit = self._resolve_context_limit(agent_name, agent_config)
             agent_config.context_limit = context_limit
             context_limits[agent_name] = context_limit
 
         # Single global session store. UI events live in the same per-session
         # JSONL as conversation history (XDG data dir, not the daemon state dir).
-        from tsugite.history import get_history_dir
-
         session_store = SessionStore(
             self.config.state_dir / "session_store.json",
             context_limits=context_limits,
-            history_dir=get_history_dir(),
         )
         self._session_store = session_store
 
@@ -510,10 +500,7 @@ class Gateway:
         # Set up notification callback if channels are configured
         if self.config.notification_channels:
             discord_adapters = {a.bot_config.name: a for a in self.adapters if hasattr(a, "bot_config")}
-            push_store = self._push_store
-            vapid_private_key = self._vapid_private_key
-            vapid_claims = self._vapid_claims
-            notifier = _build_notifier(discord_adapters, push_store, vapid_private_key, vapid_claims)
+            notifier = _build_notifier(discord_adapters, self._push_store, self._vapid_private_key, self._vapid_claims)
 
             from tsugite.tools.notify import set_notifier
 
@@ -572,6 +559,99 @@ class Gateway:
             pass_env=list(getattr(sb, "pass_env", [])),
             workspace_dir=Path(workspace) if workspace else None,
         )
+
+    @staticmethod
+    def _resolve_context_limit(agent_name: str, agent_config) -> int:
+        """The effective context limit for an agent: explicit config, else
+        auto-detected from the model, else the daemon default. Applied to the
+        config object at boot AND on reload - reload must enrich the freshly
+        loaded configs the same way, or the diff sees every agent as changed
+        and hot-swaps enriched configs for unenriched ones."""
+        default_context_limit = 128000
+        if agent_config.context_limit:
+            return agent_config.context_limit
+        if agent_config.model:
+            from tsugite_daemon.memory import get_context_limit
+
+            limit = get_context_limit(agent_config.model, fallback=default_context_limit)
+            logger.info("[%s] Auto-detected context limit: %d tokens", agent_name, limit)
+            return limit
+        return default_context_limit
+
+    async def reload_config(self) -> dict:
+        """Re-read the daemon YAML and hot-apply what can be applied at runtime.
+
+        Reconciled live: the HTTP agent set (added/removed agents; changed agent
+        configs hot-swap on the adapter, applying on each agent's NEXT run),
+        notification channels, and identity links (the map is mutated in place -
+        every adapter holds a reference). Boot-only sections (http, state_dir,
+        discord_bots, plugins, sandbox, logging) are compared and reported under
+        restart_required instead of silently ignored.
+        """
+        new = load_daemon_config(self.config_path)
+        result: dict = {"added": [], "removed": [], "updated": [], "skipped": [], "restart_required": []}
+
+        # Enrich the fresh configs exactly like start() does, so the diff below
+        # compares like with like, and the session store learns new limits.
+        for name, cfg in new.agents.items():
+            cfg.context_limit = self._resolve_context_limit(name, cfg)
+            if self._session_store is not None and hasattr(self._session_store, "update_context_limit"):
+                self._session_store.update_context_limit(name, cfg.context_limit)
+
+        boot_only = [
+            ("http", self.config.http, new.http),
+            ("state_dir", self.config.state_dir, new.state_dir),
+            ("discord_bots", self.config.discord_bots, new.discord_bots),
+            ("plugins", self.config.plugins, new.plugins),
+            ("sandbox", self.config.sandbox, new.sandbox),
+            ("log_level", self.config.log_level, new.log_level),
+            ("log_file", self.config.log_file, new.log_file),
+        ]
+        result["restart_required"] = [name for name, old, cur in boot_only if old != cur]
+
+        if self._http_server:
+            from tsugite_daemon.adapters.http import HTTPAgentAdapter
+
+            adapters = self._http_server.adapters
+            for name, cfg in new.agents.items():
+                if name not in adapters:
+                    if not resolve_agent_path(cfg.agent_file, cfg.workspace_dir):
+                        logger.warning("Reload: skipping agent '%s': agent file not found", name)
+                        result["skipped"].append(name)
+                        continue
+                    adapter = HTTPAgentAdapter(name, cfg, self._session_store, identity_map=self._identity_map)
+                    adapter.event_bus = self._http_server.event_bus
+                    adapters[name] = adapter
+                    result["added"].append(name)
+                elif self.config.agents.get(name) != cfg:
+                    # Hot-swap the config object; BaseAdapter reads agent_config
+                    # per run, so this applies on the agent's next turn.
+                    adapters[name].agent_config = cfg
+                    result["updated"].append(name)
+            for name in list(adapters):
+                if name not in new.agents:
+                    adapters.pop(name)
+                    result["removed"].append(name)
+
+        # The HTTP server holds config.agents BY REFERENCE (agent_configs);
+        # mutate in place so both views stay coherent.
+        self.config.agents.clear()
+        self.config.agents.update(new.agents)
+        self.config.notification_channels = new.notification_channels
+        self.config.identity_links = new.identity_links
+        self._identity_map.clear()
+        self._identity_map.update(
+            {pid: canonical for canonical, platform_ids in new.identity_links.items() for pid in platform_ids}
+        )
+
+        logger.info(
+            "Config reloaded: +%d agents, -%d, ~%d%s",
+            len(result["added"]),
+            len(result["removed"]),
+            len(result["updated"]),
+            f" (restart required for: {', '.join(result['restart_required'])})" if result["restart_required"] else "",
+        )
+        return result
 
     async def _shutdown(self):
         """Graceful shutdown of all adapters."""

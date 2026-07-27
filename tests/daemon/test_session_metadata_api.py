@@ -42,12 +42,11 @@ def server(tmp_workspace, session_store, session_runner, tmp_path):
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
-        with patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]):
-            adapter = HTTPAgentAdapter(
-                agent_name="test-agent",
-                agent_config=agent_config,
-                session_store=session_store,
-            )
+        adapter = HTTPAgentAdapter(
+            agent_name="test-agent",
+            agent_config=agent_config,
+            session_store=session_store,
+        )
 
     srv = HTTPServer(
         config=http_config,
@@ -94,7 +93,7 @@ class TestGetMetadata:
         assert resp.json() == {"metadata": {}}
 
     def test_get_metadata_after_set(self, client, test_token, session_id, session_store):
-        session_store.set_metadata(session_id, "env", "staging")
+        session_store.set_metadata_bulk(session_id, {"env": "staging"})
         resp = client.get(f"/api/sessions/{session_id}/metadata", headers=auth(test_token))
         assert resp.status_code == 200
         assert resp.json() == {"metadata": {"env": "staging"}}
@@ -121,7 +120,7 @@ class TestUpdateMetadata:
         assert data["metadata"] == {"env": "prod", "team": "backend"}
 
     def test_update_metadata_merges(self, client, test_token, session_id, session_store):
-        session_store.set_metadata(session_id, "existing", "value")
+        session_store.set_metadata_bulk(session_id, {"existing": "value"})
         resp = client.patch(
             f"/api/sessions/{session_id}/metadata",
             json={"new_key": "new_value"},
@@ -188,7 +187,7 @@ class TestUpdateMetadata:
         assert "160" in resp.json()["error"]
 
     def test_clear_topic_via_delete(self, client, test_token, session_id, session_store):
-        session_store.set_metadata(session_id, "topic", "old topic")
+        session_store.set_metadata_bulk(session_id, {"topic": "old topic"})
         resp = client.delete(
             f"/api/sessions/{session_id}/metadata/topic",
             headers=auth(test_token),
@@ -199,7 +198,7 @@ class TestUpdateMetadata:
 
 class TestDeleteMetadata:
     def test_delete_metadata(self, client, test_token, session_id, session_store):
-        session_store.set_metadata(session_id, "to_delete", "bye")
+        session_store.set_metadata_bulk(session_id, {"to_delete": "bye"})
         resp = client.delete(
             f"/api/sessions/{session_id}/metadata/to_delete",
             headers=auth(test_token),
@@ -239,7 +238,7 @@ class TestDeleteMetadata:
 
 class TestListSessionsIncludesMetadata:
     def test_api_list_sessions_has_metadata(self, client, test_token, session_id, session_store):
-        session_store.set_metadata(session_id, "env", "staging")
+        session_store.set_metadata_bulk(session_id, {"env": "staging"})
         resp = client.get("/api/sessions", headers=auth(test_token))
         assert resp.status_code == 200
         sessions = resp.json()["sessions"]

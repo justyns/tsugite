@@ -113,10 +113,7 @@ You are a terse helper. Answer with a single short sentence.
 def smoke_adapter(smoke_workspace, smoke_session_store, smoke_agent_file):
     agent_config = AgentConfig(workspace_dir=smoke_workspace, agent_file=str(smoke_agent_file))
 
-    with (
-        patch("tsugite.workspace.Workspace") as mock_ws,
-        patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]),
-    ):
+    with patch("tsugite.workspace.Workspace") as mock_ws:
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws.load.side_effect = WorkspaceNotFoundError("not found")

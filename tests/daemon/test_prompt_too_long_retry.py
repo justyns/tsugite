@@ -51,7 +51,6 @@ def stub_adapter_internals(adapter, monkeypatch):
     monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.agent_config.agent_file))
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
-    monkeypatch.setattr(adapter, "_get_workspace_attachments", lambda: [])
     monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)
     monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)
     return adapter

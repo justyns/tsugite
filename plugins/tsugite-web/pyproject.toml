@@ -13,6 +13,9 @@ dependencies = [
 [project.entry-points."tsugite.plugins"]
 web = "tsugite_web"
 
+[project.entry-points."tsugite.context_providers"]
+web = "tsugite_web.context"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

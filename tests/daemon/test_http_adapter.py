@@ -38,13 +38,12 @@ def mock_adapter(agent_config, tmp_path):
 
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
-        with patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]):
-            adapter = HTTPAgentAdapter(
-                agent_name="test-agent",
-                agent_config=agent_config,
-                session_store=session_store,
-            )
-            return adapter
+        adapter = HTTPAgentAdapter(
+            agent_name="test-agent",
+            agent_config=agent_config,
+            session_store=session_store,
+        )
+        return adapter
 
 
 @pytest.fixture
@@ -471,6 +470,32 @@ class TestSessionSettingsEndpoint:
         assert resp.status_code == 200
         assert resp.json()["reasoning_effort"] == "xhigh"
 
+    def test_patch_broadcasts_settings_update(self, client, server, mock_adapter, test_token):
+        # A model/effort change must broadcast a session_update so the same chat
+        # open in other tabs refreshes its model/effort chips live.
+        mock_adapter.agent_config.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-bcast", "test-agent")
+
+        recorded: list[dict] = []
+        original_emit = server.event_bus.emit
+
+        def capture(event_type, data=None):
+            if event_type == "session_update":
+                recorded.append(dict(data or {}))
+            return original_emit(event_type, data)
+
+        with patch.object(server.event_bus, "emit", side_effect=capture):
+            resp = client.patch(
+                f"/api/sessions/{session.id}/settings",
+                json={"reasoning_effort": "high"},
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+        assert resp.status_code == 200
+        settings = [r for r in recorded if r.get("action") == "settings"]
+        assert settings, "expected a settings broadcast"
+        assert settings[-1]["id"] == session.id
+        assert settings[-1]["reasoning_effort"] == "high"
+
 
 class TestChatReasoningEffortOverride:
     """POST /api/agents/{agent}/chat accepts and validates reasoning_effort."""
@@ -484,6 +509,31 @@ class TestChatReasoningEffortOverride:
         )
         assert resp.status_code == 400
         assert "supported" in resp.json()
+
+
+class TestChatContextMetadata:
+    """POST /api/agents/{agent}/chat threads context_metadata onto the ChannelContext."""
+
+    def _capture_channel_context(self, client, server, test_token, body):
+        handle = AsyncMock(return_value="ok")
+        with patch.object(type(server.adapters["test-agent"]), "handle_message", new=handle):
+            resp = client.post(
+                "/api/agents/test-agent/chat",
+                json=body,
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+            list(resp.iter_lines())
+        assert resp.status_code == 200
+        return handle.call_args.kwargs["channel_context"]
+
+    def test_context_metadata_rides_channel_context_metadata(self, client, server, test_token):
+        items = [{"key": "url", "label": "URL", "value": "https://x"}]
+        cc = self._capture_channel_context(client, server, test_token, {"message": "hi", "context_metadata": items})
+        assert cc.metadata["context_metadata"] == items
+
+    def test_absent_context_metadata_leaves_key_unset(self, client, server, test_token):
+        cc = self._capture_channel_context(client, server, test_token, {"message": "hi"})
+        assert "context_metadata" not in cc.metadata
 
 
 class TestUnloadSkillEndpoint:
@@ -704,8 +754,8 @@ class TestHistoryEndpoint:
         responses = [e for e in data["events"] if e["type"] == "model_response"]
         assert responses[0]["data"]["raw_content"] == "hi"
 
-    def test_history_includes_reactions(self, client, test_token, mock_adapter, tmp_path):
-        """Reactions from the live session event log appear as their own events in history."""
+    def test_history_includes_ui_events(self, client, test_token, mock_adapter, tmp_path):
+        """UI events from the live session event log appear as their own events in history."""
         from tsugite.history.storage import SessionStorage, get_history_dir
 
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
@@ -718,7 +768,7 @@ class TestHistoryEndpoint:
 
         mock_adapter.session_store.append_event(
             session.id,
-            {"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T00:00:00+00:00"},
+            {"type": "info", "message": "working on it", "timestamp": "2026-01-01T00:00:00+00:00"},
         )
 
         resp = client.get(
@@ -728,9 +778,9 @@ class TestHistoryEndpoint:
 
         assert resp.status_code == 200
         events = resp.json()["events"]
-        reactions = [e for e in events if e["type"] == "reaction"]
-        assert len(reactions) == 1
-        assert reactions[0]["data"]["emoji"] == "👍"
+        infos = [e for e in events if e["type"] == "info"]
+        assert len(infos) == 1
+        assert infos[0]["data"]["message"] == "working on it"
 
     def test_history_preserves_execution_result(self, client, test_token, mock_adapter, tmp_path):
         """Code execution events round-trip through the endpoint with output, error, duration."""
@@ -951,6 +1001,32 @@ class TestSkillIssuesEndpoint:
         assert "trigger" in bad_trig["message"].lower()
 
 
+class TestSkillFilesEndpoint:
+    """GET /api/skill-files lists skills from every catalog root, including the
+    read-only shared roots configured via config.skill_paths."""
+
+    def test_shared_skill_paths_listed_readonly(self, client, test_token, tmp_path, monkeypatch):
+        shared_root = tmp_path / "shared-skills"
+        skill_md = shared_root / "my-shared-skill" / "SKILL.md"
+        skill_md.parent.mkdir(parents=True)
+        skill_md.write_text("---\nname: my-shared-skill\ndescription: from a shared repo\n---\nBody.\n")
+
+        xdg = tmp_path / "xdg"
+        (xdg / "tsugite").mkdir(parents=True)
+        (xdg / "tsugite" / "config.json").write_text(json.dumps({"skill_paths": [str(shared_root)]}))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        resp = client.get("/api/skill-files", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 200
+        files = resp.json()["files"]
+        match = next((f for f in files if f["path"] == str(skill_md.resolve())), None)
+        assert match is not None, "skill from config.skill_paths should appear in the catalog"
+        assert match["readonly"] is True
+        assert match["source"] == "shared"
+        assert match["name"] == "my-shared-skill"
+
+
 class TestSchedulesEndpoint:
     """Regression coverage for the `/api/schedules` JSON serialization paths.
 
@@ -1005,6 +1081,165 @@ class TestSchedulesEndpoint:
         body = resp.json()
         entry = body[body_key][0] if body_key else body
         assert "lock" not in entry
+
+
+class TestWorkspaceSaveEndpoint:
+    def _put(self, client, test_token, path, content):
+        return client.put(
+            "/api/agents/test-agent/workspace/content",
+            json={"path": path, "content": content},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+
+    def test_creates_missing_file(self, client, test_token, tmp_workspace):
+        resp = self._put(client, test_token, "notes.md", "# Notes\n\nhello\n")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "saved"}
+        assert (tmp_workspace / "notes.md").read_text() == "# Notes\n\nhello\n"
+
+    def test_creates_missing_file_in_new_subdir(self, client, test_token, tmp_workspace):
+        resp = self._put(client, test_token, "kb/ops/runbook.md", "# Runbook\n")
+        assert resp.status_code == 200, resp.text
+        assert (tmp_workspace / "kb" / "ops" / "runbook.md").read_text() == "# Runbook\n"
+
+    def test_updates_existing_file(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "existing.md").write_text("old\n")
+        resp = self._put(client, test_token, "existing.md", "new\n")
+        assert resp.status_code == 200, resp.text
+        assert (tmp_workspace / "existing.md").read_text() == "new\n"
+
+    def test_rejects_non_text_extension(self, client, test_token, tmp_workspace):
+        resp = self._put(client, test_token, "image.png", "not really an image")
+        assert resp.status_code == 400
+        assert not (tmp_workspace / "image.png").exists()
+
+    def test_rejects_path_outside_workspace(self, client, test_token, tmp_workspace):
+        resp = self._put(client, test_token, "../escape.md", "nope")
+        assert resp.status_code == 403
+        assert not (tmp_workspace.parent / "escape.md").exists()
+
+    def test_rejects_directory_target(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "adir").mkdir()
+        resp = self._put(client, test_token, "adir", "content")
+        assert resp.status_code == 400
+
+
+class TestWorkspaceRawEndpoint:
+    # Arbitrary binary (PNG magic + every byte value); the endpoint reads bytes
+    # and guesses the type from the extension, so it need not be a decodable image.
+    IMG_BYTES = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+
+    def _get(self, client, test_token, path):
+        return client.get(
+            "/api/agents/test-agent/workspace/raw",
+            params={"path": path},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+
+    def test_serves_raw_bytes_with_guessed_content_type(self, client, test_token, tmp_workspace):
+        uploads = tmp_workspace / "uploads"
+        uploads.mkdir()
+        (uploads / "photo.png").write_bytes(self.IMG_BYTES)
+        resp = self._get(client, test_token, "uploads/photo.png")
+        assert resp.status_code == 200, resp.text
+        assert resp.content == self.IMG_BYTES
+        assert resp.headers["content-type"] == "image/png"
+
+    def test_unknown_extension_falls_back_to_octet_stream(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "data.xyzzy").write_bytes(b"\x00\x01\x02")
+        resp = self._get(client, test_token, "data.xyzzy")
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["content-type"] == "application/octet-stream"
+
+    def test_refuses_path_traversal(self, client, test_token, tmp_workspace, tmp_path):
+        (tmp_path / "secret.png").write_bytes(self.IMG_BYTES)
+        resp = self._get(client, test_token, "../secret.png")
+        assert resp.status_code == 403
+
+    def test_missing_file_is_404(self, client, test_token, tmp_workspace):
+        resp = self._get(client, test_token, "uploads/nope.png")
+        assert resp.status_code == 404
+
+    def test_directory_is_404(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "uploads").mkdir()
+        resp = self._get(client, test_token, "uploads")
+        assert resp.status_code == 404
+
+    def test_requires_auth(self, client, tmp_workspace):
+        (tmp_workspace / "x.png").write_bytes(self.IMG_BYTES)
+        resp = client.get("/api/agents/test-agent/workspace/raw", params={"path": "x.png"})
+        assert resp.status_code == 401
+
+    def test_oversize_is_413(self, client, test_token, tmp_workspace, monkeypatch):
+        import tsugite_daemon.adapters.http.agents as agents_mod
+
+        monkeypatch.setattr(agents_mod, "MAX_WORKSPACE_RAW_SIZE", 4)
+        (tmp_workspace / "big.png").write_bytes(self.IMG_BYTES)
+        resp = self._get(client, test_token, "big.png")
+        assert resp.status_code == 413
+
+
+class TestWorkspaceListEndpoint:
+    def _get(self, client, test_token, query=""):
+        return client.get(
+            f"/api/agents/test-agent/workspace{query}",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+
+    def _seed_tree(self, workspace):
+        (workspace / "top.md").write_text("# top\n")
+        (workspace / "sub").mkdir()
+        (workspace / "sub" / "nested.md").write_text("# nested\n")
+        (workspace / "sub" / "deeper").mkdir()
+        (workspace / "sub" / "deeper" / "leaf.md").write_text("# leaf\n")
+
+    def test_non_recursive_lists_only_one_level(self, client, test_token, tmp_workspace):
+        self._seed_tree(tmp_workspace)
+        resp = self._get(client, test_token)
+        assert resp.status_code == 200, resp.text
+        paths = {e["path"] for e in resp.json()["entries"]}
+        assert paths == {"top.md", "sub"}
+
+    def test_recursive_returns_full_flat_tree(self, client, test_token, tmp_workspace):
+        self._seed_tree(tmp_workspace)
+        resp = self._get(client, test_token, "?recursive=1")
+        assert resp.status_code == 200, resp.text
+        entries = resp.json()["entries"]
+        paths = {e["path"] for e in entries}
+        assert paths == {"top.md", "sub", "sub/nested.md", "sub/deeper", "sub/deeper/leaf.md"}
+        by_path = {e["path"]: e for e in entries}
+        assert by_path["sub"]["is_dir"] is True
+        assert by_path["sub/deeper/leaf.md"]["is_dir"] is False
+        assert "truncated" not in resp.json()
+
+    def test_recursive_refuses_subdir_traversal(self, client, test_token, tmp_workspace):
+        resp = self._get(client, test_token, "?recursive=1&subdir=..")
+        assert resp.status_code == 403
+
+    def test_recursive_does_not_follow_symlink_escape(self, client, test_token, tmp_workspace, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.md").write_text("secret\n")
+        (tmp_workspace / "link").symlink_to(outside, target_is_directory=True)
+        (tmp_workspace / "top.md").write_text("# top\n")
+        resp = self._get(client, test_token, "?recursive=1")
+        assert resp.status_code == 200, resp.text
+        paths = {e["path"] for e in resp.json()["entries"]}
+        assert "top.md" in paths
+        assert "link" not in paths
+        assert "link/secret.md" not in paths
+
+    def test_recursive_caps_and_flags_truncation(self, client, test_token, tmp_workspace, monkeypatch):
+        import tsugite_daemon.adapters.http.agents as agents_mod
+
+        for i in range(5):
+            (tmp_workspace / f"f{i}.md").write_text("x\n")
+        monkeypatch.setattr(agents_mod, "MAX_WORKSPACE_ENTRIES", 2)
+        resp = self._get(client, test_token, "?recursive=1")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body.get("truncated") is True
+        assert len(body["entries"]) == 2
 
 
 class TestHTTPConfig:

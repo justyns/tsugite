@@ -5,6 +5,7 @@ user's primary/default session."""
 from unittest.mock import MagicMock
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter
 from tsugite_daemon.commands import cmd_context, cmd_status
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
@@ -15,6 +16,9 @@ def _adapter(tmp_path):
     adapter.session_store = store
     adapter.agent_name = "default"
     adapter.resolve_model.return_value = "claude_code:haiku"
+    # Exercise the real per-session resolver (override wins, else agent default)
+    # rather than the mock's auto-stub.
+    adapter.resolve_session_model.side_effect = lambda sid: BaseAdapter.resolve_session_model(adapter, sid)
     return adapter, store
 
 
@@ -54,6 +58,40 @@ async def test_cmd_status_stale_session_id_falls_back_gracefully(tmp_path):
     adapter, store = _adapter(tmp_path)
     result = await cmd_status(adapter=adapter, user_id="user-1", session_id="sess-gone")
     assert "No active session" in result
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_reports_session_model_override(tmp_path):
+    """When the chat has a per-session model override (set via the web UI model
+    picker), /status must name the override, not the agent's default model."""
+    adapter, store = _adapter(tmp_path)
+    _session(store)
+    store.set_model_override("sess-open-chat", "codex_cli:gpt-5.5")
+    result = await cmd_status(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
+    assert "Model: codex_cli:gpt-5.5" in result
+    assert "claude_code:haiku" not in result
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_without_override_shows_agent_default(tmp_path):
+    """No per-session override → /status still shows the agent default model."""
+    adapter, store = _adapter(tmp_path)
+    _session(store)
+    result = await cmd_status(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
+    assert "Model: claude_code:haiku" in result
+
+
+@pytest.mark.asyncio
+async def test_cmd_status_reports_session_context_limit(tmp_path):
+    """/status must use the per-session context window (which tracks the session's
+    model), not the agent-wide default limit."""
+    adapter, store = _adapter(tmp_path)
+    _session(store)
+    store.update_context_limit("default", 128000)
+    store.update_session_context_limit("sess-open-chat", 200000)
+    result = await cmd_status(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
+    assert "200,000 tokens" in result
+    assert "128,000" not in result
 
 
 @pytest.mark.asyncio

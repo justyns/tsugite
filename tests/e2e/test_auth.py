@@ -1,30 +1,82 @@
-"""Auth flow tests."""
+"""Auth gate and app-boot smoke tests.
+
+Covers: the unauthenticated gate rendering, a valid token unlocking the app
+shell, a bad token failing to grant lasting access, and every main nav view
+mounting without a JS error (folds in what the old Alpine suite's
+`test_page_load.py::test_tab_loads_without_errors` covered, over the new view
+set).
+"""
+
+import pytest
+
+from .helpers import auth_headers, wait_for_authed
+
+VIEWS = [
+    "chats",
+    "terminals",
+    "files",
+    "jobs",
+    "schedules",
+    "usage",
+    "agents",
+    "skills",
+    "tools",
+    "webhooks",
+    "secrets",
+    "plugins",
+]
+
+
+def test_auth_gate_shown_without_token(page, base_url):
+    page.goto(base_url)
+    page.wait_for_selector('[data-testid="auth-gate"]', timeout=3000)
+    assert page.locator('[data-testid="auth-gate"]').is_visible()
 
 
 def test_valid_token_unlocks_app(page, base_url, e2e_auth_token):
-    """Entering a valid token in the auth gate dismisses it and loads agents."""
     page.goto(base_url)
-    page.wait_for_selector(".auth-gate.open", timeout=3000)
+    page.wait_for_selector('[data-testid="auth-gate"]', timeout=3000)
 
-    page.locator(".auth-gate input[type='password']").fill(e2e_auth_token)
-    page.locator(".auth-btn").click()
+    page.locator("#token-input").fill(e2e_auth_token)
+    page.locator('[data-testid="token-connect"]').click()
 
-    # After successful auth, page reloads; tolerate the brief window before Alpine is global.
-    page.wait_for_function(
-        "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired",
-        timeout=10000,
-    )
-    assert not page.locator(".auth-gate.open").is_visible()
+    wait_for_authed(page)
+    assert not page.locator('[data-testid="auth-gate"]').is_visible()
 
 
-def test_invalid_token_shows_error(page, base_url):
-    """Entering a bad token shows an error message and keeps the gate open."""
+def test_invalid_token_does_not_grant_lasting_access(page, base_url):
+    """The gate has no client-side validation - it dismisses optimistically and
+    only re-gates once the first authenticated fetch 401s. There's no inline
+    "invalid token" message in the rebuild (unlike the old Alpine `.auth-error`
+    banner); the observable, security-relevant behavior is that a bogus token
+    doesn't leave the user authenticated.
+    """
     page.goto(base_url)
-    page.wait_for_selector(".auth-gate.open", timeout=3000)
+    page.wait_for_selector('[data-testid="auth-gate"]', timeout=3000)
 
-    page.locator(".auth-gate input[type='password']").fill("tsu_totally_bogus_token")
-    page.locator(".auth-btn").click()
+    page.locator("#token-input").fill("tsu_totally_bogus_token")
+    page.locator('[data-testid="token-connect"]').click()
 
-    page.wait_for_selector(".auth-error", state="visible", timeout=5000)
-    assert "Invalid" in page.locator(".auth-error").text_content()
-    assert page.locator(".auth-gate.open").is_visible()
+    page.wait_for_selector('[data-testid="auth-gate"]', timeout=5000)
+    assert page.locator('[data-testid="auth-gate"]').is_visible()
+
+
+def test_agents_reachable(authenticated_page, base_url, e2e_auth_token):
+    """Basic connectivity smoke: a booted, authed app can reach the daemon's
+    agent roster and finds the fixture's configured agent."""
+    resp = authenticated_page.request.get(f"{base_url}/api/agents", headers=auth_headers(e2e_auth_token))
+    assert resp.ok
+    names = [a["name"] for a in resp.json()["agents"]]
+    assert "test-agent" in names
+
+
+@pytest.mark.parametrize("view", VIEWS)
+def test_view_loads_without_js_errors(authenticated_page, view):
+    page = authenticated_page
+    errors = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+
+    page.locator(f'[data-testid="nav-{view}"]').click()
+    page.wait_for_selector(f'[data-testid="view-{view}"]', timeout=5000)
+
+    assert not errors, f"JS errors on {view!r} view: {errors}"

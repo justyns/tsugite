@@ -30,6 +30,10 @@ class CommandParam:
     description: str
     required: bool = True
     choices: list[str] | None = None
+    # Optional hint naming a rich input the web UI can render for this arg
+    # (e.g. "model", "effort"). None = plain text field. Consumed by the
+    # frontend's slash-command autocomplete; unused by command execution.
+    widget: str | None = None
 
 
 @dataclass
@@ -61,7 +65,31 @@ def adapter_command(
     return decorator
 
 
+_command_plugins_loaded = False
+
+
+def _ensure_command_plugins_loaded() -> None:
+    """Import tsugite.commands plugins once, so their @adapter_command handlers
+    are in the registry before the first lookup.
+
+    Built-in commands register when this module is imported; plugin commands
+    need an explicit discovery pass. Doing it here - the single function every
+    command caller (the HTTP list/run endpoints, the Discord sync) routes
+    through - guarantees plugin commands are visible before first use. The flag
+    flips before the load so a plugin whose import re-enters get_commands()
+    can't recurse; per-plugin errors are already isolated by the loader.
+    """
+    global _command_plugins_loaded
+    if _command_plugins_loaded:
+        return
+    _command_plugins_loaded = True
+    from tsugite.plugins import load_command_plugins
+
+    load_command_plugins()
+
+
 def get_commands() -> dict[str, AdapterCommand]:
+    _ensure_command_plugins_loaded()
     return _COMMANDS
 
 
@@ -261,6 +289,28 @@ def _resolve_command_session(adapter: "BaseAdapter", user_id: str, session_id: s
     return adapter.session_store.find_default_session(user_id, adapter.agent_name)
 
 
+def _broadcast_settings(adapter: "BaseAdapter", session_id: str) -> None:
+    """Push a session_update so the same chat open in other tabs refreshes its
+    model/effort chips live. One signal shape shared with the settings PATCH.
+    Best-effort: a missing bus (Discord/legacy) or a hiccup must not fail the
+    command."""
+    bus = getattr(adapter, "event_bus", None)
+    if bus is None:
+        return
+    try:
+        bus.emit(
+            "session_update",
+            {
+                "action": "settings",
+                "id": session_id,
+                "model": adapter.session_store.get_model_override(session_id),
+                "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
+            },
+        )
+    except Exception:  # noqa: BLE001 -- a broadcast hiccup must not fail the command
+        pass
+
+
 def _parse_acceptance_criteria(raw: str | list | None) -> list[str]:
     """Normalise the slash-command AC param into a plain list of strings.
 
@@ -317,7 +367,12 @@ async def cmd_compact(
     adapter._broadcast_compaction("compaction_started", adapter.agent_name, old_id)
     new_session = None
     try:
-        new_session = await adapter._compact_session(session.id, instructions=message, reason="manual")
+        new_session = await adapter._compact_session(
+            session.id,
+            instructions=message,
+            reason="manual",
+            progress_callback=adapter._compaction_progress_cb(old_id),
+        )
     except Exception as e:
         return f"Compaction failed: {e}"
     finally:
@@ -347,13 +402,13 @@ async def cmd_status(adapter: BaseAdapter, user_id: str, session_id: str | None 
     session = _resolve_command_session(adapter, user_id, session_id)
     if session is None:
         return "No active session. Send a message to start one."
-    context_limit = adapter.session_store.get_context_limit(adapter.agent_name)
+    context_limit = adapter.session_store.get_session_context_limit(session.id)
     tokens = session.cumulative_tokens
     pct = int(tokens / context_limit * 100) if context_limit else 0
     compacting = adapter.session_store.is_compacting(user_id, adapter.agent_name)
 
     lines = [
-        f"Model: {adapter.resolve_model()}",
+        f"Model: {adapter.resolve_session_model(session.id)}",
         f"Context: {tokens:,} / {context_limit:,} tokens ({pct}%)",
         f"Messages: {session.message_count}",
     ]
@@ -404,19 +459,159 @@ async def cmd_context(adapter: BaseAdapter, user_id: str, session_id: str | None
 
 
 @adapter_command(
+    name="model",
+    description="Show or switch this chat's model (/model <id>, /model default to reset)",
+    params=[
+        CommandParam("user_id", str, "User whose chat to target"),
+        CommandParam(
+            "message",
+            str,
+            "Model id or alias to switch to; omit to show, 'default' to reset",
+            required=False,
+            widget="model",
+        ),
+        CommandParam(
+            "session_id",
+            str,
+            "Session to target (auto-injected by the web UI from the open chat)",
+            required=False,
+        ),
+    ],
+)
+async def cmd_model(
+    adapter: BaseAdapter, user_id: str, message: str | None = None, session_id: str | None = None
+) -> str:
+    """Show the chat's model, or set/clear its per-session override (same path as the picker)."""
+    session = _resolve_command_session(adapter, user_id, session_id)
+    if session is None:
+        return "No active session. Send a message to start one."
+
+    arg = (message or "").strip()
+    default_model = adapter.resolve_model()
+    if not arg:
+        override = adapter.session_store.get_model_override(session.id)
+        if override:
+            return (
+                f"Model: {override} (session override; agent default {default_model})\n"
+                "Use /model <id> to switch, /model default to reset."
+            )
+        return f"Model: {default_model} (agent default)\nUse /model <id> to switch."
+
+    if arg.lower() in ("default", "clear"):
+        adapter.session_store.set_model_override(session.id, None)
+        _broadcast_settings(adapter, session.id)
+        return f"Model reset to agent default ({default_model})."
+
+    from tsugite.models import get_provider_and_model
+    from tsugite.providers import list_all_providers
+
+    try:
+        provider_name, provider, model_id = get_provider_and_model(arg)
+    except Exception as e:  # noqa: BLE001 -- surface the malformed-model reason to the user
+        raise CommandError(f"Unknown model: {arg} ({e})") from e
+    # get_provider_and_model only parses the shape; unknown providers silently fall
+    # back to a generic OpenAI-compat stub, so a typo would poison the next turn.
+    if provider_name not in list_all_providers():
+        raise CommandError(
+            f"Unknown provider '{provider_name}' in '{arg}'. Known providers: {', '.join(list_all_providers())}."
+        )
+    adapter.session_store.set_model_override(session.id, arg)
+    _broadcast_settings(adapter, session.id)
+    # Unrecognized model id: only nag when the provider exposes a definitive model
+    # set (claude_code/codex_cli). API providers legitimately accept arbitrary ids,
+    # so an unlisted id there is not a mistake and must not caution.
+    note = ""
+    if getattr(provider, "models_are_definitive", False):
+        try:
+            if provider.get_model_info(model_id) is None:
+                note = (
+                    f" Note: '{model_id}' isn't a recognized model id for {provider_name}; "
+                    "if it's wrong the next turn will fail."
+                )
+        except Exception:  # noqa: BLE001 -- a registry hiccup shouldn't nag on a valid set
+            pass
+    return f"Model set to {arg} for this chat.{note}"
+
+
+@adapter_command(
+    name="effort",
+    description="Show or set this chat's reasoning effort (/effort <level>, /effort default to reset)",
+    params=[
+        CommandParam("user_id", str, "User whose chat to target"),
+        CommandParam(
+            "message",
+            str,
+            "Effort level to set; omit to show, 'default' to reset",
+            required=False,
+            widget="effort",
+        ),
+        CommandParam(
+            "session_id",
+            str,
+            "Session to target (auto-injected by the web UI from the open chat)",
+            required=False,
+        ),
+    ],
+)
+async def cmd_effort(
+    adapter: BaseAdapter, user_id: str, message: str | None = None, session_id: str | None = None
+) -> str:
+    """Show the chat's reasoning effort, or set/clear it against the resolved model's levels."""
+    session = _resolve_command_session(adapter, user_id, session_id)
+    if session is None:
+        return "No active session. Send a message to start one."
+
+    arg = (message or "").strip()
+    model = adapter.resolve_session_model(session.id)
+    levels = adapter.session_effort_levels(session.id)
+    if not arg:
+        current = adapter.session_store.get_reasoning_effort(session.id) or "default"
+        if not levels:
+            return f"Reasoning effort: {current}\n{model} doesn't support reasoning effort."
+        return (
+            f"Reasoning effort: {current}\n"
+            f"Supported by {model}: {', '.join(levels)}\n"
+            "Use /effort <level> to change, /effort default to reset."
+        )
+
+    if arg.lower() in ("default", "clear"):
+        adapter.session_store.set_reasoning_effort(session.id, None)
+        _broadcast_settings(adapter, session.id)
+        return "Reasoning effort reset to default."
+
+    if not levels:
+        raise CommandError(f"{model} doesn't support reasoning effort.")
+
+    from tsugite.models import UnsupportedEffortError, resolve_reasoning_effort
+
+    try:
+        resolved = resolve_reasoning_effort(model, arg)
+    except UnsupportedEffortError as e:
+        raise CommandError(str(e)) from e
+    adapter.session_store.set_reasoning_effort(session.id, resolved)
+    _broadcast_settings(adapter, session.id)
+    return f"Reasoning effort set to {resolved} for this chat."
+
+
+@adapter_command(
     name="sessions",
     description="List active and recent background sessions",
-    params=[CommandParam("status", str, "Filter by status (running, completed, failed)", required=False)],
+    params=[
+        CommandParam(
+            "status",
+            str,
+            "Filter by status (running, completed, failed)",
+            required=False,
+            choices=["running", "completed", "failed"],
+        )
+    ],
 )
 async def cmd_sessions(adapter: BaseAdapter, status: str | None = None) -> str:
     """List background sessions for the current agent."""
     sessions = adapter.session_store.list_sessions(agent=adapter.agent_name, status=status)
     if not sessions:
         return "No sessions found."
-    lines = []
-    for s in sessions[:10]:
-        label = s.title or (s.prompt or "")[:60]
-        lines.append(f"[{s.status}] {s.id[:12]} — {label}")
+    lines = [f"[{s.status}] {s.id[:12]} — {s.title or (s.prompt or '')[:60]}" for s in sessions[:10]]
     if len(sessions) > 10:
         lines.append(f"... and {len(sessions) - 10} more")
     return "\n".join(lines)

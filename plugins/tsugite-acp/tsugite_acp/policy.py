@@ -52,16 +52,6 @@ class PermissionPolicy:
         # Deny rules evaluated first so they can override an allow.
         self._rules = [_parse_rule(r, "deny") for r in self.deny] + [_parse_rule(r, "allow") for r in self.allow]
 
-    @classmethod
-    def from_config(cls, config: dict | None) -> "PermissionPolicy":
-        if not config:
-            return cls()
-        return cls(
-            default=config.get("default", "allow"),
-            allow=list(config.get("allow", [])),
-            deny=list(config.get("deny", [])),
-        )
-
     def evaluate(self, tool: str, params: dict) -> Action:
         arg_str = _stringify_params(params)
         for rule in self._rules:

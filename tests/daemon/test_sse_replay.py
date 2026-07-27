@@ -75,8 +75,7 @@ def server_client(tmp_path):
     config = AgentConfig(workspace_dir=workspace, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        with patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]):
-            adapter = HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
+        adapter = HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
     token_store = TokenStore(tmp_path / "tokens.json")
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(

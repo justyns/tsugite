@@ -14,8 +14,8 @@ class TestClaudeCodeFirstMessageAttachments:
         messages = [{"role": "user", "content": task}]
         return provider._build_first_message(messages)
 
-    def _att(self, name="test.md", content="test", content_type=AttachmentContentType.TEXT):
-        return Attachment(name=name, content=content, content_type=content_type, mime_type="text/plain")
+    def _att(self, name="test.md", content="test", content_type=AttachmentContentType.TEXT, mime_type="text/plain"):
+        return Attachment(name=name, content=content, content_type=content_type, mime_type=mime_type)
 
     def test_fresh_session_includes_attachments(self):
         att = self._att(name="MEMORY.md", content="memory content")
@@ -46,10 +46,80 @@ class TestClaudeCodeFirstMessageAttachments:
         assert "<context>" not in msg
         assert "task" in msg
 
-    def test_non_text_attachments_excluded(self):
-        att = self._att(name="image.png", content="base64data", content_type=AttachmentContentType.IMAGE)
-        msg = self._build(attachments=[att])
-        assert "<context>" not in msg
+    def test_text_only_turn_sends_plain_string(self):
+        # No image attachments: the first message stays a bare string, so text-only
+        # turns and their transcripts are byte-for-byte unchanged.
+        msg = self._build(task="just text")
+        assert isinstance(msg, str)
+        assert "just text" in msg
+
+    def test_image_attachment_emitted_as_content_block(self):
+        att = self._att(
+            name="photo.jpg",
+            content="ZmFrZWJhc2U2NA==",
+            content_type=AttachmentContentType.IMAGE,
+            mime_type="image/jpeg",
+        )
+        msg = self._build(attachments=[att], task="describe this")
+
+        assert isinstance(msg, list), "an image attachment turns the message into a content-block list"
+        text_blocks = [b for b in msg if b["type"] == "text"]
+        image_blocks = [b for b in msg if b["type"] == "image"]
+        assert any("describe this" in b["text"] for b in text_blocks)
+        assert len(image_blocks) == 1
+        assert image_blocks[0]["source"] == {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "ZmFrZWJhc2U2NA==",
+        }
+
+    def test_image_and_text_attachment_together(self):
+        text_att = self._att(name="notes.md", content="my notes")
+        img_att = self._att(
+            name="photo.png", content="cG5nZGF0YQ==", content_type=AttachmentContentType.IMAGE, mime_type="image/png"
+        )
+        msg = self._build(attachments=[text_att, img_att])
+
+        assert isinstance(msg, list)
+        text = "\n".join(b["text"] for b in msg if b["type"] == "text")
+        assert '<attachment name="notes.md">' in text
+        assert "my notes" in text
+        images = [b for b in msg if b["type"] == "image"]
+        assert images[0]["source"]["media_type"] == "image/png"
+
+    def test_unsupported_image_type_falls_back_to_text_only(self):
+        # SVG/BMP/TIFF aren't Anthropic image media types; emitting one as a base64
+        # image block is a guaranteed 400, so it must not become a content block.
+        att = self._att(
+            name="diagram.svg",
+            content="c3ZnZGF0YQ==",
+            content_type=AttachmentContentType.IMAGE,
+            mime_type="image/svg+xml",
+        )
+        msg = self._build(attachments=[att], task="look")
+        assert isinstance(msg, str)
+        assert "look" in msg
+
+    def test_image_attachment_on_resumed_session_still_emits_block(self):
+        # The primary case: a photo snapped mid-conversation. Every ongoing daemon
+        # chat turn is a fresh run with resume_session set, so this turn's uploaded
+        # image must NOT be gated on include_context (false on resume) -- it belongs
+        # to this turn and isn't in the CLI transcript yet.
+        provider = ClaudeCodeProvider()
+        att = self._att(
+            name="photo.jpg",
+            content="ZmFrZQ==",
+            content_type=AttachmentContentType.IMAGE,
+            mime_type="image/jpeg",
+        )
+        provider.set_context(attachments=[att], resume_session="sess-abc")
+        msg = provider._build_first_message([{"role": "user", "content": "what is this"}])
+
+        assert isinstance(msg, list)
+        image_blocks = [b for b in msg if b["type"] == "image"]
+        assert len(image_blocks) == 1
+        assert image_blocks[0]["source"]["data"] == "ZmFrZQ=="
+        assert any("what is this" in b["text"] for b in msg if b["type"] == "text")
 
     def test_large_attachments_not_truncated(self):
         large_content = "x" * 5000

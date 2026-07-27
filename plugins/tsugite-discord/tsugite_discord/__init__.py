@@ -22,7 +22,6 @@ from tsugite.events import (
     LLMMessageEvent,
     LLMWaitProgressEvent,
     ObservationEvent,
-    ReactionEvent,
     ReasoningContentEvent,
     StepStartEvent,
     ToolCallEvent,
@@ -62,7 +61,6 @@ class DiscordProgressHandler:
         self,
         channel: discord.abc.Messageable,
         loop: asyncio.AbstractEventLoop,
-        trigger_message: Optional[discord.Message] = None,
         header_text: Optional[str] = None,
     ):
         """Initialize progress handler.
@@ -70,12 +68,10 @@ class DiscordProgressHandler:
         Args:
             channel: Discord channel to send progress updates to
             loop: Discord bot's event loop (for thread-safe scheduling)
-            trigger_message: The user message that triggered this interaction (for reactions)
             header_text: First line of the progress tree, used to surface the active session
         """
         self.channel = channel
         self.loop = loop
-        self.trigger_message = trigger_message
         self.header_text = header_text or "🤔 Working..."
         self.progress_msg: Optional[discord.Message] = None
         self.updates: list[ProgressStep] = []
@@ -87,7 +83,6 @@ class DiscordProgressHandler:
         self._last_rendered: Optional[str] = None
         self._thought_buffer: Optional[str] = None
         self._current_turn = 0
-        self._max_turns = 10
 
     def _complete_prev_and_append(self, label: str, emoji: str) -> None:
         if self.updates:
@@ -156,7 +151,6 @@ class DiscordProgressHandler:
 
             if isinstance(event, StepStartEvent):
                 self._current_turn = event.step
-                self._max_turns = event.max_turns
                 self._complete_prev_and_append(f"Turn {event.step}/{event.max_turns}", "🤔")
                 await self._update_progress()
 
@@ -207,14 +201,6 @@ class DiscordProgressHandler:
                         await self.channel.send(event.message)
                     except discord.errors.HTTPException as e:
                         logger.debug("Failed to send info message: %s", e)
-
-            elif isinstance(event, ReactionEvent):
-                target = self.trigger_message
-                if target and event.emoji:
-                    try:
-                        await target.add_reaction(event.emoji)
-                    except discord.errors.HTTPException as e:
-                        logger.debug("Failed to add reaction %s: %s", event.emoji, e)
 
             elif isinstance(event, FinalAnswerEvent):
                 self._thought_buffer = None
@@ -403,7 +389,6 @@ class _TextInputModal(discord.ui.Modal):
     def __init__(self, question: str, timeout: float = 300):
         super().__init__(title="Question", timeout=timeout)
         self.value: Optional[str] = None
-        self._question = question
         self.answer = discord.ui.TextInput(
             label=question[:45],  # Discord label limit is 45 chars
             placeholder="Type your answer...",
@@ -449,10 +434,7 @@ class DiscordInteractionBackend:
 
     TIMEOUT = 300
 
-    def __init__(
-        self, bot: commands.Bot, channel: discord.abc.Messageable, user_id: str, loop: asyncio.AbstractEventLoop
-    ):
-        self._bot = bot
+    def __init__(self, channel: discord.abc.Messageable, user_id: str, loop: asyncio.AbstractEventLoop):
         self._channel = channel
         self._user_id = user_id
         self._loop = loop
@@ -643,12 +625,14 @@ class DiscordAdapter(BaseAdapter):
             existing = self.session_store.find_by_thread(thread_id)
             if existing:
                 return existing
-            parent_session = self.session_store.get_or_create_interactive(user_id, self.agent_name)
+            parent_session = self.session_store.get_or_create_interactive(
+                user_id, self.agent_name, source=SessionSource.DISCORD.value
+            )
             parent_channel_id = getattr(message.channel, "parent_id", None)
             thread_session = Session(
                 id="",
                 agent=self.agent_name,
-                source=SessionSource.INTERACTIVE.value,
+                source=SessionSource.DISCORD.value,
                 user_id=user_id,
                 parent_id=parent_session.id,
                 metadata={
@@ -665,14 +649,17 @@ class DiscordAdapter(BaseAdapter):
                 channel_id=str(message.channel.id),
                 agent=self.agent_name,
                 user_id=user_id,
+                source=SessionSource.DISCORD.value,
             )
 
         if self.bot_config.session_name:
             return self.session_store.get_or_create_named_session(
-                user_id, self.agent_name, self.bot_config.session_name
+                user_id, self.agent_name, self.bot_config.session_name, source=SessionSource.DISCORD.value
             )
 
-        return self.session_store.get_or_create_interactive(user_id, self.agent_name)
+        return self.session_store.get_or_create_interactive(
+            user_id, self.agent_name, source=SessionSource.DISCORD.value
+        )
 
     @staticmethod
     def _channel_display_name(channel) -> str:
@@ -715,7 +702,7 @@ class DiscordAdapter(BaseAdapter):
         header_text = self._build_progress_header(message, target_session, is_thread, is_dm)
 
         loop = asyncio.get_running_loop()
-        progress = DiscordProgressHandler(message.channel, loop, trigger_message=message, header_text=header_text)
+        progress = DiscordProgressHandler(message.channel, loop, header_text=header_text)
         sse_handler = SSEBroadcastHandler(
             broadcaster=self.event_bus,
             session_id=target_session.id,
@@ -726,15 +713,18 @@ class DiscordAdapter(BaseAdapter):
         )
         custom_logger = SimpleNamespace(ui_handler=CompositeUIHandler(progress, sse_handler))
 
+        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import set_interaction_backend
 
         interaction_backend = DiscordInteractionBackend(
-            bot=self.bot,
             channel=message.channel,
             user_id=str(message.author.id),
             loop=loop,
         )
         set_interaction_backend(interaction_backend)
+        # Expose the adapter's registered name so a spawn/start-session from a
+        # Discord run resolves to an agent that has a live daemon adapter.
+        set_current_daemon_agent(self.agent_name)
 
         await progress.start_typing_loop()
         self.active_progress_handlers.append(progress)
@@ -856,35 +846,6 @@ class DiscordAdapter(BaseAdapter):
         for chunk in chunks:
             if chunk.strip():
                 await channel.send(chunk)
-
-    # ── ThreadCapability implementation ──
-
-    async def _get_thread(self, platform_thread_id: str) -> discord.Thread:
-        """Fetch a Discord thread by ID, raising if not found or not a thread."""
-        channel = self.bot.get_channel(int(platform_thread_id))
-        if not channel:
-            channel = await self.bot.fetch_channel(int(platform_thread_id))
-        if not isinstance(channel, discord.Thread):
-            raise RuntimeError(f"Channel {platform_thread_id} is not a thread")
-        return channel
-
-    async def create_thread(self, channel_id: str, title: str) -> str:
-        """Create a Discord thread in the specified channel."""
-        channel = self.bot.get_channel(int(channel_id))
-        if not channel:
-            channel = await self.bot.fetch_channel(int(channel_id))
-        thread = await channel.create_thread(name=title[:100], type=discord.ChannelType.public_thread)
-        return str(thread.id)
-
-    async def send_to_thread(self, platform_thread_id: str, message: str) -> None:
-        thread = await self._get_thread(platform_thread_id)
-        if thread.archived:
-            await thread.edit(archived=False)
-        await self._send_chunked(thread, message)
-
-    async def close_thread(self, platform_thread_id: str) -> None:
-        thread = await self._get_thread(platform_thread_id)
-        await thread.edit(archived=True)
 
     async def start(self):
         """Start Discord bot with retry on transient errors."""

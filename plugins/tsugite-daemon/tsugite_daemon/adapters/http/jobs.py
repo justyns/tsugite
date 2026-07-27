@@ -15,6 +15,7 @@ class JobsMixin:
                 "jobs",
                 [
                     Route("/", self._api_list_jobs, methods=["GET"]),
+                    Route("/", self._api_create_job, methods=["POST"]),
                     Route("/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
                     Route("/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),
                     Route("/{job_id}/retry", self._api_retry_job, methods=["POST"]),
@@ -61,6 +62,51 @@ class JobsMixin:
         if limit > 0:
             jobs = jobs[:limit]
         return JSONResponse({"jobs": [j.to_payload() for j in jobs]})
+
+    async def _api_create_job(self, request: Request) -> JSONResponse:
+        """Structured job creation. Parses the same fields as the `/job` slash
+        command (commands.cmd_job), calls JobsOrchestrator.create_and_start_job
+        directly, and returns 201 with job.to_payload() so the caller gets the
+        job_id synchronously - unlike POST /api/agents/{agent}/commands/job,
+        which returns only a free-text confirmation string.
+
+        Always provisions a fresh host session for the tile (no session_id field);
+        the anchor logic lives in the shared cmd_job helper.
+        """
+        if err := self._require_auth_and_jobs(request):
+            return err
+        body = await self._optional_json_body(request)
+        agent = (body.get("agent") or "").strip()
+        if not agent:
+            return JSONResponse({"error": "agent is required"}, status_code=400)
+        adapter = self.adapters.get(agent)
+        if adapter is None:
+            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=404)
+        user_id = (body.get("user_id") or "").strip()
+        if not user_id:
+            return JSONResponse({"error": "user_id is required"}, status_code=400)
+        task = (body.get("task") or "").strip()
+        if not task:
+            return JSONResponse({"error": "task is required"}, status_code=400)
+
+        from tsugite_daemon.commands import _create_job_host_session, _parse_acceptance_criteria
+
+        parent_session_id = _create_job_host_session(adapter, user_id, task)
+        try:
+            job, _started = await self.jobs_orchestrator.create_and_start_job(
+                parent_session_id=parent_session_id,
+                prompt=task,
+                acceptance_criteria=_parse_acceptance_criteria(body.get("acceptance_criteria")),
+                model=body.get("model") or None,
+                max_attempts=body.get("max_attempts"),
+                spawned_by="user-slash",
+                executor=(body.get("executor") or "agent").strip() or "agent",
+            )
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:  # noqa: BLE001 -- surface spawn failures as 500, don't crash the loop
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse(job.to_payload(), status_code=201)
 
     async def _api_cancel_job(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_jobs(request):

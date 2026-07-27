@@ -122,7 +122,7 @@ class TestCompactionTopic:
         history_dir.mkdir()
 
         session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
-        adapter.session_store.set_metadata(session.id, "topic", "focus this week is plugin sandboxing")
+        adapter.session_store.set_metadata_bulk(session.id, {"topic": "focus this week is plugin sandboxing"})
 
         session_path = history_dir / f"{session.id}.jsonl"
         storage = SessionStorage.create(

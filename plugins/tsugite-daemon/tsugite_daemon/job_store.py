@@ -171,6 +171,11 @@ class Job:
     # Inherited sandbox policy (a SandboxSettings-shaped dict) stamped when a
     # sandboxed agent spawns the job, so worker + verifier sessions stay sandboxed.
     sandbox_override: Optional[dict] = None
+    # Workspace files the spawner handed to the job (validated absolute path
+    # strings). The runner materializes them into the worker session's first-turn
+    # attachments once the model is known - images reach a vision model as pixels,
+    # non-inlinable files degrade to a path hint. Mirrors spawn_agent's files=.
+    delegation_files: list[str] = field(default_factory=list)
     # Which executor produces the work. "agent" (default) spawns a tsugite worker
     # session through the SessionRunner; a plugin-registered executor (e.g. a
     # PTY-driven CLI) runs the job itself and reports back via the orchestrator's

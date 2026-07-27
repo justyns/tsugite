@@ -27,7 +27,6 @@ from tsugite_daemon.session_store import FINISHED_STATUSES, METADATA_JOB_HOST, S
 
 logger = logging.getLogger(__name__)
 
-MAX_VERIFY_ATTEMPTS = 3
 VERIFIER_AGENT = "job_verifier"
 WORKER_AGENT = "job_worker"
 
@@ -199,6 +198,7 @@ class JobsOrchestrator:
         sandbox_override: Optional[dict] = None,
         executor: str = "agent",
         effort: Optional[str] = None,
+        delegation_files: Optional[list] = None,
     ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -270,6 +270,7 @@ class JobsOrchestrator:
                 sandbox_override=sandbox_override,
                 workspace_path=str(workspace_root) if workspace_root is not None and not repo else None,
                 executor=executor,
+                delegation_files=delegation_files or [],
                 **job_kwargs,
             )
         )
@@ -332,6 +333,12 @@ class JobsOrchestrator:
                 raise ValueError(f"No executor registered for '{job.executor}'")
             await executor.start(job, followup=followup)
             return None
+        # Carry any delegated files onto the worker session's metadata; the runner
+        # materializes them into the first-turn attachments once the model is known
+        # (same key it reads for spawn_agent-style delegation).
+        worker_meta: dict = {"job_id": job.id, **(extra_metadata or {})}
+        if job.delegation_files:
+            worker_meta["delegation_files"] = list(job.delegation_files)
         session = Session(
             id="",
             agent=self._resolve_adapter_key(job.parent_session_id),
@@ -343,7 +350,7 @@ class JobsOrchestrator:
             agent_file=job.agent or WORKER_AGENT,
             model=job.model,
             workspace_override=workspace,
-            metadata=_with_sandbox(job, {"job_id": job.id, **(extra_metadata or {})}),
+            metadata=_with_sandbox(job, worker_meta),
         )
         return self._runner.start_session(session)
 
@@ -731,7 +738,7 @@ class JobsOrchestrator:
             reason = session.error or result_str or f"verifier session ended with status '{session.status}'"
             self._finalize(job, JobState.ERRORED, error=f"verifier infra failure: {reason}")
         elif is_verifier:
-            await self._handle_verifier_complete(job, session, result_str)
+            await self._handle_verifier_complete(job, result_str)
         elif session_failed:
             await self._handle_worker_failed(job, session, result_str)
         else:
@@ -1012,7 +1019,7 @@ class JobsOrchestrator:
             return
         self._finalize(job, JobState.ERRORED, error=reason, error_detail=detail)
 
-    async def _handle_verifier_complete(self, job: Job, verifier: Session, result_str: str) -> None:
+    async def _handle_verifier_complete(self, job: Job, result_str: str) -> None:
         # State guard: a duplicate or out-of-order verifier-complete for a Job
         # that's no longer in VERIFYING must NOT advance the state again.
         # Without this, a stale notify could spawn a second concurrent retry worker.
@@ -1390,17 +1397,33 @@ class JobsOrchestrator:
         return reconciled
 
     def _resolve_adapter_key(self, parent_session_id: str) -> str:
-        """Route Job spawns through the parent session's adapter so jobs stay on
-        the same agent (credentials, tools, model defaults) as the chat that spawned them.
-        Tolerates real SessionStore raising ValueError on missing sessions.
+        """Resolve the daemon adapter key to run a Job worker under, so it stays on
+        the same agent (credentials, tools, model defaults) as whoever spawned it.
+
+        Precedence: the adapter running the spawning turn (set in the run context),
+        then the parent session's stored agent IF it names a registered adapter,
+        then the sole registered adapter. A session's stored agent can be the
+        agent-file's config name rather than the adapter key (they differ when a
+        daemon agent uses an agent_file of another name), so it is only trusted when
+        it actually resolves. Tolerates a SessionStore raising ValueError on missing
+        sessions.
         """
-        parent = self._get_parent_session(parent_session_id)
-        if parent is not None:
-            return parent.agent
+        from tsugite.agent_runner.helpers import get_current_daemon_agent
+
         adapters = getattr(self._runner, "_adapters", {})
-        if adapters:
+        live = get_current_daemon_agent()
+        if live and live in adapters:
+            return live
+        parent = self._get_parent_session(parent_session_id)
+        if parent is not None and parent.agent in adapters:
+            return parent.agent
+        if len(adapters) == 1:
             return next(iter(adapters))
-        return "default"
+        # Parent's agent didn't resolve and there's no single unambiguous adapter
+        # to fall back to (none registered, or several and none matched): keep the
+        # parent's name so the caller still surfaces a clear "No adapter for agent
+        # 'X'" instead of silently running the worker under an arbitrary agent.
+        return parent.agent if parent is not None else "default"
 
     def _resolve_parent_sandbox_override(self, parent_session_id: str) -> Optional[dict]:
         """Resolve the parent session's agent sandbox config as an override dict,

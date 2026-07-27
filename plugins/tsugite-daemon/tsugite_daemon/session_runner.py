@@ -4,6 +4,7 @@ import asyncio
 import contextvars
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
 
@@ -144,6 +145,7 @@ class SessionRunner:
             )
             return
 
+        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
         custom_logger = SimpleNamespace(ui_handler=progress)
@@ -162,6 +164,27 @@ class SessionRunner:
         if session.metadata and session.metadata.get("sandbox_override"):
             metadata["sandbox_override"] = session.metadata["sandbox_override"]
 
+        # Delegated files (validated at spawn time) become first-turn attachments
+        # now that the target model is known for the vision gate; non-inlinable
+        # ones degrade to a path hint on the message.
+        message = session.prompt
+        delegation_files = (session.metadata or {}).get("delegation_files")
+        if delegation_files:
+            from tsugite.attachments.delegation import (
+                format_delegation_hint,
+                materialize_delegation_attachments,
+                partition_delegation_files,
+            )
+            from tsugite.models import model_supports_vision
+
+            effective_model = session.model or adapter.agent_config.model
+            supports_vision = model_supports_vision(effective_model) if effective_model else True
+            inline_files, hint_files = partition_delegation_files([Path(p) for p in delegation_files], supports_vision)
+            uploaded = materialize_delegation_attachments(inline_files)
+            if uploaded:
+                metadata["uploaded_attachments"] = uploaded
+            message += format_delegation_hint(hint_files)
+
         channel_context = ChannelContext(
             source="session",
             channel_id=None,
@@ -172,11 +195,15 @@ class SessionRunner:
 
         set_current_session_id(session.id)
         set_interaction_backend(NonInteractiveBackend())
+        # session.agent is the adapter key just resolved above, so a nested spawn
+        # inherits a name that still has a live adapter. Runs in this task's own
+        # copied context, so no bleed into sibling sessions.
+        set_current_daemon_agent(session.agent)
 
         try:
             result = await adapter.handle_message(
                 user_id=f"session:{session.id}",
-                message=session.prompt,
+                message=message,
                 channel_context=channel_context,
                 custom_logger=custom_logger,
             )
@@ -196,12 +223,11 @@ class SessionRunner:
 
             await self._dispatch_completion(updated, result_str)
 
-            if session.parent_id:
-                try:
-                    summary = f"Session '{session.title or session.id}' completed: {result_str[:500]}"
-                    await self.reply_to_session(session.parent_id, summary, source="session_completion")
-                except Exception as e:
-                    logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
+            await self._notify_parent(
+                session,
+                f"Session '{session.title or session.id}' completed: {result_str[:500]}",
+                "session_completion",
+            )
 
         except asyncio.CancelledError:
             updated = self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
@@ -210,17 +236,11 @@ class SessionRunner:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
             await self._dispatch_completion(updated, "CANCELLED")
-            if session.parent_id:
-                try:
-                    await self.reply_to_session(
-                        session.parent_id,
-                        f"Session '{session.title or session.id}' was cancelled",
-                        source="session_cancelled",
-                    )
-                except Exception as notify_err:
-                    logger.warning(
-                        "Failed to notify parent session '%s' of cancellation: %s", session.parent_id, notify_err
-                    )
+            await self._notify_parent(
+                session,
+                f"Session '{session.title or session.id}' was cancelled",
+                "session_cancelled",
+            )
         except Exception as e:
             updated = self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})
@@ -228,12 +248,19 @@ class SessionRunner:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
             await self._dispatch_completion(updated, f"FAILED: {str(e)[:500]}")
-            if session.parent_id:
-                try:
-                    error_summary = f"Session '{session.title or session.id}' failed: {str(e)[:500]}"
-                    await self.reply_to_session(session.parent_id, error_summary, source="session_failed")
-                except Exception as notify_err:
-                    logger.warning("Failed to notify parent session '%s' of failure: %s", session.parent_id, notify_err)
+            await self._notify_parent(
+                session,
+                f"Session '{session.title or session.id}' failed: {str(e)[:500]}",
+                "session_failed",
+            )
+
+    async def _notify_parent(self, session, summary: str, source: str) -> None:
+        if not session.parent_id:
+            return
+        try:
+            await self.reply_to_session(session.parent_id, summary, source=source)
+        except Exception as e:
+            logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
 
     def rename_session(self, session_id: str, title: str) -> Session:
         session = self._store.update_session(session_id, title=title)
@@ -335,11 +362,17 @@ class SessionRunner:
             metadata=meta,
         )
 
+        from tsugite.agent_runner.helpers import get_current_daemon_agent, set_current_daemon_agent
+
         # Set the current session ContextVar so tools that fall back to
         # get_current_session_id() (e.g. session_metadata, scratchpad,
-        # return_value) resolve correctly during the reply turn. Restore on exit
-        # so we don't bleed into the caller's context.
+        # return_value) resolve correctly during the reply turn. session.agent is
+        # the adapter key resolved above, so a spawn during this reply turn also
+        # resolves to a live adapter. Restore both on exit so we don't bleed into
+        # the caller's context (this runs in the caller's context, not a fresh task).
         token = _current_session_id.set(session_id)
+        prev_daemon_agent = get_current_daemon_agent()
+        set_current_daemon_agent(session.agent)
         try:
             result = await adapter.handle_message(
                 user_id=f"session:{session_id}",
@@ -348,11 +381,9 @@ class SessionRunner:
             )
         finally:
             _current_session_id.reset(token)
+            set_current_daemon_agent(prev_daemon_agent)
 
         self._store.update_session(session_id)
         if self._event_bus:
             self._event_bus.emit("history_update", {"agent": session.agent, "session_id": session_id})
         return result
-
-    def get_active_sessions(self) -> list[Session]:
-        return [s for s in self._store.list_sessions() if s.status == SessionStatus.RUNNING.value]

@@ -31,6 +31,7 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:fable") == "claude-fable-5"
 
     def test_model_id_version_pinned_aliases(self):
+        assert get_model_id("claude_code:opus-5") == "claude-opus-5"
         assert get_model_id("claude_code:opus-4-8") == "claude-opus-4-8"
         assert get_model_id("claude_code:opus-4-7") == "claude-opus-4-7"
         assert get_model_id("claude_code:opus-4-6") == "claude-opus-4-6"
@@ -353,6 +354,30 @@ class TestClaudeCodeProcess:
         assert msg["type"] == "user"
         assert msg["message"]["role"] == "user"
         assert msg["message"]["content"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_send_message_forwards_block_list_content(self, process):
+        """A multimodal turn hands send_message a content-block list (text + image);
+        it must reach the CLI's stdin verbatim, not stringified."""
+        events = [json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})]
+        mock_proc = self._mock_proc(events)
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdin.write = MagicMock()
+        mock_proc.stdin.drain = AsyncMock()
+
+        process._process = mock_proc
+        process._session_id = "s1"
+
+        blocks = [
+            {"type": "text", "text": "describe this"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}},
+        ]
+        async for _ in process.send_message(blocks):
+            pass
+
+        written = mock_proc.stdin.write.call_args[0][0]
+        msg = json.loads(written.decode().strip())
+        assert msg["message"]["content"] == blocks
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self, process):

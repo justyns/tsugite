@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from tsugite.attachments.base import AttachmentContentType
+from tsugite.attachments.delegation import can_inline_file
 from tsugite.attachments.file import FileHandler
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
@@ -55,15 +55,18 @@ def build_session_event_persister(session_store: "SessionStore", session_id: str
     """
 
     def _persist(payload: dict[str, Any]) -> None:
+        # prompt_snapshot is recorded durably by the agent itself (storage.record,
+        # like model_request) - appending here again would double it. Only the
+        # token-badge sync still rides this live path.
+        if payload.get("type") == "prompt_snapshot":
+            total = (payload.get("token_breakdown") or {}).get("total")
+            if isinstance(total, int) and total > 0:
+                session_store.set_cumulative_tokens(session_id, total)
+            return
         session_store.append_event(
             session_id,
             {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
         )
-        if payload.get("type") != "prompt_snapshot":
-            return
-        total = (payload.get("token_breakdown") or {}).get("total")
-        if isinstance(total, int) and total > 0:
-            session_store.set_cumulative_tokens(session_id, total)
 
     return _persist
 
@@ -124,12 +127,9 @@ class _NoCacheStaticFiles(StaticFiles):
         return response
 
 
-MAX_TEXT_ATTACH_SIZE = 50 * 1024  # 50KB -- ~12K tokens
-MAX_BINARY_ATTACH_SIZE = 10 * 1024 * 1024  # 10MB
 MAX_UPLOAD_TOTAL = 100 * 1024 * 1024  # 100MB per request
 MAX_WEBHOOK_BODY = 5 * 1024 * 1024  # 5MB per delivery (GitHub caps payloads at ~25MB; ours are envelopes)
 MAX_UPLOAD_FILES = 20
-MAX_WORKSPACE_LIST_FILES = 5000
 
 # MIME types treated as text for workspace browsing (beyond text/*)
 _TEXT_MIMES = {
@@ -222,14 +222,19 @@ def _deduplicate_dest(uploads_dir: Path, name: str, max_copies: int = 1000) -> t
     return dest, "too many copies of this file"
 
 
-def _should_context_attach(path: Path, size: int) -> bool:
-    """Determine if a file should be attached as LLM context."""
-    _, content_type = _file_handler._detect_content_type(path)
-    if content_type == AttachmentContentType.TEXT:
-        return size <= MAX_TEXT_ATTACH_SIZE
-    if path.suffix.lower() in FileHandler.BINARY_EXTENSIONS:
-        return size <= MAX_BINARY_ATTACH_SIZE
-    return False
+def _should_context_attach(path: Path, size: int, supports_vision: bool = True) -> bool:
+    """Determine if a file should be attached as LLM context.
+
+    supports_vision gates images: a non-vision model can't read an inlined image
+    block, so its images return False and fall to the workspace-only path (saved
+    under uploads/ with a path hint) rather than vanishing. Defaults True so
+    advisory callers that don't resolve a model stay optimistic.
+
+    Image types no mainstream vision API inlines (svg/bmp/tiff) also fall to the
+    workspace-only path regardless of vision support -- otherwise they'd be
+    inlined-and-dropped by the provider with no path hint.
+    """
+    return can_inline_file(path, size, supports_vision)
 
 
 def _format_upload_message_suffix(workspace_only_files: list[str], attachment_names: list[str]) -> str:
@@ -250,6 +255,8 @@ def _format_upload_message_suffix(workspace_only_files: list[str], attachment_na
 
 class HTTPAgentAdapter(BaseAdapter):
     """Per-agent adapter for HTTP. Lifecycle managed by HTTPServer."""
+
+    supports_token_streaming = True
 
     def resolve_http_user(self, user_id: str) -> str:
         """Resolve an HTTP user_id to canonical identity (no channel context needed for HTTP DMs)."""

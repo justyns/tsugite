@@ -97,3 +97,23 @@ def test_per_session_limit_persists_across_store_reload(store, tmp_path):
     reloaded = SessionStore(store._path, context_limits={"agent-a": 128_000})
 
     assert reloaded.get_session_context_limit("s1") == 1_000_000
+
+
+def test_session_detail_exposes_resolved_context_limit(store):
+    """A fresh session's raw `context_limit` is None until the first turn reports a
+    provider window, but the detail payload must ALSO carry the RESOLVED limit
+    (agent-default fallback) so the web UI paints a context meter from session open
+    instead of showing nothing. The raw field keeps its meaning (unset == None).
+    """
+    _make_session(store, "s1")
+
+    detail = store.session_detail("s1")
+    assert detail["context_limit"] is None, "raw per-session field stays None pre-first-turn"
+    assert detail["context_limit_resolved"] == 128_000, (
+        "resolved limit falls back to the agent default so a fresh session still gets a meter"
+    )
+
+    store.update_session_context_limit("s1", 1_000_000)
+    detail = store.session_detail("s1")
+    assert detail["context_limit"] == 1_000_000, "raw field now carries the tracked window"
+    assert detail["context_limit_resolved"] == 1_000_000, "resolved tracks the per-session window once set"

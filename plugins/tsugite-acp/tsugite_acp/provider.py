@@ -24,6 +24,7 @@ class ACPProvider:
     """
 
     cacheable = False
+    models_are_definitive = False  # bridges arbitrary external agents; ids aren't a fixed set
 
     def __init__(self, name: str = "acp", session_factory: Callable[[], ACPClientSession] | None = None):
         self.name = name

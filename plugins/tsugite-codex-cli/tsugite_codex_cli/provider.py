@@ -88,7 +88,7 @@ def _normalise_kwargs(kwargs: dict) -> dict:
         if key == "max_tokens":
             body["max_output_tokens"] = value
         elif key == "reasoning_effort":
-            body["reasoning"] = {"effort": value}
+            body["reasoning"] = {"effort": value, "summary": "auto"}
         elif key == "response_format":
             body["text"] = {"format": value}
         elif key in {"temperature", "top_p", "stop", "presence_penalty", "frequency_penalty"}:
@@ -107,10 +107,16 @@ def _build_usage(usage_in: dict | None) -> Usage:
     total_tokens = int(total) if total is not None else input_tokens + output_tokens
     details = usage_in.get("output_tokens_details") or {}
     reasoning_tokens = details.get("reasoning_tokens")
+    # The Responses API reports the cached prompt prefix (a subset of input_tokens)
+    # under input_tokens_details.cached_tokens - the input-side mirror of
+    # output_tokens_details.reasoning_tokens above.
+    input_details = usage_in.get("input_tokens_details") or {}
+    cached_tokens = input_details.get("cached_tokens")
     return Usage(
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=total_tokens,
+        cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
         reasoning_tokens=int(reasoning_tokens) if reasoning_tokens is not None else None,
     )
 
@@ -120,6 +126,7 @@ class CodexCliProvider:
 
     # Stateless across calls (auth refresh is internal), so the registry can cache one instance.
     cacheable = True
+    models_are_definitive = True  # CLI exposes a fixed model set; unlisted ids are typos
 
     def __init__(self, name: str = "codex_cli"):
         self.name = name
@@ -178,6 +185,11 @@ class CodexCliProvider:
         if stream:
             body["stream"] = True
         body.update(_normalise_kwargs(kwargs))
+        # Reasoning summaries are opt-in on the Responses API: without
+        # `reasoning.summary` no reasoning_summary_text deltas are ever sent,
+        # so the UI can never show thinking. Ask for them even when no effort
+        # override is set (the codex CLI itself always sends both).
+        body.setdefault("reasoning", {}).setdefault("summary", "auto")
         return body
 
     @staticmethod
@@ -279,6 +291,10 @@ class CodexCliProvider:
                     delta = event.get("delta") or ""
                     if delta:
                         yield StreamChunk(reasoning_content=delta)
+                elif etype == "response.reasoning_summary_part.done":
+                    # Summary parts are separate paragraphs; without a break the
+                    # accumulated markdown runs them together (**a****b**).
+                    yield StreamChunk(reasoning_content="\n\n")
                 elif etype == "response.completed":
                     response_obj = event.get("response") or {}
                     usage = _build_usage(response_obj.get("usage"))

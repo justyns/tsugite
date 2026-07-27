@@ -60,51 +60,6 @@ async def test_session_run_no_override_when_unset(tmp_path, mock_adapter):
     assert "sandbox_override" not in ctx.metadata
 
 
-def test_spawn_session_stamps_sandbox_override(monkeypatch):
-    """spawn_session (the preferred daemon spawn tool) must stamp the inherited
-    policy onto the new session, like start_session does."""
-    from types import SimpleNamespace
-
-    from tsugite.agent_runner.helpers import SandboxContext, clear_sandbox_context, set_sandbox_context
-    from tsugite.tools import sessions as sessions_mod
-
-    captured = {}
-
-    def fake_call(fn, session, *a, **k):
-        captured["session"] = session
-        return session  # a Session dataclass; spawn_session does asdict(result)
-
-    monkeypatch.setattr(sessions_mod, "_session_runner", SimpleNamespace(start_session=None))
-    monkeypatch.setattr(sessions_mod, "_call", fake_call)
-    set_sandbox_context(SandboxContext(allow_domains=["github.com"]))
-    try:
-        sessions_mod.spawn_session(prompt="do work", agent="researcher")
-    finally:
-        clear_sandbox_context()
-
-    assert captured["session"].metadata.get("sandbox_override", {}).get("enabled") is True
-    assert captured["session"].metadata["sandbox_override"]["allow_domains"] == ["github.com"]
-
-
-def test_spawn_session_no_override_when_not_sandboxed(monkeypatch):
-    from types import SimpleNamespace
-
-    from tsugite.agent_runner.helpers import clear_sandbox_context
-    from tsugite.tools import sessions as sessions_mod
-
-    captured = {}
-
-    def fake_call(fn, session, *a, **k):
-        captured["session"] = session
-        return session
-
-    monkeypatch.setattr(sessions_mod, "_session_runner", SimpleNamespace(start_session=None))
-    monkeypatch.setattr(sessions_mod, "_call", fake_call)
-    clear_sandbox_context()
-    sessions_mod.spawn_session(prompt="do work", agent="researcher")
-    assert "sandbox_override" not in captured["session"].metadata
-
-
 def test_with_sandbox_helper_threads_job_override():
     from tsugite_daemon.job_store import Job
     from tsugite_daemon.jobs_orchestrator import _with_sandbox

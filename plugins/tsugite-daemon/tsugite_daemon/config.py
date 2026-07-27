@@ -123,12 +123,20 @@ class NotificationChannelConfig(BaseModel):
 
 
 class HTTPConfig(BaseModel):
-    """Configuration for the HTTP API server."""
+    """Configuration for the HTTP API server.
+
+    image_max_edge / image_quality tune the browser-side re-encode the composer
+    applies to photos before upload (downscale longest edge, re-encode JPEG).
+    Served to the frontend via /api/health; read at page load, so a change takes
+    effect on the next daemon (re)start, not via reload-config.
+    """
 
     enabled: bool = False
     host: str = "127.0.0.1"
     port: int = 8374
     max_workspace_file_size: int = 1024 * 1024  # 1MB
+    image_max_edge: int = 1568  # longest-edge px cap; the API downscales past this anyway
+    image_quality: float = 0.85  # JPEG quality for the client re-encode (0..1)
 
 
 class DaemonConfig(BaseModel):
@@ -225,8 +233,7 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
         _expand_sandbox_binds(data["sandbox"])
 
     for agent_data in data.get("agents", {}).values():
-        if "workspace_dir" in agent_data:
-            agent_data["workspace_dir"] = Path(agent_data["workspace_dir"]).expanduser()
+        _expand_paths(agent_data, "workspace_dir")
         if isinstance(agent_data.get("sandbox"), dict):
             _expand_sandbox_binds(agent_data["sandbox"])
 

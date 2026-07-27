@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from tsugite_codex_cli.auth import CodexAuthError
-from tsugite_codex_cli.provider import CodexCliProvider, CodexResponsesError
+from tsugite_codex_cli.provider import CodexCliProvider, CodexResponsesError, _build_usage
 
 
 @contextmanager
@@ -138,7 +138,8 @@ async def test_request_body_user_text_and_image_translated():
     # kwargs normalised
     assert "max_tokens" not in body
     assert body["max_output_tokens"] == 1024
-    assert body["reasoning"] == {"effort": "high"}
+    # Reasoning summaries are requested so thinking deltas stream to the UI.
+    assert body["reasoning"] == {"effort": "high", "summary": "auto"}
     assert "reasoning_effort" not in body
     # headers
     headers = captured["headers"]
@@ -287,6 +288,31 @@ async def test_collected_response_usage_and_total_tokens(usage_in, expected_tota
     assert resp.usage.completion_tokens == 50
     assert resp.usage.total_tokens == expected_total
     assert resp.usage.reasoning_tokens == 7
+
+
+def test_build_usage_extracts_cached_prompt_prefix():
+    # The Responses API reports the cached prompt prefix under
+    # input_tokens_details.cached_tokens - the input-side mirror of the
+    # output_tokens_details.reasoning_tokens the provider already reads.
+    usage = _build_usage(
+        {
+            "input_tokens": 22341,
+            "input_tokens_details": {"cached_tokens": 18000},
+            "output_tokens": 1475,
+            "output_tokens_details": {"reasoning_tokens": 387},
+            "total_tokens": 23816,
+        }
+    )
+    assert usage.prompt_tokens == 22341
+    assert usage.reasoning_tokens == 387
+    assert usage.cached_tokens == 18000
+
+
+def test_build_usage_omits_cached_tokens_when_absent():
+    # No input_tokens_details (or no cached_tokens) leaves the field None so the
+    # usage dump (asdict-minus-None) never fabricates a "0 cached".
+    usage = _build_usage({"input_tokens": 10, "output_tokens": 5, "total_tokens": 15})
+    assert usage.cached_tokens is None
 
 
 # ── P3: streaming ──

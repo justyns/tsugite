@@ -16,9 +16,19 @@ dependencies = [
   "py-vapid>=1.9.0",
 ]
 
+[project.entry-points."tsugite.context_providers"]
+daemon = "tsugite_daemon.context"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# The built web UI (tsugite_daemon/web/) is gitignored build output, and
+# hatchling excludes VCS-ignored files by default. `artifacts` re-includes it
+# so wheels/sdists ship the UI - publish pipelines must run the frontend build
+# (npm --prefix plugins/tsugite-daemon/frontend run build) before `uv build`.
+artifacts = ["tsugite_daemon/web"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["tsugite_daemon"]

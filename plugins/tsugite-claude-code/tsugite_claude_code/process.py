@@ -1,7 +1,9 @@
 """Claude Code CLI subprocess provider.
 
 Routes LLM calls through `claude --print` instead of a direct HTTP provider,
-enabling Claude Max subscription auth. Text-only, no multimodal support.
+enabling Claude Max subscription auth. A user turn is sent as stream-json; its
+`content` is a bare string for text-only turns, or an Anthropic content-block
+list (text + image blocks) when the turn carries image attachments.
 """
 
 import asyncio
@@ -158,11 +160,13 @@ class ClaudeCodeProcess:
             mode,
         )
 
-    async def send_message(self, content: str) -> AsyncIterator[dict]:
+    async def send_message(self, content: str | list) -> AsyncIterator[dict]:
         """Write user message to stdin and yield streaming events from stdout.
 
         Args:
-            content: User message text
+            content: User message text, or an Anthropic content-block list
+                (text + image blocks) for a multimodal turn. Forwarded to the
+                CLI's stdin verbatim -- the CLI relays blocks to the API.
 
         Yields:
             Dicts with type "text_delta" (streaming chunk) or "result" (final)
@@ -175,7 +179,11 @@ class ClaudeCodeProcess:
             "message": {"role": "user", "content": content},
             "session_id": self._session_id or "default",
         }
-        content_len = len(content)
+        content_len = (
+            len(content)
+            if isinstance(content, str)
+            else sum(len(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+        )
         self._process.stdin.write((json.dumps(msg) + "\n").encode())
         await self._process.stdin.drain()
         logger.debug("Sent message (%d chars, ~%d est tokens): %.200s", content_len, content_len // 4, content)

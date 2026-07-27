@@ -50,26 +50,6 @@ class TestPermissionPolicy:
         q = PermissionPolicy(default="deny", allow=["Read"])
         assert q.evaluate("SomeNewTool", {}) == "deny"
 
-    def test_from_config_dict(self):
-        from tsugite_acp.policy import PermissionPolicy
-
-        p = PermissionPolicy.from_config(
-            {
-                "default": "allow",
-                "allow": ["Read", "Bash(git *)"],
-                "deny": ["Bash(rm *)"],
-            }
-        )
-        assert p.evaluate("Read", {}) == "allow"
-        assert p.evaluate("Bash", {"command": "git pull"}) == "allow"
-        assert p.evaluate("Bash", {"command": "rm /tmp/x"}) == "deny"
-
-    def test_from_config_none_returns_default_allow(self):
-        from tsugite_acp.policy import PermissionPolicy
-
-        p = PermissionPolicy.from_config(None)
-        assert p.evaluate("Anything", {}) == "allow"
-
 
 class TestHandlerPermissionRoundTrip:
     """Slice 10: agent's request_permission goes through the policy."""

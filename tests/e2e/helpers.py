@@ -1,80 +1,53 @@
 """Small helpers shared across Playwright e2e tests.
 
-Patterns extracted from copy-pasted snippets across the suite so future tests
-don't have to know the brittle predicates (e.g. tolerating the brief window
-before `window.Alpine` is defined, scoping `.console-tab` to the IDE tab bar
-to avoid the mobile-menu duplicate).
+Built around the Svelte rebuild's frozen test contract (see
+`frontend/src/lib/testids.ts`): app readiness is a single always-rendered
+`[data-testid="app-ready"]` marker (present whether or not auth is gated),
+the authenticated app shell is signalled by the nav rail mounting, and views
+are switched through the real nav rail (which drives the hash router) rather
+than any store/global reached into from the test. There are no Alpine-style
+store hooks left to poke at - tests either drive real DOM interactions or
+seed state through the daemon fixtures / HTTP API.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+# Fixed synthetic user id injected into localStorage by the `authenticated_page`
+# fixture, so tests that seed sessions/data for "the current user" via
+# e2e_session_store etc. have a stable id to key off instead of reading
+# whatever default the frontend happens to fall back to.
+E2E_USER_ID = "e2e-user"
 
-ALPINE_READY = "typeof Alpine !== 'undefined' && Alpine.store('app') && !Alpine.store('app').authRequired"
-CONV_VIEW = "[x-data*=conversationsView]"
-# The view's TRUE reactive context (registered by the component's init). Writes
-# through Alpine.$data(...) wrappers can miss Alpine's dependency graph for
-# nested state, so helpers must drive the view through this instead.
-CONV_REF = "window.__tsugiteConv"
+APP_READY = '[data-testid="app-ready"]'
+NAV_RAIL = '[data-testid="nav-rail"]'
+AUTH_GATE = '[data-testid="auth-gate"]'
 
 
-def wait_for_alpine_ready(page, timeout: int = 10000) -> None:
-    """Wait for Alpine to load and auth to no longer be required.
+def wait_for_app_ready(page, timeout: int = 10000) -> None:
+    """Wait for the Svelte app to mount.
 
-    Tolerates the brief window before window.Alpine is defined (Alpine loads
-    as an ES module from a CDN).
+    This marker renders unconditionally on first paint, regardless of auth
+    state - it only means "the app booted", not "the user is signed in".
     """
-    page.wait_for_function(ALPINE_READY, timeout=timeout)
+    page.wait_for_selector(APP_READY, state="attached", timeout=timeout)
 
 
-def open_conversations(page) -> None:
-    """Click the Conversations tab and wait for the view to switch.
+def wait_for_authed(page, timeout: int = 10000) -> None:
+    """Wait for the app shell to render past the auth gate.
 
-    Scoped to `.console-tabs button.console-tab` to avoid matching the mobile
-    menu's duplicate button.
+    The nav rail only exists in the DOM once `auth.gated` is false, so its
+    presence is a direct signal the token was accepted and the shell mounted.
     """
-    page.locator(".console-tabs button.console-tab", has_text="Conversations").click()
-    page.wait_for_function("Alpine.store('app').view === 'conversations'", timeout=3000)
+    wait_for_app_ready(page, timeout=timeout)
+    page.wait_for_selector(NAV_RAIL, timeout=timeout)
 
 
-def reload_conversations_view(page) -> None:
-    """Force the conversationsView to reload its session list.
-
-    Needed when a test added sessions to the store after page mount; the
-    initial /api/agents/{agent}/sessions fetch is stale.
-    """
-    page.evaluate(f"{CONV_REF}.reload()")
+def open_view(page, view_id: str, timeout: int = 5000) -> None:
+    """Click a nav rail entry and wait for that view's surface to mount."""
+    page.locator(f'[data-testid="nav-{view_id}"]').click()
+    page.wait_for_selector(f'[data-testid="view-{view_id}"]', timeout=timeout)
 
 
-def wait_for_session_in_list(page, session_id: str, timeout: int = 5000) -> None:
-    """Wait until the conversationsView's allSessions array includes session_id."""
-    page.wait_for_function(
-        f"(() => {{ const v = {CONV_REF}; "
-        f"return v && v.allSessions && v.allSessions.some(s => s.id === {session_id!r}); }})()",
-        timeout=timeout,
-    )
-
-
-def select_session_in_view(page, session_id: str, timeout: int = 3000) -> None:
-    """Programmatically select a session and wait for it to take effect."""
-    page.evaluate(f"{CONV_REF}.selectSessionById({session_id!r}, {{follow: false}})")
-    page.wait_for_function(
-        f"{CONV_REF}.selectedSessionId === {session_id!r}",
-        timeout=timeout,
-    )
-
-
-def open_session_by_url(page, base_url: str, user_id: Optional[str], session_id: str) -> None:
-    """Navigate to a session via the URL hash; reload first to ensure fresh state.
-
-    If user_id is given, set it in localStorage before navigation so the page
-    loads as that user. Used by history-seeding tests where the seeded session
-    is owned by a synthetic user.
-    """
-    if user_id is not None:
-        page.evaluate(f"localStorage.setItem('tsugite_user_id', {user_id!r})")
-    page.goto(page.url.split("#")[0] + f"#conversations?session={session_id}")
-    page.reload()
-    wait_for_alpine_ready(page, timeout=5000)
-    if user_id is not None:
-        page.wait_for_function(f"Alpine.store('app').userId === {user_id!r}", timeout=3000)
+def auth_headers(token: str) -> dict:
+    """Bearer-auth header dict for direct `page.request` API calls."""
+    return {"Authorization": f"Bearer {token}"}

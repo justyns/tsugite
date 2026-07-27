@@ -30,24 +30,24 @@ class YouTubeHandler(AttachmentHandler):
         try:
             transcript = YouTubeTranscriptApi.get_transcript(video_id)  # pylint: disable=no-member
 
-            lines = []
-            for entry in transcript:
-                timestamp = self._format_timestamp(entry["start"])
-                lines.append(f"[{timestamp}] {entry['text']}")
-
             return Attachment(
                 name=f"youtube:{video_id}",
-                content="\n".join(lines),
+                content="\n".join(
+                    f"[{self._format_timestamp(entry['start'])}] {entry['text']}" for entry in transcript
+                ),
                 content_type=AttachmentContentType.TEXT,
                 mime_type="text/plain",
                 source_url=source,
+                # A transcript is speech from a third party, not the user's words:
+                # mark it untrusted so the model treats it as reference data.
+                untrusted=True,
             )
         except Exception as e:
             raise ValueError(f"Failed to fetch YouTube transcript for {video_id}: {e}")
 
     def _extract_video_id(self, source: str) -> Optional[str]:
         if source.startswith("youtube:"):
-            return source[8:]
+            return source[len("youtube:") :]
 
         match = re.search(r"youtu\.be/([a-zA-Z0-9_-]+)", source)
         if match:

@@ -177,6 +177,14 @@ class SessionSource(str, Enum):
     BACKGROUND = "background"
     SPAWNED = "spawned"
 
+    # Origin of an interactive session, so the UI can badge it by where it was
+    # created instead of collapsing every chat to 'interactive'.
+    WEB = "web"
+    DISCORD = "discord"
+    # Written as a raw string by tsugite/agent_runner/runner.py (core can't
+    # import this plugin enum), so "cli" exists in stored session data.
+    CLI = "cli"
+
 
 class SessionStatus(str, Enum):
     ACTIVE = "active"
@@ -268,14 +276,9 @@ class SessionStore:
         self,
         store_path: Path,
         context_limits: Optional[dict[str, int]] = None,
-        history_dir: Optional[Path] = None,
     ):
         self._path = store_path  # legacy JSON location; one-time migration source
         self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
-        # Where per-session event logs live. Defaults to `<store_path parent>/history`
-        # so tests using tmp_path/session_store.json get isolated tmp_path/history/,
-        # while production callers can pass the XDG history dir explicitly.
-        self._history_dir = history_dir if history_dir is not None else (store_path.parent / "history")
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
@@ -419,14 +422,6 @@ class SessionStore:
                 session.suppressed_skills.append(skill_name)
                 self._persist(session)
 
-    def unsuppress_skill(self, session_id: str, skill_name: str) -> None:
-        """Remove a skill from the session's suppression set."""
-        with self._lock:
-            session = self._sessions.get(session_id)
-            if session and skill_name in session.suppressed_skills:
-                session.suppressed_skills.remove(skill_name)
-                self._persist(session)
-
     def get_suppressed_skills(self, session_id: str) -> set[str]:
         """Return a copy of the session's suppressed skill names."""
         with self._lock:
@@ -550,9 +545,15 @@ class SessionStore:
 
     # ── Interactive session management ──
 
-    def get_or_create_interactive(self, user_id: str, agent: str) -> Session:
-        """Return the user's primary session, or create a fresh default one."""
-        return self.find_default_session(user_id, agent) or self.create_default_session(user_id, agent)
+    def get_or_create_interactive(
+        self, user_id: str, agent: str, source: str = SessionSource.INTERACTIVE.value
+    ) -> Session:
+        """Return the user's primary session, or create a fresh default one.
+
+        `source` stamps only newly created sessions; an existing primary keeps
+        the source it was created with.
+        """
+        return self.find_default_session(user_id, agent) or self.create_default_session(user_id, agent, source=source)
 
     def default_primary_ids(self, agent: str) -> dict:
         """Return {user_id: session_id} for all primary sessions for this agent."""
@@ -578,9 +579,7 @@ class SessionStore:
             and s.status not in FINISHED_STATUSES
             and s.metadata.get(METADATA_SESSION_NAME) == name
         ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda s: s.last_active)
+        return max(candidates, key=lambda s: s.last_active, default=None)
 
     def find_named_session(self, user_id: str, agent: str, name: str) -> Optional[Session]:
         """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
@@ -598,9 +597,7 @@ class SessionStore:
             and s.status not in FINISHED_STATUSES
             and s.is_primary
         ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda s: s.last_active)
+        return max(candidates, key=lambda s: s.last_active, default=None)
 
     def find_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
         """Return the user's primary session for this agent, or None."""
@@ -624,7 +621,14 @@ class SessionStore:
                 cleared = s
         return cleared
 
-    def create_default_session(self, user_id: str, agent: str, *, title: Optional[str] = None) -> Session:
+    def create_default_session(
+        self,
+        user_id: str,
+        agent: str,
+        *,
+        title: Optional[str] = None,
+        source: str = SessionSource.INTERACTIVE.value,
+    ) -> Session:
         """Create a fresh interactive session and mark it primary."""
         with self._lock:
             conv_id = generate_session_id(agent)
@@ -632,7 +636,7 @@ class SessionStore:
             session = Session(
                 id=conv_id,
                 agent=agent,
-                source=SessionSource.INTERACTIVE.value,
+                source=source,
                 user_id=user_id,
                 title=title,
                 metadata={METADATA_PRIMARY_FLAG: True},
@@ -661,7 +665,9 @@ class SessionStore:
         with self._lock:
             return self._demote_primaries_locked(user_id, agent)
 
-    def get_or_create_named_session(self, user_id: str, agent: str, name: str) -> Session:
+    def get_or_create_named_session(
+        self, user_id: str, agent: str, name: str, source: str = SessionSource.INTERACTIVE.value
+    ) -> Session:
         """Resolve a named-route session for (user_id, agent), creating one if absent.
 
         The session_name lives in metadata and is preserved across compaction so the
@@ -676,7 +682,7 @@ class SessionStore:
             session = Session(
                 id=conv_id,
                 agent=agent,
-                source=SessionSource.INTERACTIVE.value,
+                source=source,
                 user_id=user_id,
                 title=f"{name.title()} Session",
                 metadata={METADATA_SESSION_NAME: name},
@@ -701,8 +707,6 @@ class SessionStore:
         history (provider state scrubbed) plus its own sidebar entry mirroring the
         source's agent/user/runtime settings.
         """
-        from tsugite.history import get_history_backend
-
         with self._lock:
             source = self._sessions.get(session_id)
             if not source:
@@ -1098,8 +1102,8 @@ class SessionStore:
 
     # ── Event log: unified with conversation history ──
     #
-    # UI events (reactions, prompt_snapshots, etc.) are recorded into the same
-    # history session as the conversation events, through the history backend.
+    # UI events (prompt_snapshots, hook executions, etc.) are recorded into the
+    # same history session as the conversation events, through the history backend.
 
     def append_event(self, session_id: str, event: dict) -> None:
         """Append a UI/telemetry event to the session's history JSONL.
@@ -1135,6 +1139,65 @@ class SessionStore:
             return []
         return [event_to_ui_dict(e) for e in session.iter_events()]
 
+    def read_events_page(
+        self,
+        session_id: str,
+        *,
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> dict:
+        """Windowed / delta read of a session's UI events for the chat surface.
+
+        - ``after_id``: forward delta — only events with ``id`` greater than it
+          (the incremental resync path). A forward catch-up, so ``has_more`` is
+          always False.
+        - ``limit`` alone: the newest ``limit`` events (the tail window on open).
+        - ``before_id`` + ``limit``: the newest ``limit`` events with ``id`` below
+          the cursor (the "load earlier" page).
+        - none of the above: every event.
+
+        Returns ``{"events": [...chronological...], "has_more": bool,
+        "oldest_id": int | None}``. ``has_more`` is True when older events exist
+        before the window; ``oldest_id`` is the window's smallest id (the cursor
+        for the next earlier page), or None when the backend assigns no ids (the
+        deprecated jsonl backend) or the window is empty. Only the returned window
+        is normalized to a UI dict, so a fat log doesn't pay the model-response
+        backfill parse for events the client will never render.
+        """
+        backend = get_history_backend()
+        if not backend.exists(session_id):
+            return {"events": [], "has_more": False, "oldest_id": None}
+        try:
+            raw = list(backend.load(session_id).iter_events())
+        except Exception:
+            return {"events": [], "has_more": False, "oldest_id": None}
+
+        # Forward delta: strictly newer than the client's cursor. Events without
+        # an id (jsonl) can't be positioned in a delta and are excluded — the
+        # client only asks for one when it holds a numeric cursor.
+        if after_id is not None:
+            delta = [e for e in raw if e.id is not None and e.id > after_id]
+            return {
+                "events": [event_to_ui_dict(e) for e in delta],
+                "has_more": False,
+                "oldest_id": delta[0].id if delta else None,
+            }
+
+        if before_id is not None:
+            raw = [e for e in raw if e.id is not None and e.id < before_id]
+
+        has_more = False
+        if limit is not None and 0 <= limit < len(raw):
+            has_more = True
+            raw = raw[len(raw) - limit :]  # newest `limit`, still chronological
+
+        return {
+            "events": [event_to_ui_dict(e) for e in raw],
+            "has_more": has_more,
+            "oldest_id": raw[0].id if raw else None,
+        }
+
     def event_count(self, session_id: str) -> int:
         with self._cache_lock:
             cached = self._event_count_cache.get(session_id)
@@ -1153,19 +1216,13 @@ class SessionStore:
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
+        # `context_limit` (the raw dataclass field) is None until the first turn
+        # reports a provider window, so a fresh session would get no meter. Expose
+        # the RESOLVED limit alongside it (falls back to the agent default) so the
+        # web UI can paint `0 / <default>` from session open. Additive: the raw
+        # field keeps its "unset == None" meaning.
+        result["context_limit_resolved"] = self.get_session_context_limit(session_id)
         return result
-
-    def session_events_since(self, session_id: str, since: Optional[str] = None) -> list[dict]:
-        """Return events for a session, optionally filtered to those after a timestamp."""
-        events = self.read_events(session_id)
-        if not since:
-            return events
-        since_dt = _parse_ts(since)
-        if not since_dt:
-            return events
-        return [
-            e for e in events if (_parse_ts(e.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)) > since_dt
-        ]
 
     def session_progress_summary(self, session_id: str) -> dict:
         """Return a lightweight live-progress summary for a running session.
@@ -1192,34 +1249,7 @@ class SessionStore:
                 self._event_count_cache[session_id] = len(events)
         return progress
 
-    def session_summary(self, session_id: str) -> dict:
-        """Return a summary dict for a session including event stats."""
-        with self._lock:
-            if session_id not in self._sessions:
-                raise ValueError(f"Session '{session_id}' not found")
-            session = self._sessions[session_id]
-            events = self.read_events(session_id)
-        tools_used = sorted({e["name"] for e in events if e.get("type") == "tool_call" and "name" in e})
-
-        summary: dict = {
-            "id": session.id,
-            "agent": session.agent,
-            "source": session.source,
-            "status": session.status,
-            "prompt": session.prompt or "",
-            "result": session.result or "",
-            "event_count": len(events),
-            "tools_used": tools_used,
-        }
-        if session.error:
-            summary["error"] = session.error
-        return summary
-
     # ── Metadata CRUD ──
-
-    def set_metadata(self, session_id: str, key: str, value) -> Session:
-        """Set a single metadata key. Raises ValueError for read-only keys."""
-        return self.set_metadata_bulk(session_id, {key: value})
 
     def set_metadata_bulk(self, session_id: str, updates: dict) -> Session:
         """Set multiple metadata keys. Rejects entire batch if any key is read-only.
@@ -1265,7 +1295,9 @@ class SessionStore:
 
     # ── Channel session index ──
 
-    def get_or_create_channel_session(self, channel_id: str, agent: str, user_id: str) -> Session:
+    def get_or_create_channel_session(
+        self, channel_id: str, agent: str, user_id: str, source: str = SessionSource.INTERACTIVE.value
+    ) -> Session:
         with self._lock:
             key = (channel_id, agent)
             is_replacement = False
@@ -1283,7 +1315,7 @@ class SessionStore:
             session = Session(
                 id=conv_id,
                 agent=agent,
-                source=SessionSource.INTERACTIVE.value,
+                source=source,
                 user_id=user_id,
                 metadata={"channel_id": channel_id},
             )
@@ -1294,13 +1326,6 @@ class SessionStore:
             self._channel_index[key] = conv_id
             self._persist(session)
             return session
-
-    def find_by_channel(self, channel_id: str, agent: str) -> Optional[Session]:
-        with self._lock:
-            session_id = self._channel_index.get((channel_id, agent))
-            if session_id:
-                return self._sessions.get(session_id)
-        return None
 
     # ── Thread lookup ──
 
@@ -1530,7 +1555,13 @@ class SessionStore:
 
 
 def create_interactive_session(
-    session_store, agent_name: str, user_id: str, title=None, event_bus=None, metadata=None
+    session_store,
+    agent_name: str,
+    user_id: str,
+    title=None,
+    event_bus=None,
+    metadata=None,
+    source: str = SessionSource.INTERACTIVE.value,
 ) -> str:
     """Provision a fresh interactive session and broadcast its creation.
 
@@ -1538,14 +1569,12 @@ def create_interactive_session(
     Jobs-tab host-session path, so session provisioning can't drift between them.
     Returns the new session id.
     """
-    from tsugite.history.storage import generate_session_id
-
     session_id = generate_session_id(agent_name)
     session_store.create_session(
         Session(
             id=session_id,
             agent=agent_name,
-            source=SessionSource.INTERACTIVE.value,
+            source=source,
             user_id=user_id,
             title=title or None,
             metadata=metadata or {},

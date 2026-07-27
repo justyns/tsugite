@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Optional
 
 from starlette.applications import Starlette
@@ -16,6 +17,7 @@ from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
     logger,
 )
+from tsugite_daemon.adapters.http.introspection import IntrospectionMixin
 from tsugite_daemon.adapters.http.jobs import JobsMixin
 from tsugite_daemon.adapters.http.push import PushMixin
 from tsugite_daemon.adapters.http.schedules import SchedulesMixin
@@ -44,6 +46,7 @@ class HTTPServer(
     PushMixin,
     SecretsMixin,
     UsageMixin,
+    IntrospectionMixin,
     StaticMixin,
 ):
     """Runs a Starlette ASGI app with uvicorn for the HTTP API."""
@@ -136,19 +139,43 @@ class HTTPServer(
             logger.warning("auth failed (no token) path=%s", path)
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    def _get_adapter(self, request: Request) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
+    def _get_adapter(
+        self, request: Request, *, fallback_session_id: Optional[str] = None
+    ) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
         """Authenticate and resolve the agent adapter from the request.
 
         Returns (adapter, None) on success, or (None, error_response) on failure.
+
+        When the URL agent isn't a live adapter but ``fallback_session_id`` names a
+        session, resolve that session's OWNING agent instead. Session-scoped routes
+        (chat / cancel / respond) pass the body's session_id so a reply lands on the
+        agent that owns the session even when the client pointed the request at a
+        non-adapter agent - e.g. the web UI opening a job's session with the worker
+        agent-file (``job_worker``) as the agent.
         """
         auth_err = self._check_auth(request)
         if auth_err:
             return None, auth_err
         agent_name = request.path_params["agent"]
         adapter = self.adapters.get(agent_name)
+        if adapter is None and fallback_session_id:
+            adapter = self._adapter_owning_session(fallback_session_id)
         if not adapter:
             return None, JSONResponse({"error": f"unknown agent: {agent_name}"}, status_code=404)
         return adapter, None
+
+    def _adapter_owning_session(self, session_id: str) -> Optional[HTTPAgentAdapter]:
+        """The live HTTP adapter that owns ``session_id``, or None. Adapters share
+        one SessionStore, so any adapter's store answers; the session's ``agent``
+        field is the authoritative owner."""
+        store = next((a.session_store for a in self.adapters.values()), None)
+        if store is None:
+            return None
+        try:
+            session = store.get_session(session_id)
+        except (ValueError, KeyError):
+            return None
+        return self.adapters.get(session.agent)
 
     def _build_app(self) -> Starlette:
         routes = [
@@ -163,6 +190,7 @@ class HTTPServer(
             *self._push_routes(),
             *self._secrets_routes(),
             *self._usage_routes(),
+            *self._introspection_routes(),
             *self._static_routes(),
         ]
         return Starlette(routes=routes)
@@ -174,7 +202,26 @@ class HTTPServer(
             Route("/api/models", self._list_models, methods=["GET"]),
             Route("/api/events", self._events, methods=["GET"]),
             Route("/api/commands", self._list_commands, methods=["GET"]),
+            Route("/api/context-providers", self._list_context_providers, methods=["GET"]),
+            Route("/api/context-providers/{key}/choices", self._context_provider_choices, methods=["GET"]),
+            Route("/api/context-providers/{key}/search", self._context_provider_search, methods=["GET"]),
+            Route("/api/context-providers/{key}/capture", self._context_provider_capture, methods=["POST"]),
+            Route("/api/daemon/reload-config", self._reload_config, methods=["POST"]),
         ]
+
+    async def _reload_config(self, request: Request) -> JSONResponse:
+        """Re-read daemon.yaml and hot-apply what can be applied (the HTTP agent
+        set); everything boot-only is reported back as restart_required."""
+        if err := self._check_auth(request):
+            return err
+        if not self.gateway:
+            return JSONResponse({"error": "no gateway attached (test server?)"}, status_code=503)
+        try:
+            result = await self.gateway.reload_config()
+        except Exception as e:  # noqa: BLE001 -- config errors go to the caller, not the log alone
+            logger.exception("Config reload failed")
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(result)
 
     async def _health(self, request: Request) -> JSONResponse:
         try:
@@ -183,7 +230,14 @@ class HTTPServer(
             v = version("tsugite-cli")
         except Exception:  # noqa: BLE001 -- fall back to in-tree constant
             from tsugite import __version__ as v
-        return JSONResponse({"status": "ok", "version": v, "agents": list(self.adapters.keys())})
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": v,
+                "agents": list(self.adapters.keys()),
+                "images": {"max_edge": self.config.image_max_edge, "quality": self.config.image_quality},
+            }
+        )
 
     async def _list_commands(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
@@ -203,6 +257,7 @@ class HTTPServer(
                                 "description": p.description,
                                 "required": p.required,
                                 **({"choices": p.choices} if p.choices else {}),
+                                **({"widget": p.widget} if p.widget else {}),
                             }
                             for p in cmd.params
                         ],
@@ -211,6 +266,101 @@ class HTTPServer(
                 ]
             }
         )
+
+    def _context_provider_ctx(self, session_id: Optional[str]) -> dict:
+        """The ``ctx`` a context provider receives, resolved from the request's
+        session the way the chat/command endpoints resolve a session's owner and
+        workspace: the session's authoritative ``agent`` field, that agent's
+        workspace (overridden by the session's own ``workspace_override``, as the
+        send path does), and the session's ``user_id``. Fields stay None when the
+        session is unknown so a ctx-agnostic provider still runs."""
+        ctx = {"session_id": session_id, "user_id": None, "agent": None, "workspace_dir": None}
+        if not session_id:
+            return ctx
+        store = next((a.session_store for a in self.adapters.values()), None)
+        if store is None:
+            return ctx
+        try:
+            session = store.get_session(session_id)
+        except (ValueError, KeyError):
+            return ctx
+        adapter = self.adapters.get(session.agent)
+        ctx["user_id"] = session.user_id
+        ctx["agent"] = session.agent
+        if session.workspace_override:
+            ctx["workspace_dir"] = Path(session.workspace_override)
+        elif adapter is not None:
+            ctx["workspace_dir"] = adapter.agent_config.workspace_dir
+        return ctx
+
+    async def _list_context_providers(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.context import get_context_providers
+
+        # An autocomplete-only source (a prefix + search, menu=False) is listed too
+        # so the frontend learns its prefix, but rides with in_menu=False so the
+        # add-context menu still excludes it.
+        return JSONResponse(
+            {
+                "providers": [
+                    {
+                        "key": p.key,
+                        "label": p.label,
+                        "icon": p.icon,
+                        "has_choices": p.choices is not None,
+                        "picker": p.picker,
+                        "in_menu": p.in_menu,
+                        "autocomplete_prefix": p.autocomplete_prefix,
+                    }
+                    for p in get_context_providers()
+                    if p.in_menu or p.is_autocomplete_source
+                ]
+            }
+        )
+
+    async def _context_provider_choices(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.context import get_choices
+
+        key = request.path_params["key"]
+        ctx = self._context_provider_ctx(request.query_params.get("session_id"))
+        choices = get_choices(key, ctx)
+        return JSONResponse({"choices": [{"value": c.value, "label": c.label} for c in choices]})
+
+    async def _context_provider_search(self, request: Request) -> JSONResponse:
+        """Query-aware autocomplete for an ``@<prefix> <query>`` source. Called per
+        keystroke, so it always returns 200 with a (possibly empty) result list;
+        the frontend renders empty rather than surfacing an error."""
+        if err := self._check_auth(request):
+            return err
+        from tsugite.context import run_search
+
+        key = request.path_params["key"]
+        query = request.query_params.get("q", "")
+        ctx = self._context_provider_ctx(request.query_params.get("session_id"))
+        results = run_search(key, query, ctx)
+        return JSONResponse({"results": [{"value": c.value, "label": c.label} for c in results]})
+
+    async def _context_provider_capture(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
+        from tsugite.context import run_capture
+
+        key = request.path_params["key"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        ctx = self._context_provider_ctx(body.get("session_id"))
+        try:
+            items = run_capture(key, body.get("arg"), ctx)
+        except Exception as e:  # noqa: BLE001 -- a deliberately-picked provider's error goes to the user
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse({"items": [it.to_metadata() for it in items]})
 
     async def _list_agents(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
@@ -250,6 +400,9 @@ class HTTPServer(
                     "id": full_id,
                     "provider": provider or None,
                     "context_window": info.max_input_tokens,
+                    "max_output_tokens": info.max_output_tokens,
+                    "input_cost_per_million": info.input_cost_per_million,
+                    "output_cost_per_million": info.output_cost_per_million,
                     "supports_vision": info.supports_vision,
                     "supports_reasoning": info.supports_reasoning,
                 }
@@ -366,10 +519,9 @@ class HTTPServer(
     async def stop(self):
         if self._server:
             # Signal all SSE subscribers to disconnect
-            if hasattr(self, "event_bus"):
-                for q in list(self.event_bus._subscribers):
-                    try:
-                        q.put_nowait(None)
-                    except asyncio.QueueFull:
-                        pass
+            for q in list(self.event_bus._subscribers):
+                try:
+                    q.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
             self._server.should_exit = True

@@ -79,9 +79,6 @@ def pty_create(
     cmd: str,
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
-    name: Optional[str] = None,
-    cols: int = 120,
-    rows: int = 40,
 ) -> dict:
     """Spawn a PTY-backed process. Returns {terminal_id, pid, started_at, cmd}.
 
@@ -95,9 +92,6 @@ def pty_create(
         cmd: Shell command line (passed through `sh -c`).
         cwd: Working directory. Defaults to the daemon's cwd.
         env: Extra environment variables merged on top of the daemon env.
-        name: Optional human-readable label (currently unused; reserved for v2).
-        cols: PTY column width (informational; xterm.js does not reflow today).
-        rows: PTY row height (informational).
 
     Returns:
         Dict with terminal_id, pid, started_at, cmd.

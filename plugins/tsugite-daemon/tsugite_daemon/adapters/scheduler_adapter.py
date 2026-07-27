@@ -240,9 +240,13 @@ class SchedulerAdapter:
 
         resolved_channels = self._resolve_channels(entry.notify) if entry.notify else []
 
+        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
         set_interaction_backend(NonInteractiveBackend())
+        # Expose the adapter's registered name so a spawn/start-session from a
+        # scheduled run resolves to an agent that has a live daemon adapter.
+        set_current_daemon_agent(adapter.agent_name)
 
         ctx = notify_context(resolved_channels) if (entry.notify_tool and resolved_channels) else nullcontext()
         try:

@@ -30,7 +30,7 @@ def test_set_metadata_does_not_bump_last_active(store):
     s = _make_session(store)
     before = s.last_active
 
-    store.set_metadata("sess-1", "status_text", "idle")
+    store.set_metadata_bulk("sess-1", {"status_text": "idle"})
 
     assert store._sessions["sess-1"].last_active == before, (
         "set_metadata bumped last_active; metadata housekeeping shouldn't count as new activity"
@@ -50,7 +50,7 @@ def test_set_metadata_bulk_does_not_bump_last_active(store):
 
 def test_delete_metadata_does_not_bump_last_active(store):
     _make_session(store)
-    store.set_metadata("sess-1", "task", "task-123")
+    store.set_metadata_bulk("sess-1", {"task": "task-123"})
     before = store._sessions["sess-1"].last_active
 
     store.delete_metadata("sess-1", "task")
@@ -86,7 +86,7 @@ def test_unread_does_not_revive_after_mark_viewed_then_metadata_update(store):
     store._sessions["sess-1"].last_active = "2026-05-18T10:00:00+00:00"
     store._sessions["sess-1"].last_viewed_at = "2026-05-18T10:00:01+00:00"
 
-    store.set_metadata("sess-1", "status_text", "idle")
+    store.set_metadata_bulk("sess-1", {"status_text": "idle"})
 
     sess = store._sessions["sess-1"]
     unread = bool(sess.last_active and (not sess.last_viewed_at or sess.last_active > sess.last_viewed_at))

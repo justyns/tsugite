@@ -42,12 +42,11 @@ def server(tmp_workspace, session_store, session_runner, tmp_path):
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
-        with patch("tsugite.workspace.context.build_workspace_attachments", return_value=[]):
-            adapter = HTTPAgentAdapter(
-                agent_name="test-agent",
-                agent_config=agent_config,
-                session_store=session_store,
-            )
+        adapter = HTTPAgentAdapter(
+            agent_name="test-agent",
+            agent_config=agent_config,
+            session_store=session_store,
+        )
 
     srv = HTTPServer(
         config=http_config,

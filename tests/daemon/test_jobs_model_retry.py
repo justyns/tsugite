@@ -13,11 +13,12 @@ from tsugite_daemon.job_store import JobState
 from tsugite_daemon.session_store import Session, SessionStatus
 
 from .test_jobs_orchestrator import (
-    MAX_VERIFY_ATTEMPTS,
     _seed_running_job,
     _verifier_session,
     _worker_session,
 )
+
+MAX_VERIFY_ATTEMPTS = 3
 
 FAIL_VERDICT = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "nope"}], "overall_pass": False})
 

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from tsugite_daemon.adapters.http import SSEProgressHandler
 
-from tsugite.events import ErrorEvent, FinalAnswerEvent, InfoEvent, ReactionEvent
+from tsugite.events import ErrorEvent, FinalAnswerEvent, InfoEvent
 
 
 class TestFinalResultPersistence:
@@ -48,19 +48,6 @@ class TestFinalResultPersistence:
         payload = persister.call_args[0][0]
         assert payload["type"] == "error"
         assert payload["error"] == "boom"
-
-    def test_reaction_is_still_persisted(self):
-        """Regression guard: reaction persistence (already working) must stay
-        working after the allowlist is widened."""
-        handler = SSEProgressHandler()
-        persister = MagicMock()
-        handler.set_event_persister(persister)
-
-        handler.handle_event(ReactionEvent(emoji=":+1:"))
-
-        assert persister.called
-        payload = persister.call_args[0][0]
-        assert payload["type"] == "reaction"
 
     def test_info_event_is_persisted(self):
         """InfoEvent must be persisted so send_message bubbles survive history replay."""

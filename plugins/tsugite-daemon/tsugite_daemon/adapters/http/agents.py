@@ -1,7 +1,9 @@
 """AgentsMixin: agents HTTP handlers for HTTPServer."""
 
 import asyncio
+import mimetypes
 import shutil
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,9 +30,49 @@ from tsugite_daemon.adapters.http.helpers import (
     logger,
 )
 from tsugite_daemon.adapters.http.sse import (
+    _PENDING_ASKS,
     HTTPInteractionBackend,
     SSEProgressHandler,
 )
+
+# Defensive cap on a single recursive workspace listing so a pathologically large
+# tree degrades (truncated flag on the response) instead of building an unbounded
+# payload and stalling the client.
+MAX_WORKSPACE_ENTRIES = 20000
+
+# Cap on a raw workspace file served inline to the browser (image thumbnails +
+# the lightbox). Larger than the text-view cap (downscaled photos routinely
+# exceed 1MB) but still bounded, so a huge file can't be read into one Response.
+MAX_WORKSPACE_RAW_SIZE = 10 * 1024 * 1024
+
+
+def _session_or_default(adapter: HTTPAgentAdapter, session_id: Optional[str], user_id: str):
+    """Resolve an explicit session id, falling back to the user's default session."""
+    session = None
+    if session_id:
+        try:
+            session = adapter.session_store.get_session(session_id)
+        except ValueError:
+            session = None
+    if session is None:
+        session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    return session
+
+
+def _load_session_events(session_id: str) -> list:
+    """Load a session's events as Event objects, the same source resume reads.
+
+    Reconstruction needs Event objects (`.type`/`.data`/`.ts`), not the dicts
+    session_store.read_events yields. The history backend's iter_events is what
+    load_conversation_messages (the resume path) consumes, so rebuilding from it
+    reproduces exactly what the model saw.
+    """
+    from tsugite.history import get_history_backend
+
+    backend = get_history_backend()
+    if not backend.exists(session_id):
+        return []
+    return list(backend.load(session_id).iter_events())
 
 
 class AgentsMixin:
@@ -46,6 +88,7 @@ class AgentsMixin:
             Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
             Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
             Route("/api/agents/{agent}/prompt-snapshot", self._prompt_snapshot, methods=["GET"]),
+            Route("/api/agents/{agent}/raw-messages", self._raw_messages, methods=["GET"]),
             Route("/api/agents/{agent}/config", self._update_agent_config, methods=["PATCH"]),
             Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
             Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
@@ -53,10 +96,112 @@ class AgentsMixin:
             Route("/api/agents/{agent}/effort-levels", self._effort_levels, methods=["GET"]),
             Route("/api/agents/{agent}/workspace", self._list_workspace_files, methods=["GET"]),
             Route("/api/agents/{agent}/workspace/content", self._read_workspace_file, methods=["GET"]),
+            Route("/api/agents/{agent}/workspace/raw", self._read_workspace_raw, methods=["GET"]),
             Route("/api/agents/{agent}/workspace/content", self._save_workspace_file, methods=["PUT"]),
             Route("/api/agents/{agent}/workspace/attach", self._attach_workspace_file, methods=["POST"]),
+            Route("/api/agents/{agent}/hooks", self._get_hooks_config, methods=["GET"]),
+            Route("/api/agents/{agent}/hooks", self._save_hooks_config, methods=["PUT"]),
             Route("/api/agents/{agent}/commands/{command_name}", self._run_command, methods=["POST"]),
         ]
+
+    # --- hooks config (the agent workspace's .tsugite/hooks.yaml, which the
+    #     daemon loads fresh on every hook firing - saves apply immediately) ---
+
+    @staticmethod
+    def _hooks_path(adapter) -> Path:
+        return Path(adapter.agent_config.workspace_dir) / ".tsugite" / "hooks.yaml"
+
+    def _permissions_runtime_path(self) -> Path:
+        """The mutable permissions.yaml that "Always allow" writes to.
+
+        Kept beside daemon.yaml so it survives restarts; falls back to the XDG
+        write location when the daemon was started without an explicit config
+        path (the same place a default daemon.yaml would be written)."""
+        if self.gateway and self.gateway.config_path:
+            return Path(self.gateway.config_path).parent / "permissions.yaml"
+        from tsugite.config import get_xdg_write_path
+
+        return get_xdg_write_path("permissions.yaml")
+
+    @staticmethod
+    def _parse_hooks_yaml(raw: str) -> tuple[Optional[dict], Optional[str]]:
+        """Validate hooks YAML through the real loader models. Returns
+        (phases, None) on success - {phase: [rule summaries]} - or (None, error)."""
+        import yaml
+
+        from tsugite.hooks import HooksConfig
+
+        if not raw.strip():
+            return {}, None
+        try:
+            data = yaml.safe_load(raw)
+        except yaml.YAMLError as e:
+            return None, f"invalid YAML: {e}"
+        if not isinstance(data, dict):
+            return None, "top-level mapping with a 'hooks' key required"
+        if "hooks" not in data:
+            return None, "missing top-level 'hooks' key"
+        try:
+            config = HooksConfig.model_validate(data["hooks"] or {})
+        except Exception as e:
+            return None, str(e)
+        phases: dict = {}
+        for phase in HooksConfig.model_fields:
+            rules = getattr(config, phase)
+            if not rules:
+                continue
+            phases[phase] = [
+                {
+                    "name": r.name,
+                    "type": r.type,
+                    "run": r.run if isinstance(r.run, str) else (" ".join(r.run) if r.run else None),
+                    "agent": r.agent,
+                    "tools": r.tools,
+                    "match": r.match,
+                    "wait": r.wait,
+                    "capture_as": r.capture_as,
+                    "only_interactive": r.only_interactive,
+                }
+                for r in rules
+            ]
+        return phases, None
+
+    def _hooks_payload(self, adapter) -> dict:
+        path = self._hooks_path(adapter)
+        raw = path.read_text(encoding="utf-8") if path.exists() else ""
+        phases, error = self._parse_hooks_yaml(raw)
+        return {
+            "path": str(path),
+            "exists": path.exists(),
+            "raw": raw,
+            "phases": phases,
+            "error": error,
+        }
+
+    async def _get_hooks_config(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        return JSONResponse(self._hooks_payload(adapter))
+
+    async def _save_hooks_config(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        raw = body.get("raw")
+        if not isinstance(raw, str):
+            return JSONResponse({"error": "raw must be a string"}, status_code=400)
+        _phases, error = self._parse_hooks_yaml(raw)
+        if error:
+            return JSONResponse({"error": error}, status_code=400)
+        path = self._hooks_path(adapter)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(raw, encoding="utf-8")
+        return JSONResponse(self._hooks_payload(adapter))
 
     async def _run_command(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -114,10 +259,7 @@ class AgentsMixin:
         status = request.query_params.get("status")
         parent_id = request.query_params.get("parent_id")
         include_superseded = request.query_params.get("include_superseded", "").lower() in ("1", "true", "yes")
-        try:
-            limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
-        except (ValueError, TypeError):
-            limit = 100
+        limit = self._parse_limit(request, default=100, cap=1000)
 
         q = request.query_params.get("q")
         if q:
@@ -203,10 +345,15 @@ class AgentsMixin:
         if title is not None and not isinstance(title, str):
             return JSONResponse({"error": "title must be a string"}, status_code=400)
 
-        from tsugite_daemon.session_store import create_interactive_session
+        from tsugite_daemon.session_store import SessionSource, create_interactive_session
 
         session_id = create_interactive_session(
-            adapter.session_store, adapter.agent_name, user_id, title=title, event_bus=self.event_bus
+            adapter.session_store,
+            adapter.agent_name,
+            user_id,
+            title=title,
+            event_bus=self.event_bus,
+            source=SessionSource.WEB.value,
         )
         return JSONResponse({"id": session_id}, status_code=201)
 
@@ -217,14 +364,7 @@ class AgentsMixin:
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
         session_id = request.query_params.get("session_id")
-        session = None
-        if session_id:
-            try:
-                session = adapter.session_store.get_session(session_id)
-            except ValueError:
-                session = None
-        if session is None:
-            session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        session = _session_or_default(adapter, session_id, user_id)
 
         model = adapter.resolve_model()
         resolved_model = _resolve_full_model_id(model)
@@ -364,17 +504,14 @@ class AgentsMixin:
             return err
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
-        try:
-            limit = max(1, min(int(request.query_params.get("limit", "100")), 1000))
-        except (ValueError, TypeError):
-            limit = 100
+        limit = self._parse_limit(request, default=100, cap=1000)
         conversation_id = self._resolve_session_id(adapter, user_id, request)
         if conversation_id is None:
             return JSONResponse({"conversation_id": None, "events": []})
 
         events = self._collect_events(conversation_id, limit=limit)
 
-        # UI events (reactions, prompt_snapshots) are now part of the same
+        # UI events (prompt_snapshots) are now part of the same
         # session JSONL as conversation events, so they're already included.
 
         return JSONResponse(
@@ -421,6 +558,36 @@ class AgentsMixin:
             return JSONResponse({"prompt_snapshot": None})
         return JSONResponse({"prompt_snapshot": {"token_breakdown": breakdown}})
 
+    async def _raw_messages(self, request: Request) -> JSONResponse:
+        """Reconstruct, per turn, the raw request messages the model saw and its
+        raw response, rebuilt on demand from the persisted event log.
+
+        Nothing is stored: the reconstruction runs off the same event source
+        resume reads, so it is replay-safe and always matches the live prompt.
+        `system_prompt` is best-effort and null for now (the stable prompt isn't
+        in the log; the UI notes it isn't shown).
+        """
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
+        session_id = self._resolve_session_id(adapter, user_id, request)
+        if session_id is None:
+            return JSONResponse({"raw_messages": None})
+
+        from tsugite.history import reconstruct_raw_turns
+
+        events = _load_session_events(session_id)
+        return JSONResponse(
+            {
+                "raw_messages": {
+                    "system_prompt": None,
+                    "turns": reconstruct_raw_turns(events),
+                }
+            }
+        )
+
     async def _branch(self, request: Request) -> JSONResponse:
         """Fork a session at an event into an independent branch (#400)."""
         adapter, err = self._get_adapter(request)
@@ -458,14 +625,7 @@ class AgentsMixin:
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
 
         session_id = body.get("session_id")
-        session = None
-        if session_id:
-            try:
-                session = adapter.session_store.get_session(session_id)
-            except ValueError:
-                session = None
-        if session is None:
-            session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        session = _session_or_default(adapter, session_id, user_id)
 
         if session is None or session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
@@ -480,7 +640,12 @@ class AgentsMixin:
         new_session = None
         try:
             instructions = body.get("instructions")
-            new_session = await adapter._compact_session(session.id, instructions=instructions, reason="manual")
+            new_session = await adapter._compact_session(
+                session.id,
+                instructions=instructions,
+                reason="manual",
+                progress_callback=adapter._compaction_progress_cb(old_conv_id),
+            )
         except Exception as e:
             msg = str(e) or repr(e)
             logger.exception("Compaction failed for agent %s", adapter.agent_name)
@@ -543,18 +708,22 @@ class AgentsMixin:
 
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
-    @staticmethod
-    def _resolve_session_model(adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> str:
-        """Resolve the effective model for a session, honoring a per-session override.
+    def _session_supports_vision(self, adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> bool:
+        """Whether the session's resolved model can accept image inputs.
 
-        Falls back to the agent/daemon default (``adapter.resolve_model()``) when
-        no session is given or the session has no model override.
+        Defaults to True on any resolution failure so a registry gap never
+        strands an image the user attached to a vision-capable model.
         """
-        if session_id:
-            override = adapter.session_store.get_model_override(session_id)
-            if override:
-                return override
-        return adapter.resolve_model()
+        from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
+        from tsugite.providers import get_provider
+
+        try:
+            resolved = resolve_model_alias(adapter.resolve_session_model(session_id))
+            provider_name, _, _ = parse_model_string(resolved)
+            info = get_provider(provider_name).get_model_info(get_model_id(resolved))
+            return bool(info is None or info.supports_vision)
+        except Exception:  # noqa: BLE001 -- unknown model → assume vision, don't strand the image
+            return True
 
     async def _effort_levels(self, request: Request) -> JSONResponse:
         """Return the effort levels supported by the session's resolved model."""
@@ -562,32 +731,31 @@ class AgentsMixin:
         if err:
             return err
 
-        from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
-        from tsugite.providers import get_provider
-
-        model_string = self._resolve_session_model(adapter, request.query_params.get("session_id"))
-        levels: list[str] | None = None
-        try:
-            resolved = resolve_model_alias(model_string)
-            provider_name, _, _ = parse_model_string(resolved)
-            provider = get_provider(provider_name)
-            info = provider.get_model_info(get_model_id(resolved))
-            if info and info.supported_effort_levels:
-                levels = list(info.supported_effort_levels)
-        except (ValueError, Exception):  # noqa: BLE001 -- treat any resolution failure as "unknown"
-            pass
-
-        return JSONResponse({"model": model_string, "supported_effort_levels": levels})
+        session_id = request.query_params.get("session_id")
+        return JSONResponse(
+            {
+                "model": adapter.resolve_session_model(session_id),
+                "supported_effort_levels": adapter.session_effort_levels(session_id),
+            }
+        )
 
     async def _respond(self, request: Request) -> JSONResponse:
-        """Submit a response to an active ask_user prompt."""
-        adapter, err = self._get_adapter(request)
-        if err:
-            return err
+        """Submit a response to an active ask_user prompt.
 
+        Resolution is by durable ``ask_id`` first: it survives a reload and a
+        rotated session triple, so a reloaded prompt can still be answered. The
+        legacy (agent, user, session) lookup stays as a fallback only for a client
+        that sent no ask_id.
+        """
         try:
             body = await request.json()
         except Exception:
+            body = None
+        session_id = body.get("session_id") if isinstance(body, dict) else None
+        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        if err:
+            return err
+        if not isinstance(body, dict):
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         response = body.get("response", "")
@@ -596,20 +764,75 @@ class AgentsMixin:
         if len(response) > 10_000:
             return JSONResponse({"error": "response too long (max 10000 chars)"}, status_code=400)
 
+        ask_id = body.get("ask_id")
+        if ask_id is not None and not isinstance(ask_id, str):
+            return JSONResponse({"error": "ask_id must be a string"}, status_code=400)
+
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
-        agent_name = request.path_params["agent"]
-        session_id = body.get("session_id")
+        agent_name = adapter.agent_name
         if not session_id:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
-        logger.info("[%s] respond from user_id=%s session_id=%s", agent_name, user_id, session_id)
+        logger.info("[%s] respond user_id=%s session_id=%s ask_id=%s", agent_name, user_id, session_id, ask_id)
 
-        key = (agent_name, user_id, session_id)
-        chat = self._active_chats.get(key)
-        if not chat:
-            return JSONResponse({"error": "no pending question for this session"}, status_code=404)
+        # Primary: the still-blocking ask, resolved by its durable id.
+        if ask_id:
+            backend = _PENDING_ASKS.get(ask_id)
+            if backend is not None:
+                backend.submit_response(response)
+                return JSONResponse({"status": "ok"})
 
-        chat.backend.submit_response(response)
-        return JSONResponse({"status": "ok"})
+        # Fallback: the legacy session-triple lookup, for a client that sent no
+        # ask_id (or whose ask is still the one live chat for this session).
+        chat = self._active_chats.get((agent_name, user_id, session_id))
+        if chat is not None:
+            chat.backend.submit_response(response)
+            return JSONResponse({"status": "ok"})
+
+        # Neither resolved. If the client named an ask that is durably pending
+        # (recorded but never answered: its backend timed out, or the daemon
+        # restarted), record ask_answered so a reload stops re-prompting, and tell
+        # the client the ask is no longer live instead of returning a bare 404.
+        if ask_id:
+            self._settle_stale_ask(adapter, session_id, ask_id, response)
+            return JSONResponse({"status": "expired", "detail": "This prompt is no longer active."})
+
+        return JSONResponse({"error": "no pending question for this session"}, status_code=404)
+
+    def _settle_stale_ask(self, adapter: HTTPAgentAdapter, session_id: str, ask_id: str, response: str) -> None:
+        """Durably answer an ask whose backend is no longer in memory.
+
+        Writes only when the ask is durably pending (an ``ask_user`` for this id
+        with no later ``ask_answered``), so a stale or replayed request can't spam
+        the log. Persists ``ask_answered`` and broadcasts it so an open tab clears
+        the prompt.
+        """
+        try:
+            events = adapter.session_store.read_events(session_id)
+        except Exception:
+            return
+        pending = False
+        for e in events:
+            if e.get("ask_id") != ask_id:
+                continue
+            if e.get("type") == "ask_user":
+                pending = True
+            elif e.get("type") == "ask_answered":
+                pending = False
+        if not pending:
+            return
+        payload = {"type": "ask_answered", "ask_id": ask_id, "answer": response}
+        try:
+            build_session_event_persister(adapter.session_store, session_id)(payload)
+        except Exception:
+            logger.debug("Failed to persist stale ask_answered for %s", ask_id, exc_info=True)
+        if self.event_bus:
+            try:
+                self.event_bus.emit(
+                    "session_event",
+                    {"session_id": session_id, "event_type": "ask_answered", "ask_id": ask_id, "answer": response},
+                )
+            except Exception:
+                logger.debug("Failed to broadcast stale ask_answered for %s", ask_id, exc_info=True)
 
     async def _upload(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -675,13 +898,19 @@ class AgentsMixin:
         return JSONResponse({"files": results})
 
     async def _chat(self, request: Request) -> Response:
-        adapter, err = self._get_adapter(request)
-        if err:
-            return err
-
         try:
             body = await request.json()
         except Exception:
+            body = None
+        session_id = body.get("session_id") if isinstance(body, dict) else None
+
+        # Route the reply through the session's owning agent when the URL agent
+        # isn't a live adapter (the web UI opens a job's session carrying the worker
+        # agent-file as the agent). Auth is still enforced inside _get_adapter.
+        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        if err:
+            return err
+        if not isinstance(body, dict):
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         message = body.get("message", "").strip()
@@ -693,7 +922,7 @@ class AgentsMixin:
             return JSONResponse({"error": "message or uploaded_files is required"}, status_code=400)
 
         raw_user_id = body.get("user_id", "web-anonymous")
-        agent_name = request.path_params["agent"]
+        agent_name = adapter.agent_name
         user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
 
@@ -705,6 +934,9 @@ class AgentsMixin:
         uploaded_attachments = []
         workspace_only_files = []
         uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        # A non-vision model can't read an inlined image; route its images to the
+        # workspace-only path (saved + path hint) instead of dropping them.
+        supports_vision = self._session_supports_vision(adapter, session_id)
 
         for file_info in uploaded_files:
             if not isinstance(file_info, dict):
@@ -714,9 +946,10 @@ class AgentsMixin:
             if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
                 continue
 
-            if _should_context_attach(file_path, file_path.stat().st_size):
+            if _should_context_attach(file_path, file_path.stat().st_size, supports_vision=supports_vision):
                 try:
                     attachment = _file_handler.fetch(str(file_path))
+                    attachment.user_upload = True
                     uploaded_attachments.append(attachment)
                 except Exception as e:
                     logger.warning("Failed to create attachment for %s: %s", file_path, e)
@@ -731,10 +964,12 @@ class AgentsMixin:
             metadata["uploaded_attachments"] = uploaded_attachments
         if reasoning_effort:
             metadata["reasoning_effort_override"] = reasoning_effort
+        context_metadata = body.get("context_metadata")
+        if isinstance(context_metadata, list) and context_metadata:
+            metadata["context_metadata"] = context_metadata
 
-        from tsugite_daemon.session_store import FINISHED_STATUSES
+        from tsugite_daemon.session_store import FINISHED_STATUSES, SessionSource
 
-        session_id = body.get("session_id")
         target_session = None
         if session_id:
             try:
@@ -757,7 +992,9 @@ class AgentsMixin:
                 metadata["conv_id_override"] = target_session.id
 
         if target_session is None:
-            target_session = adapter.session_store.get_or_create_interactive(user_id, adapter.agent_name)
+            target_session = adapter.session_store.get_or_create_interactive(
+                user_id, adapter.agent_name, source=SessionSource.WEB.value
+            )
         target_session_id = target_session.id
 
         backend_key = (agent_name, user_id, target_session_id)
@@ -790,10 +1027,27 @@ class AgentsMixin:
         self._active_chats[backend_key] = chat_state
 
         async def run_agent():
+            from tsugite.agent_runner.helpers import set_current_daemon_agent
             from tsugite.cancellation import set_cancel_event
             from tsugite.interaction import set_interaction_backend
+            from tsugite.permissions import Permissions, set_permissions
 
             set_interaction_backend(interaction_backend)
+            # Expose the adapter's REGISTERED name (its key in the daemon adapter
+            # registry) so spawn/start-session tools resolve to an agent that has
+            # a live adapter, not the agent-file config name. Rides the same
+            # context copy asyncio.to_thread makes for the executor worker.
+            set_current_daemon_agent(adapter.agent_name)
+            # Bind the approval permissions store into the run context alongside the
+            # interaction backend, so the context detector (which runs via
+            # asyncio.to_thread and inherits this context) can gate a web fetch on
+            # the allowlist and prompt through the same cross-surface machinery.
+            set_permissions(
+                Permissions(
+                    runtime_path=self._permissions_runtime_path(),
+                    workspace_dir=adapter.agent_config.workspace_dir,
+                )
+            )
             # Bind the cooperative cancel Event into the run context so the agent
             # loop (copy_context + to_thread) observes a user Stop and exits cleanly.
             set_cancel_event(chat_state.cancel_event)
@@ -856,19 +1110,21 @@ class AgentsMixin:
         )
 
     async def _cancel_chat(self, request: Request) -> JSONResponse:
-        adapter, err = self._get_adapter(request)
-        if err:
-            return err
         try:
             body = await request.json()
         except Exception:
+            body = None
+        session_id = body.get("session_id") if isinstance(body, dict) else None
+        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        if err:
+            return err
+        if not isinstance(body, dict):
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         raw_user_id = body.get("user_id", "web-anonymous")
         user_id = adapter.resolve_http_user(raw_user_id)
-        session_id = body.get("session_id")
         if not session_id:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
-        backend_key = (request.path_params["agent"], user_id, session_id)
+        backend_key = (adapter.agent_name, user_id, session_id)
         chat = self._active_chats.get(backend_key)
         if chat and chat.task and not chat.task.done():
             # Signal the worker thread to stop at its next safe checkpoint (the real
@@ -892,6 +1148,66 @@ class AgentsMixin:
             return Path(), JSONResponse({"error": "path outside workspace"}, status_code=403)
         return resolved, None
 
+    def _walk_workspace_entries(
+        self,
+        target: Path,
+        workspace_dir: Path,
+        gitignore_spec,
+        recursive: bool,
+    ) -> tuple[list[dict], bool]:
+        """Build the flat listing for `target`: one level, or the whole subtree.
+
+        Guard rails, all shared with the one-level walk: symlinks are never
+        followed or listed (S_ISLNK skip), so a symlink can neither escape the
+        workspace nor cycle the walk; gitignored directories are pruned before
+        descent, keeping .git and other ignored trees out of the recursive walk;
+        and the total is capped at MAX_WORKSPACE_ENTRIES, returning a truncated
+        flag rather than an unbounded response.
+        """
+        import stat as stat_mod
+
+        entries: list[dict] = []
+        truncated = False
+        pending: deque[Path] = deque([target])
+        while pending:
+            current = pending.popleft()
+            try:
+                children = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+            except OSError:
+                if current is target:
+                    raise  # failing to list the requested dir itself stays a 500, as before
+                continue  # an unreadable nested dir is skipped, not fatal to the whole walk
+            for item in children:
+                try:
+                    st = item.lstat()
+                except OSError:
+                    continue
+                if stat_mod.S_ISLNK(st.st_mode):
+                    continue
+                is_dir = stat_mod.S_ISDIR(st.st_mode)
+                rel = str(item.relative_to(workspace_dir))
+                if gitignore_spec and gitignore_spec.match_file(rel + ("/" if is_dir else "")):
+                    continue
+                if len(entries) >= MAX_WORKSPACE_ENTRIES:
+                    truncated = True
+                    pending.clear()
+                    break
+                if is_dir:
+                    entries.append({"path": rel, "name": item.name, "is_dir": True})
+                    if recursive:
+                        pending.append(item)
+                elif stat_mod.S_ISREG(st.st_mode) and _is_text_mime(item):
+                    entries.append(
+                        {
+                            "path": rel,
+                            "name": item.name,
+                            "is_dir": False,
+                            "size": st.st_size,
+                            "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                        }
+                    )
+        return entries, truncated
+
     async def _list_workspace_files(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
         if err:
@@ -902,6 +1218,7 @@ class AgentsMixin:
             return JSONResponse({"entries": [], "subdir": "", "workspace_dir": str(workspace_dir)})
 
         subdir = request.query_params.get("subdir", "")
+        recursive = request.query_params.get("recursive", "").lower() in ("1", "true", "yes")
         if subdir:
             target, path_err = self._validate_workspace_path(adapter, subdir)
             if path_err:
@@ -914,37 +1231,15 @@ class AgentsMixin:
         from tsugite.tools.fs import _build_gitignore_matcher
 
         gitignore_spec = _build_gitignore_matcher(workspace_dir)
-        entries = []
         try:
-            import stat as stat_mod
-
-            for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
-                try:
-                    st = item.lstat()
-                except OSError:
-                    continue
-                if stat_mod.S_ISLNK(st.st_mode):
-                    continue
-                is_dir = stat_mod.S_ISDIR(st.st_mode)
-                rel = str(item.relative_to(workspace_dir))
-                if gitignore_spec and gitignore_spec.match_file(rel + ("/" if is_dir else "")):
-                    continue
-                if is_dir:
-                    entries.append({"path": rel, "name": item.name, "is_dir": True})
-                elif stat_mod.S_ISREG(st.st_mode) and _is_text_mime(item):
-                    entries.append(
-                        {
-                            "path": rel,
-                            "name": item.name,
-                            "is_dir": False,
-                            "size": st.st_size,
-                            "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
-                        }
-                    )
+            entries, truncated = self._walk_workspace_entries(target, workspace_dir, gitignore_spec, recursive)
         except OSError as e:
             return JSONResponse({"error": f"listing failed: {e}"}, status_code=500)
 
-        return JSONResponse({"entries": entries, "subdir": subdir, "workspace_dir": str(workspace_dir)})
+        payload = {"entries": entries, "subdir": subdir, "workspace_dir": str(workspace_dir)}
+        if truncated:
+            payload["truncated"] = True
+        return JSONResponse(payload)
 
     async def _read_workspace_file(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -975,13 +1270,51 @@ class AgentsMixin:
             )
 
         try:
-            content = resolved.read_text(encoding="utf-8")
+            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
         except UnicodeDecodeError:
             return JSONResponse({"path": path_str, "content": None, "is_text": False, "size": st.st_size})
         except OSError as e:
             return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
 
         return JSONResponse({"path": path_str, "content": content, "is_text": True})
+
+    async def _read_workspace_raw(self, request: Request) -> Response:
+        """Serve a workspace file's raw bytes with a guessed content-type.
+
+        The text read endpoint (`workspace/content`) returns null for non-text,
+        so image thumbnails and the lightbox read their bytes here instead. Same
+        auth + path validation as the text read; size-capped; never JSON-wrapped.
+        """
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+
+        path_str = request.query_params.get("path", "")
+        if not path_str:
+            return JSONResponse({"error": "path parameter required"}, status_code=400)
+
+        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        if path_err:
+            return path_err
+        if not resolved.exists() or resolved.is_dir():
+            return JSONResponse({"error": "file not found"}, status_code=404)
+
+        st = resolved.stat()
+        if st.st_size > MAX_WORKSPACE_RAW_SIZE:
+            return JSONResponse(
+                {"error": f"file too large (max {MAX_WORKSPACE_RAW_SIZE // (1024 * 1024)}MB)"},
+                status_code=413,
+            )
+
+        try:
+            data = await asyncio.to_thread(resolved.read_bytes)
+        except OSError as e:
+            return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
+
+        media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+        # Private so a shared cache never retains a workspace file; the short max-age
+        # lets the lightbox reuse the thumbnail's bytes without a second round trip.
+        return Response(content=data, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
 
     async def _save_workspace_file(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -1005,13 +1338,15 @@ class AgentsMixin:
         resolved, path_err = self._validate_workspace_path(adapter, path_str)
         if path_err:
             return path_err
-        if not resolved.exists():
-            return JSONResponse({"error": "file not found"}, status_code=404)
+        # _is_text_mime is extension-based, so it also gates creation of new files.
         if not _is_text_mime(resolved):
             return JSONResponse({"error": "file type not editable"}, status_code=400)
+        if resolved.is_dir():
+            return JSONResponse({"error": "path is a directory"}, status_code=400)
 
         try:
-            resolved.write_text(content, encoding="utf-8")
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(resolved.write_text, content, encoding="utf-8")
         except OSError as e:
             return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
 
