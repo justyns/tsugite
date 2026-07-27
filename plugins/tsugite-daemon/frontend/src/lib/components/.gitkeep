@@ -1,0 +1,2 @@
+# Component library root. The .t-* components live here, each with an
+# optional <name>.gallery.svelte demo auto-discovered by the gallery view.

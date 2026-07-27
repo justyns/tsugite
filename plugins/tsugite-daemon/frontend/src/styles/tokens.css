@@ -1,0 +1,291 @@
+/* ================================================================
+   TSUGITE DESIGN TOKENS
+   Tokens live on :root (rather than a scoped container) so [data-theme] on
+   <html> re-skins the whole app and getComputedStyle can read them off
+   documentElement. All theming via custom properties on [data-theme].
+   ================================================================ */
+
+/* ---------- Reset / base ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------- Tokens · default = Catppuccin Mocha ---------- */
+:root {
+  /* surfaces: app shell → panel → surface → raised → hover · default = Catppuccin Mocha */
+  --bg0: #11111b;
+  --bg1: #181825;
+  --bg2: #1e1e2e;
+  --bg3: #313244;
+  --bg4: #45475a;
+  /* text: strong → body → secondary → faint */
+  --tx0: #cdd6f4;
+  --tx1: #bac2de;
+  --tx2: #a6adc8;
+  --tx3: #7f849c;
+  /* lines */
+  --bd0: #313244;
+  --bd1: #45475a;
+  --bd2: #585b70;
+  --st-attn: var(--st-warn);
+  /* interactive accent + brand */
+  --acc: #89b4fa;
+  --on-acc: #11111b;
+  --brand: #b4befe;
+  /* text on saturated brand / plugin-supplied badge colours - always white in
+     every theme (unlike --on-acc, which flips), so it lives only here on :root */
+  --on-brand: #fff;
+  /* semantic state - active=green, attention=peach, error=red, resolved=grey */
+  --st-ok: #a6e3a1;
+  --st-verify: #94e2d5;
+  --st-warn: #fab387;
+  --st-err: #f38ba8;
+  --st-info: #89dceb;
+  --st-queue: #b4befe;
+  --st-mute: #6c7086;
+  /* elevation */
+  --sh-1: 0 1px 2px rgba(11, 12, 20, 0.35);
+  --sh-2: 0 4px 14px rgba(11, 12, 20, 0.4);
+  --sh-3: 0 14px 40px rgba(11, 12, 20, 0.5);
+  /* type */
+  --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+  --fs-2xl: 19px;
+  --fs-3xl: 24px;
+  /* space (2-based, dense) */
+  --sp-0: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  /* radius */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-full: 999px;
+  /* motion */
+  --t-1: 100ms;
+  --t-2: 180ms;
+  --t-3: 260ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+:root[data-theme='macchiato'] {
+  --bg0: #181926;
+  --bg1: #1e2030;
+  --bg2: #24273a;
+  --bg3: #363a4f;
+  --bg4: #494d64;
+  --tx0: #cad3f5;
+  --tx1: #b8c0e0;
+  --tx2: #a5adcb;
+  --tx3: #8087a2;
+  --bd0: #363a4f;
+  --bd1: #494d64;
+  --bd2: #5b6078;
+  --acc: #8aadf4;
+  --on-acc: #181926;
+  --brand: #b7bdf8;
+  --st-ok: #a6da95;
+  --st-verify: #8bd5ca;
+  --st-warn: #f5a97f;
+  --st-err: #ed8796;
+  --st-info: #91d7e3;
+  --st-queue: #b7bdf8;
+  --st-mute: #6e738d;
+}
+
+:root[data-theme='frappe'] {
+  --bg0: #232634;
+  --bg1: #292c3c;
+  --bg2: #303446;
+  --bg3: #414559;
+  --bg4: #51576d;
+  --tx0: #c6d0f5;
+  --tx1: #b5bfe2;
+  --tx2: #a5adce;
+  --tx3: #838ba7;
+  --bd0: #414559;
+  --bd1: #51576d;
+  --bd2: #626880;
+  --acc: #8caaee;
+  --on-acc: #232634;
+  --brand: #babbf1;
+  --st-ok: #a6d189;
+  --st-verify: #81c8be;
+  --st-warn: #ef9f76;
+  --st-err: #e78284;
+  --st-info: #99d1db;
+  --st-queue: #babbf1;
+  --st-mute: #737994;
+}
+
+:root[data-theme='latte'] {
+  --bg0: #dce0e8;
+  --bg1: #e6e9ef;
+  --bg2: #eff1f5;
+  --bg3: #ccd0da;
+  --bg4: #bcc0cc;
+  --tx0: #4c4f69;
+  --tx1: #5c5f77;
+  --tx2: #6c6f85;
+  --tx3: #8c8fa1;
+  --bd0: #ccd0da;
+  --bd1: #acb0be;
+  --bd2: #9ca0b0;
+  --acc: #1e66f5;
+  --on-acc: #eff1f5;
+  --brand: #7287fd;
+  --st-ok: #40a02b;
+  --st-verify: #179299;
+  --st-warn: #fe640b;
+  --st-err: #d20f39;
+  --st-info: #04a5e5;
+  --st-queue: #7287fd;
+  --st-mute: #9ca0b0;
+  --sh-1: 0 1px 2px rgba(76, 79, 105, 0.14);
+  --sh-2: 0 4px 14px rgba(76, 79, 105, 0.16);
+  --sh-3: 0 14px 40px rgba(76, 79, 105, 0.22);
+}
+
+:root[data-theme='gruvbox'] {
+  --bg0: #1d2021;
+  --bg1: #282828;
+  --bg2: #32302f;
+  --bg3: #3c3836;
+  --bg4: #504945;
+  --tx0: #ebdbb2;
+  --tx1: #d5c4a1;
+  --tx2: #bdae93;
+  --tx3: #928374;
+  --bd0: #3c3836;
+  --bd1: #504945;
+  --bd2: #665c54;
+  --acc: #83a598;
+  --on-acc: #1d2021;
+  --brand: #d3869b;
+  --st-ok: #b8bb26;
+  --st-verify: #8ec07c;
+  --st-warn: #fe8019;
+  --st-err: #fb4934;
+  --st-info: #83a598;
+  --st-queue: #d3869b;
+  --st-mute: #928374;
+}
+
+/* ---------- Global element rules (re-scoped from .ts) ---------- */
+::selection {
+  background: color-mix(in oklab, var(--acc) 32%, transparent);
+}
+a {
+  color: var(--acc);
+  text-decoration: none;
+}
+a:hover {
+  color: color-mix(in oklab, var(--acc) 78%, var(--tx0));
+  text-decoration: underline;
+}
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 1px;
+  border-radius: var(--r-sm);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg4) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg4);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--r-full);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+button {
+  font-family: inherit;
+}
+/* base icon sizing/stroke - shared by the Icon component */
+.ic {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ic--f {
+  fill: currentColor;
+  stroke: none;
+}
+/* icon-button glyphs run smaller than the 13px base (.t-iconbtn).
+   Global because .t-iconbtn hosts a child <Icon>, and its consumers (toast,
+   code-block, exec, message actions, annotations) each render one — a scoped
+   rule in any single owner couldn't reach the others' Icon internals. */
+.t-iconbtn .ic {
+  width: 11px;
+  height: 11px;
+}
+/* keycap hint chip. Global because several unrelated owners render
+   one - top bar, keystrip, search box, palette, composer - so no single
+   component can own it; a per-owner margin stays scoped where it differs. */
+.t-kbd {
+  font: 600 var(--fs-2xs) / 1 var(--font-mono);
+  padding: 2px 5px 3px;
+  border: 1px solid var(--bd1);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg2);
+  color: var(--tx2);
+  white-space: nowrap;
+}
+/* segmented control. Global for the same reason: shared by the
+   theme switch (shell) and the generic Seg input, with no single owner. */
+.t-seg {
+  display: inline-flex;
+  background: var(--bg1);
+  border: 1px solid var(--bd1);
+  border-radius: var(--r-md);
+  padding: 2px;
+  gap: 2px;
+}
+.t-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--tx2);
+  font: 500 var(--fs-xs) / 1 var(--font-mono);
+  padding: 4px 9px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.t-seg button:hover {
+  color: var(--tx0);
+}
+.t-seg button.is-active {
+  background: var(--bg3);
+  color: var(--tx0);
+  box-shadow: var(--sh-1);
+}

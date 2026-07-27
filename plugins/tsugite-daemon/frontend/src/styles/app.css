@@ -1,0 +1,21 @@
+/* Base layout only. Tokens live in tokens.css; component styles live with
+   their components. These ride <body> (rather than a scoped container) so the
+   app shell fills the viewport and follows the theme. */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  color: var(--tx0);
+  background: var(--bg0);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100%;
+}

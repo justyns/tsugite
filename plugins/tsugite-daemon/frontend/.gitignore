@@ -1,0 +1,16 @@
+# Local install artifacts.
+node_modules/
+
+# --- Force-track source dirs that a global or repo-root gitignore would skip ---
+# A per-user global excludesfile commonly has a bare `lib/` (matches src/lib), and
+# this repo's root .gitignore has `agents/` (matches src/views/agents). Both match
+# by directory name anywhere in the tree, so a plain `git add` SILENTLY drops every
+# file under them and the build breaks for everyone else. These negations re-include
+# the directories (and, because their parents aren't excluded, their contents).
+# `!src/lib/` also covers the src/lib/components/<domain>/ component additions.
+!src/lib/
+!src/views/agents/
+
+# Vitest browser-mode failure artifacts (regenerated on every failing run).
+.vitest-attachments/
+__screenshots__/
