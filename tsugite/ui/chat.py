@@ -1,6 +1,5 @@
 """Chat session management for interactive conversations with agents."""
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -44,7 +43,6 @@ class ChatManager:
         disable_history: bool = False,
         resume_conversation_id: Optional[str] = None,
         path_context: Optional["PathContext"] = None,
-        workspace_attachments: Optional[List[str]] = None,
     ):
         """Initialize chat manager.
 
@@ -57,7 +55,6 @@ class ChatManager:
             disable_history: Disable conversation history persistence
             resume_conversation_id: Optional conversation ID to resume (skips auto-generation)
             path_context: Optional workspace path context for directory tracking
-            workspace_attachments: Optional list of workspace attachment paths
         """
         self.agent_path = agent_path
         self.model_override = model_override
@@ -65,7 +62,6 @@ class ChatManager:
         self.custom_logger = custom_logger
         self.stream = stream
         self.path_context = path_context
-        self.workspace_attachments = workspace_attachments or []
         self.conversation_history: List[ChatTurn] = []
         self.session_start = datetime.now()
 
@@ -159,15 +155,8 @@ class ChatManager:
 
         try:
             from tsugite.options import ExecutionOptions
-            from tsugite.utils import resolve_attachments
 
-            # Resolve workspace attachments if present
-            resolved_attachments = None
-            if self.workspace_attachments:
-                try:
-                    resolved_attachments = resolve_attachments(self.workspace_attachments, refresh_cache=False)
-                except ValueError:
-                    pass  # Skip attachments that fail to resolve
+            resolved_attachments = []
 
             result = run_agent(
                 agent_path=self.agent_path,
@@ -231,41 +220,6 @@ class ChatManager:
             error_msg = f"Error: {str(e)}"
             self.add_turn(user_input, error_msg)
             return error_msg
-
-    def clear_history(self) -> None:
-        """Clear conversation history."""
-        self.conversation_history = []
-
-    def save_conversation(self, path: Path) -> None:
-        """Save conversation to JSON file."""
-        agent = parse_agent_file(self.agent_path)
-
-        data = {
-            "agent": agent.config.name or str(self.agent_path),
-            "model": self.model_override or agent.config.model,
-            "created_at": self.session_start.isoformat(),
-            "turns": [turn.model_dump(mode="json") for turn in self.conversation_history],
-            "metadata": {
-                "total_turns": len(self.conversation_history),
-                "agent_path": str(self.agent_path),
-            },
-        }
-
-        path.write_text(json.dumps(data, indent=2))
-
-    def load_conversation(self, path: Path) -> None:
-        """Load conversation from JSON file."""
-        data = json.loads(path.read_text())
-
-        self.conversation_history = []
-
-        for turn_data in data.get("turns", []):
-            turn = ChatTurn.model_validate(turn_data)
-            self.conversation_history.append(turn)
-
-        if "created_at" in data:
-            # Parse datetime and strip timezone to match datetime.now() (which is naive)
-            self.session_start = datetime.fromisoformat(data["created_at"]).replace(tzinfo=None)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get session statistics."""

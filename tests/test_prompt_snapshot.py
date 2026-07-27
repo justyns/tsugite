@@ -1,7 +1,13 @@
 """Tests for prompt snapshot event and token breakdown."""
 
+from pathlib import Path
+
+import pytest
+
 from tsugite.core.agent import CONTEXT_ACK, TsugiteAgent, estimate_content_tokens
 from tsugite.events import EventType, PromptSnapshotEvent
+from tsugite.history import SessionStorage
+from tsugite.providers.base import CompletionResponse, Usage
 from tsugite.ui.jsonl import JSONLUIHandler
 
 
@@ -108,6 +114,100 @@ class TestComputeTokenBreakdown:
         ]
         result = _FakeAgent(task="task")._compute_token_breakdown(messages)
         assert result["total"] == sum(c["tokens"] for c in result["categories"])
+
+
+def _resp(content: str) -> CompletionResponse:
+    return CompletionResponse(content=content, usage=Usage(total_tokens=10), cost=0.0)
+
+
+def _patch(agent, *, side_effect=None, return_value=None):
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock = AsyncMock(side_effect=side_effect, return_value=return_value)
+    agent._provider = MagicMock()
+    agent._provider.acompletion = mock
+    agent._provider.stop = AsyncMock()
+    agent._provider.get_state = MagicMock(return_value=None)
+    agent._provider.set_context = MagicMock()
+    return mock
+
+
+def _agent(tmp_path: Path, **kw) -> tuple[TsugiteAgent, SessionStorage]:
+    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+    agent = TsugiteAgent(
+        model_string="openai:gpt-4o-mini",
+        tools=[],
+        instructions="be a helpful assistant",
+        max_turns=kw.pop("max_turns", 3),
+        storage=storage,
+        **kw,
+    )
+    return agent, storage
+
+
+def _snaps(storage):
+    return [e for e in storage.iter_events() if e.type == "prompt_snapshot"]
+
+
+class TestPromptSnapshotDurability:
+    """The breakdown must be durable, not live-only. Scheduled / subprocess /
+    restarted-daemon sessions run with no live SSE handler (event_bus is None),
+    so the agent itself must record the snapshot - otherwise the inspector only
+    ever works for the interactive chat that happened to have an SSE persist
+    path attached ("only works for live chats").
+    """
+
+    @pytest.mark.asyncio
+    async def test_headless_run_persists_a_real_breakdown(self, tmp_path: Path):
+        agent, storage = _agent(tmp_path)
+        assert agent.event_bus is None  # headless: no live SSE handler
+        _patch(agent, return_value=_resp("just prose, no code"))
+
+        await agent.run("summarize the repo")
+
+        snaps = _snaps(storage)
+        assert len(snaps) >= 1
+        bd = snaps[-1].data["token_breakdown"]
+        assert bd["total"] > 0
+        assert "categories" in bd
+        # Carries the turn index for the inspector's staleness readout.
+        assert snaps[-1].data["turn"] == 0
+
+    @pytest.mark.asyncio
+    async def test_one_snapshot_per_turn_matches_model_requests(self, tmp_path: Path):
+        # "stopped working often": the live SSE persist path is lossy (a real
+        # session logged 37 model_requests but only 27 snapshots). The durable
+        # channel must record exactly one snapshot per turn, like model_request.
+        agent, storage = _agent(tmp_path)
+        _patch(
+            agent,
+            side_effect=[
+                _resp('```python-exec\nprint("working")\n```'),
+                _resp("all done"),
+            ],
+        )
+
+        await agent.run("do a two-turn task")
+
+        reqs = [e for e in storage.iter_events() if e.type == "model_request"]
+        assert len(reqs) == 2
+        assert len(_snaps(storage)) == len(reqs)
+
+    @pytest.mark.asyncio
+    async def test_breakdown_failure_never_crashes_the_turn(self, tmp_path: Path):
+        # A breakdown computation error must be swallowed (logged), never crash
+        # the run and never persist a bogus empty snapshot.
+        from unittest.mock import MagicMock
+
+        agent, storage = _agent(tmp_path)
+        agent._compute_token_breakdown = MagicMock(side_effect=RuntimeError("boom"))
+        _patch(agent, return_value=_resp("answer"))
+
+        await agent.run("task")
+
+        finals = [e for e in storage.iter_events() if e.type == "final_result"]
+        assert len(finals) == 1  # the run completed
+        assert _snaps(storage) == []  # no bogus snapshot recorded
 
 
 class TestJSONLHandler:

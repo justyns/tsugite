@@ -2,7 +2,7 @@
 
 from .base import HistoryBackend, Session
 from .models import Event
-from .reconstruction import events_to_messages, last_index_of
+from .reconstruction import events_to_messages, last_index_of, reconstruct_raw_turns
 from .registry import get_history_backend, reset_history_backend, set_history_backend
 from .sqlite_backend import SqliteHistoryBackend
 from .storage import (
@@ -25,6 +25,7 @@ __all__ = [
     "SqliteHistoryBackend",
     "event_to_ui_dict",
     "events_to_messages",
+    "reconstruct_raw_turns",
     "generate_session_id",
     "get_history_backend",
     "get_history_dir",

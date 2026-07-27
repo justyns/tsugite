@@ -82,6 +82,83 @@ def events_to_messages(events: Iterable[Event]) -> List[Dict[str, Any]]:
     return messages
 
 
+def reconstruct_raw_turns(events: Iterable[Event]) -> List[Dict[str, Any]]:
+    """Rebuild each model call's request messages and raw response from an event log.
+
+    A ``model_request`` is recorded right before each provider call, so the
+    messages the model saw that call are :func:`events_to_messages` of the log
+    prefix up to it (a prefix reconstructs the conversation as-of that point,
+    matching resume). One entry per ``model_request``, in log order.
+
+    Each entry carries an ``index`` (a monotonic 1-based count) as its stable
+    identity. The event's own ``turn`` is a per-run step counter that resets to 0
+    every user message, so it is kept only as a secondary hint - it is neither
+    unique nor a pairing key. The response is the ``model_response`` that follows
+    the request in the log (before the next request), so pairing survives the
+    repeated turn numbers; a call that never produced one carries null.
+
+    ``new_messages`` is what the call added to the prompt over the previous call
+    (consecutive prompts only append), so a surface can show just the delta
+    instead of re-rendering the whole conversation every entry. Across a
+    compaction the prompt resets to a summary and shares no prefix; then
+    ``reset_before`` is true and ``new_messages`` is the whole request.
+
+    Returns plain dicts so any surface can serialize them: the per-call slicing
+    lives here in core, next to the reconstruction it builds on, not in a caller.
+    """
+    events = list(events)
+
+    entries: List[Dict[str, Any]] = []
+    prev_request: Optional[List[Dict[str, Any]]] = None
+    for i, event in enumerate(events):
+        if event.type != "model_request":
+            continue
+        request = events_to_messages(events[:i])
+        new_messages, reset_before = _request_delta(prev_request, request)
+        entries.append(
+            {
+                "index": len(entries) + 1,
+                "turn": event.data.get("turn"),
+                "provider": event.data.get("provider"),
+                "model": event.data.get("model"),
+                "request": request,
+                "new_messages": new_messages,
+                "reset_before": reset_before,
+                "response": _response_after(events, i),
+            }
+        )
+        prev_request = request
+    return entries
+
+
+def _response_after(events: List[Event], req_idx: int) -> Optional[Dict[str, Any]]:
+    """The ``model_response`` paired with the ``model_request`` at ``req_idx``: the
+    first one before the next ``model_request``. Pairs by log position rather than
+    the ``turn`` field, which is a per-run step counter and repeats across user
+    messages - a turn-keyed lookup would collide and mispair early calls."""
+    for event in events[req_idx + 1 :]:
+        if event.type == "model_request":
+            return None
+        if event.type == "model_response":
+            return {"raw_content": event.data.get("raw_content", "")}
+    return None
+
+
+def _request_delta(
+    prev: Optional[List[Dict[str, Any]]], cur: List[Dict[str, Any]]
+) -> tuple[List[Dict[str, Any]], bool]:
+    """Messages ``cur`` added over ``prev`` (what this call appended to the prompt),
+    plus whether the prior prefix was dropped. Consecutive calls only append, so
+    the delta is ``cur`` past the shared head - except across a compaction, where
+    ``cur`` resets to a summary and shares no prefix; then the whole prompt is new
+    and the flag is true so a surface can mark the reset."""
+    if prev is None:
+        return cur, False
+    if cur[: len(prev)] == prev:
+        return cur[len(prev) :], False
+    return cur, True
+
+
 def _event_to_message(event: Event, executed: bool = False) -> Optional[Dict[str, Any]]:
     if event.type == "user_input":
         text = event.data.get("text", "")

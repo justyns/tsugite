@@ -68,28 +68,19 @@ class AutoContextHandler(AttachmentHandler):
                     from tsugite.events.helpers import emit_file_read_event
 
                     emit_file_read_event(str(file_path), content, "auto_context")
-
-                    result.append(
-                        Attachment(
-                            name=relative_name,
-                            content=content,
-                            content_type=AttachmentContentType.TEXT,
-                            mime_type="text/plain",
-                            source_url=None,
-                        )
-                    )
                 except Exception as e:
-                    # Add error as attachment content for visibility
-                    error_content = f"# Error reading {relative_name}\n\n{str(e)}"
-                    result.append(
-                        Attachment(
-                            name=relative_name,
-                            content=error_content,
-                            content_type=AttachmentContentType.TEXT,
-                            mime_type="text/plain",
-                            source_url=None,
-                        )
+                    # Surface the read error as the attachment's content.
+                    content = f"# Error reading {relative_name}\n\n{str(e)}"
+
+                result.append(
+                    Attachment(
+                        name=relative_name,
+                        content=content,
+                        content_type=AttachmentContentType.TEXT,
+                        mime_type="text/plain",
+                        source_url=None,
                     )
+                )
 
             return result
         except Exception as e:
@@ -181,8 +172,7 @@ class AutoContextHandler(AttachmentHandler):
     def _discover_files(self, search_dirs: List[Path], context_files: List[str]) -> List[tuple[Path, str]]:
         """Discover context files in search directories.
 
-        Deduplicates by filename to prefer closer files, but tracks canonical paths
-        to handle symlinks (e.g., CLAUDE.md -> AGENTS.md).
+        Deduplicates by filename to prefer closer (more specific) directories.
 
         Args:
             search_dirs: Directories to search
@@ -192,26 +182,19 @@ class AutoContextHandler(AttachmentHandler):
             List of (file_path, relative_name) tuples for found files
         """
         found = []
-        seen_files = {}  # filename -> canonical_path
+        seen = set()
 
         # Search in order (most specific directory first)
         for directory in search_dirs:
             for filename in context_files:
                 # Skip if we've already found a file with this name
-                if filename in seen_files:
+                if filename in seen:
                     continue
 
                 file_path = directory / filename
                 if file_path.exists() and file_path.is_file():
-                    # Resolve symlinks to get canonical path
-                    try:
-                        canonical = file_path.resolve()
-                    except (OSError, RuntimeError):
-                        # If resolution fails, use the path as-is
-                        canonical = file_path
-
                     found.append((file_path, filename))
-                    seen_files[filename] = canonical
+                    seen.add(filename)
 
         return found
 

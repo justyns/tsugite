@@ -1,15 +1,19 @@
 """Example tsugite plugin - the agent-facing extension points in one module.
 
-Two entry points in pyproject.toml wire the plugin up. Importing this module
+Three entry points in pyproject.toml wire the plugin up. Importing this module
 (the first entry point) runs the @tool / @hook / @subscribe decorators; the
-daemon-only adapter (HTTP routes + job executors) lives in adapter.py so this
-half still loads on an install without the `[daemon]` extra:
+context providers live in context.py (their own entry point, whose import
+registers them); the daemon-only adapter (HTTP routes + job executors) lives in
+adapter.py so this half still loads on an install without the `[daemon]` extra:
 
     [project.entry-points."tsugite.plugins"]
-    example = "tsugite_example_plugin"                         # tool + hook + subscriber
+    example = "tsugite_example_plugin"                          # tool + hook + subscriber
+
+    [project.entry-points."tsugite.context_providers"]
+    example = "tsugite_example_plugin.context"                  # menu provider + detector
 
     [project.entry-points."tsugite.adapters"]
-    example = "tsugite_example_plugin.adapter:create_adapter"  # HTTP routes + job executors
+    example = "tsugite_example_plugin.adapter:create_adapter"   # HTTP routes + job executors
 
 Enable the adapter half in daemon.yaml:
 

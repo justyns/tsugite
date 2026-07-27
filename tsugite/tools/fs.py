@@ -200,9 +200,6 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
     # Always exclude .git/ directory
     patterns.append(".git/")
 
-    if not patterns:
-        return None
-
     return pathspec.PathSpec.from_lines(pathspec.patterns.GitWildMatchPattern, patterns)
 
 
@@ -508,7 +505,6 @@ def edit_file(
             if error:
                 raise RuntimeError(f"Failed to edit {path}: {error}")
 
-            total_edits = 1
             total_replacements = match_count
 
         else:

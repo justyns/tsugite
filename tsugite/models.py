@@ -157,6 +157,23 @@ def is_reasoning_model_without_stop_support(model_string: str) -> bool:
     return False
 
 
+def model_supports_vision(model_string: str) -> bool:
+    """Whether the resolved model accepts image inputs.
+
+    Defaults True on any resolution failure so a registry gap never strands an
+    image on a model that can actually see it.
+    """
+    from tsugite.providers import get_provider
+
+    try:
+        resolved = resolve_model_alias(model_string)
+        provider_name, _, _ = parse_model_string(resolved)
+        info = get_provider(provider_name).get_model_info(get_model_id(resolved))
+        return bool(info is None or info.supports_vision)
+    except Exception:  # noqa: BLE001 -- unknown model → assume vision, don't strand the image
+        return True
+
+
 def filter_reasoning_model_params(model_name: str, params: dict) -> dict:
     """Filter out unsupported parameters for reasoning models.
 

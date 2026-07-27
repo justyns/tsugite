@@ -11,6 +11,10 @@ dependencies = ["tsugite-cli"]
 [project.entry-points."tsugite.plugins"]
 example = "tsugite_example_plugin"
 
+# Context providers register on import (menu provider + detector).
+[project.entry-points."tsugite.context_providers"]
+example = "tsugite_example_plugin.context"
+
 # Adapters need constructor kwargs, so they keep their own group.
 [project.entry-points."tsugite.adapters"]
 example = "tsugite_example_plugin.adapter:create_adapter"

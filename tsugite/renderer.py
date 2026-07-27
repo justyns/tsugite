@@ -160,8 +160,6 @@ def humanize_mtime(epoch: Any) -> str:
 
 
 def slugify(text: str) -> str:
-    import re
-
     text = text.lower()
     # Replace special characters with dashes, then keep only ASCII letters, numbers, and dashes
     text = re.sub(r"[^\w\s-]", "-", text, flags=re.ASCII)

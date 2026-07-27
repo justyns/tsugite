@@ -249,18 +249,6 @@ class SkillManager:
         skills = list(self._skill_registry.values())
         return build_skill_index(skills)
 
-    def list_loaded_skills(self) -> str:
-        """Show which skills are currently loaded in this session.
-
-        Returns:
-            List of loaded skill names
-        """
-        if not self._loaded_skills:
-            return "No skills currently loaded"
-
-        skill_names = sorted(self._loaded_skills.keys())
-        return "Loaded skills:\n" + "\n".join(f"- {name}" for name in skill_names)
-
     def get_loaded_skills(self) -> Dict[str, str]:
         """Get all currently loaded skills.
 
@@ -436,16 +424,6 @@ def get_failed_skills_list() -> List[Dict[str, str]]:
     """
     manager = get_skill_manager()
     return manager.get_failed_skills_list()
-
-
-def get_loaded_skills() -> Dict[str, str]:
-    """Get all currently loaded skills.
-
-    Returns:
-        Dict mapping skill names to rendered content
-    """
-    manager = get_skill_manager()
-    return manager.get_loaded_skills()
 
 
 def clear_loaded_skills():

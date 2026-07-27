@@ -40,7 +40,6 @@ def test_agent_memory_initialization():
     assert memory.task == ""
     assert memory.steps == []
     assert memory.reasoning_history == []
-    assert memory.final_answer is None
 
 
 def test_add_task():
@@ -96,15 +95,6 @@ def test_add_reasoning():
     assert "considering different approaches" in memory.reasoning_history[1]
 
 
-def test_add_final_answer():
-    """Test adding final answer."""
-    memory = AgentMemory()
-
-    memory.add_final_answer("The answer is 42")
-
-    assert memory.final_answer == "The answer is 42"
-
-
 def test_complete_workflow():
     """Test complete memory workflow."""
     memory = AgentMemory()
@@ -128,14 +118,10 @@ def test_complete_workflow():
         output="120",
     )
 
-    # Set final answer
-    memory.add_final_answer("120")
-
     # Verify complete state
     assert memory.task == "Calculate factorial of 5"
     assert len(memory.steps) == 2
     assert len(memory.reasoning_history) == 1
-    assert memory.final_answer == "120"
 
 
 def test_step_with_error_in_workflow():

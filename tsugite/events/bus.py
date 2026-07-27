@@ -108,9 +108,3 @@ class EventBus:
             ):
                 continue
             _safe_invoke(sub.handler, event, "Subscription handler")
-
-    def has_handlers(self) -> bool:
-        return len(self._handlers) > 0 or len(self._filtered) > 0
-
-    def handler_count(self) -> int:
-        return len(self._handlers) + len(self._filtered)

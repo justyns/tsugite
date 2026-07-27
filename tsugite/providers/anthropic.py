@@ -45,6 +45,7 @@ _ANTHROPIC_MODELS: dict[str, ModelInfo] = {
     "anthropic/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
     "anthropic/claude-opus-4-7": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
     "anthropic/claude-opus-4-8": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
+    "anthropic/claude-opus-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=5.0, output_cost_per_million=25.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "xhigh", "max"], thinking_style="adaptive"),
     "anthropic/claude-sonnet-4-5": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
     "anthropic/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=64_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
     "anthropic/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, max_output_tokens=128_000, input_cost_per_million=3.0, output_cost_per_million=15.0, supports_vision=True, supports_reasoning=True, supported_effort_levels=["low", "medium", "high", "max"], thinking_style="budget_tokens"),
@@ -73,8 +74,9 @@ class AnthropicProvider:
             current_loop = None
 
         if self._client is None or self._client.is_closed or self._client_loop is not current_loop:
-            if self._client is not None and not self._client.is_closed:
-                self._client.close()  # pylint: disable=no-member
+            # A stale client belongs to a now-closed event loop (each turn runs under a fresh
+            # asyncio.run). httpx.AsyncClient has no sync close(), and awaiting aclose() from a
+            # different loop is unsafe, so drop the reference and let it be garbage collected.
             self._client = httpx.AsyncClient(timeout=300)
             self._client_loop = current_loop
         return self._client

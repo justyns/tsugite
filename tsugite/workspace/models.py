@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-WORKSPACE_FILES = ["PERSONA.md", "SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]
 DEFAULT_COMPACTION_THRESHOLD = 0.8
 
 
@@ -25,11 +24,6 @@ class Workspace:
     path: Path
 
     @property
-    def memory_dir(self) -> Path:
-        """Path to memory files directory."""
-        return self.path / "memory"
-
-    @property
     def skills_dir(self) -> Path:
         """Path to workspace-specific skills directory."""
         return self.path / "skills"
@@ -38,19 +32,6 @@ class Workspace:
     def agents_dir(self) -> Path:
         """Path to workspace-specific agents directory."""
         return self.path / "agents"
-
-    def get_workspace_files(self) -> List[Path]:
-        """Auto-discover workspace identity files (PERSONA.md, SOUL.md, USER.md, etc.).
-
-        Returns:
-            List of existing workspace files in conventional order
-        """
-        files = []
-        for filename in WORKSPACE_FILES:
-            path = self.path / filename
-            if path.exists() and path.is_file():
-                files.append(path)
-        return files
 
     def needs_onboarding(self) -> bool:
         """Check if workspace needs onboarding (unfilled identity).
@@ -277,6 +258,5 @@ Thumbs.db
 __all__ = [
     "Workspace",
     "WorkspaceNotFoundError",
-    "WORKSPACE_FILES",
     "DEFAULT_COMPACTION_THRESHOLD",
 ]

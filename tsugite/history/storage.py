@@ -280,9 +280,6 @@ class JsonlHistoryBackend:
     def search(self, query: str, *, agent: Optional[str] = None, limit: int = 50) -> List[dict]:
         raise NotImplementedError("history search requires the sqlite backend")
 
-    def purge(self, *, older_than: Optional[datetime] = None) -> int:
-        raise NotImplementedError("history purge requires the sqlite backend")
-
     def export_jsonl(self, session_id: str):
         raise NotImplementedError("history export requires the sqlite backend")
 

@@ -1,7 +1,7 @@
 """REPL-style chat interface using prompt_toolkit for input and rich for output."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -85,7 +85,6 @@ def run_repl_chat(
     exec_options: "ExecutionOptions",
     history_options: "HistoryOptions",
     path_context: Optional["PathContext"] = None,
-    workspace_attachments: Optional[List[str]] = None,
 ) -> None:
     """Run REPL-style chat session.
 
@@ -94,7 +93,6 @@ def run_repl_chat(
         exec_options: Execution options (model, stream, etc.)
         history_options: History options (enabled, max_turns, continue_id)
         path_context: Optional workspace path context
-        workspace_attachments: Optional list of workspace attachment paths
     """
     # Initialize console
     console = Console()
@@ -122,7 +120,6 @@ def run_repl_chat(
             disable_history=not history_options.enabled,
             resume_conversation_id=history_options.continue_id,
             path_context=path_context,
-            workspace_attachments=workspace_attachments,
         )
 
         # Track session stats
@@ -172,8 +169,6 @@ def run_repl_chat(
 
                     # Show error if command is invalid
                     if error:
-                        from rich.panel import Panel
-
                         console.print(Panel(f"[yellow]{error}[/yellow]", border_style="yellow", padding=(0, 1)))
                         continue
 

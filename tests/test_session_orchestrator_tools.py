@@ -1,4 +1,4 @@
-"""Tests for new session tools: session_events_since, session_summary, updated_since filter."""
+"""Tests for new session tools: updated_since filter."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -83,69 +83,3 @@ class TestUpdatedSinceFilter:
         result = store.list_sessions(updated_since="2026-03-15T11:00:00+00:00", status="completed")
         assert len(result) == 1
         assert result[0].id == "s1"
-
-
-class TestSessionEventsSince:
-    def test_all_events(self, store, session_with_events):
-        _, events, _ = session_with_events
-        result = store.session_events_since("test-session-1")
-        assert len(result) == 5
-
-    def test_events_since_timestamp(self, store, session_with_events):
-        _, events, base = session_with_events
-        since = (base + timedelta(seconds=15)).isoformat()
-        result = store.session_events_since("test-session-1", since=since)
-        assert len(result) == 3  # 20s, 30s, 40s events
-        assert result[0]["type"] == "tool_call"
-        assert result[-1]["type"] == "session_complete"
-
-    def test_events_since_future(self, store, session_with_events):
-        result = store.session_events_since("test-session-1", since="2099-01-01T00:00:00+00:00")
-        assert len(result) == 0
-
-    def test_events_nonexistent_session(self, store):
-        # read_events returns [] for missing sessions, so this should work
-        result = store.session_events_since("nonexistent")
-        assert result == []
-
-
-class TestSessionSummary:
-    def test_basic_summary(self, store, session_with_events):
-        session, _, _ = session_with_events
-        summary = store.session_summary("test-session-1")
-
-        assert summary["id"] == "test-session-1"
-        assert summary["agent"] == "odyn"
-        assert summary["source"] == "background"
-        assert summary["status"] == "completed"
-        assert "Do something useful" in summary["prompt"]
-        assert "Done doing something useful" in summary["result"]
-        assert summary["event_count"] == 5
-        assert sorted(summary["tools_used"]) == ["read_file", "write_file"]
-
-    def test_summary_no_events(self, store):
-        session = Session(id="empty-session", agent="test", source="background", prompt="test")
-        store.create_session(session)
-
-        summary = store.session_summary("empty-session")
-        assert summary["event_count"] == 0
-        assert summary["tools_used"] == []
-
-    def test_summary_with_error(self, store):
-        session = Session(
-            id="error-session",
-            agent="test",
-            source="background",
-            status="failed",
-            prompt="fail task",
-            error="Something broke",
-        )
-        store.create_session(session)
-
-        summary = store.session_summary("error-session")
-        assert summary["status"] == "failed"
-        assert summary["error"] == "Something broke"
-
-    def test_summary_nonexistent_raises(self, store):
-        with pytest.raises(ValueError):
-            store.session_summary("nonexistent")

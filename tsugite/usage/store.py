@@ -12,6 +12,10 @@ from tsugite.config import get_xdg_data_path
 _DEFAULT_DB_DIR = "usage"
 _DEFAULT_DB_NAME = "usage.db"
 
+# The ChannelContext.source stamped on scheduled-task turns (see the daemon
+# SchedulerAdapter). Usage rows carry this so `by_schedule` can isolate them.
+_SCHEDULER_SOURCE = "scheduler"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,6 +187,8 @@ class UsageStore:
                    SUM(cost_usd) as total_cost,
                    SUM(input_tokens) as input_tokens,
                    SUM(output_tokens) as output_tokens,
+                   SUM(cache_creation_tokens) as cache_creation_tokens,
+                   SUM(cache_read_tokens) as cache_read_tokens,
                    SUM(duration_ms) as total_duration_ms
             FROM usage {where}
             GROUP BY {date_expr}
@@ -195,7 +201,9 @@ class UsageStore:
         where, params = self._build_where(since=since)
         sql = f"""
             SELECT {column}, COUNT(*) as runs,
-                   SUM(total_tokens) as total_tokens, SUM(cost_usd) as total_cost
+                   SUM(total_tokens) as total_tokens, SUM(cost_usd) as total_cost,
+                   SUM(cache_creation_tokens) as cache_creation_tokens,
+                   SUM(cache_read_tokens) as cache_read_tokens
             FROM usage {where}
             GROUP BY {column} ORDER BY total_cost DESC LIMIT ?
         """
@@ -208,6 +216,45 @@ class UsageStore:
     def top_models(self, *, since: str | None = None, limit: int = 10) -> list[dict]:
         return self._top_by("model", since=since, limit=limit)
 
+    def by_schedule(self, *, since: str | None = None, limit: int = 100) -> list[dict]:
+        """Aggregate scheduled-task usage, one row per schedule.
+
+        Filters to rows attributable to a schedule - scheduler-sourced, or any
+        turn carrying a schedule_name (e.g. a scheduled auto-reply stamped with a
+        different source) - then groups by schedule_name. Runs recorded before the
+        schedule_id marker existed have a NULL schedule_name and aggregate into a
+        single unattributed bucket (schedule_name is None in that row) rather than
+        being dropped.
+
+        cache_creation_tokens/cache_read_tokens are honest SUMs of the stored
+        columns; providers that don't report cache usage stored 0, which is
+        indistinguishable from a genuine zero (see UsageStore.record).
+        """
+        # Attributable = scheduler-sourced OR carrying a schedule_name; the latter
+        # picks up scheduled auto-replies recorded under a different source so their
+        # cost isn't dropped from the per-schedule total.
+        conditions = ["(source = ? OR schedule_name IS NOT NULL)"]
+        params: list = [_SCHEDULER_SOURCE]
+        if since:
+            conditions.append("timestamp >= ?")
+            params.append(since)
+        where = f"WHERE {' AND '.join(conditions)}"
+        sql = f"""
+            SELECT schedule_name,
+                   COUNT(*) as runs,
+                   SUM(total_tokens) as total_tokens,
+                   SUM(cost_usd) as total_cost,
+                   SUM(cache_creation_tokens) as cache_creation_tokens,
+                   SUM(cache_read_tokens) as cache_read_tokens,
+                   MAX(timestamp) as last_run
+            FROM usage {where}
+            GROUP BY schedule_name
+            ORDER BY total_cost DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        return [dict(row) for row in self._get_conn().execute(sql, params).fetchall()]
+
     def total(self, *, since: str | None = None) -> dict:
         where, params = self._build_where(since=since)
         sql = f"""
@@ -215,8 +262,10 @@ class UsageStore:
                    COALESCE(SUM(total_tokens), 0) as total_tokens,
                    COALESCE(SUM(cost_usd), 0) as total_cost,
                    COALESCE(SUM(input_tokens), 0) as input_tokens,
-                   COALESCE(SUM(output_tokens), 0) as output_tokens
+                   COALESCE(SUM(output_tokens), 0) as output_tokens,
+                   COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+                   COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens
             FROM usage {where}
         """
         row = self._get_conn().execute(sql, params).fetchone()
-        return dict(row) if row else {"runs": 0, "total_tokens": 0, "total_cost": 0.0}
+        return dict(row)

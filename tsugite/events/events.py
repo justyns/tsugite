@@ -104,12 +104,20 @@ class ContentBlockEvent(BaseEvent):
     content: str
 
 
-class ReactionEvent(BaseEvent):
-    """Agent reacts to a message with an emoji."""
+class ModelResponseEvent(BaseEvent):
+    """The settled parse of one model turn (backend is the only parser):
+    prose before the executed fence, named content blocks, and the prose
+    after the fence's close. Mirrors what persists on the model_response
+    history event so live surfaces render without re-parsing raw text."""
 
-    event_type: EventType = Field(default=EventType.REACTION, frozen=True)
-    emoji: str
-    message_id: Optional[str] = None
+    event_type: EventType = Field(default=EventType.MODEL_RESPONSE, frozen=True)
+    thought: str = ""
+    content_blocks: Dict[str, str] = Field(default_factory=dict)
+    tail: str = ""
+    # The turn's usage dump (exclude_none), mirroring the persisted event so
+    # live surfaces read the cache split without a reload. None when the run
+    # carried no usage (e.g. an aborted turn).
+    usage: Optional[Dict[str, Any]] = None
 
 
 class FinalAnswerEvent(BaseEvent):
@@ -268,7 +276,6 @@ class StepProgressEvent(BaseEvent):
     message: str
     step: Optional[int] = Field(default=None, ge=1)
     total: Optional[int] = Field(default=None, ge=1)
-    percentage: Optional[float] = Field(default=None, ge=0, le=100)
 
 
 class FileReadEvent(BaseEvent):

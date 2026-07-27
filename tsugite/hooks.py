@@ -527,7 +527,6 @@ class HookHandler:
         self.workspace_dir = workspace_dir
         self.interactive = interactive
         self._pending: Optional[tuple[str, dict[str, Any]]] = None
-        self._executions: list[HookExecution] = []
 
     def handle_event(self, event: BaseEvent) -> None:
         if isinstance(event, ToolCallEvent):
@@ -571,21 +570,12 @@ class HookHandler:
             )
             task.add_done_callback(_log_task_exception)
         else:
-            results = _render_and_execute(
+            _render_and_execute(
                 _jinja_env, rules, context, self.workspace_dir, interactive=self.interactive, phase=phase
             )
-            self._executions.extend(results.executions)
-
-    def drain_executions(self) -> list[HookExecution]:
-        """Return and clear accumulated hook executions."""
-        execs = self._executions
-        self._executions = []
-        return execs
 
 
-# Module-level state so save_run_to_history can retrieve executions
 _active_handler: Optional[HookHandler] = None
-_pre_message_executions: list[HookExecution] = []
 
 
 def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus", interactive: bool = True) -> None:
@@ -597,16 +587,6 @@ def setup_hook_handler(workspace_dir: Path, event_bus: "EventBus", interactive: 
         event_bus.subscribe(_active_handler.handle_event)
     else:
         _active_handler = None
-
-
-def drain_all_executions() -> list[HookExecution]:
-    """Drain and return all accumulated hook executions (pre_message + post_tool)."""
-    global _pre_message_executions
-    execs = _pre_message_executions
-    _pre_message_executions = []
-    if _active_handler:
-        execs.extend(_active_handler.drain_executions())
-    return execs
 
 
 HookPhase = Literal[
@@ -675,10 +655,8 @@ async def fire_pre_message_hooks(
     on_status: Optional[Callable[[str], None]] = None,
     on_result: Optional[Callable[["HookExecution"], None]] = None,
 ) -> dict[str, str]:
-    """Fire pre_message hooks, returning captured variables. Executions are accumulated internally."""
-    global _pre_message_executions
+    """Fire pre_message hooks, returning captured variables."""
     results = await fire_hooks(
         workspace_dir, "pre_message", context, interactive=interactive, on_status=on_status, on_result=on_result
     )
-    _pre_message_executions.extend(results.executions)
     return results.captured

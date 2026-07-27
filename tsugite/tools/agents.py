@@ -52,6 +52,7 @@ def spawn_agent(
     context: Optional[Dict[str, Any]] = None,
     model_override: Optional[str] = None,
     timeout: int = 300,
+    files: Optional[List[str]] = None,
 ) -> str:
     """Spawn subagent as subprocess.
 
@@ -61,12 +62,17 @@ def spawn_agent(
         context: Optional context dict (must be JSON-serializable)
         model_override: Optional model to use
         timeout: Timeout in seconds (default: 5 minutes)
+        files: Optional workspace files to hand the subagent as attachments (paths
+            relative to your workspace). Images reach the child's model as pixels
+            when it supports vision - e.g. ask a cheaper vision model about an image
+            via files=["uploads/photo.jpg"], model_override="claude_code:haiku".
 
     Returns:
         Subagent's final result as string
 
     Raises:
-        ValueError: If agent not found or context not JSON-serializable
+        ValueError: If agent not found, a file escapes the workspace or is missing,
+            or context not JSON-serializable
         RuntimeError: If subagent fails, times out, or errors
     """
     import json
@@ -107,14 +113,32 @@ def spawn_agent(
 
     # Check visibility (only if not explicitly allowed via multi-agent mode)
     if not is_explicitly_allowed and visibility in ["private", "internal"]:
-        # No allowed list means unrestricted, but respect visibility
-        if allowed_agents is None:
-            raise ValueError(
-                f"Agent '{agent_name}' has visibility '{visibility}' and cannot be spawned. "
-                f"Only 'public' agents can be spawned without explicit permission. "
-                f"To spawn this agent, use multi-agent mode: "
-                f'tsugite run +{get_current_agent() or "primary"} +{agent_name} "task"'
-            )
+        raise ValueError(
+            f"Agent '{agent_name}' has visibility '{visibility}' and cannot be spawned. "
+            f"Only 'public' agents can be spawned without explicit permission. "
+            f"To spawn this agent, use multi-agent mode: "
+            f'tsugite run +{get_current_agent() or "primary"} +{agent_name} "task"'
+        )
+
+    # Resolve delegated files against this agent's workspace and gate them for the
+    # child's model. Inline files ride to the child as paths it materializes itself
+    # (no base64 through the pipe); non-inlinable ones (oversize, svg-class, or a
+    # non-vision child) degrade to a path hint on the prompt so they never vanish.
+    child_files: List[str] = []
+    if files:
+        from ..attachments.delegation import (
+            format_delegation_hint,
+            partition_delegation_files,
+            resolve_delegation_files,
+        )
+        from ..models import model_supports_vision, resolve_effective_model
+
+        resolved_files = resolve_delegation_files(files, _effective_cwd())
+        effective_model = resolve_effective_model(model_override, frontmatter.get("model"))
+        supports_vision = model_supports_vision(effective_model) if effective_model else True
+        inline_files, hint_files = partition_delegation_files(resolved_files, supports_vision)
+        child_files = [str(p) for p in inline_files]
+        prompt = prompt + format_delegation_hint(hint_files)
 
     # Prepare context
     context_data = {
@@ -125,6 +149,8 @@ def spawn_agent(
             "is_subagent": True,
         },
     }
+    if child_files:
+        context_data["files"] = child_files
 
     # Validate JSON serializability early
     try:
@@ -277,13 +303,6 @@ def spawn_agent(
         # Restore progress to parent agent state
         if ui_handler:
             ui_handler.update_progress("Agent running...")
-
-
-def _show_progress(message: str):
-    """Show subagent progress in parent UI."""
-    from ..events.helpers import emit_info_event
-
-    emit_info_event(f"[Subagent] {message}")
 
 
 def discover_agents() -> List[Dict[str, str]]:

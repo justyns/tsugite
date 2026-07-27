@@ -52,3 +52,32 @@ def test_mixed_none_and_reported_still_reports():
     a._accumulate_usage(_usage(), None)
     a._accumulate_usage(_usage(), 0.5)
     assert a.reported_cost == 0.5
+
+
+def test_openai_family_cached_tokens_count_as_cache_reads():
+    # OpenAI-family providers (openai_compat, codex_cli) report the cached prompt
+    # prefix on the unified `cached_tokens` field, not Anthropic's
+    # cache_read_input_tokens. The read side counts them as cache reads so the
+    # Usage tab / cost summary aren't blank for those turns.
+    a = _bare_agent()
+    a._accumulate_usage(Usage(prompt_tokens=100, completion_tokens=20, total_tokens=120, cached_tokens=80), None)
+    assert a.cache_read_tokens == 80
+
+
+def test_explicit_cache_read_wins_over_cached_tokens_composite():
+    # Anthropic sets cache_read_input_tokens explicitly AND folds creation+read
+    # into cached_tokens; the read side must take the explicit read, never the
+    # composite, so the two accountings never mix.
+    a = _bare_agent()
+    a._accumulate_usage(
+        Usage(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            cached_tokens=300,
+            cache_read_input_tokens=120,
+            cache_creation_input_tokens=180,
+        ),
+        None,
+    )
+    assert a.cache_read_tokens == 120

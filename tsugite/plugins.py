@@ -20,6 +20,8 @@ GROUP_HISTORY = "tsugite.history"
 GROUP_ATTACHMENTS = "tsugite.attachments"
 GROUP_SANDBOX = "tsugite.sandbox"
 GROUP_EXECUTORS = "tsugite.executors"
+GROUP_COMMANDS = "tsugite.commands"
+GROUP_CONTEXT_PROVIDERS = "tsugite.context_providers"
 PLUGIN_GROUPS = (
     GROUP_PLUGINS,
     GROUP_TOOLS,
@@ -32,6 +34,7 @@ PLUGIN_GROUPS = (
     GROUP_ATTACHMENTS,
     GROUP_SANDBOX,
     GROUP_EXECUTORS,
+    GROUP_COMMANDS,
 )
 
 _plugin_hooks: dict[str, list] = {}
@@ -213,6 +216,28 @@ def load_decorator_plugins(plugin_config: dict | None = None) -> list[PluginInfo
     the decorators' side effects.
     """
     return _load_plugin_group(GROUP_PLUGINS, plugin_config, on_loaded=lambda _: None)
+
+
+def load_command_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover and import daemon slash-command plugins.
+
+    Plugins under tsugite.commands are module-only entry points whose import
+    triggers @adapter_command decorators, registering the command into the
+    daemon's shared registry. Like load_decorator_plugins, the loader only has
+    to import the module - registration is the decorators' side effect.
+    """
+    return _load_plugin_group(GROUP_COMMANDS, plugin_config, on_loaded=lambda _: None)
+
+
+def load_context_provider_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Discover and import context-provider plugins.
+
+    Plugins under tsugite.context_providers are module-only entry points whose
+    import calls register_context_provider(). Like the other decorator/registry
+    groups, the loader only imports the module - registration is the import's
+    side effect.
+    """
+    return _load_plugin_group(GROUP_CONTEXT_PROVIDERS, plugin_config, on_loaded=lambda _: None)
 
 
 def load_adapter_plugins(

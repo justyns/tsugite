@@ -9,10 +9,8 @@ Workspaces represent persistent conversation contexts with:
 Convention over configuration: No config.yaml required.
 """
 
-from .context import build_workspace_attachments
 from .models import (
     DEFAULT_COMPACTION_THRESHOLD,
-    WORKSPACE_FILES,
     Workspace,
     WorkspaceNotFoundError,
 )
@@ -22,7 +20,5 @@ __all__ = [
     "Workspace",
     "WorkspaceNotFoundError",
     "WorkspaceSession",
-    "build_workspace_attachments",
-    "WORKSPACE_FILES",
     "DEFAULT_COMPACTION_THRESHOLD",
 ]

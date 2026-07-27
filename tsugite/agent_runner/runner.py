@@ -14,7 +14,11 @@ from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor_registry import get_executor_class  # noqa: E402
 from tsugite.core.proxy import _parse_pattern  # noqa: E402
-from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error  # noqa: E402
+from tsugite.exceptions import (  # noqa: E402
+    AgentExecutionError,
+    is_prompt_too_long_error,
+    is_unresumable_history_error,
+)
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
 from tsugite.models import resolve_effective_model, strip_reserved_model_kwargs  # noqa: E402
 from tsugite.options import ExecutionOptions  # noqa: E402
@@ -422,6 +426,25 @@ def _make_pre_llm_call_callback(hooks_dir: Path, agent_name: str):
     return _callback
 
 
+async def _cancel_sibling_tasks() -> None:
+    """At the end of a top-level run, cancel the event loop's other pending tasks.
+
+    Only top-level agents (on the main thread) clean up; a spawned agent leaves
+    the shared loop alone. Provider-client cleanup is handled separately by the
+    run_async_with_cleanup wrapper.
+    """
+    import threading
+
+    if threading.current_thread() != threading.main_thread():
+        return
+    current_task = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current_task and not t.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 async def _execute_agent_with_prompt(
     prepared: "PreparedAgent",
     exec_options: Optional[ExecutionOptions] = None,
@@ -718,6 +741,8 @@ async def _execute_agent_with_prompt(
                     attachments=prepared.attachments,
                     provider_state=result.provider_state,
                     last_input_tokens=result.last_input_tokens,
+                    cache_creation_tokens=agent.cache_creation_tokens,
+                    cache_read_tokens=agent.cache_read_tokens,
                     session_id=session_storage.session_id if session_storage else None,
                 )
             else:
@@ -769,24 +794,7 @@ async def _execute_agent_with_prompt(
             except Exception:
                 pass
 
-        # Clean up pending tasks (provider client cleanup is handled by run_async_with_cleanup wrapper)
-        # ONLY run cleanup for top-level agents, not spawned agents
-        import asyncio
-        import threading
-
-        if threading.current_thread() == threading.main_thread():
-            # Get all tasks except the current one
-            current_task = asyncio.current_task()
-            all_tasks = asyncio.all_tasks()
-            pending_tasks = [task for task in all_tasks if task is not current_task and not task.done()]
-
-            # Cancel all pending tasks
-            for task in pending_tasks:
-                task.cancel()
-
-            # Wait for all tasks to be cancelled
-            if pending_tasks:
-                await asyncio.gather(*pending_tasks, return_exceptions=True)
+        await _cancel_sibling_tasks()
 
 
 def resolve_effective_sandbox(
@@ -924,6 +932,16 @@ def run_agent(
             error_event = {"type": "error", "error": f"Failed to parse stdin JSON: {e}"}
             print(json.dumps(error_event), flush=True)
             sys.exit(1)
+
+        # Delegated files handed down by spawn_agent: the parent already gated them
+        # for this model, so materialize them into attachments the same way agent
+        # frontmatter attachments are (FileHandler.fetch, size gates included).
+        delegated_files = stdin_data.get("files") or []
+        if delegated_files:
+            from tsugite.attachments.delegation import materialize_delegation_attachments
+
+            delegated = materialize_delegation_attachments([Path(f) for f in delegated_files])
+            attachments = (attachments or []) + delegated
 
         from tsugite.ui.jsonl import JSONLUIHandler
 
@@ -1076,7 +1094,6 @@ async def run_agent_async(
             agent=agent,
             prompt=prompt,
             context=context,
-            workspace=workspace,
             attachments=attachments,
             path_context=path_context,
         )
@@ -1132,13 +1149,26 @@ async def run_agent_async(
             )
         except (RuntimeError, AgentExecutionError) as e:
             err_str = str(e).lower()
+            poisoned = is_unresumable_history_error(err_str)
             if resume_session and (
                 "process ended" in err_str
                 or "no conversation found" in err_str
                 or is_prompt_too_long_error(err_str)
                 or "format_error_loop" in err_str
+                or poisoned
             ):
                 logger.warning("Provider session resume failed (%s), retrying with fresh session", e)
+                if poisoned:
+                    # Durably sever the unresumable session so later messages stop
+                    # re-resolving it from history; the retry below runs fresh.
+                    from tsugite.agent_runner.history_integration import record_resume_reset
+
+                    reset = record_resume_reset(continue_conversation_id)
+                    # Surface it live on this turn too: the durable record alone only
+                    # shows on the next reload, so emit an SSE frame the open
+                    # conversation renders before the fresh retry streams in.
+                    if reset and ui_handler is not None and hasattr(ui_handler, "_emit"):
+                        ui_handler._emit("resume_reset", reset)
                 try:
                     previous_messages = load_and_apply_history(continue_conversation_id)
                 except Exception:
@@ -1163,11 +1193,6 @@ async def run_agent_async(
         clear_allowed_agents()
 
 
-# Predefined loop condition helpers
-# These are plain Jinja2 expressions (no {{ }}) that can be used in {% if %} blocks
-LOOP_HELPERS = {}
-
-
 # Framework flags that builtin agent templates (default.md and friends) may
 # reference in `{% if %}` blocks. Bare references would raise under
 # StrictUndefined when running multi-step agents, since step_context starts
@@ -1179,7 +1204,6 @@ _MULTISTEP_FRAMEWORK_FLAG_DEFAULTS: Dict[str, Any] = {
     "schedule_id": "",
     "has_notify_tool": False,
     "agent_name": "",
-    "can_spawn_sessions": False,
     "can_spawn_jobs": False,
     "can_use_pty": False,
     "is_channel_session": False,
@@ -1288,7 +1312,6 @@ def _build_prepared_agent_for_step(
         tools=tools,
         context=step_context,
         combined_instructions=combined_instructions,
-        prefetch_results={},  # Already executed in preamble
         attachments=attachments or [],
     )
 
@@ -1307,10 +1330,6 @@ def evaluate_loop_condition(expression: str, context: Dict[str, Any]) -> bool:
         ValueError: If expression is invalid or evaluation fails
     """
     from jinja2 import Template, TemplateSyntaxError
-
-    # Check if it's a predefined helper
-    if expression in LOOP_HELPERS:
-        expression = LOOP_HELPERS[expression]
 
     try:
         # Wrap expression in {% if %} to get boolean result
@@ -1870,24 +1889,7 @@ async def _run_multistep_agent_impl(
         clear_current_agent()
         clear_allowed_agents()
 
-        # Clean up pending tasks (provider client cleanup is handled by run_async_with_cleanup wrapper)
-        # ONLY run cleanup for top-level agents, not spawned agents
-        import asyncio
-        import threading
-
-        if threading.current_thread() == threading.main_thread():
-            # Get all tasks except the current one
-            current_task = asyncio.current_task()
-            all_tasks = asyncio.all_tasks()
-            pending_tasks = [task for task in all_tasks if task is not current_task and not task.done()]
-
-            # Cancel all pending tasks
-            for task in pending_tasks:
-                task.cancel()
-
-            # Wait for all tasks to be cancelled
-            if pending_tasks:
-                await asyncio.gather(*pending_tasks, return_exceptions=True)
+        await _cancel_sibling_tasks()
 
 
 def run_multistep_agent(
@@ -1909,8 +1911,6 @@ def run_multistep_agent(
     Returns:
         Result from the final step
     """
-    import asyncio
-
     if exec_options is None:
         exec_options = ExecutionOptions()
 

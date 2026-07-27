@@ -137,11 +137,11 @@ class Config(BaseModel):
     default_workspace: Optional[str] = None
     history_enabled: bool = True
     history_dir: Optional[Path] = None
-    max_history_days: Optional[int] = None
     auto_context_enabled: bool = True
     auto_context_files: List[str] = Field(default_factory=lambda: [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"])
     auto_context_include_global: bool = True
     skill_paths: List[str] = Field(default_factory=list)
+    agent_paths: List[str] = Field(default_factory=list)
     skill_ttl_default: int = 10
     secrets: Optional[SecretsConfig] = None
     history: Optional[HistoryConfig] = None

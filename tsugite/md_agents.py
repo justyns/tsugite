@@ -37,6 +37,11 @@ def _parse_directive_attribute(
     return value
 
 
+# Prompt caches allow a small number of breakpoints (Anthropic: 4), one per
+# attachment cache tier, so the grouped ``attachments:`` form is capped here.
+MAX_ATTACHMENT_TIERS = 4
+
+
 class AttachmentSpec(BaseModel):
     """Dict-form attachment specification.
 
@@ -54,6 +59,9 @@ class AttachmentSpec(BaseModel):
     attach: bool = True
     index_format: Literal["path_only", "first_line", "first_heading", "frontmatter"] = "first_heading"
     max_entries: int = 50
+    # Cache tier this attachment belongs to (0 = first/most-stable block). Set by
+    # the ``attachments`` grouping normalizer, not written directly in frontmatter.
+    tier: int = 0
 
     @field_validator("assign", mode="after")
     @classmethod
@@ -131,6 +139,38 @@ class AgentConfig(BaseModel):
         if v not in allowed:
             raise ValueError(f"visibility must be one of {allowed}, got: {v}")
         return v
+
+    @field_validator("attachments", mode="before")
+    @classmethod
+    def _normalize_attachment_tiers(cls, v: Any) -> Any:
+        """Accept a flat list (one cache block) or a list of lists (ordered cache
+        tiers), normalizing the grouped form to a flat list of specs each tagged
+        with its tier index. Earlier group = lower tier = cached deeper, so put
+        stable files first and volatile ones last. Mixing flat items and groups is
+        rejected; a leading-dash removal marker stays a plain string."""
+        if not isinstance(v, list) or not v:
+            return v
+        is_group = [isinstance(item, list) for item in v]
+        if not any(is_group):
+            return v  # flat: every item is tier 0 (the default)
+        if not all(is_group):
+            raise ValueError("attachments must be either a flat list or a list of groups, not a mix of both")
+        if len(v) > MAX_ATTACHMENT_TIERS:
+            raise ValueError(
+                f"attachments supports at most {MAX_ATTACHMENT_TIERS} groups (prompt-cache breakpoint limit)"
+            )
+        flat: list = []
+        for tier, group in enumerate(v):
+            for item in group:
+                if isinstance(item, str):
+                    flat.append(item if item.startswith("-") else {"path": item, "tier": tier})
+                elif isinstance(item, dict):
+                    flat.append({**item, "tier": tier})
+                elif isinstance(item, AttachmentSpec):
+                    flat.append(item.model_copy(update={"tier": tier}))
+                else:
+                    raise ValueError(f"invalid attachment item in group {tier}: {item!r}")
+        return flat
 
     @field_validator("attachments", mode="after")
     @classmethod
@@ -610,8 +650,6 @@ def parse_model_kwargs_from_args(args: str, step_name: str) -> dict[str, Any]:
     Raises:
         ValueError: If JSON parsing fails for response_format
     """
-    import json
-
     model_kwargs = {}
 
     # Check for json shorthand
@@ -863,15 +901,8 @@ def validate_tool_specs(tool_specs: list[str]) -> tuple[bool, Optional[str]]:
     Returns:
         Tuple of (is_valid, error_message). Error is None if valid.
     """
-    try:
-        # Import to ensure module can be loaded
-        from .tools import expand_tool_specs  # noqa: F401
+    for tool_spec in tool_specs:
+        if not isinstance(tool_spec, str):
+            return False, f"Tool specification must be string: {tool_spec}"
 
-        # Check syntax is valid
-        for tool_spec in tool_specs:
-            if not isinstance(tool_spec, str):
-                return False, f"Tool specification must be string: {tool_spec}"
-
-        return True, None
-    except Exception as e:
-        return False, f"Tool import error: {e}"
+    return True, None

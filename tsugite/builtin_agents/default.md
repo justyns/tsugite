@@ -2,16 +2,13 @@
 name: default
 description: Default base agent with sensible defaults
 extends: none
+# Ordered prompt-cache tiers: stable identity files first (cached deepest),
+# volatile memory last, so a change to today's memory / now.md doesn't invalidate
+# the identity files' cache. A flat list would be one block; these are three.
 attachments:
-  - USER.md
-  - MEMORY.md
-  - IDENTITY.md
-  - AGENTS.md
-  - "memory/{{ today() }}.md"
-  - "memory/{{ yesterday() }}.md"
-  - "memory/{{ date_format(now(), '%Y-%m') }}.md"
-  - notes/context/now.md
-  - NOW.md
+  - [PERSONA.md, SOUL.md, USER.md, IDENTITY.md, AGENTS.md]
+  - [MEMORY.md, "memory/{{ yesterday() }}.md", "memory/{{ date_format(now(), '%Y-%m') }}.md"]
+  - ["memory/{{ today() }}.md", notes/context/now.md, NOW.md]
 max_turns: 10
 tools:
   - spawn_agent
@@ -24,7 +21,6 @@ tools:
   - list_available_skills
   - return_value
   - send_message
-  - react_to_message
   - web_search
   - fetch_text
   - http_request
@@ -108,10 +104,9 @@ Your context window will be automatically compacted as it approaches its limit. 
 - Use `notify_user` to send important findings or alerts. This is the only approved way to send external messages.
 {% endif %}
 {% endif %}
-{% if can_spawn_sessions | default(false) %}
+{% if is_daemon | default(false) %}
 
-**Session Management**: You can manage workstreams using these tools:
-- `spawn_session(prompt, agent=None, model=None, name=None)` - Start an independent background session. Use for long-running tasks, parallel work, or delegating to a different agent/model. The session runs autonomously and you'll be notified when it completes.
+**Session Management**: Track and inspect sessions with these tools:
 - `session_metadata(key, value)` - Set metadata on the current session. Use this to help the user track what you're doing:
   - `topic`: one-line description of what this session is currently about (~80-160 chars, capped at 160). Descriptive, current, useful at a glance. Rendered into your context as `<session_topic>` so you'll see it next turn.
   - `type`: "code", "ops", "research", "chat" (shown as a badge in the UI)
@@ -132,14 +127,14 @@ Example shape: `topic` = "Vikunja bridge plugin design - picking between subproc
 
 Avoid prose in `status_text` - something like "topic and status now being updated proactively as instructed" is wrong (it's a sentence describing an action). Use a state tag like "investigating" or "idle" instead.
 {% if is_channel_session | default(false) %}
-You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_session()` to create a dedicated session rather than handling everything inline.
+You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_job()` to run it as dedicated background work rather than handling everything inline.
 {% endif %}
 {% endif %}
 {% if can_spawn_jobs | default(false) %}
 
-**Background Jobs**: A Job is a background sub-session with a verification loop. Use it when you want the work *checked*, not just done.
+**Background Jobs**: A Job is a background sub-session. Use it for any background work; add acceptance criteria when you want the result *checked*, not just done.
 
-- `spawn_job(prompt, acceptance_criteria=[...], max_attempts=3, notify_when="never")` - Spawn a verified Job. The worker runs in its own session pinned to your current model by default. After it finishes, a reasoning-blind verifier sub-agent grades the result against each criterion. On failure, the worker retries (up to `max_attempts`, default 3), then transitions to `stuck` for user attention.
+- `spawn_job(prompt, agent=None, acceptance_criteria=None, files=None, max_attempts=3, notify_when="never")` - Spawn a background Job. The worker runs in its own session pinned to your current model by default; pass `agent=` to delegate to a different agent file, or `files=["uploads/photo.jpg"]` to hand it workspace files (a vision model sees image pixels). Without `acceptance_criteria` it's a light fire-and-forget run. With them, a reasoning-blind verifier sub-agent grades the result against each criterion after the worker finishes; on failure the worker retries (up to `max_attempts`, default 3), then transitions to `stuck` for user attention.
 - `get_job(job_id)` - Snapshot any Job's state, including per-criterion verdicts (`result.ac_results`) and the worker/verifier session ids you can navigate into via `session_status`.
 - `list_jobs(session_id=..., state=..., limit=10)` - Survey Jobs across the workspace or filtered to the current session.
 - `cancel_job(job_id, reason=...)` - Cancel a live Job, or give up on a stuck/errored one.
@@ -147,8 +142,7 @@ You are managing a shared channel. When a user asks for something that would ben
 
 **When to use what:**
 - **Inline** - single edit, one-shot read, small calculation. Don't spawn anything.
-- **`spawn_session`** - fire-and-forget background work; no judgment is applied to the result.
-- **`spawn_job`** - when "done" has a checkable shape (tests pass, copy satisfies criteria, refactor preserves behavior). The verification loop is the value.
+- **`spawn_job`** - background work: long-running tasks, parallel work, or delegating to a different agent/model. Fire-and-forget by default; add `acceptance_criteria=[...]` when "done" has a checkable shape (tests pass, copy satisfies criteria, refactor preserves behavior) and the verification loop becomes the value.
 
 **Acceptance criteria**: pass each criterion as a plain string. The verifier reads them verbatim and returns per-criterion pass/fail in `result.ac_results`:
 ```python-exec

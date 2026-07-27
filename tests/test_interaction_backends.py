@@ -183,7 +183,44 @@ class TestHTTPInteractionBackend:
         t.join()
 
         assert result == "user said hello"
-        progress._emit.assert_called_once_with("ask_user", {"question": "What?", "question_type": "text"})
+        # The ask_user frame carries a durable ask id alongside the question fields.
+        ask_call = next(c for c in progress._emit.call_args_list if c.args[0] == "ask_user")
+        assert ask_call.args[1]["question"] == "What?"
+        assert ask_call.args[1]["question_type"] == "text"
+        assert ask_call.args[1]["ask_id"].startswith("ask-")
+        # Answering emits a matching ask_answered so a reload clears the prompt.
+        answered_call = next(c for c in progress._emit.call_args_list if c.args[0] == "ask_answered")
+        assert answered_call.args[1] == {"ask_id": ask_call.args[1]["ask_id"], "answer": "user said hello"}
+
+    def test_ask_user_registers_in_pending_registry_and_pops(self):
+        """While ask_user blocks, its backend is discoverable by ask_id in the
+        module registry; once unblocked the finally clause removes it."""
+        import time
+
+        from tsugite_daemon.adapters.http.sse import _PENDING_ASKS, HTTPInteractionBackend, SSEProgressHandler
+
+        progress = MagicMock(spec=SSEProgressHandler)
+        backend = HTTPInteractionBackend(progress)
+        seen: dict = {}
+
+        def resolve_by_id():
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                aid = backend._ask_id
+                if aid is not None and aid in _PENDING_ASKS:
+                    break
+                time.sleep(0.01)
+            seen["ask_id"] = backend._ask_id
+            seen["registered_backend"] = _PENDING_ASKS.get(seen["ask_id"])
+            backend.submit_response("done")
+
+        t = threading.Thread(target=resolve_by_id)
+        t.start()
+        backend.ask_user("Q?", "text")
+        t.join()
+
+        assert seen["registered_backend"] is backend
+        assert seen["ask_id"] not in _PENDING_ASKS  # popped by the finally
 
     def test_timeout_raises(self):
         from tsugite_daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
@@ -194,6 +231,18 @@ class TestHTTPInteractionBackend:
 
         with pytest.raises(RuntimeError, match="Timed out"):
             backend.ask_user("Quick?", "text")
+
+    def test_timeout_pops_from_pending_registry(self):
+        """A timed-out ask must not leak an entry in the pending registry."""
+        from tsugite_daemon.adapters.http.sse import _PENDING_ASKS, HTTPInteractionBackend, SSEProgressHandler
+
+        progress = MagicMock(spec=SSEProgressHandler)
+        backend = HTTPInteractionBackend(progress)
+        backend.TIMEOUT = 0.05
+
+        with pytest.raises(RuntimeError, match="Timed out"):
+            backend.ask_user("Quick?", "text")
+        assert backend._ask_id not in _PENDING_ASKS
 
 
 class TestContextPropagationThroughThreads:
@@ -244,3 +293,60 @@ class TestContextPropagationThroughThreads:
 
         # Without context propagation, backend is None in new thread
         assert result is None
+
+
+class TestHTTPApprovalRoundTrip:
+    """request_approval carries an approval decision end to end through the REAL
+    HTTP backend, over the same context-copy the web fetch detector relies on: the
+    backend set here (in the async run) must reach request_approval in the worker
+    thread, emit an ``approval`` ask_user frame, block, and map the reply back."""
+
+    def _drive(self, reply: str, *, allow_always: bool) -> tuple[dict, str]:
+        import contextvars
+        import time
+
+        from tsugite_daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
+
+        from tsugite.approval import request_approval
+
+        progress = MagicMock(spec=SSEProgressHandler)
+        backend = HTTPInteractionBackend(progress)
+        set_interaction_backend(backend)
+
+        # Copy the context AFTER setting the backend, exactly as asyncio.to_thread
+        # does before running the detector off the event loop.
+        ctx = contextvars.copy_context()
+        out: dict = {}
+
+        def run():
+            out["decision"] = request_approval("Fetch content from evil.test?", allow_always=allow_always)
+
+        worker = threading.Thread(target=lambda: ctx.run(run))
+        worker.start()
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not progress._emit.called:
+            time.sleep(0.01)
+        assert progress._emit.called, "backend never emitted the approval frame"
+        event_type, payload = progress._emit.call_args.args
+
+        backend.submit_response(reply)
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        return payload, out["decision"]
+
+    def test_always_allow_round_trips(self):
+        payload, decision = self._drive("Always allow", allow_always=True)
+        assert payload["question_type"] == "approval"
+        assert payload["options"] == ["Approve", "Deny", "Always allow"]
+        assert "evil.test" in payload["question"]
+        assert decision == "always"
+
+    def test_approve_round_trips(self):
+        _, decision = self._drive("Approve", allow_always=True)
+        assert decision == "approve"
+
+    def test_deny_round_trips(self):
+        payload, decision = self._drive("Deny", allow_always=False)
+        assert payload["options"] == ["Approve", "Deny"]
+        assert decision == "deny"

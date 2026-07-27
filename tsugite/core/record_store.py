@@ -116,10 +116,6 @@ class SqliteCollectionStorage:
             (self._collection, datetime.now(timezone.utc).isoformat()),
         )
 
-    def exists_any(self) -> bool:
-        """True when the collection has at least one row (no full scan)."""
-        return self._conn.execute(f'SELECT 1 FROM "{self._collection}" LIMIT 1').fetchone() is not None
-
     def get(self, record_id: str) -> dict | None:
         row = self._conn.execute(f'SELECT data FROM "{self._collection}" WHERE id = ?', (record_id,)).fetchone()
         if row is None:

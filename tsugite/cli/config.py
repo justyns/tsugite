@@ -175,7 +175,7 @@ def config_set_default_workspace(
     """Set the default workspace (auto-loaded unless --no-workspace is used).
 
     Examples:
-        tsu config set-default-workspace justyn
+        tsu config set-default-workspace personal
         tsu config set-default-workspace none  # Disable default workspace
     """
     from tsugite.config import get_config_path, update_config

@@ -272,14 +272,9 @@ def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider
     """Factory function — same interface as external plugin entry points."""
     config = _PROVIDER_CONFIGS.get(name, {})
 
-    api_base = kwargs.get("api_base") or config.get("api_base")
-    if not api_base:
-        env_key = config.get("api_base_env")
-        api_base = os.getenv(env_key) if env_key else None
-    if not api_base:
-        api_base = config.get("api_base_default", "https://api.openai.com/v1")
+    api_base = kwargs.get("api_base") or config.get("api_base") or "https://api.openai.com/v1"
 
-    api_key = kwargs.get("api_key") or config.get("api_key")
+    api_key = kwargs.get("api_key")
     if not api_key:
         env_key = config.get("api_key_env")
         api_key = os.getenv(env_key) if env_key else None

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, _is_recent
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.session_store import Session, SessionStore
 
@@ -31,25 +31,6 @@ def workspace_dir(tmp_path):
 def _make_adapter(workspace_dir, session_store):
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     return _StubAdapter("test-agent", agent_config, session_store)
-
-
-# ── _is_recent helper ──
-
-
-class TestIsRecent:
-    def test_recent_timestamp(self):
-        ts = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
-        assert _is_recent(ts, minutes=5) is True
-
-    def test_old_timestamp(self):
-        ts = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
-        assert _is_recent(ts, minutes=10) is False
-
-    def test_empty_string(self):
-        assert _is_recent("", minutes=10) is False
-
-    def test_invalid_timestamp(self):
-        assert _is_recent("not-a-date", minutes=10) is False
 
 
 # ── Context population ──

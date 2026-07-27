@@ -64,3 +64,14 @@ def is_prompt_too_long_error(error: BaseException | str) -> bool:
     """
     s = str(error).lower()
     return any(needle in s for needle in ("prompt is too long", "prompt too long", "context length exceeded"))
+
+
+def is_unresumable_history_error(error: BaseException | str) -> bool:
+    """Return True if `error` is the poisoned-transcript 400 from a resumed session.
+
+    A resumed session-owning transcript (e.g. a Claude Code sidecar) that picked up
+    an empty text content block makes the Anthropic API reject every request with
+    "400 ... text content blocks must be non-empty". Retrying the same resume can
+    never succeed, so the caller must abandon it and start a fresh session.
+    """
+    return "text content blocks must be non-empty" in str(error).lower()

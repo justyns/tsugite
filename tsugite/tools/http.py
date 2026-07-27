@@ -178,8 +178,7 @@ def http_request(
         follow_redirects: Follow 3xx redirects (default True, max 5 hops); False returns the 3xx response for inspection
     """
     try:
-        request_headers = dict(headers) if headers else {}
-        response = _simple_request(url, method, request_headers, timeout, body, follow_redirects=follow_redirects)
+        response = _simple_request(url, method, headers, timeout, body, follow_redirects=follow_redirects)
 
         return HttpResponse(
             status_code=response.status_code,

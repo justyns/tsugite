@@ -116,7 +116,6 @@ def render(
             # Agent config attachments are resolved by AgentPreparer as workspace-relative
             # files — only CLI-level attachments and auto-context are resolved here.
             cli_only_attachments = inject_auto_context_if_enabled(
-                None,
                 agent.config.auto_context,
                 cli_override=auto_context,
             )

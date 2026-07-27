@@ -15,6 +15,7 @@ from tsugite.agent_inheritance import (
     merge_agent_configs,
     resolve_agent_inheritance,
 )
+from tsugite.config import Config
 from tsugite.md_agents import AgentConfig, parse_agent
 
 
@@ -111,6 +112,45 @@ def test_iter_agent_search_paths_can_exclude_local_roots(tmp_path):
     assert (project / ".tsugite").resolve() not in paths
     assert (project / ".tsugite" / "agents").resolve() in paths
     assert (project / "agents").resolve() in paths
+
+
+def test_iter_agent_search_paths_includes_config_agent_paths(tmp_path):
+    """Agents load from config.agent_paths dirs, mirroring config.skill_paths for skills.
+
+    Config paths sit right after workspace and before the project-local roots
+    (the slot skills give their extra roots), are mutable, and dedupe via the
+    shared resolver. An agent file living there is found and resolvable."""
+    config_agents = tmp_path / "team-agents"
+    config_agents.mkdir()
+    (config_agents / "helper.md").write_text("---\nname: helper\n---\nfrom config path\n")
+
+    workspace_dir = tmp_path / "ws" / "agents"
+    workspace_dir.mkdir(parents=True)
+    workspace = SimpleNamespace(agents_dir=workspace_dir)
+
+    project = tmp_path / "proj"
+    (project / "agents").mkdir(parents=True)
+
+    fake_config = Config(agent_paths=[str(config_agents)])
+    with (
+        patch("tsugite.config.load_config", return_value=fake_config),
+        patch("tsugite.agent_inheritance.get_plugin_agents_paths", return_value=[]),
+        patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]),
+    ):
+        entries = iter_agent_search_paths(current_agent_dir=project, workspace=workspace)
+        found = find_agent_file("helper", project, workspace=workspace)
+
+    paths = [e.path.resolve() for e in entries]
+    assert config_agents.resolve() in paths
+    assert found == (config_agents / "helper.md").resolve()
+
+    sources = [e.source for e in entries]
+    assert sources[0] == AgentDirSource.WORKSPACE
+    assert sources[1] == AgentDirSource.CONFIG
+    assert sources[2] == AgentDirSource.PROJECT
+
+    config_entry = next(e for e in entries if e.source == AgentDirSource.CONFIG)
+    assert config_entry.readonly is False
 
 
 def test_find_agent_file_prefers_user_global_over_plugin(tmp_path):

@@ -136,11 +136,6 @@ def tools_add(
     if param:
         for param_spec in param:
             parts = param_spec.split(":")
-            if len(parts) < 1:
-                console.print(f"[red]Invalid parameter spec: {param_spec}[/red]")
-                console.print("Format: name[:type][:required|default]")
-                raise typer.Exit(1)
-
             param_name = parts[0]
 
             # Default to string type

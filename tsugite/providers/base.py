@@ -47,7 +47,6 @@ class ModelInfo:
     supports_vision: bool = False
     supports_audio: bool = False
     supports_reasoning: bool = False
-    supports_streaming: bool = True
     supported_effort_levels: list[str] | None = None
     # How the model exposes reasoning control: "budget_tokens" (extended
     # thinking via thinking budgets) or "adaptive" (native effort parameter;
@@ -60,6 +59,10 @@ class ModelInfo:
 class Provider(Protocol):
     name: str
     cacheable: bool
+    # True when the provider exposes a finite, known set of model ids (CLI-backed
+    # providers like claude_code/codex_cli). API providers accept arbitrary ids, so
+    # they leave this False and callers must not treat an unlisted id as wrong.
+    models_are_definitive: bool = False
 
     async def acompletion(
         self,

@@ -116,7 +116,6 @@ def onboard_workspace(
     from tsugite.cli.helpers import PathContext, load_and_validate_agent
     from tsugite.options import ExecutionOptions, HistoryOptions
     from tsugite.ui.repl_chat import run_repl_chat
-    from tsugite.workspace.context import build_workspace_attachments
 
     workspace = _load_workspace_or_exit(name)
 
@@ -124,9 +123,6 @@ def onboard_workspace(
 
     # Load the onboard builtin agent
     _, agent_path, _ = load_and_validate_agent("onboard", console)
-
-    # Build workspace attachments
-    workspace_attachments = [str(att.source) for att in build_workspace_attachments(workspace)]
 
     # Run as REPL chat session (multi-turn conversation)
     exec_opts = ExecutionOptions(model_override=model, stream=True)
@@ -143,7 +139,6 @@ def onboard_workspace(
         exec_options=exec_opts,
         history_options=history_opts,
         path_context=path_context,
-        workspace_attachments=workspace_attachments,
     )
 
     console.print(f"\n[green]✓[/green] Workspace '{name}' onboarding complete")
@@ -161,7 +156,7 @@ def show_info(
 
     # Check for workspace files
     console.print("\n[bold]Workspace Files:[/bold]")
-    files = workspace.get_workspace_files()
+    files = sorted(p for p in workspace.path.glob("*.md") if p.is_file())
     if files:
         for file in files:
             console.print(f"  ✓ {file.name}")

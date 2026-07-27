@@ -186,3 +186,87 @@ def test_context_tokens_falls_back_to_token_count():
     context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
 
     assert context_tokens == 50000
+
+
+@pytest.mark.asyncio
+async def test_run_accumulates_openai_family_cache_reads():
+    """A codex/openai turn reports cache reads on `cached_tokens`; the agent's
+    cache_read accumulator (which the CLI usage-store path reads directly) must
+    pick them up so the Usage tab isn't blank for those providers."""
+    agent = _make_agent()
+    _patch_provider(
+        agent,
+        return_value=_mock_response(
+            "Thought: done\n\n```python-exec\nfinal_answer(1)\n```",
+            Usage(prompt_tokens=22341, completion_tokens=1475, total_tokens=23816, cached_tokens=18000),
+        ),
+    )
+
+    await agent.run("test", return_full_result=True)
+
+    assert agent.cache_read_tokens == 18000
+
+
+def test_usage_store_cache_prefers_result_over_provider_state():
+    """The daemon usage-store call derives cache columns from the agent's
+    accumulated totals (carried on the result), falling back to provider_state
+    only when the result carries none - so codex/openai turns (empty get_state)
+    still record their cache reads, and claude_code/acp turns are unchanged."""
+    result = AgentExecutionResult(
+        response="test",
+        cache_read_tokens=18000,
+        cache_creation_tokens=0,
+    )
+    ps = {}  # codex/openai get_state() -> None -> {}
+
+    # Simulate the adapter's derivation (base.py usage record call).
+    cache_read = getattr(result, "cache_read_tokens", None) or ps.get("cache_read_tokens", 0)
+    cache_creation = getattr(result, "cache_creation_tokens", None) or ps.get("cache_creation_tokens", 0)
+
+    assert cache_read == 18000
+    assert cache_creation == 0
+
+
+def test_usage_store_cache_falls_back_to_provider_state():
+    """When the result carries no cache accounting (older path), provider_state's
+    cache totals still win - preserving claude_code/acp recording."""
+    result = AgentExecutionResult(response="test")
+    ps = {"cache_read_tokens": 900, "cache_creation_tokens": 100}
+
+    cache_read = getattr(result, "cache_read_tokens", None) or ps.get("cache_read_tokens", 0)
+    cache_creation = getattr(result, "cache_creation_tokens", None) or ps.get("cache_creation_tokens", 0)
+
+    assert cache_read == 900
+    assert cache_creation == 100
+
+
+def test_runner_populates_cache_tokens_on_result():
+    """The runner carries the agent's accumulated cache totals onto the result the
+    daemon reads. The same assignment already feeds the CLI usage-store record, so
+    it must appear a SECOND time (on the AgentExecutionResult) - asserted by count,
+    like the schedule_id wiring, so dropping the plumbing can't silently blank the
+    Usage tab again."""
+    import inspect
+
+    from tsugite.agent_runner import runner
+
+    src = inspect.getsource(runner._execute_agent_with_prompt)
+    assert src.count("cache_creation_tokens=agent.cache_creation_tokens") >= 2
+    assert src.count("cache_read_tokens=agent.cache_read_tokens") >= 2
+
+
+def test_usage_record_derives_cache_from_result_with_provider_state_fallback():
+    """The daemon usage-store call must take cache columns off the result (the
+    agent's accumulated totals, which include OpenAI-family cached reads), falling
+    back to provider_state. Source-asserted so the read-side wiring can't regress."""
+    import inspect
+    import re
+
+    from tsugite_daemon.adapters.base import BaseAdapter
+
+    src = re.sub(r"\s+", " ", inspect.getsource(BaseAdapter._handle_message_inner))
+    assert 'cache_read_tokens=getattr(result, "cache_read_tokens", None) or ps.get("cache_read_tokens", 0)' in src
+    assert (
+        'cache_creation_tokens=getattr(result, "cache_creation_tokens", None) or ps.get("cache_creation_tokens", 0)'
+        in src
+    )

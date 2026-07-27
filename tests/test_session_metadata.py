@@ -31,16 +31,16 @@ def session_in_store(store):
 
 class TestSessionMetadata:
     def test_set_metadata_key(self, store, session_in_store):
-        result = store.set_metadata(session_in_store.id, "task", "https://tasks.example/42")
+        result = store.set_metadata_bulk(session_in_store.id, {"task": "https://tasks.example/42"})
         assert result.metadata["task"] == "https://tasks.example/42"
 
     def test_set_metadata_overwrites(self, store, session_in_store):
-        store.set_metadata(session_in_store.id, "status_text", "investigating")
-        result = store.set_metadata(session_in_store.id, "status_text", "PR opened")
+        store.set_metadata_bulk(session_in_store.id, {"status_text": "investigating"})
+        result = store.set_metadata_bulk(session_in_store.id, {"status_text": "PR opened"})
         assert result.metadata["status_text"] == "PR opened"
 
     def test_delete_metadata_key(self, store, session_in_store):
-        store.set_metadata(session_in_store.id, "notes", "some notes")
+        store.set_metadata_bulk(session_in_store.id, {"notes": "some notes"})
         result = store.delete_metadata(session_in_store.id, "notes")
         assert "notes" not in result.metadata
 
@@ -63,7 +63,7 @@ class TestSessionMetadata:
 
     def test_set_metadata_updates_last_active(self, store, session_in_store):
         old_active = session_in_store.last_active
-        store.set_metadata(session_in_store.id, "type", "ops")
+        store.set_metadata_bulk(session_in_store.id, {"type": "ops"})
         updated = store.get_session(session_in_store.id)
         assert updated.last_active >= old_active
 
@@ -71,7 +71,7 @@ class TestSessionMetadata:
         store1 = SessionStore(tmp_path / "store.json")
         s = Session(id="persist-test", agent="test")
         store1.create_session(s)
-        store1.set_metadata("persist-test", "type", "research")
+        store1.set_metadata_bulk("persist-test", {"type": "research"})
 
         store2 = SessionStore(tmp_path / "store.json")
         loaded = store2.get_session("persist-test")
@@ -79,10 +79,10 @@ class TestSessionMetadata:
 
     def test_set_metadata_nonexistent_session_raises(self, store):
         with pytest.raises(ValueError, match="not found"):
-            store.set_metadata("nonexistent", "key", "value")
+            store.set_metadata_bulk("nonexistent", {"key": "value"})
 
     def test_arbitrary_keys_allowed(self, store, session_in_store):
-        result = store.set_metadata(session_in_store.id, "custom_field", "custom_value")
+        result = store.set_metadata_bulk(session_in_store.id, {"custom_field": "custom_value"})
         assert result.metadata["custom_field"] == "custom_value"
 
 
@@ -93,7 +93,7 @@ class TestReadOnlyKeys:
     @pytest.mark.parametrize("key", sorted(READ_ONLY_METADATA_KEYS))
     def test_set_read_only_key_raises(self, store, session_in_store, key):
         with pytest.raises(ValueError, match="read-only"):
-            store.set_metadata(session_in_store.id, key, "forbidden")
+            store.set_metadata_bulk(session_in_store.id, {key: "forbidden"})
 
     @pytest.mark.parametrize("key", sorted(READ_ONLY_METADATA_KEYS))
     def test_delete_read_only_key_raises(self, store, session_in_store, key):
@@ -106,7 +106,7 @@ class TestReadOnlyKeys:
         # session_metadata tool (which routes through set_metadata).
         assert "sandbox_override" in READ_ONLY_METADATA_KEYS
         with pytest.raises(ValueError, match="read-only"):
-            store.set_metadata(session_in_store.id, "sandbox_override", '{"enabled": false}')
+            store.set_metadata_bulk(session_in_store.id, {"sandbox_override": '{"enabled": false}'})
 
     def test_bulk_with_read_only_key_rejects_all(self, store, session_in_store):
         with pytest.raises(ValueError, match="read-only"):
@@ -146,15 +146,6 @@ class TestChannelSessionIndex:
         s2 = store.get_or_create_channel_session("channel-1", "helper", "user-1")
         assert s1.id != s2.id
 
-    def test_find_by_channel(self, store):
-        store.get_or_create_channel_session("channel-99", "odyn", "user-1")
-        found = store.find_by_channel("channel-99", "odyn")
-        assert found is not None
-        assert found.metadata["channel_id"] == "channel-99"
-
-    def test_find_by_channel_missing(self, store):
-        assert store.find_by_channel("nonexistent", "odyn") is None
-
     def test_compact_session_repoints_channel_index(self, store):
         """Compacting a channel session must repoint the channel index to the successor,
         else the next channel message orphans the compacted history into a new empty session."""
@@ -163,15 +154,14 @@ class TestChannelSessionIndex:
         assert successor.id != s.id
         # The channel must now resolve to the compacted successor, not a fresh empty session.
         assert store.get_or_create_channel_session("channel-xyz", "odyn", "user-1").id == successor.id
-        assert store.find_by_channel("channel-xyz", "odyn").id == successor.id
+        assert store._channel_index[("channel-xyz", "odyn")] == successor.id
 
     def test_channel_index_rebuilt_on_load(self, tmp_path):
         store1 = SessionStore(tmp_path / "store.json")
         store1.get_or_create_channel_session("ch-1", "odyn", "user-1")
 
         store2 = SessionStore(tmp_path / "store.json")
-        found = store2.find_by_channel("ch-1", "odyn")
-        assert found is not None
+        assert ("ch-1", "odyn") in store2._channel_index
 
 
 # ── Session Runner Metadata ──
@@ -204,7 +194,7 @@ class TestSessionRunnerMetadata:
         from tsugite_daemon.session_runner import SessionRunner
 
         store, event_bus, session = runner_deps
-        store.set_metadata(session.id, "notes", "temp")
+        store.set_metadata_bulk(session.id, {"notes": "temp"})
         runner = SessionRunner(store, {}, event_bus=event_bus)
         runner.delete_session_metadata(session.id, "notes")
 
@@ -257,7 +247,7 @@ class TestSessionMetadataTool:
         from tsugite.tools.sessions import session_metadata
 
         self._create_session("tool-del")
-        self.store.set_metadata("tool-del", "notes", "to be deleted")
+        self.store.set_metadata_bulk("tool-del", {"notes": "to be deleted"})
         result = session_metadata(key="notes", value=None, session_id="tool-del")
         assert "notes" not in result["metadata"]
 
@@ -296,12 +286,12 @@ class TestTopicLengthCap:
 
     def test_topic_at_cap_succeeds(self, store, session_in_store):
         topic = "x" * 160
-        result = store.set_metadata(session_in_store.id, "topic", topic)
+        result = store.set_metadata_bulk(session_in_store.id, {"topic": topic})
         assert result.metadata["topic"] == topic
 
     def test_topic_over_cap_rejected(self, store, session_in_store):
         with pytest.raises(ValueError, match="160"):
-            store.set_metadata(session_in_store.id, "topic", "x" * 161)
+            store.set_metadata_bulk(session_in_store.id, {"topic": "x" * 161})
 
     def test_topic_over_cap_via_bulk_rejected(self, store, session_in_store):
         with pytest.raises(ValueError, match="160"):
@@ -311,9 +301,9 @@ class TestTopicLengthCap:
 
     def test_other_keys_uncapped(self, store, session_in_store):
         long_value = "x" * 500
-        result = store.set_metadata(session_in_store.id, "task", long_value)
+        result = store.set_metadata_bulk(session_in_store.id, {"task": long_value})
         assert result.metadata["task"] == long_value
 
     def test_non_string_topic_rejected(self, store, session_in_store):
         with pytest.raises(ValueError, match="string"):
-            store.set_metadata(session_in_store.id, "topic", 123)
+            store.set_metadata_bulk(session_in_store.id, {"topic": 123})

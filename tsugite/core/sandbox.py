@@ -10,7 +10,7 @@ and also stays in core; the executor orchestrates it.
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import List, Optional
 
 from tsugite.plugins import load_backend_entry_point
 
@@ -26,17 +26,6 @@ class SandboxConfig:
     extra_ro_binds: List[Path] = field(default_factory=list)
     extra_rw_binds: List[Path] = field(default_factory=list)
     pass_env: List[str] = field(default_factory=list)  # extra env var NAMES to pass through
-
-
-@runtime_checkable
-class Sandbox(Protocol):
-    """Wraps a command for isolated execution.
-
-    Backends are constructed with (config, proxy_socket=None, workspace_dir=None,
-    state_dir=None) and expose a classmethod/staticmethod `check_available() -> bool`.
-    """
-
-    def build_command(self, inner_cmd: List[str]) -> List[str]: ...
 
 
 def _configured_backend() -> str:

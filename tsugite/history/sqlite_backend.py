@@ -419,22 +419,6 @@ class SqliteHistoryBackend:
                 break
         return list(hits.values())
 
-    def purge(self, *, older_than: Optional[datetime] = None) -> int:
-        """Delete sessions last written before ``older_than`` (events cascade). Returns count."""
-        if older_than is None:
-            return 0
-        cutoff = _as_iso(older_than)
-        conn = self._conn()
-        removed = 0
-
-        def body():
-            nonlocal removed
-            cur = conn.execute("DELETE FROM sessions WHERE COALESCE(updated_at, created_at) < ?", (cutoff,))
-            removed = cur.rowcount
-
-        _run_write(conn, body)
-        return removed
-
     def delete_session(self, session_id: str) -> bool:
         """Delete one session and its events (cascade). Returns True if a row was removed."""
         conn = self._conn()

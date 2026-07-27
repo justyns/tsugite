@@ -1,7 +1,5 @@
 """Initialization command for first-time setup."""
 
-import subprocess
-from pathlib import Path
 from typing import List, Optional
 
 import typer
@@ -40,20 +38,6 @@ def _get_questionary_style():
             ),  # Current selection - black on cyan
         ]
     )
-
-
-def detect_ollama() -> bool:
-    """Check if Ollama is running."""
-    try:
-        result = subprocess.run(
-            ["ollama", "list"],
-            capture_output=True,
-            timeout=2,
-            check=False,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
 
 
 def fetch_provider_models(provider: str) -> List[str]:
@@ -214,61 +198,6 @@ def prompt_for_model(providers: dict[str, int], skip_prompt: bool = False, defau
         else:
             # Regular model selected
             return selected_model
-
-
-def test_setup(model: str, skip_test: bool = False) -> bool:
-    """Run a quick test to verify setup works."""
-    if skip_test:
-        return True
-
-    console.print("\n[bold cyan]Testing Setup[/bold cyan]")
-
-    if not Confirm.ask("Run a quick test?", default=True):
-        return True
-
-    try:
-        from io import StringIO
-
-        from rich.console import Console as RichConsole
-
-        # Use the builtin default agent
-        from tsugite.agent_inheritance import find_agent_file
-        from tsugite.agent_runner import run_agent
-        from tsugite.ui import custom_agent_ui
-
-        agent_path = find_agent_file("default", current_agent_dir=Path.cwd())
-
-        console.print("[dim]Running: tsugite run +default 'say hello'[/dim]")
-
-        # Create a quiet logger that doesn't output anything
-        quiet_console = RichConsole(file=StringIO())
-        with custom_agent_ui(
-            quiet_console,
-            show_code=False,
-            show_observations=False,
-            show_progress=False,
-            show_llm_messages=False,
-            show_panels=False,
-        ) as logger:
-            from tsugite.options import ExecutionOptions
-
-            result = run_agent(
-                agent_path=agent_path,
-                prompt="Say hello in one sentence",
-                exec_options=ExecutionOptions(model_override=model),
-                custom_logger=logger,
-            )
-
-        console.print("[green]✓[/green] Test successful!")
-        console.print(
-            f"[dim]Response: {result[:100]}...[/dim]" if len(result) > 100 else f"[dim]Response: {result}[/dim]"
-        )
-        return True
-
-    except Exception as e:
-        console.print(f"[yellow]Warning: Test failed: {e}[/yellow]")
-        console.print("[dim]You can still use tsugite, but you may need to configure your model.[/dim]")
-        return False
 
 
 def init(

@@ -1,6 +1,6 @@
 """Attachment handler system for different content sources."""
 
-from typing import List
+from typing import List, Optional
 
 from tsugite.attachments.auto_context import AutoContextHandler
 from tsugite.attachments.base import AttachmentHandler
@@ -25,6 +25,7 @@ __all__ = [
     "AutoContextHandler",
     "get_handler",
     "get_handlers",
+    "get_specific_handler",
     # Storage functions
     "add_attachment",
     "get_attachment",
@@ -71,3 +72,22 @@ def get_handler(source: str) -> AttachmentHandler:
             return handler
 
     raise ValueError(f"No handler found for source: {source}")
+
+
+def get_specific_handler(source: str) -> Optional[AttachmentHandler]:
+    """A non-fallback handler that claims ``source`` (a built-in specific handler
+    or a plugin one, e.g. the YouTube transcript handler), or None when only the
+    generic file/URL fallback would match.
+
+    Lets a caller prefer a smart handler for known sources while keeping its own
+    generic path for everything else: the web context detector runs a pasted URL
+    through this so a YouTube link yields a transcript, but a plain page still
+    falls back to its readable-article scrape instead of the fallback handler's
+    raw markdown.
+    """
+    from tsugite.plugins import get_attachment_handlers
+
+    for handler in _SPECIFIC_HANDLERS + list(get_attachment_handlers()):
+        if handler.can_handle(source):
+            return handler
+    return None

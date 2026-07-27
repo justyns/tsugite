@@ -177,10 +177,20 @@ def schedule_list() -> list:
     """List all configured schedules with their status.
 
     Returns:
-        List of schedules with id, agent, type, enabled, next_run, last_status
+        List of schedules with id, agent, type, enabled, next_run, last_status.
+        Per-run history is omitted to keep the result small; fetch it for one
+        schedule with schedule_status(id).
     """
     entries = _call(_scheduler.list)
-    return [_entry_to_dict(e) for e in entries]
+    result = []
+    for e in entries:
+        d = _entry_to_dict(e)
+        # Every schedule keeps up to 20 run_history entries; dumping them all can
+        # balloon the listing past the exec-output cap. last_run/last_status/
+        # run_count already summarize health, so drop the array here.
+        d.pop("run_history", None)
+        result.append(d)
+    return result
 
 
 @tool(require_daemon=True)

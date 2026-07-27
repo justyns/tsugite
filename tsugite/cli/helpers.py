@@ -113,24 +113,6 @@ def get_logo(console: Console) -> str:
     return TSUGITE_LOGO_NARROW if console.width < MIN_WIDTH_FOR_WIDE_LOGO else TSUGITE_LOGO_WIDE
 
 
-def print_plain_section(console: Console, title: str, content: str, style: str = "") -> None:
-    """Print a plain text section with simple separators.
-
-    Args:
-        console: Rich console instance
-        title: Section title
-        content: Section content
-        style: Optional Rich style for content (e.g., "cyan", "green")
-    """
-    console.print()
-    console.rule(title if not style else f"[{style}]{title}[/{style}]", style="dim")
-    if style:
-        console.print(f"[{style}]{content}[/{style}]")
-    else:
-        console.print(content)
-    console.print()
-
-
 def print_plain_info(console: Console, title: str, items: dict, style: str = "cyan") -> None:
     """Print plain text information list.
 
@@ -157,7 +139,6 @@ def print_plain_info(console: Console, title: str, items: dict, style: str = "cy
 
 def resolve_attachments_with_error_handling(
     attachments: List[str],
-    base_dir: Path,
     refresh_cache: bool,
     console: Console,
     error_context: str = "Attachment",
@@ -166,7 +147,6 @@ def resolve_attachments_with_error_handling(
 
     Args:
         attachments: List of attachment names/paths
-        base_dir: Base directory for resolving paths
         refresh_cache: Whether to refresh cached content
         console: Console for error messages
         error_context: Context for error message (e.g., "Agent attachment" or "Attachment")
@@ -187,25 +167,22 @@ def resolve_attachments_with_error_handling(
 
 
 def inject_auto_context_if_enabled(
-    agent_attachments: Optional[List[str]],
     agent_auto_context: Optional[bool],
     cli_override: Optional[bool] = None,
 ) -> Optional[List[str]]:
-    """Inject auto-context attachment if enabled in config or agent.
+    """Return the auto-context attachment list if enabled in config or agent.
 
     Args:
-        agent_attachments: Current agent attachments list
         agent_auto_context: Agent's auto_context setting (None = use config default)
         cli_override: CLI flag override (None = use precedence, True/False = force)
 
     Returns:
-        Updated attachments list with auto-context prepended if enabled, or original list
+        ["auto-context"] if auto-context is enabled, else None
     """
     from tsugite.config import load_config
 
     config = load_config()
 
-    # Determine if auto-context should be enabled
     # Priority: CLI override > agent setting > config default
     if cli_override is not None:
         should_enable = cli_override
@@ -214,17 +191,7 @@ def inject_auto_context_if_enabled(
     else:
         should_enable = config.auto_context_enabled
 
-    if not should_enable:
-        return agent_attachments
-
-    # Prepend auto-context to attachments list
-    attachments = list(agent_attachments) if agent_attachments else []
-
-    # Only add if not already present
-    if "auto-context" not in attachments:
-        attachments.insert(0, "auto-context")
-
-    return attachments
+    return ["auto-context"] if should_enable else None
 
 
 def assemble_prompt_with_attachments(
@@ -257,14 +224,14 @@ def assemble_prompt_with_attachments(
 
     # Resolve agent attachments
     agent_attachment_contents = (
-        resolve_attachments_with_error_handling(agent_attachments, base_dir, refresh_cache, console, "Agent attachment")
+        resolve_attachments_with_error_handling(agent_attachments, refresh_cache, console, "Agent attachment")
         if agent_attachments
         else []
     )
 
     # Resolve CLI attachments
     cli_attachment_contents = (
-        resolve_attachments_with_error_handling(cli_attachments, base_dir, refresh_cache, console, "Attachment")
+        resolve_attachments_with_error_handling(cli_attachments, refresh_cache, console, "Attachment")
         if cli_attachments
         else []
     )
@@ -639,25 +606,3 @@ def workspace_directory_context(
         # Always restore original CWD
         if effective_cwd != invoked_from:
             os.chdir(str(invoked_from))
-
-
-@contextmanager
-def agent_context(agent_path: str, root: Optional[str], console: Console):
-    """Validate agent path and optionally change working directory."""
-    original_cwd = _validate_and_change_to_root(root, console)
-
-    try:
-        agent_file = Path(agent_path)
-        if not agent_file.exists():
-            console.print(f"[red]Agent file not found: {agent_path}[/red]")
-            raise typer.Exit(1)
-
-        if agent_file.suffix != ".md":
-            console.print(f"[red]Agent file must be a .md file: {agent_path}[/red]")
-            raise typer.Exit(1)
-
-        yield agent_file.resolve()
-
-    finally:
-        if original_cwd:
-            os.chdir(original_cwd)

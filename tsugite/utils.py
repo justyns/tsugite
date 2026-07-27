@@ -99,38 +99,19 @@ def execute_shell_command(
     subprocess_env = {**os.environ, **env} if env else None
 
     try:
-        if shell:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                cwd=resolved_cwd,
-                env=subprocess_env,
-            )
-        else:
-            cmd_parts = shlex.split(command)
-            result = subprocess.run(
-                cmd_parts,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                cwd=resolved_cwd,
-                env=subprocess_env,
-            )
+        args = command if shell else shlex.split(command)
+        result = subprocess.run(
+            args,
+            shell=shell,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            cwd=resolved_cwd,
+            env=subprocess_env,
+        )
 
-        output = ""
-        if result.stdout:
-            output += result.stdout
-        if result.stderr:
-            if output:
-                output += "\n" + result.stderr
-            else:
-                output = result.stderr
-
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
         if result.returncode != 0:
             output += f"\n[Exit code: {result.returncode}]"
 
@@ -237,6 +218,15 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
     from tsugite.attachments.base import Attachment, AttachmentContentType
     from tsugite.cache import get_cached_content, save_to_cache
 
+    def as_text(name: str, text: str) -> Attachment:
+        return Attachment(
+            name=name,
+            content=text,
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+            source_url=None,
+        )
+
     resolved = []
 
     for ref in attachment_refs:
@@ -259,31 +249,14 @@ def resolve_attachments(attachment_refs: List[str], refresh_cache: bool = False)
 
         # If inline content, use it directly as text attachment
         if content is not None:
-            resolved.append(
-                Attachment(
-                    name=ref,
-                    content=content,
-                    content_type=AttachmentContentType.TEXT,
-                    mime_type="text/plain",
-                    source_url=None,
-                )
-            )
+            resolved.append(as_text(ref, content))
             continue
 
         # For file/URL references, check cache first (for text attachments only)
         if not refresh_cache:
             cached = get_cached_content(source)
             if cached:
-                # Cached content is text
-                resolved.append(
-                    Attachment(
-                        name=ref,
-                        content=cached,
-                        content_type=AttachmentContentType.TEXT,
-                        mime_type="text/plain",
-                        source_url=None,
-                    )
-                )
+                resolved.append(as_text(ref, cached))
                 continue
 
         # Fetch content via handler

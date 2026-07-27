@@ -82,12 +82,10 @@ class Skill:
         name: Skill name/identifier.
         content: Rendered SKILL.md body, optionally with an appended
             bundled-resources block.
-        source_path: Optional path where the skill was loaded from.
     """
 
     name: str
     content: str
-    source_path: str | None = None
 
 
 def get_builtin_skills_path() -> Path:

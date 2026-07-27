@@ -77,29 +77,14 @@ class GenericURLHandler(AttachmentHandler):
             content_type = self._get_content_type(source)
             name = self._get_name_from_url(source)
 
-            # Determine content type and handle accordingly
+            # Image/audio/document are handed to the provider as a URL reference
+            # (no download); only some providers consume these URL blocks. Text is
+            # the only type we download and decode here.
+            url_ref_type = None
             if content_type.startswith("image/"):
-                # Image - return URL reference; providers fetch it
-                mime_type = content_type.split(";")[0].strip()
-                return Attachment(
-                    name=name,
-                    content=None,
-                    content_type=AttachmentContentType.IMAGE,
-                    mime_type=mime_type,
-                    source_url=source,
-                )
-
+                url_ref_type = AttachmentContentType.IMAGE
             elif content_type.startswith("audio/"):
-                # Audio - return URL reference; only some providers support this (e.g. OpenAI input_audio)
-                mime_type = content_type.split(";")[0].strip()
-                return Attachment(
-                    name=name,
-                    content=None,
-                    content_type=AttachmentContentType.AUDIO,
-                    mime_type=mime_type,
-                    source_url=source,
-                )
-
+                url_ref_type = AttachmentContentType.AUDIO
             elif content_type in (
                 "application/pdf",
                 "application/vnd.ms-excel",
@@ -107,32 +92,35 @@ class GenericURLHandler(AttachmentHandler):
                 "application/msword",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ):
-                # Document - return URL reference; only some providers support URL file blocks (e.g. OpenAI)
+                url_ref_type = AttachmentContentType.DOCUMENT
+
+            if url_ref_type is not None:
                 mime_type = content_type.split(";")[0].strip()
                 return Attachment(
                     name=name,
                     content=None,
-                    content_type=AttachmentContentType.DOCUMENT,
+                    content_type=url_ref_type,
                     mime_type=mime_type,
                     source_url=source,
+                    untrusted=True,
                 )
 
-            else:
-                # Text content - download and decode
-                with urllib.request.urlopen(source, timeout=30) as response:
-                    content = response.read().decode("utf-8")
+            # Text content - download and decode
+            with urllib.request.urlopen(source, timeout=30) as response:
+                content = response.read().decode("utf-8")
 
-                if "text/html" in content_type:
-                    content = convert_html_to_markdown(content)
+            if "text/html" in content_type:
+                content = convert_html_to_markdown(content)
 
-                mime_type = content_type.split(";")[0].strip() if content_type else "text/plain"
-                return Attachment(
-                    name=name,
-                    content=content,
-                    content_type=AttachmentContentType.TEXT,
-                    mime_type=mime_type,
-                    source_url=None,
-                )
+            mime_type = content_type.split(";")[0].strip() if content_type else "text/plain"
+            return Attachment(
+                name=name,
+                content=content,
+                content_type=AttachmentContentType.TEXT,
+                mime_type=mime_type,
+                source_url=None,
+                untrusted=True,
+            )
 
         except Exception as e:
             raise ValueError(f"Failed to fetch URL '{source}': {e}")

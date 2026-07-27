@@ -34,11 +34,6 @@ def set_ui_context(
     _event_bus_var.set(event_bus)
 
 
-def get_console() -> Optional[Console]:
-    """Get the console from context variables."""
-    return _console_var.get()
-
-
 def get_progress() -> Optional[Progress]:
     """Get the progress spinner from context variables."""
     return _progress_var.get()

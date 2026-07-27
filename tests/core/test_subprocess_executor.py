@@ -118,6 +118,13 @@ async def test_tool_call_ipc():
         assert result.error is None
         assert "yes" in result.output
         assert call_log == ["continue?"]
+        # The per-call record survives the child->parent round trip.
+        assert result.tools_called == ["ask_user"]
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["tool"] == "ask_user"
+        assert result.tool_calls[0]["arguments"] == {"question": "continue?"}
+        assert result.tool_calls[0]["success"] is True
+        assert result.tool_calls[0]["output"] == "yes"
     finally:
         executor.cleanup()
 

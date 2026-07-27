@@ -155,17 +155,7 @@ def create_shell_tool_function(definition: ShellToolDefinition):
     annotations = {}
 
     for param_name, param_def in definition.parameters.items():
-        # Map our types to Python types
-        if param_def.type == "str":
-            param_type = str
-        elif param_def.type == "int":
-            param_type = int
-        elif param_def.type == "bool":
-            param_type = bool
-        elif param_def.type == "float":
-            param_type = float
-        else:
-            param_type = str
+        param_type = {"str": str, "int": int, "bool": bool, "float": float}.get(param_def.type, str)
 
         annotations[param_name] = param_type
 

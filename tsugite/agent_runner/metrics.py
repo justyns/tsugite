@@ -23,8 +23,6 @@ class StepMetrics:
 
 def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any] = None):
     """Display step execution metrics in a table using event system."""
-    from tsugite.events import EventBus
-
     from .helpers import get_ui_handler
 
     # Build metrics table
@@ -66,8 +64,7 @@ def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any
             skipped += 1
 
     # Build summary line
-    summary_parts = []
-    summary_parts.append(f"Total: {total_duration:.1f}s")
+    summary_parts = [f"Total: {total_duration:.1f}s"]
     if successful > 0:
         summary_parts.append(f"[green]Success: {successful}[/green]")
     if skipped > 0:

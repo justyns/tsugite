@@ -4,7 +4,7 @@ Tracks execution history for building conversation context.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -32,13 +32,11 @@ class AgentMemory:
     - The task
     - All steps (thought/code/observation)
     - Reasoning content (for o1/o3/Claude)
-    - Final answer
     """
 
     task: str = ""
     steps: List[StepResult] = field(default_factory=list)
     reasoning_history: List[str] = field(default_factory=list)
-    final_answer: Optional[Any] = None
 
     def add_task(self, task: str) -> None:
         """Set the task."""
@@ -76,7 +74,3 @@ class AgentMemory:
     def add_reasoning(self, reasoning: str) -> None:
         """Add reasoning content (from o1/o3/Claude thinking)."""
         self.reasoning_history.append(reasoning)
-
-    def add_final_answer(self, answer: Any) -> None:
-        """Set final answer."""
-        self.final_answer = answer

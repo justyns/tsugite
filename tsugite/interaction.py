@@ -21,8 +21,8 @@ class InteractionBackend(Protocol):
 
         Args:
             question: The question text
-            question_type: "text", "yes_no", or "choice"
-            options: Options for choice questions
+            question_type: "text", "yes_no", "choice", or "approval"
+            options: Options for choice/approval questions
 
         Returns:
             User's response as a string
@@ -68,6 +68,14 @@ class NonInteractiveBackend:
     def ask_user(self, question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
         if question_type == "yes_no":
             return self._default_yes_no
+        if question_type == "approval":
+            # Fail closed: never auto-approve in non-interactive mode. Return the
+            # "Deny" option (never index 0, which would be "Approve").
+            if options:
+                for option in options:
+                    if option.strip().lower() == "deny":
+                        return option
+            return "deny"
         if question_type == "choice":
             if not options:
                 raise RuntimeError("Cannot ask choice questions without options in non-interactive mode.")

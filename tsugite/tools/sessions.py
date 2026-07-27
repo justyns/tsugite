@@ -66,9 +66,11 @@ def start_session(
     from tsugite_daemon.session_store import Session, SessionSource
 
     if agent is None:
-        from tsugite.agent_runner.helpers import get_current_agent
+        from tsugite.agent_runner.helpers import get_current_agent, get_current_daemon_agent
 
-        agent = get_current_agent() or "default"
+        # Prefer the daemon adapter's registered name (the key that actually has
+        # an adapter); fall back to the agent-file config name, then "default".
+        agent = get_current_daemon_agent() or get_current_agent() or "default"
 
     # Inherit the sandbox: a sandboxed agent's spawned session must stay
     # sandboxed regardless of the target agent's own config.
@@ -180,68 +182,6 @@ def rename_session(session_id: str, title: str) -> dict:
     """
     session = _call(_session_runner.rename_session, session_id, title)
     return {"session_id": session.id, "title": session.title}
-
-
-@tool(require_daemon=True)
-def spawn_session(
-    prompt: str,
-    agent: Optional[str] = None,
-    model: Optional[str] = None,
-    agent_file: Optional[str] = None,
-    name: Optional[str] = None,
-    parent_session_id: Optional[str] = None,
-    notify: Optional[list[str]] = None,
-) -> dict:
-    """Spawn a new background session that runs independently.
-
-    Creates a new session with its own conversation history, visible in the web UI.
-    The parent session is notified when the spawned session completes.
-    Use this instead of spawn_agent when running in daemon mode.
-
-    Args:
-        prompt: Task instruction for the spawned session.
-        agent: Agent name. Defaults to the current agent.
-        model: Optional model override (e.g. "anthropic:claude-sonnet-4-20250514").
-        agent_file: Agent file name or path to use instead of the default.
-        name: Human-readable name for the session (used as session ID prefix).
-        parent_session_id: Parent session ID for tracking lineage.
-        notify: Notification channels for result delivery.
-
-    Returns:
-        Session details including ID and status
-    """
-    from tsugite_daemon.session_store import Session, SessionSource
-
-    if agent is None:
-        from tsugite.agent_runner.helpers import get_current_agent
-
-        agent = get_current_agent() or "default"
-
-    if parent_session_id is None:
-        parent_session_id = get_current_session_id()
-
-    # Inherit the sandbox: a sandboxed agent's spawned session must stay sandboxed
-    # regardless of the target agent's own config.
-    from tsugite.agent_runner.helpers import sandbox_context_to_override
-
-    metadata = {}
-    sandbox_override = sandbox_context_to_override()
-    if sandbox_override is not None:
-        metadata["sandbox_override"] = sandbox_override
-
-    session = Session(
-        id=f"spawn-{name}" if name else "",
-        agent=agent,
-        source=SessionSource.SPAWNED.value,
-        prompt=prompt,
-        model=model,
-        agent_file=agent_file,
-        parent_id=parent_session_id,
-        notify=notify or [],
-        metadata=metadata,
-    )
-    result = _call(_session_runner.start_session, session)
-    return asdict(result)
 
 
 @tool(require_daemon=True)

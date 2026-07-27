@@ -94,12 +94,3 @@ def test_complete_path(tmp_path):
     # Check that at least one test file is found
     found_test_files = [p for p in paths if "test" in p and (p.endswith(".txt") or p.endswith(".md"))]
     assert len(found_test_files) >= 1
-
-
-def test_update_agent_name():
-    """Test updating current agent name."""
-    completer = TsugiteCompleter(current_agent_name="old-agent")
-    assert completer.current_agent_name == "old-agent"
-
-    completer.update_agent_name("new-agent")
-    assert completer.current_agent_name == "new-agent"

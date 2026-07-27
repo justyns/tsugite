@@ -3,7 +3,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +13,6 @@ from tsugite.md_agents import Agent, AgentConfig, AttachmentSpec  # noqa: E402
 from tsugite.renderer import humanize_mtime  # noqa: E402
 from tsugite.skill_discovery import Skill  # noqa: E402
 from tsugite.utils import has_glob_chars  # noqa: E402
-
-if TYPE_CHECKING:
-    from tsugite.workspace import Workspace
 
 
 def _render_path(template: str) -> Optional[str]:
@@ -93,10 +90,18 @@ def resolve_agent_config_attachments(
     bindings: Dict[str, Any] = {}
 
     for item in items:
+        before = len(attachments)
         if isinstance(item, str):
             _resolve_string_item(item, workspace_path, file_handler, attachments)
         else:
             _resolve_spec(item, workspace_path, file_handler, attachments, bindings)
+        # Tag everything this item produced with its cache tier (a spec's tier;
+        # plain strings are always tier 0). The context turn renders one cache
+        # block per tier so a volatile file only invalidates its own block.
+        tier = getattr(item, "tier", 0)
+        if tier:
+            for att in attachments[before:]:
+                att.tier = tier
 
     return attachments, bindings
 
@@ -360,7 +365,6 @@ class PreparedAgent:
         tools: List of Tool objects ready for agent execution
         context: Full template rendering context
         combined_instructions: Combined default + agent instructions
-        prefetch_results: Results from prefetch tool execution
         attachments: List of Attachment objects for multi-modal inputs
         skills: List of Skill objects for loaded skills
     """
@@ -373,7 +377,6 @@ class PreparedAgent:
     tools: List[Tool]
     context: Dict[str, Any]
     combined_instructions: str
-    prefetch_results: Dict[str, Any]
     attachments: List[Attachment]
     original_prompt: str = ""
     skills: List[Skill] = field(default_factory=list)
@@ -452,7 +455,6 @@ class AgentPreparer:
         agent: Agent,
         prompt: str,
         context: Optional[Dict[str, Any]] = None,
-        workspace: Optional["Workspace"] = None,
         skip_tool_directives: bool = False,
         skip_exec_directives: bool = False,
         attachments: Optional[List[Attachment]] = None,
@@ -465,7 +467,6 @@ class AgentPreparer:
             agent: Parsed agent object
             prompt: User prompt/task
             context: Additional context variables
-            workspace: Optional workspace for context files and persistent sessions
             skip_tool_directives: Skip executing tool directives (for render)
             skip_exec_directives: Skip executing exec directives (for render --no-exec)
             attachments: List of Attachment objects for multi-modal inputs
@@ -496,24 +497,19 @@ class AgentPreparer:
 
         agent_config = agent.config
 
-        # Step 0: Resolve workspace files using convention-based discovery
-        workspace_attachments: List[Attachment] = []
-        if workspace:
-            from tsugite.workspace.context import build_workspace_attachments
+        all_attachments = list(attachments or [])
 
-            workspace_attachments = build_workspace_attachments(workspace)
-
-        # Merge workspace attachments with explicit attachments (explicit first)
-        all_attachments = (attachments or []) + workspace_attachments
-
-        # Step 0b: Load agent-config attachments (Jinja-rendered paths). Legacy
-        # `-filename` string entries remove a workspace default with that name.
-        workspace_path = workspace.path if workspace else None
+        # Load agent-config attachments (Jinja-rendered paths). Legacy `-filename`
+        # string entries drop a same-named entry from the attachments above.
+        # Front-matter paths resolve via cwd (workspace_path is None in production).
+        workspace_path = None
         removals, keep_items = split_attachment_removals(agent_config.attachments or [])
         if removals:
             all_attachments = [a for a in all_attachments if a.name not in removals]
         loaded, attachment_bindings = resolve_agent_config_attachments(keep_items, workspace_path)
-        all_attachments.extend(loaded)
+        # Front-matter attachments carry the cache tiers and are the intended source,
+        # so they dedupe AHEAD of any same-named attachment the caller passed in.
+        all_attachments = loaded + all_attachments
 
         # Deduplicate by name (keep first occurrence)
         seen_names: set[str] = set()
@@ -524,14 +520,13 @@ class AgentPreparer:
                 deduped.append(att)
         all_attachments = deduped
 
-        # Step 0c: Set up workspace-aware skill manager. Fall back to
-        # path_context.workspace_dir when no Workspace was passed so daemon/chat
-        # callers still get workspace skills.
+        # Set up the workspace-aware skill manager, resolving the workspace from
+        # path_context.workspace_dir so daemon/chat callers still get workspace skills.
         from tsugite.config import load_config as _load_config
         from tsugite.tools.skills import SkillManager, set_skill_manager
         from tsugite.workspace.models import Workspace
 
-        effective_workspace = workspace or Workspace.try_load(path_context.workspace_dir if path_context else None)
+        effective_workspace = Workspace.try_load(path_context.workspace_dir if path_context else None)
 
         _config = _load_config()
         extra_skill_paths = (agent_config.skill_paths or []) + (_config.skill_paths or [])
@@ -650,7 +645,6 @@ class AgentPreparer:
                     tools=[],
                     context=full_context,
                     combined_instructions="",
-                    prefetch_results=prefetch_context,
                     attachments=all_attachments,
                     skipped=True,
                     skip_reason=skip_reason,
@@ -808,7 +802,6 @@ they typically mean the invoked location ({invoked_from}).
             tools=tools,
             context=full_context,
             combined_instructions=combined_instructions,
-            prefetch_results=prefetch_context,
             attachments=all_attachments,
             skills=skills,
             expiring_skills=expiring_skills,

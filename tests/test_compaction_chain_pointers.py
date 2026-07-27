@@ -292,8 +292,8 @@ def test_compact_session_preserves_topic_and_type_metadata(tmp_path):
     """
     store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
     session = store.get_or_create_interactive("test-user", "test-agent")
-    store.set_metadata(session.id, "topic", "researching widgets")
-    store.set_metadata(session.id, "type", "research")
+    store.set_metadata_bulk(session.id, {"topic": "researching widgets"})
+    store.set_metadata_bulk(session.id, {"type": "research"})
 
     new_session = store.compact_session(session.id)
 

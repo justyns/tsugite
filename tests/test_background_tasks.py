@@ -275,7 +275,7 @@ class TestAutoReply:
     @pytest.mark.asyncio
     async def test_auto_reply_calls_handle_message_on_user_session(self):
         sa, mock_adapter = _make_scheduler_adapter(
-            identity_map={"discord:123456789": "justyn"},
+            identity_map={"discord:123456789": "alice"},
             notification_channels={"dm": _make_discord_channel()},
         )
 
@@ -294,7 +294,7 @@ class TestAutoReply:
 
         mock_adapter.handle_message.assert_awaited_once()
         call_kwargs = mock_adapter.handle_message.call_args[1]
-        assert call_kwargs["user_id"] == "justyn"
+        assert call_kwargs["user_id"] == "alice"
         assert "background_task" in call_kwargs["message"]
         assert "file1.txt" in call_kwargs["message"]
         assert call_kwargs["channel_context"].source == "background_task"
@@ -303,7 +303,7 @@ class TestAutoReply:
     async def test_auto_reply_skips_inject_history(self):
         """When auto_reply=True, _inject_into_user_sessions should NOT be called."""
         sa, mock_adapter = _make_scheduler_adapter(
-            identity_map={"discord:123456789": "justyn"},
+            identity_map={"discord:123456789": "alice"},
             notification_channels={"dm": _make_discord_channel()},
         )
 
@@ -363,7 +363,7 @@ class TestAutoReply:
     async def test_auto_reply_falls_back_on_error(self):
         """If handle_message fails, fall back to raw notification."""
         sa, mock_adapter = _make_scheduler_adapter(
-            identity_map={"discord:123456789": "justyn"},
+            identity_map={"discord:123456789": "alice"},
         )
         mock_adapter.handle_message = AsyncMock(side_effect=RuntimeError("agent crashed"))
 
@@ -693,7 +693,6 @@ class TestPartialHistoryOnError:
         mock_adapter._resolve_agent_path = MagicMock(return_value=Path("/fake/agent.yaml"))
         mock_adapter._build_message_context = MagicMock(return_value="test prompt")
         mock_adapter._build_agent_context = MagicMock(return_value={})
-        mock_adapter._get_workspace_attachments = MagicMock(return_value=[])
         mock_adapter._emit_ui = MagicMock()
         mock_adapter._identity_map = {}
         mock_adapter.event_bus = None

@@ -15,9 +15,9 @@ from .events import (
     InfoEvent,
     LLMMessageEvent,
     LLMWaitProgressEvent,
+    ModelResponseEvent,
     ObservationEvent,
     PromptSnapshotEvent,
-    ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     SecretAccessEvent,
@@ -49,10 +49,9 @@ __all__ = [
     # LLM
     "LLMMessageEvent",
     "LLMWaitProgressEvent",
+    "ModelResponseEvent",
     "ReasoningContentEvent",
     "ReasoningTokensEvent",
-    # Reaction
-    "ReactionEvent",
     # Meta
     "InfoEvent",
     "ErrorEvent",

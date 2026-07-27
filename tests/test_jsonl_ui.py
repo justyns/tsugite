@@ -8,6 +8,7 @@ from tsugite.events import (
     FinalAnswerEvent,
     LLMMessageEvent,
     LLMWaitProgressEvent,
+    ModelResponseEvent,
     ObservationEvent,
     StepStartEvent,
     TaskStartEvent,
@@ -59,6 +60,40 @@ def test_jsonl_thought(capsys):
     event = json.loads(lines[0])
     assert event["type"] == "thought"
     assert event["content"] == "Thinking about the problem..."
+
+
+def test_jsonl_model_response(capsys):
+    """MODEL_RESPONSE emits the settled parse with the same type and field
+    names as the persisted history event (one reducer path for live+replay)."""
+    handler = JSONLUIHandler()
+    handler.handle_event(
+        ModelResponseEvent(thought="pre-fence prose", content_blocks={"a.md": "body"}, tail="post-fence prose")
+    )
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["type"] == "model_response"
+    assert event["thought"] == "pre-fence prose"
+    assert event["content_blocks"] == {"a.md": "body"}
+    assert event["tail"] == "post-fence prose"
+
+
+def test_jsonl_model_response_carries_usage(capsys):
+    """The frame maps the turn's usage dump through unchanged, so the live path
+    surfaces the same cache split (reads/writes) that replay reads off history."""
+    handler = JSONLUIHandler()
+    handler.handle_event(
+        ModelResponseEvent(
+            thought="x",
+            usage={"total_tokens": 115, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 20},
+        )
+    )
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["usage"] == {
+        "total_tokens": 115,
+        "cache_read_input_tokens": 80,
+        "cache_creation_input_tokens": 20,
+    }
 
 
 def test_jsonl_code_execution(capsys):
@@ -201,3 +236,18 @@ def test_jsonl_multiple_events(capsys):
     assert json.loads(lines[1])["type"] == "turn_start"
     assert json.loads(lines[2])["type"] == "thought"
     assert json.loads(lines[3])["type"] == "final_result"
+
+
+def test_jsonl_stream_chunk_and_complete(capsys):
+    """Streaming deltas map to stream_chunk/stream_complete frames so the web
+    UI can render tokens as they arrive (the daemon SSE handlers subclass this)."""
+    from tsugite.events import StreamChunkEvent, StreamCompleteEvent
+
+    handler = JSONLUIHandler()
+    handler.handle_event(StreamChunkEvent(chunk="Hel"))
+    handler.handle_event(StreamChunkEvent(chunk="lo"))
+    handler.handle_event(StreamCompleteEvent())
+
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().split("\n")]
+    assert [e["type"] for e in lines] == ["stream_chunk", "stream_chunk", "stream_complete"]
+    assert [e.get("chunk") for e in lines[:2]] == ["Hel", "lo"]

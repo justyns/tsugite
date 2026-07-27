@@ -93,31 +93,6 @@ Assistant: {{ turn.agent_response }}
         assert agent_name == "test_chat"
         assert model == "ollama:custom-model"
 
-    def test_save_conversation_uses_agent_config(self, test_agent, tmp_path):
-        """Test that save_conversation accesses agent.config correctly."""
-        manager = ChatManager(
-            agent_path=test_agent,
-            model_override=None,
-            max_history=50,
-        )
-
-        # Add a test turn
-        manager.add_turn("Hello", "Hi there!")
-
-        # Save should work without errors
-        save_path = tmp_path / "conversation.json"
-        manager.save_conversation(save_path)
-
-        assert save_path.exists()
-
-        # Verify contents
-        import json
-
-        data = json.loads(save_path.read_text())
-        assert data["agent"] == "test_chat"
-        assert data["model"] == "ollama:qwen2.5-coder:7b"
-        assert len(data["turns"]) == 1
-
     def test_chat_history_context_format(self, test_agent):
         """Test that chat_history is passed as list to agent."""
 

@@ -376,10 +376,11 @@ final_answer(42)
     assert event_types[1] == EventType.STEP_START
     assert event_types[2] == EventType.PROMPT_SNAPSHOT
     assert event_types[3] == EventType.LLM_MESSAGE
-    assert event_types[4] == EventType.PROMPT_SNAPSHOT  # post-LLM snapshot with response
-    assert event_types[5] == EventType.CODE_EXECUTION
-    assert event_types[6] == EventType.OBSERVATION
-    assert event_types[7] == EventType.FINAL_ANSWER
+    assert event_types[4] == EventType.MODEL_RESPONSE  # settled parse follows the thought
+    assert event_types[5] == EventType.PROMPT_SNAPSHOT  # post-LLM snapshot with response
+    assert event_types[6] == EventType.CODE_EXECUTION
+    assert event_types[7] == EventType.OBSERVATION
+    assert event_types[8] == EventType.FINAL_ANSWER
 
 
 @pytest.mark.asyncio

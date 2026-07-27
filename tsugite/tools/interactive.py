@@ -139,35 +139,6 @@ def send_message(message: str) -> str:
     return f"Message sent: {message}"
 
 
-@tool(interactive_only=True)
-def react_to_message(emoji: str, message_id: Optional[str] = None) -> str:
-    """Add a reaction emoji to a message.
-
-    Use this to acknowledge messages with emoji reactions instead of
-    (or in addition to) sending a text response.
-    If message_id is omitted, reacts to the most recent user message.
-
-    Args:
-        emoji: The emoji to react with (e.g., "👍", "✅", "👀", "⏳")
-        message_id: Optional platform message ID to react to
-
-    Returns:
-        Confirmation that reaction was added
-
-    Example:
-        react_to_message("👍")
-        react_to_message("✅", message_id="123456")
-    """
-    from tsugite.ui_context import get_event_bus
-
-    event_bus = get_event_bus()
-    if event_bus:
-        from tsugite.events import ReactionEvent
-
-        event_bus.emit(ReactionEvent(emoji=emoji, message_id=message_id))
-    return f"Reacted with {emoji}"
-
-
 @tool(parent_only=True)
 def ask_user(question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
     """Ask the user a question interactively.
@@ -277,10 +248,7 @@ def ask_user_batch(questions: List[dict]) -> dict:
 
     backend = get_interaction_backend()
     if backend is not None:
-        responses = {}
-        for q in questions:
-            responses[q["id"]] = backend.ask_user(q["question"], q["type"], q.get("options"))
-        return responses
+        return {q["id"]: backend.ask_user(q["question"], q["type"], q.get("options")) for q in questions}
 
     # Fall back to TTY behavior
     if not is_interactive():
@@ -501,9 +469,9 @@ def handle_question_by_type(q_type: str, q_text: str, options: Optional[List[str
     """Handle a question based on its type.
 
     Args:
-        q_type: Question type ("text", "yes_no", or "choice")
+        q_type: Question type ("text", "yes_no", "choice", or "approval")
         q_text: Question text
-        options: Options for choice questions (required if q_type == "choice")
+        options: Options for choice/approval questions (required for those types)
         console: Rich console for output
         flush_fn: Function to flush input buffer
 
@@ -517,9 +485,10 @@ def handle_question_by_type(q_type: str, q_text: str, options: Optional[List[str
         return ask_text_question(q_text, console, flush_fn)
     elif q_type == "yes_no":
         return ask_yes_no_question(q_text, console, flush_fn)
-    elif q_type == "choice":
+    elif q_type in ("choice", "approval"):
+        # Approval renders like a choice: the caller supplies Approve/Deny/[Always allow].
         if not options:
-            raise ValueError("Options required for choice type questions")
+            raise ValueError(f"Options required for {q_type} type questions")
         return ask_choice_question(q_text, options, console, flush_fn)
     else:
         raise ValueError(f"Invalid question type: {q_type}")

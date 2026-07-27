@@ -5,14 +5,36 @@ Content is stored by SHA256 hash, allowing deduplication and
 efficient storage of session context.
 """
 
-import base64
 import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 from tsugite.config import get_xdg_cache_path
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` so a reader never sees a partial file.
+
+    Writes a sibling temp file (same directory, so the rename stays on one
+    filesystem) and atomically replaces the target. A failure discards the temp
+    and leaves any existing file untouched, rather than truncating it in place.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def get_cache_key(source: str) -> str:
@@ -72,11 +94,11 @@ def save_to_cache(source: str, content: str) -> None:
     cache_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        cache_file.write_text(content, encoding="utf-8")
+        _atomic_write_text(cache_file, content)
 
         # Update metadata
         _update_cache_metadata(source, cache_file)
-    except IOError as e:
+    except OSError as e:
         raise RuntimeError(f"Failed to save cache for {source}: {e}") from e
 
 
@@ -108,11 +130,9 @@ def _update_cache_metadata(source: str, cache_file: Path) -> None:
     }
 
     # Save metadata
-    metadata_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with open(metadata_file, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-    except IOError:
+        _atomic_write_text(metadata_file, json.dumps(metadata, indent=2, ensure_ascii=False))
+    except OSError:
         # Metadata update failure is not critical
         pass
 
@@ -151,9 +171,8 @@ def clear_cache(source: Optional[str] = None) -> int:
                 if cache_key in metadata:
                     del metadata[cache_key]
 
-                with open(metadata_file, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-            except (json.JSONDecodeError, IOError):
+                _atomic_write_text(metadata_file, json.dumps(metadata, indent=2, ensure_ascii=False))
+            except (json.JSONDecodeError, OSError):
                 pass
     else:
         # Clear all cache files
@@ -169,7 +188,7 @@ def clear_cache(source: Optional[str] = None) -> int:
     return count
 
 
-def list_cache() -> Dict[str, Dict[str, any]]:
+def list_cache() -> Dict[str, Dict[str, Any]]:
     """List all cached entries with metadata.
 
     Returns:
@@ -187,7 +206,7 @@ def list_cache() -> Dict[str, Dict[str, any]]:
         return {}
 
 
-def get_cache_info(source: str) -> Optional[Dict[str, any]]:
+def get_cache_info(source: str) -> Optional[Dict[str, Any]]:
     """Get cache metadata for a specific source.
 
     Args:
@@ -199,163 +218,3 @@ def get_cache_info(source: str) -> Optional[Dict[str, any]]:
     metadata = list_cache()
     cache_key = get_cache_key(source)
     return metadata.get(cache_key)
-
-
-# Session Storage V2 functions
-
-
-def get_content_hash(content: Union[str, bytes]) -> str:
-    """Compute SHA256 hash of content.
-
-    Args:
-        content: String or bytes content
-
-    Returns:
-        Full SHA256 hex digest
-    """
-    if isinstance(content, str):
-        content = content.encode("utf-8")
-    return hashlib.sha256(content).hexdigest()
-
-
-def get_binary_cache_path(content_hash: str) -> Path:
-    """Get cache file path for binary content by hash.
-
-    Args:
-        content_hash: SHA256 hash of content
-
-    Returns:
-        Path to cache file
-    """
-    cache_dir = get_xdg_cache_path("attachments")
-    return cache_dir / f"{content_hash}.bin"
-
-
-def store_content(content: Union[str, bytes], is_binary: bool = False) -> str:
-    """Store content by hash, returns hash key.
-
-    Args:
-        content: Content to store (string or bytes)
-        is_binary: If True, treat as binary and base64 encode for storage
-
-    Returns:
-        SHA256 hash of content (use as cache key)
-    """
-    content_hash = get_content_hash(content)
-
-    if is_binary:
-        cache_file = get_binary_cache_path(content_hash)
-        if cache_file.exists():
-            return content_hash
-
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-
-        if isinstance(content, str):
-            content = content.encode("utf-8")
-
-        cache_file.write_bytes(content)
-    else:
-        cache_file = get_xdg_cache_path("attachments") / f"{content_hash}.txt"
-        if cache_file.exists():
-            return content_hash
-
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-
-        cache_file.write_text(content, encoding="utf-8")
-
-    _update_hash_metadata(content_hash, cache_file)
-    return content_hash
-
-
-def get_content_by_hash(content_hash: str, is_binary: bool = False) -> Optional[Union[str, bytes]]:
-    """Retrieve content by hash.
-
-    Args:
-        content_hash: SHA256 hash of content
-        is_binary: If True, return bytes
-
-    Returns:
-        Content if found, None otherwise
-    """
-    if is_binary:
-        cache_file = get_binary_cache_path(content_hash)
-        if cache_file.exists():
-            return cache_file.read_bytes()
-    else:
-        cache_file = get_xdg_cache_path("attachments") / f"{content_hash}.txt"
-        if cache_file.exists():
-            return cache_file.read_text(encoding="utf-8")
-
-    return None
-
-
-def get_content_by_hash_as_base64(content_hash: str) -> Optional[str]:
-    """Retrieve binary content by hash as base64 string.
-
-    Useful for reconstructing image data URIs.
-
-    Args:
-        content_hash: SHA256 hash of content
-
-    Returns:
-        Base64-encoded content if found, None otherwise
-    """
-    content = get_content_by_hash(content_hash, is_binary=True)
-    if content is None:
-        return None
-    return base64.b64encode(content).decode("ascii")
-
-
-def _update_hash_metadata(content_hash: str, cache_file: Path) -> None:
-    """Update cache metadata for hash-based storage."""
-    metadata_file = get_xdg_cache_path("attachments") / "metadata.json"
-
-    if metadata_file.exists():
-        try:
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                metadata = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            metadata = {}
-    else:
-        metadata = {}
-
-    metadata[content_hash] = {
-        "cached_at": datetime.now(timezone.utc).isoformat(),
-        "size": cache_file.stat().st_size,
-    }
-
-    metadata_file.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with open(metadata_file, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-    except IOError:
-        pass
-
-
-def compute_context_hash(attachments: Dict[str, Any], skills: List[str]) -> str:
-    """Compute hash of context state for change detection.
-
-    Creates a deterministic hash from attachment references and skill list.
-
-    Args:
-        attachments: Dict of attachment name -> AttachmentRef (or dict representation)
-        skills: List of skill names
-
-    Returns:
-        SHA256 hash of context state
-    """
-    # Build deterministic representation
-    att_items = []
-    for name in sorted(attachments.keys()):
-        ref = attachments[name]
-        if hasattr(ref, "model_dump"):
-            ref = ref.model_dump(exclude_none=True)
-        att_items.append((name, json.dumps(ref, sort_keys=True)))
-
-    skills_sorted = sorted(skills)
-
-    context_str = json.dumps({"attachments": att_items, "skills": skills_sorted}, sort_keys=True)
-    return hashlib.sha256(context_str.encode()).hexdigest()[:16]

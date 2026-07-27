@@ -41,6 +41,11 @@ class AgentExecutionResult(BaseModel):
     )  # List of Attachment objects (using Any for Pydantic compatibility)
     provider_state: Optional[dict] = None
     last_input_tokens: Optional[int] = None
+    # Cache-token totals accumulated across the turn's model calls. The daemon
+    # usage-store call reads these (falling back to provider_state) so OpenAI-family
+    # turns - whose get_state() carries no cache - still record their cache reads.
+    cache_creation_tokens: Optional[int] = None
+    cache_read_tokens: Optional[int] = None
     session_id: Optional[str] = None  # ID of the SessionStorage the agent recorded events to
 
     def __str__(self) -> str:

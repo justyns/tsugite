@@ -33,47 +33,6 @@ def test_workspace_load_file_not_directory(tmp_path):
         Workspace.load(file_path)
 
 
-def test_workspace_get_workspace_files_none_exist(tmp_path):
-    """Test workspace with no identity files."""
-    workspace_path = tmp_path / "empty-workspace"
-    workspace_path.mkdir()
-
-    workspace = Workspace.load(workspace_path)
-    files = workspace.get_workspace_files()
-
-    assert files == []
-
-
-def test_workspace_get_workspace_files_some_exist(tmp_path):
-    """Test workspace with some identity files."""
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-
-    (workspace_path / "PERSONA.md").write_text("# Persona")
-    (workspace_path / "USER.md").write_text("# User")
-
-    workspace = Workspace.load(workspace_path)
-    files = workspace.get_workspace_files()
-
-    assert len(files) == 2
-    assert any(f.name == "PERSONA.md" for f in files)
-    assert any(f.name == "USER.md" for f in files)
-
-
-def test_workspace_get_workspace_files_all_exist(tmp_path):
-    """Test workspace with all identity files."""
-    workspace_path = tmp_path / "workspace"
-    workspace_path.mkdir()
-
-    for filename in ["PERSONA.md", "SOUL.md", "USER.md", "MEMORY.md", "IDENTITY.md", "AGENTS.md"]:
-        (workspace_path / filename).write_text(f"# {filename}")
-
-    workspace = Workspace.load(workspace_path)
-    files = workspace.get_workspace_files()
-
-    assert len(files) == 6
-
-
 def test_workspace_create(tmp_path):
     """Test creating a new workspace."""
     workspace_path = tmp_path / "new-workspace"
@@ -81,7 +40,6 @@ def test_workspace_create(tmp_path):
     workspace = Workspace.create(workspace_path)
 
     assert workspace.path.exists()
-    assert workspace.memory_dir.exists()
     assert workspace.skills_dir.exists()
     assert workspace.agents_dir.exists()
 
@@ -112,6 +70,5 @@ def test_workspace_properties(tmp_path):
 
     workspace = Workspace.load(workspace_path)
 
-    assert workspace.memory_dir == workspace_path / "memory"
     assert workspace.skills_dir == workspace_path / "skills"
     assert workspace.agents_dir == workspace_path / "agents"

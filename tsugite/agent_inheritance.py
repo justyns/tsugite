@@ -20,6 +20,7 @@ class AgentDirSource(Enum):
 
     WORKSPACE = "workspace"  # caller-passed workspace agents/ (mutable)
     PROJECT = "project"  # caller-passed project agents/ (mutable; today only http.py)
+    CONFIG = "config"  # config.agent_paths dirs (user-configured, mutable)
     BUILTIN = "builtin"  # tsugite/builtin_agents/ (read-only)
     PLUGIN = "plugin"  # plugin <pkg>/agents/ via tsugite.plugins entry-points (read-only)
     GLOBAL = "global"  # XDG global agents/ (mutable)
@@ -105,6 +106,25 @@ def get_plugin_agents_paths() -> List[Path]:
     return paths
 
 
+def get_config_agent_paths() -> List[Path]:
+    """Get agent directory paths configured via ``config.agent_paths``.
+
+    Mirrors how skills draw extra roots from ``config.skill_paths``: entries are
+    user-editable, so these dirs are mutable. ``~`` is expanded here; relative
+    paths resolve later during dedup. Order is preserved.
+
+    Returns:
+        List of configured agent directories.
+    """
+    from .config import load_config
+
+    try:
+        config = load_config()
+    except Exception:
+        return []
+    return [Path(p).expanduser() for p in (config.agent_paths or [])]
+
+
 def iter_agent_search_paths(
     *,
     current_agent_dir: Optional[Path] = None,
@@ -117,16 +137,17 @@ def iter_agent_search_paths(
     Order:
 
       1. workspace.agents_dir (if workspace given)
-      2. current_agent_dir / ".tsugite"
-      3. current_agent_dir / ".tsugite" / "agents"
-      4. current_agent_dir / "agents"
-      5. current_agent_dir itself (for `<name>.md` directly in cwd)
-      6. caller-supplied extra project dirs (HTTP adapter feeds per-agent dirs here)
-      7. builtin agents
-      8. XDG global agents (user agents beat plugin agents of the same name)
-      9. plugin-supplied agents
+      2. config.agent_paths dirs (user-configured extra roots)
+      3. current_agent_dir / ".tsugite"
+      4. current_agent_dir / ".tsugite" / "agents"
+      5. current_agent_dir / "agents"
+      6. current_agent_dir itself (for `<name>.md` directly in cwd)
+      7. caller-supplied extra project dirs (HTTP adapter feeds per-agent dirs here)
+      8. builtin agents
+      9. XDG global agents (user agents beat plugin agents of the same name)
+      10. plugin-supplied agents
 
-    include_local_roots: when False, skip entries 2 and 5 (the bare .tsugite/
+    include_local_roots: when False, skip entries 3 and 6 (the bare .tsugite/
     and cwd roots). Name-resolution callers want them so `extends: foo` finds a
     sibling foo.md; discovery callers that glob *.md must skip them, otherwise
     every frontmattered note in a docs/notes workspace lists as an agent.
@@ -148,6 +169,9 @@ def iter_agent_search_paths(
 
     if workspace is not None and hasattr(workspace, "agents_dir"):
         _add(workspace.agents_dir, AgentDirSource.WORKSPACE, readonly=False)
+
+    for config_dir in get_config_agent_paths():
+        _add(config_dir, AgentDirSource.CONFIG, readonly=False)
 
     if current_agent_dir is not None:
         if include_local_roots:

@@ -1,6 +1,5 @@
 """Plain text UI handler without colors, panels, or emojis."""
 
-import re
 from contextlib import contextmanager
 from typing import Generator
 
@@ -46,43 +45,6 @@ class PlainUIHandler(CustomUIHandler):
             show_llm_messages=show_reasoning,
             show_panels=False,
         )
-
-    @staticmethod
-    def _strip_emojis(text: str) -> str:
-        """Remove all emojis from text.
-
-        Args:
-            text: Text potentially containing emojis
-
-        Returns:
-            Text with emojis removed
-        """
-        # Pattern matches emoji characters
-        emoji_pattern = re.compile(
-            "["
-            "\U0001f600-\U0001f64f"  # emoticons
-            "\U0001f300-\U0001f5ff"  # symbols & pictographs
-            "\U0001f680-\U0001f6ff"  # transport & map symbols
-            "\U0001f1e0-\U0001f1ff"  # flags
-            "\U00002702-\U000027b0"
-            "\U000024c2-\U0001f251"
-            "]+",
-            flags=re.UNICODE,
-        )
-        return emoji_pattern.sub("", text).strip()
-
-    @staticmethod
-    def _strip_rich_markup(text: str) -> str:
-        """Remove Rich markup tags from text.
-
-        Args:
-            text: Text potentially containing Rich markup like [bold], [cyan], etc.
-
-        Returns:
-            Text with Rich markup removed
-        """
-        # Remove Rich color/style tags like [cyan], [/cyan], [bold], etc.
-        return re.sub(r"\[/?[a-z\s]+\]", "", text)
 
     @staticmethod
     def _is_final_answer(text: str) -> bool:

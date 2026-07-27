@@ -74,13 +74,6 @@ class TestAdminTokens:
         store = TokenStore(tmp_path / "tokens.json")
         assert store.revoke_admin_token("nonexistent") is False
 
-    def test_has_admin_tokens(self, tmp_path):
-        store = TokenStore(tmp_path / "tokens.json")
-        assert store.has_admin_tokens() is False
-
-        store.create_admin_token(name="test")
-        assert store.has_admin_tokens() is True
-
     def test_daemon_db_permissions(self, tmp_path):
         """daemon.db now holds token hashes (and session content) - it must be
         owner-only like tokens.json was."""
@@ -96,7 +89,7 @@ class TestAdminTokens:
         path.write_text("not valid json")
 
         store = TokenStore(path)
-        assert store.has_admin_tokens() is False
+        assert store.list_admin_tokens() == []
 
     def test_unnamed_token(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")

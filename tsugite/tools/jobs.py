@@ -1,4 +1,4 @@
-"""Jobs tool - `spawn_job()` for agents, mirroring spawn_session for plain sessions.
+"""Jobs tool - `spawn_job()` for agents: background work with an optional verification loop.
 
 Tool uses @tool(require_daemon=True) so it only appears in daemon mode.
 """
@@ -44,17 +44,19 @@ def spawn_job(
     notify_when: Optional[str] = None,
     executor: str = "agent",
     effort: Optional[str] = None,
+    files: Optional[list[str]] = None,
 ) -> dict:
-    """Spawn a background Job with a verification loop.
+    """Spawn a background Job with an optional verification loop.
 
     Creates a Job record + worker session pinned to the workspace default model
-    (or the supplied `model`). On worker completion the orchestrator spawns a
-    verifier sub-agent that judges the result against `acceptance_criteria`. If
-    verification fails, the Job loops back up to `max_attempts` times before
-    going `stuck` (default 3).
+    (or the supplied `model`). On worker completion, if `acceptance_criteria`
+    were given, the orchestrator spawns a verifier sub-agent that judges the
+    result against them; on failure the Job loops back up to `max_attempts`
+    times before going `stuck` (default 3).
 
-    Use this instead of `spawn_session` when you want structured verification
-    of the work, not just a fire-and-forget background session.
+    With no `acceptance_criteria` this is a light fire-and-forget background run
+    (the worker's result is taken as-is); supply them to get the verification
+    loop above.
 
     Args:
         prompt: Task instruction for the spawned Job.
@@ -89,6 +91,10 @@ def spawn_job(
         effort: Optional per-job reasoning effort (low|medium|high|xhigh|max).
             For a cc executor job this maps to claude's --effort; ignored by
             executors that don't support it.
+        files: Optional workspace files to attach to the worker's first turn
+            (paths relative to your workspace). Images reach a vision model as
+            pixels - e.g. delegate an image question via files=["uploads/photo.jpg"],
+            model="claude_code:haiku".
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -106,6 +112,20 @@ def spawn_job(
     # Inherit the sandbox: worker + verifier sessions stay sandboxed if this agent
     # is, and predicate ACs are evaluated inside bwrap by the orchestrator.
     sandbox_override = sandbox_context_to_override()
+
+    # Validate delegated files against this agent's workspace now (clear error to
+    # the caller); the runner materializes them into the worker's first-turn
+    # attachments once the target model is known. Paths only, so nothing bulky
+    # rides the Job record.
+    delegation_files = None
+    if files:
+        from pathlib import Path
+
+        from tsugite.attachments.delegation import resolve_delegation_files
+        from tsugite.cli.helpers import get_workspace_dir
+
+        resolved = resolve_delegation_files(files, get_workspace_dir() or Path.cwd())
+        delegation_files = [str(p) for p in resolved]
 
     try:
         # Generous timeout: --repo provisioning runs `git worktree add`, which
@@ -127,6 +147,7 @@ def spawn_job(
             sandbox_override=sandbox_override,
             executor=executor,
             effort=effort,
+            delegation_files=delegation_files,
             timeout=180,
         )
     except concurrent.futures.TimeoutError:

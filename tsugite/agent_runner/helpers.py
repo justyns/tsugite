@@ -1,5 +1,6 @@
 """Shared helper functions for agent execution."""
 
+import contextvars
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -146,6 +147,36 @@ def set_current_agent(name: str) -> None:
 def get_current_agent() -> Optional[str]:
     """Get the name of the currently executing agent from thread-local storage."""
     return getattr(_current_agent_context, "name", None)
+
+
+# The daemon can register an agent adapter under a name that differs from the
+# agent file's own config name (the registry key is the daemon-config agent
+# name, which need not equal agent_config.name). Only the registered name has a
+# live adapter, so spawn/start-session tools must default their target agent to
+# THAT name rather than the agent-file config name.
+#
+# This is a ContextVar (NOT a threading.local like _current_agent_context)
+# because the daemon sets it in the async request handler before the run, and
+# the value must reach the code-execution worker thread through the context that
+# asyncio.to_thread copies. A thread-local set on the async handler thread would
+# never reach that worker.
+_current_daemon_agent_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "current_daemon_agent", default=None
+)
+
+
+def set_current_daemon_agent(name: Optional[str]) -> None:
+    """Record the daemon adapter's registered name for the current run.
+
+    Spawn/start-session tools prefer this over the agent-file config name so a
+    spawned session resolves to an agent that actually has a daemon adapter.
+    """
+    _current_daemon_agent_var.set(name)
+
+
+def get_current_daemon_agent() -> Optional[str]:
+    """Return the daemon adapter's registered name for the current run, or None."""
+    return _current_daemon_agent_var.get()
 
 
 def resolve_current_agent(explicit: Optional[str] = None, default: str = "default") -> str:

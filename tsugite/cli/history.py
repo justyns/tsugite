@@ -15,6 +15,27 @@ console = Console()
 history_app = typer.Typer(help="Manage conversation history")
 
 
+def _read_jsonl(path: Path) -> list[dict]:
+    """Read a JSONL file, returning parsed records and skipping blank/invalid lines.
+
+    Returns [] if the file cannot be opened.
+    """
+    records: list[dict] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    return records
+
+
 def _format_duration(ms: Optional[int]) -> str:
     if not ms:
         return "-"
@@ -489,20 +510,7 @@ def migrate_daemon_sessions(daemon_dir: Path, history_dir: Path, *, backup: bool
         sid = daemon_file.stem
         history_file = history_dir / f"{sid}.jsonl"
 
-        try:
-            daemon_events = []
-            with open(daemon_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        daemon_events.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
-        except OSError:
-            skipped += 1
-            continue
+        daemon_events = _read_jsonl(daemon_file)
 
         if not daemon_events:
             skipped += 1
@@ -531,17 +539,7 @@ def migrate_daemon_sessions(daemon_dir: Path, history_dir: Path, *, backup: bool
         # prompt_snapshots) whose ts fall within the existing range must interleave;
         # appending (mode "a") put them after the last event and broke chronological
         # order in `history show` / export.
-        existing_events = []
-        if history_file.exists():
-            with open(history_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        existing_events.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        continue
+        existing_events = _read_jsonl(history_file)
         combined = existing_events + [
             {"type": e["type"], "ts": e["ts"], "data": {k: v for k, v in e["data"].items() if v is not None}}
             for e in new_events

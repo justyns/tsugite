@@ -57,21 +57,6 @@ def _write_cache(provider_name: str, models: list[dict]) -> None:
     _write_all(data)
 
 
-def clear_model_cache(provider_name: str | None = None) -> None:
-    """Clear cached model lists. If provider_name is None, clear all."""
-    try:
-        if provider_name:
-            data = _read_all()
-            data.pop(provider_name, None)
-            _write_all(data)
-        else:
-            path = _cache_path()
-            if path.exists():
-                path.unlink()
-    except Exception as e:
-        logger.debug("Cache clear failed: %s", e)
-
-
 def _info_to_dict(info: ModelInfo | None) -> dict | None:
     return asdict(info) if info else None
 
@@ -110,11 +95,6 @@ async def get_provider_models(provider_name: str, refresh: bool = False) -> list
     _write_cache(provider_name, cache_data)
 
     return enriched
-
-
-def get_provider_models_sync(provider_name: str, refresh: bool = False) -> list[dict[str, Any]]:
-    """Sync wrapper for get_provider_models."""
-    return asyncio.run(get_provider_models(provider_name, refresh=refresh))
 
 
 async def get_all_models(providers: list[str] | None = None, refresh: bool = False) -> dict[str, list[dict[str, Any]]]:

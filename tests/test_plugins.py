@@ -420,6 +420,42 @@ class TestUnifiedPluginsGroup:
         assert any(p.group == "tsugite.plugins" for p in result)
 
 
+class TestLoadCommandPlugins:
+    """Plugins contribute daemon slash commands via a module-only
+    tsugite.commands entry point whose import runs @adapter_command."""
+
+    def test_command_group_in_discover(self):
+        ep = _make_entry_point("fake-cmds", "fake_command_plugin", "tsugite.commands")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
+            result = discover_plugins()
+        assert any(p.group == "tsugite.commands" for p in result)
+
+    def test_module_only_command_entry_point(self):
+        import types
+
+        from tsugite.plugins import load_command_plugins
+
+        fake_module = types.ModuleType("fake_command_plugin")
+        ep = _make_entry_point("cmds-plugin", "fake_command_plugin", "tsugite.commands")
+        ep.load.return_value = fake_module
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_command_plugins()
+
+        assert results[0].loaded is True
+        ep.load.assert_called_once()
+
+    def test_skips_disabled_command_plugin(self):
+        from tsugite.plugins import load_command_plugins
+
+        ep = _make_entry_point("cmds-plugin", "fake_command_plugin", "tsugite.commands")
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            results = load_command_plugins(plugin_config={"cmds-plugin": {"enabled": False}})
+
+        ep.load.assert_not_called()
+        assert results[0].enabled is False
+
+
 class TestModuleOnlyEntryPoint:
     """Plugins may declare a module-only entry point (no :attr).
 

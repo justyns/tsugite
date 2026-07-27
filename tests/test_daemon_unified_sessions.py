@@ -38,9 +38,9 @@ def session_store(tmp_path):
 @pytest.fixture
 def identity_map():
     return {
-        "discord:123456789": "justyn",
-        "http:justyn": "justyn",
-        "http:web-anonymous": "justyn",
+        "discord:123456789": "alice",
+        "http:alice": "alice",
+        "http:web-anonymous": "alice",
     }
 
 
@@ -56,10 +56,10 @@ class TestIdentityResolution:
         adapter = _make_adapter(workspace_dir, session_store, identity_map)
 
         ctx = ChannelContext(source="discord", channel_id="dm-chan", user_id="123456789", reply_to="discord:dm-chan")
-        assert adapter.resolve_user("123456789", ctx) == "justyn"
+        assert adapter.resolve_user("123456789", ctx) == "alice"
 
-        ctx_http = ChannelContext(source="http", channel_id=None, user_id="justyn", reply_to="http:justyn")
-        assert adapter.resolve_user("justyn", ctx_http) == "justyn"
+        ctx_http = ChannelContext(source="http", channel_id=None, user_id="alice", reply_to="http:alice")
+        assert adapter.resolve_user("alice", ctx_http) == "alice"
 
     def test_unlinked_user_gets_bare_id(self, workspace_dir, session_store, identity_map):
         adapter = _make_adapter(workspace_dir, session_store, identity_map)
@@ -89,7 +89,7 @@ class TestGroupIsolation:
         )
         resolved = adapter.resolve_user("123456789", ctx)
         assert resolved == "discord:guild-channel-42:123456789"
-        assert resolved != "justyn"
+        assert resolved != "alice"
 
     def test_same_user_dm_vs_group_different(self, workspace_dir, session_store, identity_map):
         adapter = _make_adapter(workspace_dir, session_store, identity_map)
@@ -117,12 +117,12 @@ class TestSharedSessionStore:
         discord_ctx = ChannelContext(
             source="discord", channel_id="dm-chan", user_id="123456789", reply_to="discord:dm-chan"
         )
-        http_ctx = ChannelContext(source="http", channel_id=None, user_id="justyn", reply_to="http:justyn")
+        http_ctx = ChannelContext(source="http", channel_id=None, user_id="alice", reply_to="http:alice")
 
         discord_user = discord_adapter.resolve_user("123456789", discord_ctx)
-        http_user = http_adapter.resolve_user("justyn", http_ctx)
+        http_user = http_adapter.resolve_user("alice", http_ctx)
 
-        assert discord_user == http_user == "justyn"
+        assert discord_user == http_user == "alice"
 
         session1 = shared_store.get_or_create_interactive(discord_user, "test-agent")
         session2 = shared_store.get_or_create_interactive(http_user, "test-agent")
@@ -173,13 +173,6 @@ class TestSessionStoreSkillSuppression:
         store.suppress_skill("session-1", "skill-a")
         assert store.get_suppressed_skills("session-2") == set()
 
-    def test_unsuppress_removes(self, tmp_path):
-        store = SessionStore(tmp_path / "session_store.json")
-        _seed_session(store)
-        store.suppress_skill("session-1", "skill-a")
-        store.unsuppress_skill("session-1", "skill-a")
-        assert store.get_suppressed_skills("session-1") == set()
-
     def test_get_returns_copy(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
         _seed_session(store)
@@ -193,17 +186,6 @@ class TestSessionStoreSkillSuppression:
         _seed_session(store)
         store.suppress_skill("session-1", "skill-a")
         store.suppress_skill("session-1", "skill-a")
-        assert store.get_suppressed_skills("session-1") == {"skill-a"}
-
-    def test_unsuppress_unknown_is_noop(self, tmp_path):
-        store = SessionStore(tmp_path / "session_store.json")
-        # unsuppress on a session that doesn't exist is a no-op
-        store.unsuppress_skill("ghost-session", "skill-a")
-        assert store.get_suppressed_skills("ghost-session") == set()
-        # unsuppress a skill that isn't suppressed leaves the set unchanged
-        _seed_session(store)
-        store.suppress_skill("session-1", "skill-a")
-        store.unsuppress_skill("session-1", "skill-b")
         assert store.get_suppressed_skills("session-1") == {"skill-a"}
 
     def test_suppression_survives_reload_after_save(self, tmp_path):
@@ -384,9 +366,9 @@ class TestNoIdentityLinksBackwardCompat:
     def test_identity_links_parsed(self):
         config = DaemonConfig(
             agents={"test": AgentConfig(workspace_dir=Path("/tmp/ws"), agent_file="default")},
-            identity_links={"justyn": ["discord:123", "http:justyn"]},
+            identity_links={"alice": ["discord:123", "http:alice"]},
         )
-        assert config.identity_links["justyn"] == ["discord:123", "http:justyn"]
+        assert config.identity_links["alice"] == ["discord:123", "http:alice"]
 
 
 try:
@@ -408,8 +390,8 @@ class TestHTTPAdapterResolveUser:
         store = SessionStore(tmp_path / "session_store.json")
         adapter = HTTPAgentAdapter("test-agent", agent_config, store, identity_map=identity_map)
 
-        assert adapter.resolve_http_user("justyn") == "justyn"
-        assert adapter.resolve_http_user("web-anonymous") == "justyn"
+        assert adapter.resolve_http_user("alice") == "alice"
+        assert adapter.resolve_http_user("web-anonymous") == "alice"
 
     def test_resolve_unlinked(self, workspace_dir, tmp_path, identity_map):
         from tsugite_daemon.adapters.http import HTTPAgentAdapter

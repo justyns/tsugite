@@ -47,6 +47,21 @@ _IPC_HELPER = textwrap.dedent("""\
     _resp_file = open(_RESP_PATH, "r")
     _call_id_counter = 0
     _tools_called = []
+    _tool_calls = []
+
+    def _cap_call_text(text, limit):
+        return text if len(text) <= limit else text[:limit] + "\\u2026"
+
+    def _jsonable_call_args(kwargs):
+        safe = {}
+        for k, v in kwargs.items():
+            if v is None or isinstance(v, (int, float, bool)):
+                safe[k] = v
+            elif isinstance(v, str):
+                safe[k] = _cap_call_text(v, 500)
+            else:
+                safe[k] = _cap_call_text(repr(v), 500)
+        return safe
 
     def _ipc_call(msg_type, **kwargs):
         global _call_id_counter
@@ -95,12 +110,6 @@ _SEND_MESSAGE_STUB = textwrap.dedent("""\
         return f"Message sent: {msg}"
 """)
 
-_REACT_TO_MESSAGE_STUB = textwrap.dedent("""\
-    def react_to_message(emoji="", message_id=None):
-        _ipc_call("tool_call", name="react_to_message", kwargs={"emoji": str(emoji), "message_id": message_id})
-        return f"Reacted with {emoji}"
-""")
-
 # Mirrors LocalExecutor._split_code_for_last_expr — duplicated because this runs
 # as a string template inside the sandboxed subprocess (can't import from parent).
 _SPLIT_CODE_FN = textwrap.dedent("""\
@@ -127,14 +136,34 @@ _SPLIT_CODE_FN = textwrap.dedent("""\
 _TIMED_AUDIT_WRAPPER = textwrap.dedent("""\
     def _timed_audit_call(tool_name, fn, kwargs):
         _tools_called.append(tool_name)
-        _ipc_audit("tool_call", tool_name, args=kwargs)
+        _record = {"tool": tool_name, "arguments": _jsonable_call_args(kwargs)}
+        _tool_calls.append(_record)
+        _ipc_audit("tool_call", tool_name, args=_record["arguments"])
         t0 = time.time()
         try:
             result = fn(**kwargs)
-            _ipc_audit("tool_result", tool_name, success=True, duration_ms=int((time.time() - t0) * 1000))
+            _record["success"] = True
+            _record["duration_ms"] = int((time.time() - t0) * 1000)
+            _record["output"] = _cap_call_text(str(result), 2000) if result is not None else ""
+            _ipc_audit(
+                "tool_result",
+                tool_name,
+                success=True,
+                duration_ms=_record["duration_ms"],
+                summary=_cap_call_text(_record["output"], 200),
+            )
             return result
-        except Exception:
-            _ipc_audit("tool_result", tool_name, success=False, duration_ms=int((time.time() - t0) * 1000))
+        except Exception as exc:
+            _record["success"] = False
+            _record["duration_ms"] = int((time.time() - t0) * 1000)
+            _record["error"] = _cap_call_text(str(exc), 2000)
+            _ipc_audit(
+                "tool_result",
+                tool_name,
+                success=False,
+                duration_ms=_record["duration_ms"],
+                summary=_cap_call_text(_record["error"], 200),
+            )
             raise
 
     def _run_maybe_async(fn, kwargs):
@@ -348,7 +377,6 @@ os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
 {_SEND_MESSAGE_STUB}
-{_REACT_TO_MESSAGE_STUB}
 {_SPLIT_CODE_FN}
 
 PPRINT_WIDTH = 100
@@ -363,7 +391,6 @@ namespace = {{}}
 namespace["return_value"] = return_value
 namespace["final_answer"] = return_value  # backward-compat alias
 namespace["send_message"] = send_message
-namespace["react_to_message"] = react_to_message
 def _blocked_open(*args, **kwargs):
     raise RuntimeError(
         "open() is not available. Use the provided tools instead:\\n"
@@ -489,6 +516,7 @@ result = {{
     "stderr": stderr_output if exec_error is None else (stderr_output + "\\n" + exec_error),
     "return_value": _return_value if exec_error is None else None,
     "tools_called": _tools_called[:],
+    "tool_calls": _tool_calls[:],
     "variables_set": variables_set,
     "state_keys": state_keys,
 }}
@@ -687,6 +715,7 @@ with open(RESULT_PATH, "w") as f:
                 stderr=result_data.get("stderr", ""),
                 return_value=result_data.get("return_value"),
                 tools_called=result_data.get("tools_called", []),
+                tool_calls=result_data.get("tool_calls", []),
                 variables_set=result_data.get("variables_set", {}),
                 state_keys=result_data.get("state_keys", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
@@ -770,14 +799,6 @@ with open(RESULT_PATH, "w") as f:
 
                     self.event_bus.emit(InfoEvent(message=str(message)))
                 resp = {"call_id": call_id, "result": f"Message sent: {message}", "error": None}
-            elif name == "react_to_message":
-                emoji = kwargs.get("emoji", "")
-                message_id = kwargs.get("message_id")
-                if self.event_bus:
-                    from tsugite.events import ReactionEvent
-
-                    self.event_bus.emit(ReactionEvent(emoji=str(emoji), message_id=message_id))
-                resp = {"call_id": call_id, "result": f"Reacted with {emoji}", "error": None}
             elif name in self._tool_map:
                 tool = self._tool_map[name]
                 try:
@@ -818,7 +839,7 @@ with open(RESULT_PATH, "w") as f:
                 ToolResultEvent(
                     tool_name=tool_name,
                     success=msg.get("success", True),
-                    result_summary="",
+                    result_summary=msg.get("summary", ""),
                     duration_ms=msg.get("duration_ms"),
                 )
             )
@@ -877,8 +898,6 @@ with open(RESULT_PATH, "w") as f:
 
         if self._proxy:
             try:
-                import asyncio
-
                 try:
                     loop = asyncio.get_running_loop()
                     loop.create_task(self._stop_proxy())

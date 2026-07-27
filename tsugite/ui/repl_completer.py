@@ -176,11 +176,3 @@ class TsugiteCompleter(Completer):
             return completions
         except (OSError, PermissionError):
             return []
-
-    def update_agent_name(self, agent_name: str) -> None:
-        """Update the current agent name.
-
-        Args:
-            agent_name: New agent name
-        """
-        self.current_agent_name = agent_name

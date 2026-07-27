@@ -304,3 +304,24 @@ def test_sandbox_extra_binds_path_expansion(tmp_path, monkeypatch):
     config = load_daemon_config(config_file)
     assert config.agents["boxed"].sandbox.extra_ro_binds == [tmp_path / "creds"]
     assert config.agents["boxed"].sandbox.extra_rw_binds == [tmp_path / "scratch"]
+
+
+def test_http_config_image_defaults():
+    from tsugite_daemon.config import HTTPConfig
+
+    cfg = HTTPConfig()
+    assert cfg.image_max_edge == 1568
+    assert cfg.image_quality == 0.85
+
+
+def test_http_config_image_overrides_from_yaml(tmp_path):
+    config_file = _write_config(
+        tmp_path,
+        {
+            "agents": {"default": _agent(tmp_path)},
+            "http": {"enabled": True, "image_max_edge": 1024, "image_quality": 0.7},
+        },
+    )
+    config = load_daemon_config(config_file)
+    assert config.http.image_max_edge == 1024
+    assert config.http.image_quality == 0.7

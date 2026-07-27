@@ -136,8 +136,7 @@ def agents_show(
                             console.print(f"{prefix} [bold]{agent_name}[/bold] [dim](current)[/dim]")
                         else:
                             console.print(f"{prefix} {agent_name} [dim]({agent_path.name})[/dim]")
-                            if i < len(chain) - 1:
-                                console.print("  │")
+                            console.print("  │")
             except Exception as e:
                 console.print(f"\n[yellow]Could not build inheritance chain: {e}[/yellow]")
 

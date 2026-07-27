@@ -30,7 +30,7 @@ def history_dir(tmp_path: Path):
 
 @pytest.fixture
 def store(tmp_path: Path, history_dir):
-    return SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    return SessionStore(tmp_path / "session_store.json")
 
 
 def _make_history_session(history_dir: Path, session_id: str) -> SessionStorage:
@@ -90,7 +90,7 @@ def test_event_count_increments_on_append(store, history_dir, jsonl_open_spy):
     sid = "ec-incr"
     _make_history_session(history_dir, sid)
     store.event_count(sid)  # prime to 1 (just session_start)
-    store.append_event(sid, {"type": "reaction", "emoji": "🎉"})
+    store.append_event(sid, {"type": "info", "message": "hi"})
     target = str(history_dir / f"{sid}.jsonl")
     jsonl_open_spy.clear()
     n = store.event_count(sid)
@@ -112,13 +112,13 @@ def test_progress_session_end_resets_counts(store, history_dir):
 def test_cache_survives_store_reload(tmp_path: Path, history_dir):
     """After a daemon restart, the cache rebuilds from the file on first call."""
     path = tmp_path / "session_store.json"
-    s1 = SessionStore(path, history_dir=history_dir)
+    s1 = SessionStore(path)
     sid = "reload-test"
     _make_history_session(history_dir, sid)
     s1.append_event(sid, {"type": "tool_invocation", "name": "bash"})
     s1.append_event(sid, {"type": "tool_invocation", "name": "read"})
 
-    s2 = SessionStore(path, history_dir=history_dir)
+    s2 = SessionStore(path)
     summary = s2.session_progress_summary(sid)
     assert summary["tool_count"] == 2
 

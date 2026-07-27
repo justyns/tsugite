@@ -8,7 +8,6 @@ from tsugite.options import ExecutionOptions, HistoryOptions
 
 from .helpers import load_and_validate_agent, workspace_directory_context
 from .run import (
-    _build_workspace_attachments,
     _check_and_run_onboarding,
     _resolve_effective_workspace,
 )
@@ -53,11 +52,8 @@ def chat(
     if workspace_to_use and not resolved_workspace:
         console.print(f"[yellow]Warning: Workspace '{workspace_to_use}' not found[/yellow]")
 
-    # Build workspace attachments
-    workspace_attachments = []
     if resolved_workspace:
         resolved_workspace = _check_and_run_onboarding(resolved_workspace, workspace_to_use, model)
-        workspace_attachments = _build_workspace_attachments(resolved_workspace)
 
     with workspace_directory_context(resolved_workspace, root, console) as path_context:
         if continue_ is not None:
@@ -91,5 +87,4 @@ def chat(
             exec_options=exec_opts,
             history_options=history_opts,
             path_context=path_context,
-            workspace_attachments=workspace_attachments,
         )

@@ -24,7 +24,7 @@ def history_dir(tmp_path: Path):
 
 @pytest.fixture
 def store(tmp_path: Path, history_dir):
-    return SessionStore(tmp_path / "session_store.json", history_dir=history_dir)
+    return SessionStore(tmp_path / "session_store.json")
 
 
 def _make_history_session(history_dir: Path, session_id: str) -> SessionStorage:

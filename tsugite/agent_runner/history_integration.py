@@ -6,6 +6,7 @@ around the agent run: creating the session, recording user_input + session_end
 events, exposing helpers to load past sessions for continuation.
 """
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from tsugite.history import (
     get_history_backend,
     last_index_of,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def load_conversation_messages(conversation_id: str) -> List[Dict[str, Any]]:
@@ -81,17 +84,50 @@ def open_or_create_session(
     return backend.create(agent_name=agent_name, model=model, workspace=workspace)
 
 
+def _current_turn_already_has_user_input(storage: Session) -> bool:
+    """True if the in-progress turn already recorded a user_input.
+
+    A turn runs from its user_input to its session_end. A live-recorded turn
+    that failed (or retried) before completing leaves a user_input with no
+    session_end after it; the post-hoc save_run_to_history on the error path
+    would otherwise record a second, identical one (a duplicate user bubble).
+    A genuinely repeated message opens a new turn *after* the prior session_end,
+    so this stays False for it.
+    """
+    for event in reversed(list(storage.iter_events(types=("user_input", "session_end")))):
+        if event.type == "session_end":
+            return False
+        if event.type == "user_input":
+            return True
+    return False
+
+
 def record_user_input(
     storage: Session,
     text: str,
     attachments: Optional[List[Attachment]] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Record a user_input event at the start of a turn."""
+    """Record a user_input event at the start of a turn.
+
+    Idempotent within a turn: the live runner and the error-path
+    save_run_to_history can both reach here for the same message with no shared
+    in-memory flag, so a turn that failed before completing is deduped from the
+    session's own events rather than by content-matching (which would collapse
+    legitimate repeats).
+    """
+    if _current_turn_already_has_user_input(storage):
+        return
     data: Dict[str, Any] = {"text": text}
-    if attachments:
+    # Only files the user actually uploaded ride here: this field is display-only
+    # (the web UI renders them as clickable `uploads/<name>` chips). The agent's
+    # auto-included context (workspace memory files like USER.md, config
+    # attachments) is not a user attachment and lives outside uploads/, so listing
+    # it produced dead "file not found" chips on every message.
+    uploads = [a for a in attachments if getattr(a, "user_upload", False)] if attachments else []
+    if uploads:
         data["attachments"] = [
-            {"name": a.name, "type": a.content_type.value, "source_url": a.source_url} for a in attachments
+            {"name": a.name, "type": a.content_type.value, "source_url": a.source_url} for a in uploads
         ]
     if channel_metadata:
         data["channel"] = channel_metadata
@@ -165,7 +201,6 @@ def save_run_to_history(
     provider_state: Optional[Dict[str, Any]] = None,
     status: str = "success",
     error_message: Optional[str] = None,
-    raw_events: Optional[list] = None,
 ) -> Optional[str]:
     """Persist a completed run as events.
 
@@ -257,8 +292,12 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
         storage = backend.load(conversation_id)
         events = storage.load_events()
 
-        # Find the last compaction. Anything before it is stale.
+        # Find the last boundary past which a recorded provider session is stale: a
+        # compaction (history was summarized) or a resume_reset (the session was
+        # severed because its transcript could no longer be resumed).
         compaction_idx = last_index_of(events, "compaction")
+        reset_idx = last_index_of(events, "resume_reset")
+        boundary_idx = max((idx for idx in (compaction_idx, reset_idx) if idx is not None), default=None)
 
         for i in range(len(events) - 1, -1, -1):
             event = events[i]
@@ -268,7 +307,7 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
             session_id = state.get("session_id")
             if not session_id:
                 continue
-            if compaction_idx is not None and i <= compaction_idx:
+            if boundary_idx is not None and i <= boundary_idx:
                 continue
             return ResumableSessionState(
                 session_id=session_id,
@@ -277,6 +316,38 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
         return None
     except Exception:
         return None
+
+
+def record_resume_reset(conversation_id: str, *, reason: str = "poisoned_transcript") -> Optional[Dict[str, Any]]:
+    """Sever a conversation's resumable provider session by recording a boundary.
+
+    A session-owning provider transcript can become unresumable (e.g. a Claude Code
+    sidecar that picked up an empty text block and 400s on every resume). This
+    boundary makes get_resumable_session_state stop returning the stale session id,
+    so the next turn starts fresh from serialized history; the frontend renders it
+    as a notice. Best-effort: a recording failure must not mask the triggering turn.
+
+    Returns the recorded event data (so the caller can also surface it live on the
+    same turn) when persisted, else None (empty id, no history, or a record error).
+    """
+    if not conversation_id:
+        return None
+    data: Dict[str, Any] = {
+        "reason": reason,
+        "message": (
+            "The chat's resumable model session was reset because it could no "
+            "longer be resumed; continuing from saved history."
+        ),
+    }
+    try:
+        backend = get_history_backend()
+        if not backend.exists(conversation_id):
+            return None
+        backend.load(conversation_id).record("resume_reset", **data)
+    except Exception:
+        logger.warning("Failed to record resume_reset for %s", conversation_id, exc_info=True)
+        return None
+    return data
 
 
 def get_latest_conversation() -> Optional[str]:

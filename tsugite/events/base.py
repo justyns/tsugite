@@ -44,9 +44,7 @@ class EventType(IntEnum):
 
     # Content events
     CONTENT_BLOCK = 28
-
-    # Reaction events
-    REACTION = 29
+    MODEL_RESPONSE = 34
 
     # Secret events
     SECRET_ACCESS = 30

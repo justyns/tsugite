@@ -74,7 +74,7 @@ def test_default_md_preamble_renders_with_minimal_step_context():
         "{% if is_daemon %}DAEMON{% endif %}",
         "{% if is_scheduled %}SCHEDULED{% endif %}",
         "{% if has_notify_tool %}NOTIFY{% endif %}",
-        "{% if can_spawn_sessions %}SPAWN{% endif %}",
+        "{% if can_spawn_jobs %}JOBS{% endif %}",
         "{% if is_channel_session %}CHANNEL{% endif %}",
     ],
 )

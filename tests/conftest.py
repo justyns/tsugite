@@ -64,12 +64,18 @@ def clear_agent_context():
     This prevents test pollution where one test sets current_agent
     and affects another test running in the same worker.
     """
-    from tsugite.agent_runner.helpers import clear_allowed_agents, clear_current_agent, set_allowed_secrets
+    from tsugite.agent_runner.helpers import (
+        clear_allowed_agents,
+        clear_current_agent,
+        set_allowed_secrets,
+        set_current_daemon_agent,
+    )
 
     def _reset():
         clear_current_agent()
         clear_allowed_agents()
         set_allowed_secrets(None)
+        set_current_daemon_agent(None)
 
     _reset()
     yield
@@ -370,14 +376,13 @@ def spawn_agent_tool(reset_tool_registry, request):
 def interactive_tools(reset_tool_registry):
     """Register interactive tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.interactive import ask_user, ask_user_batch, react_to_message, return_value, send_message
+    from tsugite.tools.interactive import ask_user, ask_user_batch, return_value, send_message
 
     # Re-register the tools after registry reset
     tool(parent_only=True)(ask_user)
     tool(parent_only=True)(ask_user_batch)
     tool(return_value)
     tool(send_message)
-    tool(react_to_message)
 
 
 @pytest.fixture

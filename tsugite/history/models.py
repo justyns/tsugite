@@ -10,8 +10,11 @@ Standard event types (documented for reference; runtime treats `type` as opaque)
 - session_start: agent, model, workspace, parent_session
 - user_input: text, attachments
 - model_request: provider, model, message_count, tool_names
-- model_response: provider, raw_content, usage, cost, stop_reason, state_delta
-- code_execution: code, output, error, duration_ms, tools_called
+- model_response: provider, raw_content, thought, content_blocks, tail, usage, cost, stop_reason, state_delta
+  (thought/content_blocks/tail = the settled parse; thought present marks a parsed event,
+  older events without it are normalized on read)
+- code_execution: code, output, error, duration_ms, tools_called, tool_calls
+- reasoning: content (the turn's reasoning/thinking summary; never replayed into model context)
 - tool_invocation: name, args, output, error, duration_ms, call_id
 - format_error: reason, rejected_content
 - skill_added / skill_removed: name

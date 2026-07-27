@@ -62,7 +62,7 @@ def test_non_snapshot_events_do_not_touch_cumulative_tokens(store, session):
     store.update_token_count(session.id, 7_500)
 
     persist = build_session_event_persister(store, session.id)
-    persist({"type": "reaction", "token_breakdown": {"total": 99_999}})
+    persist({"type": "info", "token_breakdown": {"total": 99_999}})
     persist({"type": "final_result"})
 
     assert store.get_session(session.id).cumulative_tokens == 7_500
@@ -83,10 +83,12 @@ def test_message_count_not_bumped_by_snapshot_update(store, session):
     assert refreshed.message_count == msg_count_before
 
 
-def test_event_still_persisted_to_history(store, session):
+def test_snapshot_not_double_persisted_but_tokens_still_sync(store, session):
+    # The agent records prompt_snapshot durably itself (storage.record); the SSE
+    # persister must NOT append a second copy - only the token-badge sync rides it.
     persist = build_session_event_persister(store, session.id)
     persist({"type": "prompt_snapshot", "token_breakdown": {"total": 4_200}})
 
     events = store.read_events(session.id)
-    snapshot = next(e for e in events if e["type"] == "prompt_snapshot")
-    assert snapshot["token_breakdown"]["total"] == 4200
+    assert not any(e["type"] == "prompt_snapshot" for e in events)
+    assert store.get_session(session.id).cumulative_tokens == 4_200

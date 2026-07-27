@@ -1,7 +1,18 @@
 """Tests for `record_user_input` threading channel_metadata through to the event payload."""
 
 from tsugite.agent_runner.history_integration import record_user_input
+from tsugite.attachments.base import Attachment, AttachmentContentType
 from tsugite.history import SessionStorage
+
+
+def _att(name: str, user_upload: bool) -> Attachment:
+    return Attachment(
+        name=name,
+        content="x",
+        content_type=AttachmentContentType.TEXT,
+        mime_type="text/plain",
+        user_upload=user_upload,
+    )
 
 
 def _new_storage(tmp_path):
@@ -45,3 +56,28 @@ def test_channel_metadata_optional_does_not_break_existing_callers(tmp_path):
         "channel must be absent when channel_metadata is not provided to preserve existing event shape"
     )
     assert user_events[0].data.get("text") == "hello world"
+
+
+def test_only_user_uploads_are_recorded_as_attachments(tmp_path):
+    """The recorded attachments field is display-only (the web UI renders it as
+    clickable uploads/<name> chips), so it must list only files the user actually
+    uploaded. The agent's auto-included context (workspace memory like USER.md)
+    is not a user attachment and lives outside uploads/, so it must not appear -
+    it rendered as a dead 'file not found' chip on every message otherwise."""
+    storage = _new_storage(tmp_path)
+    record_user_input(
+        storage,
+        "look at this",
+        attachments=[_att("USER.md", False), _att("photo.jpg", True), _att("MEMORY.md", False)],
+    )
+    ev = next(e for e in storage.iter_events() if e.type == "user_input")
+    assert [a["name"] for a in ev.data["attachments"]] == ["photo.jpg"]
+
+
+def test_no_attachments_key_when_only_auto_context(tmp_path):
+    """A turn carrying only auto-included context (no user upload) records no
+    attachments key, preserving the plain-message event shape."""
+    storage = _new_storage(tmp_path)
+    record_user_input(storage, "hi", attachments=[_att("USER.md", False), _att("AGENTS.md", False)])
+    ev = next(e for e in storage.iter_events() if e.type == "user_input")
+    assert "attachments" not in ev.data

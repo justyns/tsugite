@@ -52,7 +52,6 @@ async def test_agent_creation():
     assert agent.instructions == "You are a helpful assistant"
     assert agent.max_turns == 10
     assert isinstance(agent.executor, LocalExecutor)
-    assert agent.tool_map["add"] == tool
 
 
 @pytest.mark.asyncio
@@ -998,3 +997,86 @@ async def test_secrets_masked_in_persisted_code_execution():
     finally:
         reg._active.clear()
         reg._sorted = []
+
+
+@pytest.mark.asyncio
+async def test_code_execution_persists_per_call_tool_records():
+    """The code_execution event carries per-call records (tool, arguments,
+    output, success, duration) so the UI can replay individual calls - masked
+    like the rest of the event."""
+    from tsugite.core.tools import create_tool_from_function
+    from tsugite.secrets.registry import get_registry
+
+    secret = "sk-percall-secret-999"
+    reg = get_registry()
+    reg.register("API_KEY", secret, agent="test")
+    try:
+        recorded = []
+
+        class _Storage:
+            def record(self, event_type, **fields):
+                recorded.append((event_type, fields))
+
+            def iter_events(self, types=None):
+                return iter(())
+
+        def fetch(url: str) -> str:
+            """stub tool"""
+            return f"token={secret} for {url}"
+
+        agent = TsugiteAgent(
+            model_string="openai:gpt-4o-mini",
+            tools=[create_tool_from_function(fetch)],
+            instructions="",
+            max_turns=2,
+            storage=_Storage(),
+        )
+
+        async def mock_acompletion(*args, **kwargs):
+            return _mock_response("```python-exec\nfetch(url='https://x.test')\nfinal_answer('ok')\n```")
+
+        _patch_provider(agent, side_effect=mock_acompletion)
+        await agent.run("go")
+
+        code_events = [f for t, f in recorded if t == "code_execution"]
+        assert code_events, "a code_execution event should have been recorded"
+        calls = code_events[0].get("tool_calls")
+        assert calls, "per-call tool records should persist on the code_execution event"
+        assert calls[0]["tool"] == "fetch"
+        assert calls[0]["arguments"] == {"url": "https://x.test"}
+        assert calls[0]["success"] is True
+        assert isinstance(calls[0]["duration_ms"], int)
+        assert secret not in calls[0]["output"], "raw secret persisted unmasked in a per-call record"
+        assert "***" in calls[0]["output"]
+    finally:
+        reg._active.clear()
+        reg._sorted = []
+
+
+@pytest.mark.asyncio
+async def test_reasoning_persisted_to_history():
+    """Reasoning content is recorded as a `reasoning` event so thinking blocks
+    survive a reload (masked; reconstruction ignores the type)."""
+    recorded = []
+
+    class _Storage:
+        def record(self, event_type, **fields):
+            recorded.append((event_type, fields))
+
+        def iter_events(self, types=None):
+            return iter(())
+
+    agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=2, storage=_Storage())
+
+    async def mock_acompletion(*args, **kwargs):
+        return _mock_response(
+            "```python-exec\nfinal_answer('ok')\n```",
+            reasoning_content="weighing the two options carefully",
+        )
+
+    _patch_provider(agent, side_effect=mock_acompletion)
+    await agent.run("go")
+
+    reasoning_events = [f for t, f in recorded if t == "reasoning"]
+    assert reasoning_events, "reasoning should be persisted alongside the model_response"
+    assert reasoning_events[0]["content"] == "weighing the two options carefully"

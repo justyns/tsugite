@@ -29,7 +29,7 @@ PPRINT_WIDTH = 100
 # serialize their chdir+exec+restore window; the lock is held across the whole
 # user-code exec(), so heavy parallel LocalExecutor turns serialize end-to-end.
 # Accepted trade-off: silent disagreement between raw `os.getcwd()` and tool
-# path resolution is worse than the serialization. `spawn_session` returns
+# path resolution is worse than the serialization. A background spawn returns
 # immediately so a parent holding the lock doesn't starve a nested child.
 _chdir_lock = threading.Lock()
 
@@ -54,23 +54,42 @@ def _locked_chdir(target: Optional[Path]) -> Iterator[None]:
 
 def _looks_html_escaped(source: str) -> bool:
     """True if `source` is HTML-entity-escaped XML (observation content leaked into exec)."""
-    i = 0
-    for ch in source:
-        if not ch.isspace():
-            break
-        i += 1
-    return source.startswith("&lt;", i) or source.startswith("&amp;lt;", i)
+    stripped = source.lstrip()
+    return stripped.startswith(("&lt;", "&amp;lt;"))
 
 
 # Tools with special executor handling (not injected via the normal tool wrapper path).
 # These are implemented directly in the executor because they need event_bus access
 # or special completion signaling.
-EXECUTOR_BUILTIN_TOOLS = frozenset({"return_value", "final_answer", "send_message", "react_to_message"})
+EXECUTOR_BUILTIN_TOOLS = frozenset({"return_value", "final_answer", "send_message"})
 
 # Max execution output shown to the model before truncation. Shared so the live
 # observation (ExecutionResult.to_xml) and the replayed one (history reconstruction)
 # truncate at the same boundary and stay byte-stable.
 MAX_EXECUTION_OUTPUT_KB = 50
+
+# Per-call record caps for ExecutionResult.tool_calls (persisted with the
+# code_execution event): arguments and outputs are display detail for the UI,
+# not model input, so they stay small.
+TOOL_CALL_ARG_MAX = 500
+TOOL_CALL_OUTPUT_MAX = 2000
+
+
+def _cap_text(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _jsonable_call_args(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """JSON-safe, capped copy of a call's kwargs (non-scalars fall back to repr)."""
+    safe: Dict[str, Any] = {}
+    for k, v in kwargs.items():
+        if v is None or isinstance(v, (int, float, bool)):
+            safe[k] = v
+        elif isinstance(v, str):
+            safe[k] = _cap_text(v, TOOL_CALL_ARG_MAX)
+        else:
+            safe[k] = _cap_text(repr(v), TOOL_CALL_ARG_MAX)
+    return safe
 
 
 @dataclass
@@ -83,6 +102,9 @@ class ExecutionResult:
     stderr: str
     return_value: Optional[Any] = None
     tools_called: List[str] = field(default_factory=list)
+    # Per-call records ({tool, arguments, success, duration_ms, output|error}),
+    # capped via TOOL_CALL_ARG_MAX / TOOL_CALL_OUTPUT_MAX.
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
     state_keys: Dict[str, str] = field(default_factory=dict)  # persisted state: name -> "type(size)"
     loaded_skills: Dict[str, str] = field(default_factory=dict)  # name -> content
@@ -320,6 +342,7 @@ class LocalExecutor:
         """
         self._return_value = None
         self._tools_called = []
+        self._tool_calls: List[Dict[str, Any]] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
         self._unloaded_skills_for_turn: List[str] = []
         self.workspace_dir = workspace_dir
@@ -369,15 +392,6 @@ class LocalExecutor:
             return f"Message sent: {msg}"
 
         ns["send_message"] = send_message
-
-        def react_to_message(emoji="", message_id=None):
-            if self.event_bus:
-                from tsugite.events import ReactionEvent
-
-                self.event_bus.emit(ReactionEvent(emoji=str(emoji), message_id=message_id))
-            return f"Reacted with {emoji}"
-
-        ns["react_to_message"] = react_to_message
 
         def _blocked_open(*args, **kwargs):
             raise RuntimeError(
@@ -500,6 +514,7 @@ class LocalExecutor:
         """
         self._return_value = None
         self._tools_called = []
+        self._tool_calls = []
         self._loaded_skills_for_turn = {}
         self._unloaded_skills_for_turn = []
 
@@ -589,6 +604,7 @@ class LocalExecutor:
             stderr=stderr_output,
             return_value=None if exec_error else self._return_value,
             tools_called=self._tools_called.copy(),
+            tool_calls=[dict(c) for c in self._tool_calls],
             variables_set=variables_set,
             state_keys=state_keys,
             loaded_skills=self._loaded_skills_for_turn.copy(),
@@ -650,29 +666,37 @@ class LocalExecutor:
         def tool_wrapper(*args, **kwargs):
             self._tools_called.append(tool_obj.name)
             convert_positional_to_kwargs(tool_obj, args, kwargs)
+            record: Dict[str, Any] = {"tool": tool_obj.name, "arguments": _jsonable_call_args(kwargs)}
+            self._tool_calls.append(record)
             if self.event_bus:
                 self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=kwargs))
             t0 = time.perf_counter()
             try:
                 result = run_async_in_sync_context(tool_obj.execute(**kwargs))
+                record["success"] = True
+                record["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+                record["output"] = _cap_text(str(result), TOOL_CALL_OUTPUT_MAX) if result is not None else ""
                 if self.event_bus:
                     self.event_bus.emit(
                         ToolResultEvent(
                             tool_name=tool_obj.name,
                             success=True,
                             result_summary=str(result)[:200] if result is not None else "",
-                            duration_ms=int((time.perf_counter() - t0) * 1000),
+                            duration_ms=record["duration_ms"],
                         )
                     )
                 return result
             except Exception as exc:
+                record["success"] = False
+                record["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+                record["error"] = _cap_text(str(exc), TOOL_CALL_OUTPUT_MAX)
                 if self.event_bus:
                     self.event_bus.emit(
                         ToolResultEvent(
                             tool_name=tool_obj.name,
                             success=False,
                             result_summary=str(exc)[:200],
-                            duration_ms=int((time.perf_counter() - t0) * 1000),
+                            duration_ms=record["duration_ms"],
                         )
                     )
                 raise

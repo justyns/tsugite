@@ -105,6 +105,7 @@ def test_config_with_empty_values(tmp_path):
         "auto_context_files": [".tsugite/CONTEXT.md", "AGENTS.md", "CLAUDE.md"],
         "auto_context_include_global": True,
         "skill_paths": [],
+        "agent_paths": [],
         "skill_ttl_default": 10,
     }
 
@@ -155,3 +156,20 @@ def test_skill_paths_default_empty(tmp_path):
     config_path = tmp_path / "config.json"
     config = load_config(config_path)
     assert config.skill_paths == []
+
+
+def test_agent_paths_round_trip(tmp_path):
+    """Test saving and loading config with agent_paths."""
+    config_path = tmp_path / "config.json"
+    config = Config(agent_paths=["~/my-agents", "/opt/team-agents"])
+    save_config(config, config_path)
+
+    loaded = load_config(config_path)
+    assert loaded.agent_paths == ["~/my-agents", "/opt/team-agents"]
+
+
+def test_agent_paths_default_empty(tmp_path):
+    """Test that agent_paths defaults to empty list."""
+    config_path = tmp_path / "config.json"
+    config = load_config(config_path)
+    assert config.agent_paths == []

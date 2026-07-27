@@ -860,3 +860,72 @@ async def test_content_block_cannot_shadow_a_tool():
     assert "hello doc" in r2.output
 
     _ = create_tool_from_function  # keep import used
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_capture_args_output_and_failures():
+    """Each wrapped tool call records its arguments, output, success, and
+    duration on ExecutionResult.tool_calls (what code_execution persists)."""
+    from tsugite.core.tools import create_tool_from_function
+
+    def greet(name: str, excited: bool = False) -> str:
+        """stub tool"""
+        return f"hi {name}{'!' if excited else ''}"
+
+    def boom(reason: str) -> str:
+        """stub tool"""
+        raise ValueError(f"nope: {reason}")
+
+    executor = LocalExecutor()
+    executor.set_tools([create_tool_from_function(greet), create_tool_from_function(boom)])
+
+    result = await executor.execute("print(greet('ada', excited=True))\nboom(reason='testing')")
+    assert result.tools_called == ["greet", "boom"]
+    assert len(result.tool_calls) == 2
+
+    ok = result.tool_calls[0]
+    assert ok["tool"] == "greet"
+    assert ok["arguments"] == {"name": "ada", "excited": True}
+    assert ok["success"] is True
+    assert ok["output"] == "hi ada!"
+    assert isinstance(ok["duration_ms"], int)
+
+    failed = result.tool_calls[1]
+    assert failed["tool"] == "boom"
+    assert failed["success"] is False
+    assert "nope: testing" in failed["error"]
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_cap_long_arguments_and_outputs():
+    """Per-call records are capped so a huge payload can't bloat history."""
+    from tsugite.core.executor import TOOL_CALL_ARG_MAX, TOOL_CALL_OUTPUT_MAX
+    from tsugite.core.tools import create_tool_from_function
+
+    def echo(text: str) -> str:
+        """stub tool"""
+        return text * 100
+
+    executor = LocalExecutor()
+    executor.set_tools([create_tool_from_function(echo)])
+
+    result = await executor.execute(f"echo(text={'x' * 60!r} * 20)")
+    call = result.tool_calls[0]
+    assert len(call["arguments"]["text"]) <= TOOL_CALL_ARG_MAX + 1
+    assert len(call["output"]) <= TOOL_CALL_OUTPUT_MAX + 1
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_reset_between_executions():
+    from tsugite.core.tools import create_tool_from_function
+
+    def ping() -> str:
+        """stub tool"""
+        return "pong"
+
+    executor = LocalExecutor()
+    executor.set_tools([create_tool_from_function(ping)])
+
+    await executor.execute("ping()")
+    second = await executor.execute("print('no tools this time')")
+    assert second.tool_calls == []

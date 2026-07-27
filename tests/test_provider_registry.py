@@ -44,6 +44,21 @@ class TestProviderCaching:
         p = get_provider("anthropic")
         assert getattr(p, "cacheable", True) is True
 
+    def test_models_are_definitive_on_cli_providers(self):
+        """CLI-backed providers expose a fixed model set, so /model cautions on
+        unlisted ids for them."""
+        from tsugite_claude_code.provider import ClaudeCodeProvider
+        from tsugite_codex_cli.provider import CodexCliProvider
+
+        assert ClaudeCodeProvider.models_are_definitive is True
+        assert CodexCliProvider.models_are_definitive is True
+
+    def test_models_are_definitive_default_false_on_api_provider(self):
+        """API providers accept arbitrary ids, so the flag stays False and /model
+        must not caution on unlisted ids."""
+        p = get_provider("anthropic")
+        assert getattr(p, "models_are_definitive", False) is False
+
     def test_concurrent_claude_code_providers_independent(self):
         """Each get_provider call returns a fresh instance with no shared state."""
         p1 = get_provider("claude_code")
@@ -51,11 +66,9 @@ class TestProviderCaching:
 
         # Mutate one instance's state
         p1._session_id = "test-session"
-        p1._turn_count = 5
 
         # Other instance should be unaffected
         assert p2._session_id is None
-        assert p2._turn_count == 0
 
     def test_concurrent_sessions_isolate_all_claude_code_state(self):
         """Issue #321: two daemon sessions on the same agent must each get an

@@ -14,9 +14,9 @@ from tsugite.events import (
     InfoEvent,
     LLMMessageEvent,
     LLMWaitProgressEvent,
+    ModelResponseEvent,
     ObservationEvent,
     PromptSnapshotEvent,
-    ReactionEvent,
     ReasoningContentEvent,
     ReasoningTokensEvent,
     SecretAccessEvent,
@@ -24,6 +24,8 @@ from tsugite.events import (
     SkillLoadFailedEvent,
     SkillUnloadedEvent,
     StepStartEvent,
+    StreamChunkEvent,
+    StreamCompleteEvent,
     TaskStartEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -47,6 +49,8 @@ class JSONLUIHandler:
     - TaskStartEvent      → {"type": "init", "agent": str, "model": str}
     - StepStartEvent      → {"type": "turn_start", "turn": int}
     - LLMMessageEvent     → {"type": "thought", "content": str}
+    - StreamChunkEvent    → {"type": "stream_chunk", "chunk": str}
+    - StreamCompleteEvent → {"type": "stream_complete"}
     - CodeExecutionEvent  → {"type": "code", "content": str}
     - ObservationEvent    → {"type": "tool_result", "tool": str, "success": bool, "output"?: str, "error"?: str}
     - FinalAnswerEvent    → {"type": "final_result", "result": str, "result_data": Any|null, "turns": int, "tokens": int, "cost": float}
@@ -70,6 +74,7 @@ class JSONLUIHandler:
         CodeExecutionEvent: "_handle_code_execution",
         ObservationEvent: "_handle_observation",
         ContentBlockEvent: "_handle_content_block",
+        ModelResponseEvent: "_handle_model_response",
         FinalAnswerEvent: "_handle_final_answer",
         ErrorEvent: "_handle_error",
         SkillLoadedEvent: "_handle_skill_loaded",
@@ -80,9 +85,10 @@ class JSONLUIHandler:
         ToolCallEvent: "_handle_tool_call",
         ToolResultEvent: "_handle_tool_result",
         InfoEvent: "_handle_info",
-        ReactionEvent: "_handle_reaction",
         ReasoningContentEvent: "_handle_reasoning_content",
         ReasoningTokensEvent: "_handle_reasoning_tokens",
+        StreamChunkEvent: "_handle_stream_chunk",
+        StreamCompleteEvent: "_handle_stream_complete",
         SecretAccessEvent: "_handle_secret_access",
         PromptSnapshotEvent: "_handle_prompt_snapshot",
         LLMWaitProgressEvent: "_handle_llm_wait_progress",
@@ -104,6 +110,12 @@ class JSONLUIHandler:
         if event.content.strip():
             self._emit("thought", {"content": event.content})
 
+    def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
+        self._emit("stream_chunk", {"chunk": event.chunk})
+
+    def _handle_stream_complete(self, event: StreamCompleteEvent) -> None:
+        self._emit("stream_complete", {})
+
     def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         if event.code:
             self._emit("code", {"content": event.code})
@@ -119,6 +131,20 @@ class JSONLUIHandler:
 
     def _handle_content_block(self, event: ContentBlockEvent) -> None:
         self._emit("content_block", {"name": event.name, "content": event.content})
+
+    def _handle_model_response(self, event: ModelResponseEvent) -> None:
+        # The settled parse of one model turn; shares its type and field names
+        # with the persisted model_response event so the timeline reducer
+        # renders live frames and replayed history through one code path.
+        self._emit(
+            "model_response",
+            {
+                "thought": event.thought,
+                "content_blocks": event.content_blocks,
+                "tail": event.tail,
+                "usage": event.usage,
+            },
+        )
 
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         self._emit(
@@ -181,9 +207,6 @@ class JSONLUIHandler:
 
     def _handle_info(self, event: InfoEvent) -> None:
         self._emit("info", {"message": event.message})
-
-    def _handle_reaction(self, event: ReactionEvent) -> None:
-        self._emit("reaction", {"emoji": event.emoji, "message_id": event.message_id})
 
     def _handle_prompt_snapshot(self, event: PromptSnapshotEvent) -> None:
         self._emit("prompt_snapshot", {"token_breakdown": event.token_breakdown})

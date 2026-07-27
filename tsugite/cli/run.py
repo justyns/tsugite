@@ -61,14 +61,6 @@ def _resolve_workspace(workspace_ref: Optional[str]) -> Optional[Any]:
         return None
 
 
-def _build_workspace_attachments(workspace) -> List[str]:
-    """Build list of workspace attachment paths (convention-based)."""
-    from tsugite.workspace.context import build_workspace_attachments
-
-    attachment_objects = build_workspace_attachments(workspace)
-    return [str(att.source) for att in attachment_objects]
-
-
 def _check_and_run_onboarding(
     workspace, workspace_ref: str, model: Optional[str], interactive: bool = True
 ) -> Optional[Any]:
@@ -141,33 +133,10 @@ def _build_executor_kwargs(
     return kwargs
 
 
-def _resolve_conversation_continuation(
-    continue_conversation: bool, conversation_id: Optional[str], stderr_console: Console
-) -> Optional[str]:
-    """Resolve which conversation to continue."""
-    if not continue_conversation:
-        return None
-
-    from tsugite.agent_runner.history_integration import get_latest_conversation
-
-    if conversation_id:
-        stderr_console.print(f"[cyan]Continuing conversation: {conversation_id}[/cyan]")
-        return conversation_id
-
-    continue_conversation_id = get_latest_conversation()
-    if not continue_conversation_id:
-        stderr_console.print("[red]No conversations found to resume[/red]")
-        raise typer.Exit(1)
-
-    stderr_console.print(f"[cyan]Continuing latest conversation: {continue_conversation_id}[/cyan]")
-    return continue_conversation_id
-
-
 def _execute_agent_with_ui(
     executor,
     executor_kwargs: Dict[str, Any],
     ui_opts: UIOptions,
-    use_plain_output: bool,
     console: Console,
 ):
     """Execute agent with appropriate UI mode.
@@ -224,12 +193,11 @@ def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console
 
     from tsugite.console import get_stdout_console
 
-    if ui_opts.headless or ui_opts.final_only:
-        get_stdout_console(no_color=ui_opts.no_color, force_terminal=True).print(Markdown(result_str))
-    else:
+    if not (ui_opts.headless or ui_opts.final_only):
         stderr_console.print()
         stderr_console.rule("[bold green]Agent Execution Complete[/bold green]")
-        get_stdout_console(no_color=ui_opts.no_color, force_terminal=True).print(Markdown(result_str))
+
+    get_stdout_console(no_color=ui_opts.no_color, force_terminal=True).print(Markdown(result_str))
 
 
 def run(
@@ -382,16 +350,12 @@ def run(
         history_opts.continue_id = session_id
         workspace_session_continued = True
 
-    # Add workspace files to attachment list
-    workspace_attachments = []
     if resolved_workspace:
         resolved_workspace = _check_and_run_onboarding(
             resolved_workspace, workspace_to_use, model, interactive=not ui_opts.non_interactive
         )
-        workspace_attachments = _build_workspace_attachments(resolved_workspace)
 
-    # Combine workspace attachments with CLI attachments
-    all_attachments = workspace_attachments + (list(attachment) if attachment else [])
+    all_attachments = list(attachment) if attachment else []
 
     attach_opts = AttachmentOptions(
         sources=all_attachments,
@@ -431,8 +395,6 @@ def run(
             if daemon_agent not in daemon_config.agents:
                 stderr_console.print(f"[red]Agent '{daemon_agent}' not found in daemon config[/red]")
                 raise typer.Exit(1)
-
-            agent_config = daemon_config.agents[daemon_agent]
 
         except ModuleNotFoundError as e:
             stderr_console.print(
@@ -482,10 +444,7 @@ def run(
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Load workspace attachments from daemon config
-        daemon_workspace = _resolve_workspace(str(agent_config.workspace_dir)) or agent_config.workspace_dir
-        workspace_attachments = _build_workspace_attachments(daemon_workspace)
-        all_attachments = workspace_attachments + (list(attachment) if attachment else [])
+        all_attachments = list(attachment) if attachment else []
         attach_opts = AttachmentOptions(
             sources=all_attachments,
             refresh_cache=refresh_cache,
@@ -494,7 +453,14 @@ def run(
 
     # Handle conversation continuation - check before parsing args
     if continue_conversation and not history_opts.continue_id:
-        history_opts.continue_id = _resolve_conversation_continuation(True, None, stderr_console)
+        from tsugite.agent_runner.history_integration import get_latest_conversation
+
+        latest_conversation_id = get_latest_conversation()
+        if not latest_conversation_id:
+            stderr_console.print("[red]No conversations found to resume[/red]")
+            raise typer.Exit(1)
+        stderr_console.print(f"[cyan]Continuing latest conversation: {latest_conversation_id}[/cyan]")
+        history_opts.continue_id = latest_conversation_id
     elif history_opts.continue_id:
         stderr_console.print(f"[cyan]Continuing conversation: {history_opts.continue_id}[/cyan]")
 
@@ -582,7 +548,6 @@ def run(
         # by AgentPreparer as workspace-relative files — not through CLI attachment resolution.
         # Only CLI-level attachments (-f flag) and auto-context are resolved here.
         cli_only_attachments = inject_auto_context_if_enabled(
-            None,
             agent_info.get("auto_context"),
             cli_override=attach_opts.auto_context,
         )
@@ -613,7 +578,9 @@ def run(
 
             agent_attachments = agent_info.get("attachments")
             if agent_attachments:
-                info_items["Agent Attachments"] = ", ".join(agent_attachments)
+                # Items may be plain paths or AttachmentSpec objects (grouped/tiered
+                # attachments normalize to specs); show the path either way.
+                info_items["Agent Attachments"] = ", ".join(getattr(a, "path", a) for a in agent_attachments)
 
             if attach_opts.sources:
                 info_items["CLI Attachments"] = ", ".join(attach_opts.sources)
@@ -709,7 +676,6 @@ def run(
                 executor,
                 executor_kwargs,
                 ui_opts,
-                use_plain_output,
                 stderr_console,
             )
 
