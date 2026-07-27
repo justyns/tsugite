@@ -1,3 +1,11 @@
+# The web UI dist is gitignored build output; build it in a node stage so the
+# python image needs no node toolchain.
+FROM node:26-slim AS webui
+COPY plugins/tsugite-daemon/frontend /frontend
+WORKDIR /frontend
+RUN npm ci && npm run build
+# vite emits to ../tsugite_daemon/web relative to the frontend dir -> /tsugite_daemon/web
+
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
@@ -8,6 +16,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
+COPY --from=webui /tsugite_daemon/web /app/plugins/tsugite-daemon/tsugite_daemon/web
 WORKDIR /app
 # The [daemon] extra pulls tsugite-daemon/-discord/-pty/-sandbox, which aren't on
 # PyPI when this image builds (and pip ignores uv's workspace sources). Install the

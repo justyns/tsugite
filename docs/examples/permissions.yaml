@@ -1,0 +1,14 @@
+# Example permissions store for approval-gated actions.
+#
+# Two files are merged, like hooks:
+#   1. The runtime permissions.yaml next to daemon.yaml (this layout). It is
+#      mutable: an "Always allow" prompt appends here and it survives restarts.
+#   2. An optional, read-only <workspace_dir>/.tsugite/permissions.yaml, hand
+#      authored per agent (same layout). The store never writes it.
+#
+# An action is allowed if it is listed in EITHER file.
+
+web:
+  # Domains the webpage detector may fetch without asking for approval.
+  fetch_allowlist:
+    - example.com

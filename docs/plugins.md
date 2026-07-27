@@ -121,3 +121,81 @@ def register_event_subscribers(config):
         subs.append(Subscription(handler=debug_logger))
     return subs
 ```
+
+## Command plugins
+
+A plugin can add daemon slash commands (the `/name` commands in the web composer and Discord) via the `tsugite.commands` group. Like the unified group it is module-only: importing the module runs the `@adapter_command` decorator, which registers the command into the daemon's shared registry. Command handlers are daemon-coupled by nature - they receive a daemon `BaseAdapter` as their first argument.
+
+```python
+# tsugite_my_plugin/commands.py
+from tsugite_daemon.commands import CommandParam, adapter_command
+
+
+@adapter_command(
+    name="terminals",
+    description="List the daemon's terminal sessions and their state",
+    params=[
+        CommandParam("state", str, "Filter by state", required=False, choices=["running", "succeeded"]),
+    ],
+)
+async def cmd_terminals(adapter, state: str | None = None) -> str:
+    terminals = adapter.terminal_store.list_all()
+    return "\n".join(f"[{t.state}] {t.id}: {t.cmd}" for t in terminals) or "No terminals found."
+```
+
+```toml
+[project.entry-points."tsugite.commands"]
+my_plugin = "tsugite_my_plugin.commands"
+```
+
+Each `CommandParam` carries `required`, an optional `choices` list (a fixed enum the UI offers), and an optional `widget` hint (`"model"`, `"effort"`, ...) naming a rich input the web UI's autocomplete renders for that argument; omit `widget` for a plain text field. The daemon loads command plugins the first time `get_commands()` runs, so they are registered before the first `/api/commands` list or command run.
+
+## Context providers
+
+A plugin can contribute **context items** - structured `{key, label, value}` records that get folded into the agent's context (as a `<client_context>` block) and rendered in the web UI's context gutter, the same path the browser's own providers (e.g. location) use. There are two kinds, and one provider may be either or both:
+
+- **Menu provider** - appears in the composer's "add context" menu. On pick the daemon runs `capture` server-side. Add `choices` to first offer a submenu; the picked value arrives as `capture`'s `arg` (it is `None` for a direct capture on pick).
+- **Detector** - `detect` scans the outgoing message server-side at send time and attaches an item for anything it recognizes (a URL, a ticket id). Detectors run best-effort: a raising detector is logged and skipped, never breaking the send.
+
+Register providers at import time via the module-only `tsugite.context_providers` group:
+
+```python
+# tsugite_my_plugin/context.py
+from tsugite.context import ContextChoice, ContextItem, ContextProvider, register_context_provider
+
+
+# Menu provider (with a submenu). `context` carries {session_id, user_id, agent, workspace_dir}.
+def open_files(context: dict) -> list[ContextChoice]:
+    return [ContextChoice(value="README.md", label="README.md")]
+
+
+def capture_file(arg: str | None, context: dict) -> list[ContextItem]:
+    if not arg:
+        return []
+    return [ContextItem(key=f"file:{arg}", label=arg, value=open(arg).read())]
+
+
+register_context_provider(
+    ContextProvider(key="file", label="Project file", icon="doc", choices=open_files, capture=capture_file)
+)
+
+
+# Detector - attach an item for each ticket id mentioned in the message.
+import re
+
+_TICKET = re.compile(r"\b([A-Z]+-\d+)\b")
+
+
+def detect_tickets(message: str, context: dict) -> list[ContextItem]:
+    return [ContextItem(key=f"ticket:{t}", label=t, value=f"Ticket {t}") for t in dict.fromkeys(_TICKET.findall(message))]
+
+
+register_context_provider(ContextProvider(key="ticket", label="Ticket", icon="tag", detect=detect_tickets))
+```
+
+```toml
+[project.entry-points."tsugite.context_providers"]
+my_plugin = "tsugite_my_plugin.context"
+```
+
+`ContextProvider(key, label, icon="sparkle", capture=None, choices=None, detect=None)`: `key` is the stable id, `capture(arg, context)` runs a menu pick, `choices(context)` builds its optional submenu, and `detect(message, context)` scans a message. A provider shows in the menu iff it has a `capture`. The daemon exposes menu providers over `/api/context-providers`; detectors run automatically as each message is sent. `examples/tsugite-example-plugin/tsugite_example_plugin/context.py` is a heavily commented, copy-paste reference of both kinds.

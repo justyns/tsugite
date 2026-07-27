@@ -155,6 +155,97 @@ disable = [
 ]
 ignore = [".venv", "docs", "tests"]
 
+# Dead-code scan config for `mise run deadcode` (which also runs the frontend
+# knip pass). Confidence 60 is needed to surface unused methods/attributes, but
+# that pulls in whole classes of framework callbacks reached dynamically (never
+# by a direct call), so the decorator/name lists below suppress those classes to
+# leave a signal of genuinely-unreachable code. Tests are excluded from triage.
+[tool.vulture]
+min_confidence = 60
+paths = [
+  "tsugite",
+  "plugins/tsugite-acp/tsugite_acp",
+  "plugins/tsugite-cc-driver/tsugite_cc_driver",
+  "plugins/tsugite-claude-code/tsugite_claude_code",
+  "plugins/tsugite-codex-cli/tsugite_codex_cli",
+  "plugins/tsugite-daemon/tsugite_daemon",
+  "plugins/tsugite-discord/tsugite_discord",
+  "plugins/tsugite-pty/tsugite_pty",
+  "plugins/tsugite-sandbox/tsugite_sandbox",
+  "plugins/tsugite-tmux/tsugite_tmux",
+  "plugins/tsugite-web/tsugite_web",
+  "plugins/tsugite-youtube/tsugite_youtube",
+]
+exclude = ["*/tests/*", "*/test_*.py"]
+ignore_decorators = [
+  "@*.command",        # typer CLI subcommands (tsugite/cli/*)
+  "@*.callback",       # typer app callbacks
+  "@tool",             # agent tools (tsugite/tools/*), invoked by name from the registry
+  "@field_validator",  # pydantic
+  "@model_validator",  # pydantic
+  "@*.event",          # discord.py gateway events (on_ready/on_message/on_error)
+  "@*.button",         # discord.py UI buttons
+  "@kb.add",           # prompt_toolkit key bindings (repl Ctrl-C handler)
+]
+ignore_names = [
+  "cmd_*",             # daemon chat commands, dispatched from a name registry
+  "_handle_*",         # UI event handlers, dispatched via an event->method-name map
+  "_validate_*",       # pydantic validators
+  "model_config",      # pydantic model settings
+  "on_*",              # discord/lifecycle callbacks (on_submit, on_ready, on_connect, ...)
+  "interaction_check", # discord.py View/Modal permission hook
+  "create_adapter",    # plugin entry points (pyproject [project.entry-points])
+  "create_handler",
+  "get_public_http_routes",
+  "get_http_routes",
+  "install_signal_handlers",  # uvicorn.Config attributes, set by name
+  "should_exit",
+  "force_exit",
+  "CLI",               # SessionSource member matching the raw "cli" agent_runner writes into session data
+  # acp.Client protocol handlers - the acp library dispatches these by
+  # getattr(handler, "<name>") string lookup (acp/client/router.py), never by a
+  # direct in-repo call.
+  "session_update",
+  "request_permission",
+  "read_text_file",
+  "write_text_file",
+  "create_terminal",
+  "terminal_output",
+  "release_terminal",
+  "wait_for_terminal_exit",
+  "kill_terminal",
+  "ext_method",
+  "ext_notification",
+  # pydantic HooksConfig phase fields, fired via getattr(config, phase) in the hook runner.
+  "pre_compact",
+  "post_compact",
+  "pre_message",
+  "pre_context_build",
+  "post_context_build",
+  "pre_response",
+  "post_response",
+  "session_end",
+  "hook",              # @hook decorator-registry, the public plugin hook API
+  # Framework-owned attributes read by the library, not by tsugite code.
+  "message_content",   # discord.py privileged Intents flag
+  "row_factory",       # sqlite3.Connection attribute, consumed by the C layer
+  "ignore_links",      # html2text.HTML2Text config attributes
+  "ignore_images",
+  "body_width",
+  "get_completions",   # prompt_toolkit Completer API, dispatched by the session
+  "complete_event",    # mandatory prompt_toolkit get_completions() parameter
+  "language",          # CodeExecutionEvent field, read by the web UI via serialized events
+  "BubblewrapSandbox", # plugin entry point (tsugite.sandbox: bwrap), loaded via get_sandbox_class
+  # Public API / test-infra reached only from tests (vulture excludes tests).
+  "subscribe_filtered",         # imperative EventBus filtered-subscription API (docs/plugin-events.md)
+  "unsubscribe_filtered",
+  "supports_audio",             # ModelInfo field populated from OpenRouter metadata
+  "save_schema",                # called by scripts/regenerate_schema.py (scripts/ not scanned)
+  "wait_drain",                 # PtyProcess test-synchronization primitive
+  "close_all",                  # sqlite connection-cache cleanup used by test fixtures
+  "reset_attachment_handlers",  # attachment-registry reset used by test fixtures
+]
+
 [dependency-groups]
 dev = [
   "black>=25.9.0",

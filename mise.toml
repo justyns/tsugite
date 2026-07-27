@@ -1,3 +1,6 @@
+[tools]
+node = "26"
+
 [tasks.lint]
 description = "Fix and format with ruff"
 run = [
@@ -13,10 +16,47 @@ run = "uv run pylint tsugite -E"
 description = "Run unit/integration tests"
 run = "uv run pytest"
 
+[tasks.web-deps]
+description = "Install frontend deps (npm ci); skipped while the lockfile is unchanged"
+run = "npm --prefix plugins/tsugite-daemon/frontend ci"
+sources = ["plugins/tsugite-daemon/frontend/package-lock.json"]
+outputs = ["plugins/tsugite-daemon/frontend/node_modules/.package-lock.json"]
+
+[tasks.web-dev]
+description = "Vite dev server (HMR), proxies /api to 127.0.0.1:8374 (or $TSU_API)"
+depends = ["web-deps"]
+run = "npm --prefix plugins/tsugite-daemon/frontend run dev"
+
+[tasks.web-build]
+description = "Build web UI into tsugite_daemon/web"
+depends = ["web-deps"]
+run = "npm --prefix plugins/tsugite-daemon/frontend run build"
+
+[tasks.web-check]
+description = "svelte-check + vitest + prettier check"
+depends = ["web-deps"]
+run = "npm --prefix plugins/tsugite-daemon/frontend run check"
+
+[tasks.daemon]
+description = "Build the web UI, then run the daemon (git checkouts have no prebuilt dist)"
+depends = ["web-build"]
+run = "uv run tsu daemon"
+
 [tasks.e2e]
 description = "Run Playwright E2E tests"
+depends = ["web-build"]
 run = "uv run pytest tests/e2e/ -x -v --override-ini='addopts='"
 
 [tasks.ci]
 description = "Lint, check, and test"
 depends = ["lint", "check", "test"]
+
+[tasks.deadcode]
+description = "Report unused code: vulture (Python) + knip (web UI). Manual triage tool, not a CI gate"
+depends = ["web-deps"]
+run = [
+    # vulture always finds residual 60%-confidence candidates to eyeball, so
+    # don't let its exit status abort the knip pass.
+    "uvx vulture || true",
+    "npm --prefix plugins/tsugite-daemon/frontend run knip",
+]

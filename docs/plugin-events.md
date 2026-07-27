@@ -60,7 +60,6 @@ Subscribers run synchronously in the order they were registered. Errors are logg
 - Tool audit: `tool_call`, `tool_result`
 - Files: `file_read`, `file_write`
 - Skills: `skill_loaded`, `skill_unloaded`, `skill_load_failed`
-- Misc: `info`, `warning`, `debug_message`, `step_progress`, `cost_summary`, `prompt_snapshot`, `secret_access`, `content_block`, `reaction`
 - Plugin-defined: `custom` (matched by `custom_name`, see below)
 
 `uv run python -c "from tsugite.events.base import EventType; print([t.name.lower() for t in EventType])"` prints the live list.

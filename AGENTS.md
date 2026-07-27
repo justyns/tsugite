@@ -489,25 +489,33 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 
 ## Web UI
 
-The daemon's web UI lives at `plugins/tsugite-daemon/tsugite_daemon/web/`.
+Source lives at `plugins/tsugite-daemon/frontend/` (**Svelte 5 runes + TypeScript + Vite**). The production build lands in `plugins/tsugite-daemon/tsugite_daemon/web/` - **gitignored build output** (never hand-edit; every build overwrites it via `emptyOutDir`). Wheels/sdists bundle it via hatch `artifacts`, so the publish pipeline and Dockerfile build the frontend first; a git checkout must run `mise run web-build` (or `mise run daemon`, which depends on it) before the daemon can serve the UI.
 
 ### Stack
 
-- **Alpine.js 3** loaded from CDN. No build step. No React. Don't port this to a framework - the design handoff explicitly said match visuals, not internal structure.
-- **Starlette** serves `index.html` plus `/static/{css,js,icons}` and the `/api/*` routes (`plugins/tsugite-daemon/tsugite_daemon/adapters/http/`, a per-domain package).
-- CSS lives in three files. Read all three before adding rules: `theme.css` (Catppuccin tokens), `console.css` (Console redesign - the real stylesheet), `styles.css` (legacy modals/auth/forms; ~120 lines, pruned aggressively after the redesign).
-- View modules under `js/views/`: `conversations.js` (orchestrator) + `conversation/{sessions,history,streaming,input,attachments,event_types}.js` mixins, plus `workspace.js`, `schedules.js`, `webhooks.js`, `usage.js`, `file-editor.js`. Shared helpers: `js/api.js` (REST + SSE), `js/utils.js` (markdown, formatters, toast).
+- **Svelte 5 + Vite**; prod builds use `base: '/static/'`; routing is hash-based (no SPA catch-all server-side). **Starlette** serving contracts are unchanged: `/` (index.html), `/static/*`, `/sw.js`, and `/api/*` routes (`plugins/tsugite-daemon/tsugite_daemon/adapters/http/`, a per-domain package).
+- Components implement the design-system `.t-*` contracts 1:1 under `frontend/src/lib/components/<domain>/` (domain-grouped, PascalCase, one component per file), transcribe the design's CSS, no wrapper layers or extra abstraction. Imports use the `$lib` alias. Design references live in `docs/design/webui-rebuild/` (gitignored - never commit).
+- Svelte 5 idioms are mandatory: runes (`$state`/`$derived`/`$props` single typed destructure), snippets + `{@render}` (no `<slot>`), callback props (no `createEventDispatcher`), event attributes (`onclick`, no `on:` directives), `.svelte.ts` state modules that export mutable `$state` objects (never a reassigned binding).
+- Static public assets (`sw.js`, `manifest.json`, `icons/`) live in `frontend/public/`.
+- **No CDN dependencies**: fonts via `@fontsource/*`, xterm (`@xterm/xterm`, dynamic import) and `marked` via npm.
+- `sw.js` stays **push-only** - never add precaching or vite-plugin-pwa; a caching SW reintroduces the stale-UI-after-deploy bug class the no-cache design avoids.
+
+### Commands
+
+- `mise run web-dev` - Vite dev server on :5173 with HMR, proxying `/api` to a local daemon on 127.0.0.1:8374 (`uv run tsu daemon`).
+- `mise run web-build` - production build into `tsugite_daemon/web/` (gitignored; never committed).
+- `mise run web-check` - svelte-check + vitest + prettier check.
 
 ### Theme tokens
 
-- Use **bare token names** - `var(--base)`, `var(--mantle)`, `var(--crust)`, `var(--surface0/1/2)`, `var(--text)`, `var(--lavender)`, `var(--blue)`, `var(--peach)`, etc. The legacy `--ctp-*` aliases were removed.
-- **Visual depth is `crust < mantle < base`** (darker → lighter on Frappé/Mocha/Macchiato). For dark-on-dark panels, panels go `var(--mantle)` and inner cards `var(--surface0)` or `var(--crust)`. Don't put a brighter (`--bg`/`--base`) header over a `--mantle` panel - it inverts the depth on dark themes.
-- Never hardcode hex colors. They won't theme-switch. Even in JS palette objects (e.g. `PI_COLORS` in `conversations.js`), use `var(--pink)` strings - they get embedded into `:style="background: ..."` and resolve through the CSS cascade.
-- `<meta name="theme-color">` is synced to the active theme's `--crust` via an `Alpine.effect` in `app.js` so the PWA status bar / mobile chrome track the theme.
+- Design tokens ride `[data-theme]`: surfaces `--bg0..--bg4` (app shell → panel → surface → raised → hover), text `--tx0..--tx3` (strong → faint), lines `--bd0..--bd2`, accent `--acc`/`--on-acc`/`--brand`, semantic states `--st-ok/-verify/-warn/-err/-info/-queue/-mute`, radii `--r-sm/-md/-lg/-full`, spacing `--sp-0..6`, motion `--t-1..3` + `--ease`. Five themes: mocha (default), macchiato, frappe, latte, gruvbox.
+- Never hardcode hex colors - they won't theme-switch. State is never signaled by color alone (a11y contract).
 
-### Verification
+### Testing
 
-Browser verification on UI changes is mandatory. The smoketest recipe - daemon spinup, Playwright wiring, and the post-redesign DOM selectors - is captured in the agent's project memory file `project_daemon_ui_smoketest.md`. There's also a `project_webui_console_hotzones.md` memory listing the load-bearing assumptions in the new UI (pulse signal, mid-turn reload guards, theme depth, PWA resume, mobile back-buttons) that bit during the redesign and should be re-read before touching session lifecycle, theme tokens, or PWA behaviour.
+- e2e selectors use `data-testid` values from `frontend/src/lib/testids.ts` (a frozen contract - extend, don't rename). App readiness marker: `[data-testid="app-ready"]`; test hooks hang off `window.__tsugite`.
+- Frontend behavioral logic (stores, SSE replay, parsers/reducers) is vitest-tested (`frontend/src/**/*.test.ts`), failing-test-first.
+- Browser verification on UI changes is mandatory. Daemon spinup + Playwright wiring recipe: project memory `project_daemon_ui_smoketest.md` (its DOM selector list predates the Svelte rebuild - trust the testids contract instead).
 
 ## Code Review Policy
 

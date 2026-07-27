@@ -72,3 +72,28 @@ jobs:
             coverage.xml
             htmlcov/
           retention-days: 30
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/tsugite-daemon/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: plugins/tsugite-daemon/frontend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run test:browser
+
+      - run: npm run build

@@ -14,7 +14,10 @@ from tsugite_daemon.adapters.http.helpers import (
 class StaticMixin:
     def _static_routes(self) -> list:
         return [
-            Mount("/static", app=_NoCacheStaticFiles(directory=str(WEB_DIR)), name="static"),
+            # check_dir=False: a source checkout that hasn't run the web build has no
+            # WEB_DIR yet, and StaticFiles otherwise raises at construction and takes
+            # the whole daemon down. Missing assets 404 instead (as _serve_ui does).
+            Mount("/static", app=_NoCacheStaticFiles(directory=str(WEB_DIR), check_dir=False), name="static"),
             Route("/sw.js", self._serve_sw, methods=["GET"]),
             Route("/", self._serve_ui, methods=["GET"]),
         ]

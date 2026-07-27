@@ -27,6 +27,19 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+          cache-dependency-path: plugins/tsugite-daemon/frontend/package-lock.json
+
+      # The web UI dist is gitignored build output; the tsugite-daemon wheel
+      # bundles it (hatch `artifacts`), so it must exist before packaging.
+      - name: Build web UI
+        run: npm ci && npm run build
+        working-directory: plugins/tsugite-daemon/frontend
+
       - name: Build all workspace packages
         run: uv build --all-packages
 
