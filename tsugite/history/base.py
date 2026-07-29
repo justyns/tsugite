@@ -30,6 +30,21 @@ class Session(Protocol):
 
     def summary(self) -> SessionSummary: ...
 
+    def read_events_window(
+        self,
+        *,
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> "tuple[List[Event], bool]":
+        """A chronological window of events plus whether older ones exist before it.
+
+        ``after_id``: forward delta (has_more always False). ``before_id`` + ``limit``:
+        the newest ``limit`` below the cursor. ``limit`` alone: the newest ``limit``.
+        None of them: every event.
+        """
+        ...
+
 
 @runtime_checkable
 class HistoryBackend(Protocol):

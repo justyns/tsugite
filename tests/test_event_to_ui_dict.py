@@ -131,6 +131,22 @@ def test_user_input_client_context_yields_structured_items():
     assert d["display_text"] == "summarize this"
 
 
+def test_user_input_prefers_stored_client_context_over_xml():
+    """The dual-write path: structured client_context recorded as event data is used
+    directly, not re-parsed from the folded XML (which stays as the prompt rendering);
+    the XML is still stripped from display_text and the stored key isn't left stray."""
+    text = (
+        "<client_context>\n"
+        '  <attachment key="url" name="Page URL">https://x/?a=1&amp;b=2</attachment>\n'
+        "</client_context>\n\nsummarize this"
+    )
+    stored = [{"key": "url", "label": "Page URL", "value": "https://x/?a=1&b=2", "untrusted": True}]
+    d = event_to_ui_dict(Event(type="user_input", ts=TS, data={"text": text, "client_context": stored}))
+    assert d["injected"] == [{"tag": "client_context", "items": stored}]
+    assert d["display_text"] == "summarize this"
+    assert "client_context" not in d
+
+
 def test_client_context_alongside_other_injections_keeps_their_shape():
     text = (
         "<message_context>\nctx\n</message_context>\n"

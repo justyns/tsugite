@@ -120,9 +120,18 @@ def _normalize(out: Dict[str, Any], event_type: str) -> None:
             else:
                 out.pop("tail", None)
     elif event_type == "user_input":
+        # client_context recorded as structured event data is preferred over
+        # re-parsing the folded <client_context> XML; the XML stays as the prompt
+        # rendering and the fallback for turns recorded before the dual-write.
+        stored = out.pop("client_context", None)
         blocks, rest = split_injected_context(out.get("text") or "")
         if blocks:
-            out["injected"] = [_structure_injected_block(b) for b in blocks]
+            out["injected"] = [
+                {"tag": "client_context", "items": stored}
+                if stored is not None and b.get("tag") == "client_context"
+                else _structure_injected_block(b)
+                for b in blocks
+            ]
             out["display_text"] = rest
 
 

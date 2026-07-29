@@ -94,6 +94,9 @@ class _DummySession:
 
         return SessionSummary.from_events(self.events)
 
+    def read_events_window(self, *, after_id=None, before_id=None, limit=None):
+        return list(self.events), False
+
 
 def test_set_backend_routes_sessions_to_it():
     dummy = _DummyBackend()

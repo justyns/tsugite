@@ -792,6 +792,7 @@ class BaseAdapter(ABC):
                     recorded_message,
                     attachments=(channel_context.metadata or {}).get("uploaded_attachments"),
                     channel_metadata=metadata,
+                    client_context_items=client_items,
                 )
         except Exception as e:
             logger.debug("Early user_input recording failed, leaving it to the runner: %s", e)

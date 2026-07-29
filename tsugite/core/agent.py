@@ -1096,7 +1096,7 @@ class TsugiteAgent:
         tiers = sorted({att.tier for att in context_atts}) or [0]
         turns = []
         for i, tier in enumerate(tiers):
-            atts = [a for a in context_atts if getattr(a, "tier", 0) == tier]
+            atts = [a for a in context_atts if a.tier == tier]
             skills = self.skills if i == len(tiers) - 1 else []
             block = self._build_context_block(atts, skills)
             if block:

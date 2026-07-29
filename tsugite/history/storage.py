@@ -121,6 +121,27 @@ class SessionStorage:
     def load_events(self) -> List[Event]:
         return list(self.iter_events())
 
+    def read_events_window(
+        self,
+        *,
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> "tuple[List[Event], bool]":
+        """In-memory window over the full log (this backend can't push it into a
+        query). Events without an id can't be positioned, so the delta/before-id
+        cursors exclude them (the client only sends a cursor when it holds a numeric id)."""
+        raw = self.load_events()
+        if after_id is not None:
+            return [e for e in raw if e.id is not None and e.id > after_id], False
+        if before_id is not None:
+            raw = [e for e in raw if e.id is not None and e.id < before_id]
+        has_more = False
+        if limit is not None and 0 <= limit < len(raw):
+            has_more = True
+            raw = raw[len(raw) - limit :]  # newest `limit`, still chronological
+        return raw, has_more
+
     @classmethod
     def load_meta_fast(cls, session_path: Path) -> Optional[Event]:
         """Read just the first event (the session_start) for fast list views."""

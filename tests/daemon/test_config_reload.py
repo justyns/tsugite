@@ -87,19 +87,10 @@ def test_every_config_section_is_classified_hot_or_boot_only():
     hot-reconciled or boot-only. A newly added section that lands in neither would
     silently escape restart_required detection, so fail until it's classified."""
     from tsugite_daemon.config import DaemonConfig
+    from tsugite_daemon.gateway import BOOT_ONLY_SECTIONS
 
     hot_reconciled = {"agents", "notification_channels", "identity_links"}
-    boot_only = {
-        "http",
-        "state_dir",
-        "discord_bots",
-        "plugins",
-        "sandbox",
-        "log_level",
-        "log_file",
-        "log_to_console",
-    }
-    unclassified = set(DaemonConfig.model_fields) - hot_reconciled - boot_only
+    unclassified = set(DaemonConfig.model_fields) - hot_reconciled - set(BOOT_ONLY_SECTIONS)
     assert not unclassified, f"Unclassified daemon config sections: {unclassified}"
 
 

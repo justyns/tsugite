@@ -107,6 +107,7 @@ def record_user_input(
     text: str,
     attachments: Optional[List[Attachment]] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
+    client_context_items: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Record a user_input event at the start of a turn.
 
@@ -131,6 +132,10 @@ def record_user_input(
         ]
     if channel_metadata:
         data["channel"] = channel_metadata
+    # Structured client context, recorded alongside the folded <client_context> XML
+    # in `text` so the UI reads it back without re-parsing the prompt string.
+    if client_context_items:
+        data["client_context"] = client_context_items
     storage.record("user_input", **data)
 
 

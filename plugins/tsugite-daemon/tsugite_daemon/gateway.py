@@ -204,6 +204,22 @@ def check_sandbox_prerequisites(config: DaemonConfig) -> None:
         )
 
 
+# DaemonConfig sections that only take effect at boot: a change to any of them is
+# reported as restart_required. The rest (agents, notification_channels,
+# identity_links) are hot-reconciled. Exported so the coverage test checks the same
+# set reload_config uses instead of a hand-maintained copy.
+BOOT_ONLY_SECTIONS = (
+    "http",
+    "state_dir",
+    "discord_bots",
+    "plugins",
+    "sandbox",
+    "log_level",
+    "log_file",
+    "log_to_console",
+)
+
+
 class Gateway:
     """Main daemon gateway routing messages between platform adapters and agents."""
 
@@ -598,20 +614,12 @@ class Gateway:
             if self._session_store is not None:
                 self._session_store.update_context_limit(name, cfg.context_limit)
 
-        # Every DaemonConfig section is classified below as either hot-reconciled
-        # (agents, notification_channels, identity_links) or boot-only; a coverage
-        # test asserts none is silently omitted (see test_config_reload).
-        boot_only = [
-            ("http", self.config.http, new.http),
-            ("state_dir", self.config.state_dir, new.state_dir),
-            ("discord_bots", self.config.discord_bots, new.discord_bots),
-            ("plugins", self.config.plugins, new.plugins),
-            ("sandbox", self.config.sandbox, new.sandbox),
-            ("log_level", self.config.log_level, new.log_level),
-            ("log_file", self.config.log_file, new.log_file),
-            ("log_to_console", self.config.log_to_console, new.log_to_console),
+        # Every DaemonConfig section is hot-reconciled (agents, notification_channels,
+        # identity_links) or boot-only (BOOT_ONLY_SECTIONS); a coverage test asserts
+        # none is silently omitted (see test_config_reload).
+        result["restart_required"] = [
+            name for name in BOOT_ONLY_SECTIONS if getattr(self.config, name) != getattr(new, name)
         ]
-        result["restart_required"] = [name for name, old, cur in boot_only if old != cur]
 
         if self._http_server:
             from tsugite_daemon.adapters.http import HTTPAgentAdapter

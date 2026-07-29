@@ -1170,17 +1170,10 @@ class SessionStore:
             return {"events": [], "has_more": False, "oldest_id": None}
         try:
             session = backend.load(session_id)
-            # SQLite bounds the window in the query; other backends (the deprecated
-            # jsonl one) still materialize the log and slice it in memory. A negative
-            # limit can't be expressed as a SQL LIMIT, so it also takes the in-memory
-            # path — the HTTP endpoint only ever passes None or a non-negative int.
-            window = getattr(session, "read_events_window", None)
-            if window is not None and (limit is None or limit >= 0):
-                events, has_more = window(after_id=after_id, before_id=before_id, limit=limit)
-            else:
-                events, has_more = self._window_events_in_memory(
-                    list(session.iter_events()), after_id=after_id, before_id=before_id, limit=limit
-                )
+            # Each Session windows in its own layer: SQLite bounds it in the query, the
+            # jsonl backend slices its materialized log. A negative limit can't be a SQL
+            # LIMIT, but the HTTP endpoint only ever passes None or a non-negative int.
+            events, has_more = session.read_events_window(after_id=after_id, before_id=before_id, limit=limit)
         except Exception:
             return {"events": [], "has_more": False, "oldest_id": None}
 
@@ -1189,22 +1182,6 @@ class SessionStore:
             "has_more": has_more,
             "oldest_id": events[0].id if events else None,
         }
-
-    @staticmethod
-    def _window_events_in_memory(raw, *, after_id, before_id, limit):
-        """In-memory equivalent of SqliteSession.read_events_window, for a backend
-        that can't push the window into its query. Events without an id can't be
-        positioned, so the delta/before-id cursors exclude them (the client only
-        sends a cursor when it holds a numeric id)."""
-        if after_id is not None:
-            return [e for e in raw if e.id is not None and e.id > after_id], False
-        if before_id is not None:
-            raw = [e for e in raw if e.id is not None and e.id < before_id]
-        has_more = False
-        if limit is not None and 0 <= limit < len(raw):
-            has_more = True
-            raw = raw[len(raw) - limit :]  # newest `limit`, still chronological
-        return raw, has_more
 
     def event_count(self, session_id: str) -> int:
         with self._cache_lock:
