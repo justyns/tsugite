@@ -357,57 +357,6 @@ def test_cancel_chat_sets_cooperative_cancel_event(client, mock_adapter, test_to
         d.wait(timeout=5)
 
 
-def test_respond_routes_by_session(client, mock_adapter, test_token, server):
-    """POST /respond with session_id routes to the correct backend when two
-    sessions are awaiting concurrently. Without per-session keying, the
-    request would land on whichever backend last registered at (agent, user).
-    """
-    import asyncio
-
-    _make_session(mock_adapter, "sess-A", "alice")
-    _make_session(mock_adapter, "sess-B", "alice")
-
-    async def slow_handle(*args, **kwargs):
-        await asyncio.sleep(2.0)
-        return "ok"
-
-    with patch.object(mock_adapter, "handle_message", side_effect=slow_handle):
-        _t1, _st1, d1 = _start_chat_in_thread(client, test_token, session_id="sess-A", user_id="alice")
-        _t2, _st2, d2 = _start_chat_in_thread(client, test_token, session_id="sess-B", user_id="alice")
-        _wait_for_active_chats(server, "sess-A", "sess-B")
-
-        resolved_user = mock_adapter.resolve_http_user("alice")
-        agent_name = mock_adapter.agent_name
-        chat_a = server._active_chats.get((agent_name, resolved_user, "sess-A"))
-        chat_b = server._active_chats.get((agent_name, resolved_user, "sess-B"))
-        assert chat_a is not None, "chat state for sess-A should be registered"
-        assert chat_b is not None, "chat state for sess-B should be registered"
-        backend_a = chat_a.backend
-        backend_b = chat_b.backend
-
-        resp = client.post(
-            "/api/agents/test-agent/respond",
-            json={"user_id": "alice", "session_id": "sess-A", "response": "answer-A"},
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        assert resp.status_code == 200, f"respond failed: {resp.text}"
-        assert backend_a._response == "answer-A"
-        assert backend_b._response is None, "sess-B's backend should be untouched"
-
-        client.post(
-            "/api/agents/test-agent/chat/cancel",
-            json={"user_id": "alice", "session_id": "sess-A"},
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        client.post(
-            "/api/agents/test-agent/chat/cancel",
-            json={"user_id": "alice", "session_id": "sess-B"},
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        d1.wait(timeout=5)
-        d2.wait(timeout=5)
-
-
 def test_status_returns_correct_session_busy(client, mock_adapter, test_token, server):
     """While S1 is mid-turn, /status?session_id=S1 reports busy=true and
     /status?session_id=S2 reports busy=false. On master, both report busy=true

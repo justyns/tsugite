@@ -5,11 +5,33 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import html2text
 import yaml
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` so a reader never sees a partial file.
+
+    Writes a sibling temp file (same directory, so the rename stays on one
+    filesystem) and atomically replaces the target. A failure discards the temp
+    and leaves any existing file untouched, rather than truncating it in place.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def convert_html_to_markdown(html: str) -> str:

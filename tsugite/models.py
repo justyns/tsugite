@@ -157,21 +157,29 @@ def is_reasoning_model_without_stop_support(model_string: str) -> bool:
     return False
 
 
-def model_supports_vision(model_string: str) -> bool:
-    """Whether the resolved model accepts image inputs.
-
-    Defaults True on any resolution failure so a registry gap never strands an
-    image on a model that can actually see it.
+def resolve_model_info(model_string: str):
+    """Resolve a model string (alias-aware) to its ``ModelInfo``, or ``None`` when the
+    model is unknown or resolution fails. Single authority for the
+    alias → provider → get_model_info chain; each caller applies its own default.
     """
     from tsugite.providers import get_provider
 
     try:
         resolved = resolve_model_alias(model_string)
         provider_name, _, _ = parse_model_string(resolved)
-        info = get_provider(provider_name).get_model_info(get_model_id(resolved))
-        return bool(info is None or info.supports_vision)
-    except Exception:  # noqa: BLE001 -- unknown model → assume vision, don't strand the image
-        return True
+        return get_provider(provider_name).get_model_info(get_model_id(resolved))
+    except Exception:  # noqa: BLE001 -- unknown/unresolvable model
+        return None
+
+
+def model_supports_vision(model_string: str) -> bool:
+    """Whether the resolved model accepts image inputs.
+
+    Defaults True on any resolution failure so a registry gap never strands an
+    image on a model that can actually see it.
+    """
+    info = resolve_model_info(model_string)
+    return bool(info is None or info.supports_vision)
 
 
 def filter_reasoning_model_params(model_name: str, params: dict) -> dict:

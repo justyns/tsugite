@@ -406,17 +406,11 @@ class BaseAdapter(ABC):
         effort-levels endpoint and the /effort command so both report identical,
         model-dependent levels.
         """
-        from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
-        from tsugite.providers import get_provider
+        from tsugite.models import resolve_model_info
 
-        try:
-            resolved = resolve_model_alias(self.resolve_session_model(session_id))
-            provider_name, _, _ = parse_model_string(resolved)
-            info = get_provider(provider_name).get_model_info(get_model_id(resolved))
-            if info and info.supported_effort_levels:
-                return list(info.supported_effort_levels)
-        except Exception:  # noqa: BLE001 -- unknown model -> unknown levels
-            pass
+        info = resolve_model_info(self.resolve_session_model(session_id))
+        if info and info.supported_effort_levels:
+            return list(info.supported_effort_levels)
         return None
 
     def _save_history(

@@ -71,7 +71,7 @@ class FileHandler(AttachmentHandler):
         except (OSError, RuntimeError):
             return False
 
-    def _detect_content_type(self, path: Path) -> tuple[str, AttachmentContentType]:
+    def detect_content_type(self, path: Path) -> tuple[str, AttachmentContentType]:
         """Detect MIME type and content type from file.
 
         Args:
@@ -112,7 +112,7 @@ class FileHandler(AttachmentHandler):
         """
         try:
             path = Path(source).expanduser()
-            mime_type, content_type = self._detect_content_type(path)
+            mime_type, content_type = self.detect_content_type(path)
 
             if content_type == AttachmentContentType.TEXT:
                 # Read as text

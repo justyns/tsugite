@@ -16,6 +16,12 @@ from tsugite_daemon.session_store import SessionStore
 
 WEB_DIR = Path(tsugite_daemon.__file__).parent / "web"
 
+# These assert against real Vite-built assets - gitignored build output absent on a
+# source checkout that hasn't run the web build. Skip (not fail) when no build is
+# present; a packaged install or a built CI run still exercises them.
+_HAS_BUILT_UI = (WEB_DIR / "index.html").exists() and any((WEB_DIR / "assets").glob("*.js"))
+pytestmark = pytest.mark.skipif(not _HAS_BUILT_UI, reason="no built web UI on this checkout")
+
 
 def _built_asset(suffix: str) -> str:
     """Resolve a real Vite-emitted asset (hashed names change every build)."""

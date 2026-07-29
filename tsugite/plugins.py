@@ -35,6 +35,7 @@ PLUGIN_GROUPS = (
     GROUP_SANDBOX,
     GROUP_EXECUTORS,
     GROUP_COMMANDS,
+    GROUP_CONTEXT_PROVIDERS,
 )
 
 _plugin_hooks: dict[str, list] = {}
@@ -207,37 +208,15 @@ def reset_attachment_handlers() -> None:
     _plugin_attachment_handlers = None
 
 
-def load_decorator_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and import unified-group plugins.
+def load_module_only_plugins(group: str, plugin_config: dict | None = None) -> list[PluginInfo]:
+    """Import module-only plugins for a group whose registration is a pure import
+    side effect, so the loader just imports each module and has nothing to consume.
 
-    Plugins under tsugite.plugins are expected to be module-only entry points
-    whose import triggers @tool / @hook / @subscribe decorators. The loader
-    has nothing to do beyond importing the module - registration happens via
-    the decorators' side effects.
+    Shared by the decorator group (tsugite.plugins, @tool/@hook/@subscribe), the
+    daemon-command group (tsugite.commands, @adapter_command), and the
+    context-provider group (tsugite.context_providers, register_context_provider()).
     """
-    return _load_plugin_group(GROUP_PLUGINS, plugin_config, on_loaded=lambda _: None)
-
-
-def load_command_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and import daemon slash-command plugins.
-
-    Plugins under tsugite.commands are module-only entry points whose import
-    triggers @adapter_command decorators, registering the command into the
-    daemon's shared registry. Like load_decorator_plugins, the loader only has
-    to import the module - registration is the decorators' side effect.
-    """
-    return _load_plugin_group(GROUP_COMMANDS, plugin_config, on_loaded=lambda _: None)
-
-
-def load_context_provider_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and import context-provider plugins.
-
-    Plugins under tsugite.context_providers are module-only entry points whose
-    import calls register_context_provider(). Like the other decorator/registry
-    groups, the loader only imports the module - registration is the import's
-    side effect.
-    """
-    return _load_plugin_group(GROUP_CONTEXT_PROVIDERS, plugin_config, on_loaded=lambda _: None)
+    return _load_plugin_group(group, plugin_config, on_loaded=lambda _: None)
 
 
 def load_adapter_plugins(

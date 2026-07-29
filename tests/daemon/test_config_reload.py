@@ -42,7 +42,7 @@ def env(tmp_path):
     alpha = SimpleNamespace(agent_config=config.agents["alpha"], event_bus=None)
     beta = SimpleNamespace(agent_config=config.agents["beta"], event_bus=None)
     gateway._http_server = SimpleNamespace(adapters={"alpha": alpha, "beta": beta}, event_bus=object())
-    gateway._session_store = SimpleNamespace()
+    gateway._session_store = SimpleNamespace(update_context_limit=lambda *a, **k: None)
     return gateway, cfg_path, ws
 
 
@@ -80,6 +80,27 @@ async def test_reload_adds_removes_and_updates_agents(env, monkeypatch):
     # The updated agent got the NEW config object hot-swapped in.
     assert adapters["alpha"].agent_config.model == "openai:gpt-5.4-mini"
     assert set(gateway.config.agents) == {"alpha", "gamma"}
+
+
+def test_every_config_section_is_classified_hot_or_boot_only():
+    """reload_config must classify every DaemonConfig section as either
+    hot-reconciled or boot-only. A newly added section that lands in neither would
+    silently escape restart_required detection, so fail until it's classified."""
+    from tsugite_daemon.config import DaemonConfig
+
+    hot_reconciled = {"agents", "notification_channels", "identity_links"}
+    boot_only = {
+        "http",
+        "state_dir",
+        "discord_bots",
+        "plugins",
+        "sandbox",
+        "log_level",
+        "log_file",
+        "log_to_console",
+    }
+    unclassified = set(DaemonConfig.model_fields) - hot_reconciled - boot_only
+    assert not unclassified, f"Unclassified daemon config sections: {unclassified}"
 
 
 @pytest.mark.asyncio

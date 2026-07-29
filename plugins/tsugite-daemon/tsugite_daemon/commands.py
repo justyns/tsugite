@@ -83,9 +83,9 @@ def _ensure_command_plugins_loaded() -> None:
     if _command_plugins_loaded:
         return
     _command_plugins_loaded = True
-    from tsugite.plugins import load_command_plugins
+    from tsugite.plugins import GROUP_COMMANDS, load_module_only_plugins
 
-    load_command_plugins()
+    load_module_only_plugins(GROUP_COMMANDS)
 
 
 def get_commands() -> dict[str, AdapterCommand]:
@@ -223,9 +223,9 @@ async def cmd_job(
             raise CommandError(f"Session '{session_id}' not found - cannot anchor Job.") from None
         parent_session_id = parent.id
     else:
-        parent_session_id = _create_job_host_session(adapter, user_id, prompt)
+        parent_session_id = create_job_host_session(adapter, user_id, prompt)
 
-    ac_list = _parse_acceptance_criteria(acceptance_criteria)
+    ac_list = parse_acceptance_criteria(acceptance_criteria)
     ladder = model_ladder.split("|") if isinstance(model_ladder, str) and model_ladder else model_ladder
 
     try:
@@ -252,7 +252,7 @@ async def cmd_job(
     return f"Job {job.id} spawned (worker session: {started.id})"
 
 
-def _create_job_host_session(adapter: "BaseAdapter", user_id: str, prompt: str) -> str:
+def create_job_host_session(adapter: "BaseAdapter", user_id: str, prompt: str) -> str:
     """Provision a fresh, non-primary interactive session to host a Job spawned
     outside any conversation (the Jobs-tab "new job" modal).
 
@@ -311,7 +311,7 @@ def _broadcast_settings(adapter: "BaseAdapter", session_id: str) -> None:
         pass
 
 
-def _parse_acceptance_criteria(raw: str | list | None) -> list[str]:
+def parse_acceptance_criteria(raw: str | list | None) -> list[str]:
     """Normalise the slash-command AC param into a plain list of strings.
 
     Accepts: None, an existing list, JSON-array string, or pipe-separated

@@ -3,28 +3,28 @@
 from unittest.mock import MagicMock
 
 import pytest
-from tsugite_daemon.commands import _parse_acceptance_criteria, cmd_job
+from tsugite_daemon.commands import cmd_job, parse_acceptance_criteria
 
 
 def test_empty_returns_empty_list():
-    assert _parse_acceptance_criteria(None) == []
-    assert _parse_acceptance_criteria("") == []
-    assert _parse_acceptance_criteria([]) == []
+    assert parse_acceptance_criteria(None) == []
+    assert parse_acceptance_criteria("") == []
+    assert parse_acceptance_criteria([]) == []
 
 
 def test_plain_pipe_separated_strings():
-    out = _parse_acceptance_criteria("tests pass|PR open")
+    out = parse_acceptance_criteria("tests pass|PR open")
     assert out == ["tests pass", "PR open"]
 
 
 def test_legacy_dict_entries_coerced_to_strings():
     """Old callers passing `{text, kind}` dicts get coerced to plain strings."""
-    out = _parse_acceptance_criteria([{"text": "x", "kind": "ui"}, "y"])
+    out = parse_acceptance_criteria([{"text": "x", "kind": "ui"}, "y"])
     assert out == ["x", "y"]
 
 
 def test_json_array_parsed():
-    out = _parse_acceptance_criteria('["tests pass", "PR open"]')
+    out = parse_acceptance_criteria('["tests pass", "PR open"]')
     assert out == ["tests pass", "PR open"]
 
 

@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from tsugite.attachments.delegation import can_inline_file
 from tsugite.attachments.file import FileHandler
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
@@ -220,21 +219,6 @@ def _deduplicate_dest(uploads_dir: Path, name: str, max_copies: int = 1000) -> t
         if not dest.exists():
             return dest, None
     return dest, "too many copies of this file"
-
-
-def _should_context_attach(path: Path, size: int, supports_vision: bool = True) -> bool:
-    """Determine if a file should be attached as LLM context.
-
-    supports_vision gates images: a non-vision model can't read an inlined image
-    block, so its images return False and fall to the workspace-only path (saved
-    under uploads/ with a path hint) rather than vanishing. Defaults True so
-    advisory callers that don't resolve a model stay optimistic.
-
-    Image types no mainstream vision API inlines (svg/bmp/tiff) also fall to the
-    workspace-only path regardless of vision support -- otherwise they'd be
-    inlined-and-dropped by the provider with no path hint.
-    """
-    return can_inline_file(path, size, supports_vision)
 
 
 def _format_upload_message_suffix(workspace_only_files: list[str], attachment_names: list[str]) -> str:

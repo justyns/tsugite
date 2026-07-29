@@ -66,11 +66,9 @@ def start_session(
     from tsugite_daemon.session_store import Session, SessionSource
 
     if agent is None:
-        from tsugite.agent_runner.helpers import get_current_agent, get_current_daemon_agent
+        from tsugite.agent_runner.helpers import resolve_run_agent
 
-        # Prefer the daemon adapter's registered name (the key that actually has
-        # an adapter); fall back to the agent-file config name, then "default".
-        agent = get_current_daemon_agent() or get_current_agent() or "default"
+        agent = resolve_run_agent()
 
     # Inherit the sandbox: a sandboxed agent's spawned session must stay
     # sandboxed regardless of the target agent's own config.

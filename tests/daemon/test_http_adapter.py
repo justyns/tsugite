@@ -1,9 +1,11 @@
 """Tests for the HTTP API adapter."""
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import tsugite_daemon
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
 from tsugite_daemon.config import AgentConfig, HTTPConfig
@@ -849,7 +851,11 @@ class TestBranchEndpoint:
         assert resp.status_code == 400
 
 
+_WEB_INDEX = Path(tsugite_daemon.__file__).parent / "web" / "index.html"
+
+
 class TestWebUI:
+    @pytest.mark.skipif(not _WEB_INDEX.exists(), reason="no built web UI on this checkout")
     def test_serve_ui(self, client):
         resp = client.get("/")
         assert resp.status_code == 200

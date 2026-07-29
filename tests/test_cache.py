@@ -37,7 +37,7 @@ def test_write_is_atomic_failed_replace_keeps_old_content(cache_dir, monkeypatch
     def boom(*_args, **_kwargs):
         raise OSError("replace failed")
 
-    monkeypatch.setattr(cache.os, "replace", boom)
+    monkeypatch.setattr("tsugite.utils.os.replace", boom)
     with pytest.raises(RuntimeError):
         cache.save_to_cache("src://a", "TRUNCATED")
 

@@ -136,12 +136,10 @@ class TestAtomicWrite:
         _write_yaml(rt, {"web": {"fetch_allowlist": ["orig.test"]}})
         original = rt.read_text()
 
-        import tsugite.permissions as permissions_mod
-
         def boom(*args, **kwargs):
             raise OSError("simulated replace failure")
 
-        monkeypatch.setattr(permissions_mod.os, "replace", boom)
+        monkeypatch.setattr("tsugite.utils.os.replace", boom)
 
         perms = Permissions(rt)
         with pytest.raises(OSError):

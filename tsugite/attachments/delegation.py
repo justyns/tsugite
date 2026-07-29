@@ -5,8 +5,8 @@ child) and ``spawn_job`` (daemon) so a delegating agent can pass real files -
 images especially - to the child it delegates to, and the child's model sees them.
 
 ``can_inline_file`` is the single source of the "should this file ride inline as
-model context vs. stay on disk" gate; the daemon's ``_should_context_attach``
-delegates here so uploaded files and delegated files gate identically.
+model context vs. stay on disk" gate, called directly by both the daemon's upload
+handlers and delegation here so uploaded and delegated files gate identically.
 """
 
 import logging
@@ -39,7 +39,7 @@ def can_inline_file(path: Path, size: int, supports_vision: bool = True) -> bool
     supports_vision defaults True so callers that can't resolve a model stay
     optimistic rather than stranding an image.
     """
-    mime_type, content_type = _file_handler._detect_content_type(path)
+    mime_type, content_type = _file_handler.detect_content_type(path)
     if content_type == AttachmentContentType.TEXT:
         return size <= MAX_TEXT_ATTACH_SIZE
     if path.suffix.lower() in FileHandler.BINARY_EXTENSIONS:

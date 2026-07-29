@@ -119,7 +119,7 @@ class TestCreateJobAuth:
 
 class TestCreateJobHappyPath:
     def test_returns_201_with_job_payload(self, client, test_token, server):
-        with patch("tsugite_daemon.commands._create_job_host_session", return_value="sess-host-1"):
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
             resp = client.post(
                 "/api/jobs",
                 headers=_auth(test_token),
@@ -147,7 +147,7 @@ class TestCreateJobHappyPath:
         assert call["model"] == "gpt"
 
     def test_minimal_body_defaults(self, client, test_token, server):
-        with patch("tsugite_daemon.commands._create_job_host_session", return_value="sess-host-1"):
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
             resp = client.post(
                 "/api/jobs",
                 headers=_auth(test_token),
@@ -179,7 +179,7 @@ class TestCreateJobValidation:
     def test_orchestrator_valueerror_is_400(self, server, test_token):
         server.jobs_orchestrator = _FakeOrchestrator(raise_exc=ValueError("Unknown job executor: 'bogus'"))
         c = TestClient(server.app)
-        with patch("tsugite_daemon.commands._create_job_host_session", return_value="sess-host-1"):
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
             resp = c.post(
                 "/api/jobs",
                 headers=_auth(test_token),

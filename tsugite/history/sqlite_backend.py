@@ -181,6 +181,11 @@ def _copy_session_events(
         _fold_event(conn, dst_id, event, now_iso)
 
 
+def _event_from_row(row) -> Event:
+    """Build an Event from an ``id, type, ts, data`` events-table row."""
+    return Event(id=row["id"], type=row["type"], ts=row["ts"], data=json.loads(row["data"]))
+
+
 class SqliteSession:
     """Read/write handle for one conversation backed by SQLite."""
 
@@ -217,10 +222,61 @@ class SqliteSession:
                 "SELECT id, type, ts, data FROM events WHERE session_id=? ORDER BY id", (self.session_id,)
             ).fetchall()
         for row in rows:
-            yield Event(id=row["id"], type=row["type"], ts=row["ts"], data=json.loads(row["data"]))
+            yield _event_from_row(row)
 
     def load_events(self) -> List[Event]:
         return list(self.iter_events())
+
+    def read_events_window(
+        self,
+        *,
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        limit: Optional[int] = None,
+    ) -> tuple[List[Event], bool]:
+        """Bounded read for the chat pagination endpoint: the window is fetched by
+        the query rather than materializing the whole event log.
+
+        Returns ``(events_oldest_first, has_more)``, matching exactly what slicing
+        the full ``iter_events()`` list would yield:
+
+        - ``after_id``: every event with a larger id (the forward delta); has_more
+          is always False.
+        - ``limit`` (optionally with ``before_id``): the newest ``limit`` events,
+          below the cursor when given, oldest-first; has_more is True when older
+          matching events remain.
+        - neither ``after_id`` nor ``limit``: all events (below ``before_id`` if set).
+
+        Assumes ``limit`` is None or non-negative (the endpoint validates it).
+        """
+        conn = self.backend._conn()
+        if after_id is not None:
+            rows = conn.execute(
+                "SELECT id, type, ts, data FROM events WHERE session_id=? AND id>? ORDER BY id",
+                (self.session_id, after_id),
+            ).fetchall()
+            return [_event_from_row(r) for r in rows], False
+
+        where = "session_id=?"
+        params: list[Any] = [self.session_id]
+        if before_id is not None:
+            where += " AND id<?"
+            params.append(before_id)
+
+        if limit is None:
+            rows = conn.execute(f"SELECT id, type, ts, data FROM events WHERE {where} ORDER BY id", params).fetchall()
+            return [_event_from_row(r) for r in rows], False
+
+        # Newest `limit`, fetching one extra to detect whether older events remain,
+        # then reverse the DESC page back to oldest-first.
+        rows = conn.execute(
+            f"SELECT id, type, ts, data FROM events WHERE {where} ORDER BY id DESC LIMIT ?",
+            (*params, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        window = rows[:limit]
+        window.reverse()
+        return [_event_from_row(r) for r in window], has_more
 
     def summary(self) -> SessionSummary:
         conn = self.backend._conn()

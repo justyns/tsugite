@@ -236,6 +236,13 @@ class SSEProgressHandler(JSONLUIHandler):
 _PENDING_ASKS: dict[str, "HTTPInteractionBackend"] = {}
 
 
+def resolve_pending_ask(ask_id: str) -> "HTTPInteractionBackend | None":
+    """The interaction backend still blocking on ``ask_id``, or None if none is
+    (it timed out, was already answered, or the daemon restarted). The one reader
+    of the pending-ask registry, so callers don't reach the dict across modules."""
+    return _PENDING_ASKS.get(ask_id)
+
+
 class HTTPInteractionBackend:
     """Interaction backend for HTTP -- emits SSE events, blocks until response."""
 

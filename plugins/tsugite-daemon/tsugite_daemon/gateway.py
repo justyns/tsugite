@@ -595,9 +595,12 @@ class Gateway:
         # compares like with like, and the session store learns new limits.
         for name, cfg in new.agents.items():
             cfg.context_limit = self._resolve_context_limit(name, cfg)
-            if self._session_store is not None and hasattr(self._session_store, "update_context_limit"):
+            if self._session_store is not None:
                 self._session_store.update_context_limit(name, cfg.context_limit)
 
+        # Every DaemonConfig section is classified below as either hot-reconciled
+        # (agents, notification_channels, identity_links) or boot-only; a coverage
+        # test asserts none is silently omitted (see test_config_reload).
         boot_only = [
             ("http", self.config.http, new.http),
             ("state_dir", self.config.state_dir, new.state_dir),
@@ -606,6 +609,7 @@ class Gateway:
             ("sandbox", self.config.sandbox, new.sandbox),
             ("log_level", self.config.log_level, new.log_level),
             ("log_file", self.config.log_file, new.log_file),
+            ("log_to_console", self.config.log_to_console, new.log_to_console),
         ]
         result["restart_required"] = [name for name, old, cur in boot_only if old != cur]
 

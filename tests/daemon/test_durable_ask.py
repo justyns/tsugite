@@ -7,8 +7,8 @@ Two halves:
   message and survives a reload. The runner's own later record_user_input is
   deduped to a no-op (exactly one user_input event).
 - Answer-by-id: ask_user carries a durable ``ask_id`` (emitted, persisted,
-  replayed), and POST /respond resolves the blocking ask by that id first,
-  falling back to the legacy session triple only when no ask_id was sent.
+  replayed), and POST /respond resolves the blocking ask by that id. An absent
+  ask_id is rejected (400).
 """
 
 import asyncio
@@ -285,34 +285,15 @@ class TestRespondByAskId:
         finally:
             _PENDING_ASKS.pop("ask-live0001", None)
 
-    def test_absent_ask_id_uses_triple_fallback(self, client, mock_adapter, test_token, server):
-        """Without an ask_id, the legacy (agent, user, session) lookup still works."""
-        from tsugite_daemon.adapters.http.helpers import ActiveChat
-        from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
-
-        resolved_user = mock_adapter.resolve_http_user("alice")
-        backend = HTTPInteractionBackend(SSEProgressHandler())
-        key = ("test-agent", resolved_user, "sess-Z")
-        server._active_chats[key] = ActiveChat(backend=backend, progress=SSEProgressHandler())
-        try:
-            resp = client.post(
-                "/api/agents/test-agent/respond",
-                json={"user_id": "alice", "session_id": "sess-Z", "response": "hi"},
-                headers=_auth(test_token),
-            )
-            assert resp.status_code == 200, resp.text
-            assert backend._response == "hi"
-        finally:
-            server._active_chats.pop(key, None)
-
-    def test_absent_ask_id_no_chat_still_404(self, client, mock_adapter, test_token):
-        """The legacy no-pending-question 404 is preserved for the no-ask_id path."""
+    def test_absent_ask_id_returns_400(self, client, mock_adapter, test_token):
+        """ask_id is required: the legacy (agent, user, session) fallback is gone,
+        so a respond with no ask_id is a 400, not a triple-keyed lookup or 404."""
         resp = client.post(
             "/api/agents/test-agent/respond",
-            json={"user_id": "alice", "session_id": "sess-x", "response": "hi"},
+            json={"user_id": "alice", "session_id": "sess-Z", "response": "hi"},
             headers=_auth(test_token),
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 400, resp.text
 
     def test_stale_ask_id_persists_ask_answered_and_non_404(self, client, mock_adapter, test_token, server):
         """A durably-pending ask whose backend is gone (timeout / restart): the

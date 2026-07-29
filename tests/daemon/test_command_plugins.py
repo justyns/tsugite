@@ -35,7 +35,7 @@ def _make_entry_point(name, value, group):
 def test_load_command_plugins_registers_into_get_commands():
     from tsugite_daemon.commands import adapter_command, get_commands
 
-    from tsugite.plugins import load_command_plugins
+    from tsugite.plugins import GROUP_COMMANDS, load_module_only_plugins
 
     def _register_on_import():
         @adapter_command(name="_pytest_plugin_cmd", description="fake plugin command")
@@ -48,7 +48,7 @@ def test_load_command_plugins_registers_into_get_commands():
     ep.load.side_effect = _register_on_import
     try:
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_command_plugins()
+            results = load_module_only_plugins(GROUP_COMMANDS)
         assert results[0].loaded is True
         ep.load.assert_called_once()  # module-only: import IS the registration
         assert "_pytest_plugin_cmd" in get_commands()
@@ -63,7 +63,7 @@ def test_get_commands_triggers_plugin_load_once():
 
     cmds._command_plugins_loaded = False
     try:
-        with patch("tsugite.plugins.load_command_plugins") as mock_load:
+        with patch("tsugite.plugins.load_module_only_plugins") as mock_load:
             cmds.get_commands()
             cmds.get_commands()
         mock_load.assert_called_once()

@@ -23,12 +23,12 @@ layout so callers stay decoupled from it.
 """
 
 import contextvars
-import os
-import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 import yaml
+
+from tsugite.utils import atomic_write_text
 
 WEB_FETCH_ALLOWLIST = "web.fetch_allowlist"
 
@@ -65,24 +65,8 @@ def _ensure_parent(data: dict, parts: List[str]) -> tuple:
 
 
 def _atomic_write_yaml(path: Path, data: dict) -> None:
-    """Write ``data`` as yaml so a reader never sees a partial file.
-
-    Writes a sibling temp file (same directory, so the rename stays on one
-    filesystem) and atomically replaces the target. A failure discards the temp
-    and leaves any existing file untouched, rather than truncating it in place.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    """Serialize ``data`` to yaml and write it atomically (see ``atomic_write_text``)."""
+    atomic_write_text(path, yaml.safe_dump(data, default_flow_style=False, sort_keys=False))
 
 
 class Permissions:

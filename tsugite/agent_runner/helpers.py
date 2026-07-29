@@ -179,6 +179,15 @@ def get_current_daemon_agent() -> Optional[str]:
     return _current_daemon_agent_var.get()
 
 
+def resolve_run_agent() -> str:
+    """Resolve the agent a spawned run should target.
+
+    Prefers the daemon adapter's registered name (the key that actually has a live
+    adapter) over the agent-file config name, falling back to "default".
+    """
+    return get_current_daemon_agent() or get_current_agent() or "default"
+
+
 def resolve_current_agent(explicit: Optional[str] = None, default: str = "default") -> str:
     """Resolve agent name: explicit value > current agent context > default."""
     if explicit is not None:

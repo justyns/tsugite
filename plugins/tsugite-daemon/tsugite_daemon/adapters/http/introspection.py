@@ -51,11 +51,10 @@ class IntrospectionMixin:
         plugin for anything registered from another package."""
         if err := self._check_auth(request):
             return err
-        from tsugite.tools import _ensure_tools_loaded, _tools
+        from tsugite.tools import iter_tool_infos
 
-        _ensure_tools_loaded()
         tools = []
-        for tool_info in _tools.values():
+        for tool_info in iter_tool_infos():
             module = tool_info.func.__module__
             tools.append(
                 {

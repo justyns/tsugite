@@ -13,6 +13,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from tsugite.attachments.delegation import can_inline_file
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http.helpers import (
     MAX_UPLOAD_FILES,
@@ -25,14 +26,13 @@ from tsugite_daemon.adapters.http.helpers import (
     _is_text_mime,
     _resolve_full_model_id,
     _sanitize_filename,
-    _should_context_attach,
     build_session_event_persister,
     logger,
 )
 from tsugite_daemon.adapters.http.sse import (
-    _PENDING_ASKS,
     HTTPInteractionBackend,
     SSEProgressHandler,
+    resolve_pending_ask,
 )
 
 # Defensive cap on a single recursive workspace listing so a pathologically large
@@ -708,23 +708,6 @@ class AgentsMixin:
 
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
-    def _session_supports_vision(self, adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> bool:
-        """Whether the session's resolved model can accept image inputs.
-
-        Defaults to True on any resolution failure so a registry gap never
-        strands an image the user attached to a vision-capable model.
-        """
-        from tsugite.models import get_model_id, parse_model_string, resolve_model_alias
-        from tsugite.providers import get_provider
-
-        try:
-            resolved = resolve_model_alias(adapter.resolve_session_model(session_id))
-            provider_name, _, _ = parse_model_string(resolved)
-            info = get_provider(provider_name).get_model_info(get_model_id(resolved))
-            return bool(info is None or info.supports_vision)
-        except Exception:  # noqa: BLE001 -- unknown model → assume vision, don't strand the image
-            return True
-
     async def _effort_levels(self, request: Request) -> JSONResponse:
         """Return the effort levels supported by the session's resolved model."""
         adapter, err = self._get_adapter(request)
@@ -739,13 +722,17 @@ class AgentsMixin:
             }
         )
 
-    async def _respond(self, request: Request) -> JSONResponse:
-        """Submit a response to an active ask_user prompt.
+    async def _session_scoped_request(
+        self, request: Request
+    ) -> tuple[Optional["HTTPAgentAdapter"], Optional[dict], Optional[JSONResponse]]:
+        """Parse a JSON body carrying an optional ``session_id`` and resolve the
+        adapter that owns that session. Returns ``(adapter, body, err)``; on failure
+        ``err`` is a JSONResponse and adapter/body are None.
 
-        Resolution is by durable ``ask_id`` first: it survives a reload and a
-        rotated session triple, so a reloaded prompt can still be answered. The
-        legacy (agent, user, session) lookup stays as a fallback only for a client
-        that sent no ask_id.
+        Routing by the body's session_id (not just the URL agent) lets the web UI
+        open a session whose owning agent differs from the URL - e.g. a job's
+        session carrying the worker agent-file. Auth is still enforced in
+        ``_get_adapter``.
         """
         try:
             body = await request.json()
@@ -754,9 +741,23 @@ class AgentsMixin:
         session_id = body.get("session_id") if isinstance(body, dict) else None
         adapter, err = self._get_adapter(request, fallback_session_id=session_id)
         if err:
-            return err
+            return None, None, err
         if not isinstance(body, dict):
-            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+            return None, None, JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        return adapter, body, None
+
+    async def _respond(self, request: Request) -> JSONResponse:
+        """Submit a response to an active ask_user prompt.
+
+        Resolution is by durable ``ask_id`` (required): it survives a reload and a
+        rotated session triple, so a reloaded prompt can still be answered. An ask
+        whose in-memory backend is gone (timeout or daemon restart) is settled
+        durably instead of silently lost.
+        """
+        adapter, body, err = await self._session_scoped_request(request)
+        if err:
+            return err
+        session_id = body.get("session_id")
 
         response = body.get("response", "")
         if not isinstance(response, str):
@@ -765,38 +766,25 @@ class AgentsMixin:
             return JSONResponse({"error": "response too long (max 10000 chars)"}, status_code=400)
 
         ask_id = body.get("ask_id")
-        if ask_id is not None and not isinstance(ask_id, str):
-            return JSONResponse({"error": "ask_id must be a string"}, status_code=400)
-
-        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
-        agent_name = adapter.agent_name
+        if not isinstance(ask_id, str) or not ask_id:
+            return JSONResponse({"error": "ask_id is required"}, status_code=400)
         if not session_id:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
-        logger.info("[%s] respond user_id=%s session_id=%s ask_id=%s", agent_name, user_id, session_id, ask_id)
 
-        # Primary: the still-blocking ask, resolved by its durable id.
-        if ask_id:
-            backend = _PENDING_ASKS.get(ask_id)
-            if backend is not None:
-                backend.submit_response(response)
-                return JSONResponse({"status": "ok"})
+        user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
+        logger.info("[%s] respond user_id=%s session_id=%s ask_id=%s", adapter.agent_name, user_id, session_id, ask_id)
 
-        # Fallback: the legacy session-triple lookup, for a client that sent no
-        # ask_id (or whose ask is still the one live chat for this session).
-        chat = self._active_chats.get((agent_name, user_id, session_id))
-        if chat is not None:
-            chat.backend.submit_response(response)
+        # The still-blocking ask, resolved by its durable id.
+        backend = resolve_pending_ask(ask_id)
+        if backend is not None:
+            backend.submit_response(response)
             return JSONResponse({"status": "ok"})
 
-        # Neither resolved. If the client named an ask that is durably pending
-        # (recorded but never answered: its backend timed out, or the daemon
-        # restarted), record ask_answered so a reload stops re-prompting, and tell
-        # the client the ask is no longer live instead of returning a bare 404.
-        if ask_id:
-            self._settle_stale_ask(adapter, session_id, ask_id, response)
-            return JSONResponse({"status": "expired", "detail": "This prompt is no longer active."})
-
-        return JSONResponse({"error": "no pending question for this session"}, status_code=404)
+        # Durably pending but its in-memory backend is gone (timed out, or the
+        # daemon restarted): record ask_answered so a reload stops re-prompting,
+        # and tell the client the ask is no longer live instead of a bare 404.
+        self._settle_stale_ask(adapter, session_id, ask_id, response)
+        return JSONResponse({"status": "expired", "detail": "This prompt is no longer active."})
 
     def _settle_stale_ask(self, adapter: HTTPAgentAdapter, session_id: str, ask_id: str, response: str) -> None:
         """Durably answer an ask whose backend is no longer in memory.
@@ -881,8 +869,8 @@ class AgentsMixin:
             dest.write_bytes(content)
             written_paths.append(dest)
             file_size = len(content)
-            mime_type, content_type = _file_handler._detect_content_type(dest)
-            context_attach = _should_context_attach(dest, file_size)
+            mime_type, content_type = _file_handler.detect_content_type(dest)
+            context_attach = can_inline_file(dest, file_size)
 
             results.append(
                 {
@@ -898,20 +886,10 @@ class AgentsMixin:
         return JSONResponse({"files": results})
 
     async def _chat(self, request: Request) -> Response:
-        try:
-            body = await request.json()
-        except Exception:
-            body = None
-        session_id = body.get("session_id") if isinstance(body, dict) else None
-
-        # Route the reply through the session's owning agent when the URL agent
-        # isn't a live adapter (the web UI opens a job's session carrying the worker
-        # agent-file as the agent). Auth is still enforced inside _get_adapter.
-        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        adapter, body, err = await self._session_scoped_request(request)
         if err:
             return err
-        if not isinstance(body, dict):
-            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        session_id = body.get("session_id")
 
         message = body.get("message", "").strip()
         uploaded_files = body.get("uploaded_files", [])
@@ -936,7 +914,9 @@ class AgentsMixin:
         uploads_dir = adapter.agent_config.workspace_dir / "uploads"
         # A non-vision model can't read an inlined image; route its images to the
         # workspace-only path (saved + path hint) instead of dropping them.
-        supports_vision = self._session_supports_vision(adapter, session_id)
+        from tsugite.models import model_supports_vision
+
+        supports_vision = model_supports_vision(adapter.resolve_session_model(session_id))
 
         for file_info in uploaded_files:
             if not isinstance(file_info, dict):
@@ -946,7 +926,7 @@ class AgentsMixin:
             if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
                 continue
 
-            if _should_context_attach(file_path, file_path.stat().st_size, supports_vision=supports_vision):
+            if can_inline_file(file_path, file_path.stat().st_size, supports_vision=supports_vision):
                 try:
                     attachment = _file_handler.fetch(str(file_path))
                     attachment.user_upload = True
@@ -1110,16 +1090,10 @@ class AgentsMixin:
         )
 
     async def _cancel_chat(self, request: Request) -> JSONResponse:
-        try:
-            body = await request.json()
-        except Exception:
-            body = None
-        session_id = body.get("session_id") if isinstance(body, dict) else None
-        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        adapter, body, err = await self._session_scoped_request(request)
         if err:
             return err
-        if not isinstance(body, dict):
-            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        session_id = body.get("session_id")
         raw_user_id = body.get("user_id", "web-anonymous")
         user_id = adapter.resolve_http_user(raw_user_id)
         if not session_id:
@@ -1384,8 +1358,8 @@ class AgentsMixin:
             return JSONResponse({"error": f"copy failed: {e}"}, status_code=500)
 
         file_size = dest.stat().st_size
-        mime_type, content_type = _file_handler._detect_content_type(dest)
-        context_attach = _should_context_attach(dest, file_size)
+        mime_type, content_type = _file_handler.detect_content_type(dest)
+        context_attach = can_inline_file(dest, file_size)
 
         return JSONResponse(
             {

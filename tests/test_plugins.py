@@ -391,24 +391,24 @@ class TestUnifiedPluginsGroup:
     def test_imports_module_via_unified_entry_point(self):
         import types
 
-        from tsugite.plugins import load_decorator_plugins
+        from tsugite.plugins import GROUP_PLUGINS, load_module_only_plugins
 
         fake_module = types.ModuleType("fake_unified_plugin")
         ep = _make_entry_point("kitchen-sink", "fake_unified_plugin", "tsugite.plugins")
         ep.load.return_value = fake_module
 
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_decorator_plugins()
+            results = load_module_only_plugins(GROUP_PLUGINS)
 
         assert results[0].loaded is True
         ep.load.assert_called_once()
 
     def test_skips_disabled_unified_plugin(self):
-        from tsugite.plugins import load_decorator_plugins
+        from tsugite.plugins import GROUP_PLUGINS, load_module_only_plugins
 
         ep = _make_entry_point("kitchen-sink", "fake_unified_plugin", "tsugite.plugins")
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_decorator_plugins(plugin_config={"kitchen-sink": {"enabled": False}})
+            results = load_module_only_plugins(GROUP_PLUGINS, plugin_config={"kitchen-sink": {"enabled": False}})
 
         ep.load.assert_not_called()
         assert results[0].enabled is False
@@ -433,24 +433,24 @@ class TestLoadCommandPlugins:
     def test_module_only_command_entry_point(self):
         import types
 
-        from tsugite.plugins import load_command_plugins
+        from tsugite.plugins import GROUP_COMMANDS, load_module_only_plugins
 
         fake_module = types.ModuleType("fake_command_plugin")
         ep = _make_entry_point("cmds-plugin", "fake_command_plugin", "tsugite.commands")
         ep.load.return_value = fake_module
 
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_command_plugins()
+            results = load_module_only_plugins(GROUP_COMMANDS)
 
         assert results[0].loaded is True
         ep.load.assert_called_once()
 
     def test_skips_disabled_command_plugin(self):
-        from tsugite.plugins import load_command_plugins
+        from tsugite.plugins import GROUP_COMMANDS, load_module_only_plugins
 
         ep = _make_entry_point("cmds-plugin", "fake_command_plugin", "tsugite.commands")
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_command_plugins(plugin_config={"cmds-plugin": {"enabled": False}})
+            results = load_module_only_plugins(GROUP_COMMANDS, plugin_config={"cmds-plugin": {"enabled": False}})
 
         ep.load.assert_not_called()
         assert results[0].enabled is False
@@ -476,3 +476,14 @@ class TestModuleOnlyEntryPoint:
 
         assert results[0].loaded is True
         mock_register.assert_not_called()
+
+
+def test_all_group_constants_are_enumerated():
+    """Every GROUP_* entry-point group must appear in PLUGIN_GROUPS, or
+    discover_plugins() (and the /api/plugins endpoint built on it) silently
+    omits that group's plugins."""
+    import tsugite.plugins as plugins_mod
+
+    group_consts = {v for k, v in vars(plugins_mod).items() if k.startswith("GROUP_") and isinstance(v, str)}
+    missing = group_consts - set(plugins_mod.PLUGIN_GROUPS)
+    assert not missing, f"GROUP_* constants missing from PLUGIN_GROUPS: {sorted(missing)}"

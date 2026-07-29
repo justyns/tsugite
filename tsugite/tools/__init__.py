@@ -211,6 +211,16 @@ def list_tools() -> List[str]:
     return list(_tools.keys())
 
 
+def iter_tool_infos() -> List[ToolInfo]:
+    """Return every registered tool's ToolInfo, loading tool modules on first use.
+
+    Public accessor for callers that need each tool's metadata (category, defining
+    module, description) without reaching into the private registry.
+    """
+    _ensure_tools_loaded()
+    return list(_tools.values())
+
+
 def get_tools_by_category(category: str) -> List[str]:
     """Get all tool names in a specific category.
 
@@ -419,14 +429,15 @@ def _ensure_tools_loaded():
 
     # Load plugin tools after custom shell tools
     from tsugite.plugins import (
+        GROUP_PLUGINS,
         load_attachment_plugins,
-        load_decorator_plugins,
         load_event_subscriber_plugins,
         load_hook_plugins,
+        load_module_only_plugins,
         load_tool_plugins,
     )
 
-    load_decorator_plugins()
+    load_module_only_plugins(GROUP_PLUGINS)
     load_tool_plugins()
     load_hook_plugins()
     load_event_subscriber_plugins()

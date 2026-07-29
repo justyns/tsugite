@@ -89,14 +89,14 @@ class JobsMixin:
         if not task:
             return JSONResponse({"error": "task is required"}, status_code=400)
 
-        from tsugite_daemon.commands import _create_job_host_session, _parse_acceptance_criteria
+        from tsugite_daemon.commands import create_job_host_session, parse_acceptance_criteria
 
-        parent_session_id = _create_job_host_session(adapter, user_id, task)
+        parent_session_id = create_job_host_session(adapter, user_id, task)
         try:
             job, _started = await self.jobs_orchestrator.create_and_start_job(
                 parent_session_id=parent_session_id,
                 prompt=task,
-                acceptance_criteria=_parse_acceptance_criteria(body.get("acceptance_criteria")),
+                acceptance_criteria=parse_acceptance_criteria(body.get("acceptance_criteria")),
                 model=body.get("model") or None,
                 max_attempts=body.get("max_attempts"),
                 spawned_by="user-slash",

@@ -135,9 +135,9 @@ def ensure_loaded() -> None:
 
     register_builtin_providers()
     try:
-        from tsugite.plugins import load_context_provider_plugins
+        from tsugite.plugins import GROUP_CONTEXT_PROVIDERS, load_module_only_plugins
 
-        load_context_provider_plugins()
+        load_module_only_plugins(GROUP_CONTEXT_PROVIDERS)
     except Exception as e:  # never let plugin discovery break a read
         logger.warning("Loading context-provider plugins failed: %s", e)
 
