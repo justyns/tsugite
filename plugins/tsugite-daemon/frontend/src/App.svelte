@@ -438,10 +438,14 @@
           </div>
         </section>
 
-        {#if mode === 'full' && activeView.component}
-          {@const Full = activeView.component}
+        {#if mode === 'full' && activeView.load}
           <section class="app-view" data-full-view={activeView.id}>
-            <Full />
+            {#await activeView.load() then mod}
+              {@const Full = mod.default}
+              <Full />
+            {:catch}
+              <p class="view-load-error">Failed to load this view. Try again.</p>
+            {/await}
           </section>
         {/if}
       </main>

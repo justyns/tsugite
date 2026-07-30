@@ -42,6 +42,7 @@
 
   const agent = $derived(params?.agent ?? agentsMeta.agents[0]?.name ?? '');
 
+  // svelte-ignore state_referenced_locally -- seeds from the initial param; user navigation drives it after.
   let activePath = $state(params?.path ?? '');
   let browseDir = $state('');
   let doc = $state<OpenDoc | null>(null);

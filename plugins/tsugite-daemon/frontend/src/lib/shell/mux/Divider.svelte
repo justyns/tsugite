@@ -99,9 +99,12 @@
   }
 </script>
 
-<!-- WAI-ARIA window-splitter pattern: a role="separator" that is focusable and
-     resizable via the keyboard (aria-valuenow/min/max). The a11y linter treats
-     separators as non-interactive, but this is the sanctioned resize-handle role. -->
+<!-- Suppression is correct: this is the WAI-ARIA "window splitter" - a focusable
+     role="separator" with aria-orientation + aria-valuemin/max/now and
+     Arrow/Home/End keyboard resize (see onkeydown). axe accepts this resize-handle
+     pattern, but svelte's linter classes separators as non-interactive and so
+     flags the required tabindex and the pointer/key handlers. No more-interactive
+     role fits (slider would misrepresent it), and it is already keyboard-operable. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div

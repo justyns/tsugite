@@ -22,9 +22,13 @@
   }
 </script>
 
-<!-- Backdrop dismissal is a pointer convenience; the keyboard equivalent (Esc)
-     lives on the dialog inside. The scrim is role="presentation", so it
-     intentionally carries no key handler of its own. -->
+<!-- Suppression is correct here: click-to-dismiss is a pointer-only convenience;
+     the keyboard path is Esc, owned by the dialog this wraps (Modal/Picker/Palette
+     all implement it). The handler must stay on .t-scrim itself (a unit test
+     clicks it directly), and .t-scrim can't take an interactive role/become a
+     <button> - it wraps a dialog, so that would nest interactive controls (axe
+     nested-interactive). A key handler on this presentation backdrop would be
+     dead code (it never holds focus). -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="t-scrim" class:is-open={open} role="presentation" onclick={onBackdropClick}>

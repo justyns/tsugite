@@ -16,6 +16,7 @@
   // Phone drilldown back: the terminal content screen returns to the pty list.
   const back = () => goBackToWorkspaceList('terminals');
 
+  // svelte-ignore state_referenced_locally -- seeds from the initial param; the effect below follows later changes.
   let terminalId = $state<string | null>(params?.terminalId ?? null);
   let now = $state(Date.now());
 

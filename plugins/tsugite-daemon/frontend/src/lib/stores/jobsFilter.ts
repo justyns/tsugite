@@ -17,6 +17,8 @@ export interface JobLike {
   state?: string;
   agent?: string;
   prompt?: string;
+  verify_attempts?: number;
+  max_attempts?: number;
   // Nullable to match the full Job payload (worker/parent ids are string|null).
   parent_session_id?: string | null;
 }

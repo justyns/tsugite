@@ -32,6 +32,7 @@
     onOpen?: () => void;
   } = $props();
 
+  // svelte-ignore state_referenced_locally -- seeds the initial open state; toggling owns it after.
   let isOpen = $state(open);
   // Only pull focus into the popover when the user opened it (keyboard path);
   // a statically-opened instance must not steal focus on mount.

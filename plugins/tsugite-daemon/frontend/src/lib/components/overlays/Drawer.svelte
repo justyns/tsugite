@@ -50,28 +50,30 @@
     wasOpen = open;
   });
 
-  function onKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      onclose?.();
-    }
+  // Esc closes, but only while focus sits inside the drawer. Listening on the
+  // window (rather than on the complementary <aside>, a non-interactive landmark)
+  // keeps the key handling off the region element; the focus-within guard scopes
+  // it. The app's global Esc only closes the palette/settings/help, and those
+  // hold focus themselves when open, so the two never act on the same keypress.
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape' || !open) return;
+    if (!rootEl?.contains(document.activeElement)) return;
+    onclose?.();
   }
 </script>
 
-<!-- Explicit role="complementary": an <aside> nested in sectioning content maps
-     to `generic`, so the role is kept to guarantee the semantic in any pane.
-     Esc-to-close is scoped here so it only fires while focus is in the drawer. -->
-<!-- svelte-ignore a11y_no_redundant_roles -->
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<svelte:window onkeydown={onWindowKeydown} />
+
+<!-- No explicit role: the <aside> always carries an accessible name (label, or
+     the title via aria-labelledby), so it maps to the complementary landmark even
+     when nested in a pane. -->
 <aside
   bind:this={rootEl}
   class="t-drawer"
   class:is-open={open}
-  role="complementary"
   aria-label={label}
   aria-labelledby={label ? undefined : titleId}
   inert={!open}
-  onkeydown={onKeydown}
 >
   <div class="t-drawer-hd">
     {#if status}{@render status()}{/if}

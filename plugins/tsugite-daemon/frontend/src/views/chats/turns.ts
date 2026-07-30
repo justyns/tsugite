@@ -19,6 +19,8 @@
  * over replay+live as frames arrive.
  */
 
+import type { JobLike } from '$lib/stores/jobsFilter';
+
 export interface ProseBlock {
   kind: 'prose';
   text: string;
@@ -83,7 +85,7 @@ export interface ResultBlock {
 }
 export interface JobBlock {
   kind: 'job';
-  job: Record<string, unknown>;
+  job: JobLike;
 }
 export interface ErrorBlock {
   kind: 'error';
@@ -783,12 +785,21 @@ class Builder {
       case 'job_status':
       case 'job_update': {
         const turn = this.ensureAi(at);
-        const job = (e.data as Event) ?? e;
+        const raw = (e.data as Event) ?? e;
+        // Narrow the wire dict to the shared JobLike shape at this one boundary, so
+        // the tile renders typed fields instead of stringly-casting downstream.
+        const job: JobLike = {
+          job_id: str(raw.job_id) ?? str(e.job_id),
+          state: str(raw.state),
+          agent: str(raw.agent),
+          prompt: str(raw.prompt),
+          verify_attempts: num(raw.verify_attempts),
+          max_attempts: num(raw.max_attempts),
+        };
         // One tile per job, not per status event: fold repeat events into the
         // existing tile so a job's lifecycle updates in place.
-        const jobId = str(job.job_id) ?? str(e.job_id);
-        const existing = jobId
-          ? (turn.blocks.find((b) => b.kind === 'job' && str(b.job.job_id) === jobId) as
+        const existing = job.job_id
+          ? (turn.blocks.find((b) => b.kind === 'job' && b.job.job_id === job.job_id) as
               JobBlock | undefined)
           : undefined;
         if (existing) existing.job = job;

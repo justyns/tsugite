@@ -25,6 +25,7 @@
   let { params }: { params?: Record<string, string> } = $props();
 
   const ctrl = new ConversationController();
+  // svelte-ignore state_referenced_locally -- seeds from the initial param; the effect below follows later changes.
   let selectedId = $state<string | null>(params?.sessionId ?? null);
 
   // Resolve the selected session's own agent + metadata from its record. A deep

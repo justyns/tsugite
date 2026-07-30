@@ -130,6 +130,12 @@
       {#if hasResults}
         {#each matches as m, i (m.item.value)}
           {@const isSel = ui.selected === i}
+          <!-- Listbox option in the combobox+activedescendant pattern: it stays
+               non-focusable (tabindex=-1, tracked by the input's
+               aria-activedescendant), and Arrow/Enter selection lives on the
+               combobox input above. onclick is a pointer convenience; a per-option
+               key handler would be dead (options never take focus) and a <button>
+               would join the shared trapFocus Tab cycle. Suppression is correct: -->
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             class="pk-it"

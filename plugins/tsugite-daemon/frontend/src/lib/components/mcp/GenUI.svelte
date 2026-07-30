@@ -20,9 +20,11 @@
     onPick?: (index: number) => void;
   } = $props();
 
+  // svelte-ignore state_referenced_locally -- seeds from the initial selection.
   let picked = $state<number | null>(selected);
   const done = $derived(picked !== null);
   // Roving focus starts on the picked choice, else the first.
+  // svelte-ignore state_referenced_locally -- seeds roving focus from the initial selection.
   let focusIndex = $state(selected ?? 0);
   let btns = $state<(HTMLButtonElement | undefined)[]>([]);
 

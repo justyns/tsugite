@@ -1,30 +1,20 @@
 import type { Component } from 'svelte';
 import type { IconName } from '$lib/components/icon/icons';
-import JobsView from './jobs/View.svelte';
-import SchedulesView from './schedules/View.svelte';
-import AgentsView from './agents/View.svelte';
-import SkillsView from './skills/View.svelte';
-import PluginsView from './plugins/View.svelte';
-import SecretsView from './secrets/View.svelte';
-import UsageView from './usage/View.svelte';
-import WebhooksView from './webhooks/View.svelte';
-import HooksView from './hooks/View.svelte';
-import ToolsView from './tools/View.svelte';
-import GalleryView from './gallery/View.svelte';
 
 /**
  * A workspace view (chats/terminals/files) drives the shared context rail + the
  * one mux tab area; it renders no full-area component of its own (its content is
- * the docked surfaces). A full view replaces the whole workspace region with its
- * `component`.
+ * the docked surfaces). A full view replaces the whole workspace region with the
+ * component its `load` resolves - lazily, so each full view is its own JS chunk and
+ * a user only downloads the views they actually open.
  */
 export type ViewMode = 'workspace' | 'full';
 
 export interface ViewDef {
   id: string;
   label: string;
-  /** Full views render this in the workspace region; workspace views omit it. */
-  component?: Component;
+  /** Full views lazy-load their component here; workspace views omit it. */
+  load?: () => Promise<{ default: Component }>;
   /** Nav-rail glyph. */
   icon: IconName;
   mode: ViewMode;
@@ -35,16 +25,76 @@ export const views: ViewDef[] = [
   { id: 'chats', label: 'Chats', icon: 'chat', mode: 'workspace' },
   { id: 'terminals', label: 'Terminals', icon: 'term', mode: 'workspace' },
   { id: 'files', label: 'Files', icon: 'files', mode: 'workspace' },
-  { id: 'jobs', label: 'Jobs', component: JobsView, icon: 'jobs', mode: 'full' },
-  { id: 'schedules', label: 'Schedules', component: SchedulesView, icon: 'sched', mode: 'full' },
-  { id: 'usage', label: 'Usage', component: UsageView, icon: 'usage', mode: 'full' },
-  { id: 'agents', label: 'Agents', component: AgentsView, icon: 'agent', mode: 'full' },
-  { id: 'skills', label: 'Skills', component: SkillsView, icon: 'skill', mode: 'full' },
-  { id: 'tools', label: 'Tools', component: ToolsView, icon: 'tool', mode: 'full' },
-  { id: 'webhooks', label: 'Webhooks', component: WebhooksView, icon: 'hook', mode: 'full' },
-  { id: 'hooks', label: 'Hooks', component: HooksView, icon: 'fork', mode: 'full' },
-  { id: 'secrets', label: 'Secrets', component: SecretsView, icon: 'key', mode: 'full' },
-  { id: 'plugins', label: 'Plugins', component: PluginsView, icon: 'plug', mode: 'full' },
+  {
+    id: 'jobs',
+    label: 'Jobs',
+    load: () => import('./jobs/View.svelte'),
+    icon: 'jobs',
+    mode: 'full',
+  },
+  {
+    id: 'schedules',
+    label: 'Schedules',
+    load: () => import('./schedules/View.svelte'),
+    icon: 'sched',
+    mode: 'full',
+  },
+  {
+    id: 'usage',
+    label: 'Usage',
+    load: () => import('./usage/View.svelte'),
+    icon: 'usage',
+    mode: 'full',
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    load: () => import('./agents/View.svelte'),
+    icon: 'agent',
+    mode: 'full',
+  },
+  {
+    id: 'skills',
+    label: 'Skills',
+    load: () => import('./skills/View.svelte'),
+    icon: 'skill',
+    mode: 'full',
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    load: () => import('./tools/View.svelte'),
+    icon: 'tool',
+    mode: 'full',
+  },
+  {
+    id: 'webhooks',
+    label: 'Webhooks',
+    load: () => import('./webhooks/View.svelte'),
+    icon: 'hook',
+    mode: 'full',
+  },
+  {
+    id: 'hooks',
+    label: 'Hooks',
+    load: () => import('./hooks/View.svelte'),
+    icon: 'fork',
+    mode: 'full',
+  },
+  {
+    id: 'secrets',
+    label: 'Secrets',
+    load: () => import('./secrets/View.svelte'),
+    icon: 'key',
+    mode: 'full',
+  },
+  {
+    id: 'plugins',
+    label: 'Plugins',
+    load: () => import('./plugins/View.svelte'),
+    icon: 'plug',
+    mode: 'full',
+  },
 ];
 
 // Dev-only surface that auto-discovers *.gallery.svelte demos. Reachable at
@@ -52,7 +102,7 @@ export const views: ViewDef[] = [
 export const galleryView: ViewDef = {
   id: 'gallery',
   label: 'Gallery',
-  component: GalleryView,
+  load: () => import('./gallery/View.svelte'),
   icon: 'grid',
   mode: 'full',
 };

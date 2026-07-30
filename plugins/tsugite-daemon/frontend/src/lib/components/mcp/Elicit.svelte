@@ -62,6 +62,7 @@
   // Live form values, seeded once from the schema defaults. Booleans stay
   // boolean; string/number are edited as text and coerced on submit.
   const seed: Record<string, string | boolean> = {};
+  // svelte-ignore state_referenced_locally -- seed captures the schema defaults once.
   for (const f of fields) {
     if (f.kind === 'boolean') seed[f.name] = f.value ?? false;
     else seed[f.name] = f.value ?? '';

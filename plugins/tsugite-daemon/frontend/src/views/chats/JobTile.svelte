@@ -9,8 +9,9 @@
   import { jobs } from '$lib/stores/jobs.svelte';
   import { jobDrawerRequest } from '../jobs/jobDrawerSignal.svelte';
   import { attachRecordToChat, copyReference } from './attachRecord';
+  import type { JobLike } from '$lib/stores/jobsFilter';
 
-  let { job }: { job: Record<string, unknown> } = $props();
+  let { job }: { job: JobLike } = $props();
 
   // Labels + spin here; each state's color lives in the stylesheet below.
   const STATE_META: Record<string, { label: string; spin?: boolean }> = {
@@ -24,20 +25,20 @@
     cancelled: { label: 'cancelled' },
   };
 
-  const jobId = $derived(String(job.job_id ?? ''));
+  const jobId = $derived(job.job_id ?? '');
   // Prefer the live store record over the recorded snapshot when the store has it.
   const live = $derived(jobId ? jobs.jobs.find((j) => j.job_id === jobId) : undefined);
-  const j = $derived((live ?? job) as Record<string, unknown>);
+  const j = $derived(live ?? job);
 
-  const state = $derived(String(j.state ?? 'queued'));
+  const state = $derived(j.state ?? 'queued');
   const meta = $derived(STATE_META[state] ?? { label: state });
-  const prompt = $derived(String(j.prompt ?? ''));
+  const prompt = $derived(j.prompt ?? '');
   const attempts = $derived(
     j.verify_attempts != null && j.max_attempts != null
       ? `attempt ${j.verify_attempts}/${j.max_attempts}`
       : '',
   );
-  const agent = $derived(j.agent ? String(j.agent) : '');
+  const agent = $derived(j.agent ?? '');
 
   function openInJobs() {
     if (jobId) jobDrawerRequest.request(jobId);

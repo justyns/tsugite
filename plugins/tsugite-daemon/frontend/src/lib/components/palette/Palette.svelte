@@ -95,10 +95,6 @@
     }
   }
 
-  function onBackdrop(e: MouseEvent) {
-    if (e.target === e.currentTarget) open = false;
-  }
-
   // Focus the fresh input when the overlay opens (never in inline/embedded mode).
   function autofocus(node: HTMLInputElement, enabled: boolean) {
     if (enabled) requestAnimationFrame(() => node.focus());
@@ -135,6 +131,11 @@
             <div class="t-pal-g">{row.label}</div>
           {:else}
             {@const isSel = ui.selected === row.index}
+            <!-- Listbox option in the combobox+activedescendant pattern:
+                 non-focusable (tabindex=-1, tracked by the input's
+                 aria-activedescendant), with Arrow/Enter selection handled on the
+                 combobox input. onclick is pointer-only; a <button> would join the
+                 shared trapFocus Tab cycle. Suppression is correct: -->
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <div
               class="t-pal-it"
@@ -176,17 +177,25 @@
   {#if inline}
     <div class="pal-inline">{@render panel(false)}</div>
   {:else}
-    <!-- backdrop click closes (mouse convenience); Escape on the input is the keyboard path -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div
       class="t-pal is-open"
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
       tabindex="-1"
-      onclick={onBackdrop}
       use:trapFocus
     >
+      <!-- Backdrop dismiss as a real button (Esc on the input is the keyboard
+           path). position:fixed keeps it out of trapFocus's Tab cycle
+           (offsetParent is null, so focusables() drops it); z-index:-1 sits it
+           behind the panel, so only the margins around the panel close on click. -->
+      <button
+        type="button"
+        class="t-pal-scrim"
+        aria-label="Close command palette"
+        tabindex="-1"
+        onclick={() => (open = false)}
+      ></button>
       {@render panel(true)}
     </div>
   {/if}
@@ -214,6 +223,18 @@
   }
   .t-pal.is-open {
     display: flex;
+  }
+  /* Transparent full-viewport dismiss target behind the panel. */
+  .t-pal-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: default;
+    appearance: none;
   }
   .t-pal-panel {
     width: min(580px, 100%);

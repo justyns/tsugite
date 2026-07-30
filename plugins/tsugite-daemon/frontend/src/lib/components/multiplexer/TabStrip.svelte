@@ -190,9 +190,10 @@
         {/if}
         <span class="lb">{tab.label}</span>
         {#if tab.closable !== false && onClose}
-          <!-- Pointer-only affordance as a span: a
-             nested interactive (even aria-hidden, a button stays focusable)
-             violates axe nested-interactive. Keyboard path = Delete on the tab. -->
+          <!-- Suppression is correct: pointer-only close, kept as an aria-hidden
+               <span> because a real <button> nested in this role="tab" is an axe
+               nested-interactive violation. The keyboard path is Delete on the
+               focused tab (see onKeydown), announced by tabAria(). -->
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <span
             class="x"
