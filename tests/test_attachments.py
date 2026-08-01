@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tsugite.agent_preparation import AgentPreparer, resolve_agent_config_attachments
+from tsugite.agent_preparation import AgentPreparer
 from tsugite.attachments import (
     add_attachment,
     get_attachment,
@@ -14,6 +14,7 @@ from tsugite.attachments import (
     remove_attachment,
     search_attachments,
 )
+from tsugite.attachments.agent_config import resolve_agent_config_attachments
 from tsugite.attachments.base import AttachmentContentType
 from tsugite.md_agents import (
     Agent,

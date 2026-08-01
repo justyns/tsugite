@@ -63,7 +63,7 @@ def test_removal_marker_in_a_group_stays_a_plain_string():
 
 
 def test_resolution_tags_each_attachment_with_its_tier(tmp_path):
-    from tsugite.agent_preparation import resolve_agent_config_attachments
+    from tsugite.attachments.agent_config import resolve_agent_config_attachments
 
     (tmp_path / "USER.md").write_text("user")
     (tmp_path / "now.md").write_text("now")

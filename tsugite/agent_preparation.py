@@ -3,348 +3,38 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-from tsugite.attachments.base import Attachment, AttachmentContentType  # noqa: E402
+if TYPE_CHECKING:
+    from tsugite.cli.helpers import PathContext
+    from tsugite.tools.skills import SkillManager
+
+from tsugite.attachments.agent_config import (  # noqa: E402
+    resolve_agent_config_attachments,
+    split_attachment_removals,
+)
+from tsugite.attachments.base import Attachment  # noqa: E402
 from tsugite.core.tools import Tool  # noqa: E402
-from tsugite.md_agents import Agent, AgentConfig, AttachmentSpec  # noqa: E402
-from tsugite.renderer import humanize_mtime  # noqa: E402
+from tsugite.md_agents import Agent, AgentConfig  # noqa: E402
 from tsugite.skill_discovery import Skill  # noqa: E402
-from tsugite.utils import has_glob_chars  # noqa: E402
 
 
-def _render_path(template: str) -> Optional[str]:
-    """Render a Jinja path template; return None on render failure."""
-    from tsugite.renderer import AgentRenderer
+@dataclass(frozen=True)
+class SkillLoad:
+    """What one turn's skill resolution produced.
 
-    try:
-        return AgentRenderer().render_string(template)
-    except Exception as e:
-        logger.debug("Failed to render attachment path %r: %s", template, e)
-        return None
-
-
-def split_attachment_removals(
-    items: List[Union[str, AttachmentSpec]],
-) -> Tuple[set, List[Union[str, AttachmentSpec]]]:
-    """Split `-filename` removal markers out of an attachments list.
-
-    The leading-dash convention is string-only legacy syntax; AttachmentSpec items
-    always pass through unchanged.
+    `expired`/`triggered`/`auto_loaded` are read back by the daemon to update its
+    sticky state after the turn, so they are real outputs rather than bookkeeping;
+    `prepare()` publishes them onto the template context explicitly.
     """
-    removals = {t.lstrip("-") for t in items if isinstance(t, str) and t.startswith("-")}
-    keep = [t for t in items if not (isinstance(t, str) and t.startswith("-"))]
-    return removals, keep
 
-
-def _resolve_path(rendered: str, workspace_path: Optional[Path]) -> Path:
-    p = Path(rendered)
-    if not p.is_absolute() and workspace_path:
-        p = workspace_path / p
-    return p
-
-
-def _expand_glob(pattern: str, workspace_path: Optional[Path]) -> List[Path]:
-    """Expand a glob pattern relative to workspace, alphabetically sorted."""
-    p = Path(pattern)
-    if p.is_absolute():
-        base = Path(p.anchor)
-        rel = str(p.relative_to(p.anchor))
-    elif workspace_path:
-        base = workspace_path
-        rel = pattern
-    else:
-        base = Path.cwd()
-        rel = pattern
-    matches = sorted(base.glob(rel))
-    return [m for m in matches if m.is_file()]
-
-
-def resolve_agent_config_attachments(
-    items: List[Union[str, AttachmentSpec]],
-    workspace_path: Optional[Path] = None,
-) -> Tuple[List[Attachment], Dict[str, Any]]:
-    """Resolve agent config attachment items to Attachment objects and Jinja bindings.
-
-    String items keep legacy semantics (Jinja-render the path, fetch the single file).
-    AttachmentSpec items support globs, `assign:` bindings, and `attach: false`.
-
-    Args:
-        items: List of strings or AttachmentSpec objects from agent_config.attachments
-        workspace_path: Optional workspace path for resolving relative paths
-
-    Returns:
-        Tuple of (attachments to inject, dict of {assign_name: bound_value}).
-        Bound value is `str` for single concrete files, `list[dict]` for globs,
-        and `None` for a missing single file.
-    """
-    if not items:
-        return [], {}
-
-    from tsugite.attachments.file import FileHandler
-
-    file_handler = FileHandler()
-    attachments: List[Attachment] = []
-    bindings: Dict[str, Any] = {}
-
-    for item in items:
-        before = len(attachments)
-        if isinstance(item, str):
-            _resolve_string_item(item, workspace_path, file_handler, attachments)
-        else:
-            _resolve_spec(item, workspace_path, file_handler, attachments, bindings)
-        # Tag everything this item produced with its cache tier (a spec's tier;
-        # plain strings are always tier 0). The context turn renders one cache
-        # block per tier so a volatile file only invalidates its own block.
-        tier = getattr(item, "tier", 0)
-        if tier:
-            for att in attachments[before:]:
-                att.tier = tier
-
-    return attachments, bindings
-
-
-def _resolve_string_item(
-    template: str,
-    workspace_path: Optional[Path],
-    file_handler: "FileHandler",
-    attachments: List[Attachment],
-) -> None:
-    """Legacy string handling: render Jinja, resolve path, fetch single file."""
-    rendered = _render_path(template)
-    if rendered is None:
-        return
-    resolved = _resolve_path(rendered, workspace_path)
-    if not resolved.exists():
-        logger.debug("Agent attachment not found (skipped): %s", resolved)
-        return
-    att = file_handler.fetch(str(resolved))
-    if att:
-        attachments.append(att)
-        logger.debug("Loaded agent attachment: %s", resolved)
-
-
-def _resolve_spec(
-    spec: AttachmentSpec,
-    workspace_path: Optional[Path],
-    file_handler: "FileHandler",
-    attachments: List[Attachment],
-    bindings: Dict[str, Any],
-) -> None:
-    """Resolve a single AttachmentSpec, populating attachments and bindings."""
-    rendered = _render_path(spec.path)
-    if rendered is None:
-        if spec.assign:
-            bindings[spec.assign] = None
-        return
-
-    if spec.mode == "index":
-        _resolve_index_spec(spec, rendered, workspace_path, attachments, bindings)
-        return
-
-    if has_glob_chars(rendered):
-        matched = _expand_glob(rendered, workspace_path)
-        if spec.assign:
-            bindings[spec.assign] = []
-        for path in matched:
-            # When attach=False, we only need text content for the binding; skip
-            # FileHandler.fetch so binaries aren't base64-encoded just to be discarded.
-            if not spec.attach and spec.assign:
-                try:
-                    content = path.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                bindings[spec.assign].append({"path": str(path), "content": content})
-                continue
-            att = file_handler.fetch(str(path))
-            if not att:
-                continue
-            if spec.attach:
-                attachments.append(att)
-            if spec.assign and att.content_type == AttachmentContentType.TEXT:
-                bindings[spec.assign].append({"path": str(path), "content": att.content})
-        return
-
-    resolved = _resolve_path(rendered, workspace_path)
-    if not resolved.exists():
-        if spec.assign:
-            bindings[spec.assign] = None
-        logger.debug("Agent attachment not found (skipped): %s", resolved)
-        return
-
-    att = file_handler.fetch(str(resolved))
-    if not att:
-        if spec.assign:
-            bindings[spec.assign] = None
-        return
-    if spec.attach:
-        attachments.append(att)
-    if spec.assign:
-        bindings[spec.assign] = att.content if att.content_type == AttachmentContentType.TEXT else None
-
-
-def _resolve_index_spec(
-    spec: AttachmentSpec,
-    rendered_path: str,
-    workspace_path: Optional[Path],
-    attachments: List[Attachment],
-    bindings: Dict[str, Any],
-) -> None:
-    """Resolve a mode: index spec into a single index Attachment and/or assign binding."""
-    if has_glob_chars(rendered_path):
-        paths = _expand_glob(rendered_path, workspace_path)
-    else:
-        single = _resolve_path(rendered_path, workspace_path)
-        paths = [single] if single.exists() and single.is_file() else []
-
-    if len(paths) > spec.max_entries:
-        logger.warning(
-            "Attachment index for %r exceeds max_entries=%d, truncating from %d",
-            spec.path,
-            spec.max_entries,
-            len(paths),
-        )
-        paths = paths[: spec.max_entries]
-
-    entries = [_extract_index_entry(p, spec.index_format) for p in paths]
-
-    if spec.assign:
-        bindings[spec.assign] = entries
-
-    if not entries:
-        return
-
-    if spec.attach:
-        att_name = spec.name or _derive_index_name(rendered_path)
-        att_content = _format_index_block(spec.path, entries, spec.index_format)
-        attachments.append(
-            Attachment(
-                name=att_name,
-                content=att_content,
-                content_type=AttachmentContentType.TEXT,
-                mime_type="text/plain",
-                mode="index",
-            )
-        )
-
-
-def _extract_index_entry(path: Path, fmt: str) -> Dict[str, Any]:
-    """Build an index entry dict for a single file. Falls back gracefully on errors."""
-    entry: Dict[str, Any] = {"path": str(path)}
-
-    if fmt == "path_only":
-        # Cheapest format: skip stat + read entirely. Only `path` is used downstream.
-        entry["heading"] = ""
-        return entry
-
-    try:
-        stat = path.stat()
-        entry["size_bytes"] = stat.st_size
-        entry["mtime"] = stat.st_mtime
-    except OSError:
-        entry["size_bytes"] = 0
-        entry["mtime"] = 0
-
-    try:
-        with path.open("rb") as f:
-            head = f.read(2048)
-        text = head.decode("utf-8", errors="replace")
-    except OSError:
-        text = ""
-
-    if fmt == "first_line":
-        entry["heading"] = _first_nonempty_line(text)
-    elif fmt == "frontmatter":
-        entry.update(_parse_frontmatter_for_index(text, path))
-    else:  # first_heading (default)
-        entry["heading"] = _first_markdown_heading(text)
-
-    return entry
-
-
-def _first_nonempty_line(text: str) -> str:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return ""
-
-
-def _first_markdown_heading(text: str) -> str:
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            return stripped.lstrip("#").strip()
-    return ""
-
-
-def _parse_frontmatter_for_index(text: str, path: Path) -> Dict[str, Any]:
-    """Extract title/description/tags from YAML frontmatter; fall back to path_only on error."""
-    if not text.startswith("---"):
-        return {"heading": ""}
-    try:
-        from tsugite.utils import parse_yaml_frontmatter
-
-        meta, _body = parse_yaml_frontmatter(text, str(path))
-    except Exception:
-        return {"heading": ""}
-    out: Dict[str, Any] = {
-        "heading": meta.get("title", "") or meta.get("description", ""),
-    }
-    if "title" in meta:
-        out["title"] = meta["title"]
-    if "description" in meta:
-        out["description"] = meta["description"]
-    if "tags" in meta:
-        out["tags"] = meta["tags"]
-    return out
-
-
-def _format_index_block(pattern: str, entries: List[Dict[str, Any]], fmt: str) -> str:
-    """Render the index Attachment content with a one-line prelude + bullets."""
-    prelude = (
-        f'File index for "{pattern}" ({len(entries)} files). Use read_file(path=...) to read any of them when relevant.'
-    )
-    lines = [prelude, ""]
-    for entry in entries:
-        path = entry.get("path", "")
-        if fmt == "path_only":
-            lines.append(path)
-            continue
-
-        if fmt == "frontmatter":
-            title = entry.get("title") or entry.get("heading") or ""
-            desc = entry.get("description", "")
-            if title and desc:
-                bullet = f"{path} - {title}: {desc}"
-            elif title:
-                bullet = f"{path} - {title}"
-            else:
-                bullet = path
-        else:
-            heading = entry.get("heading", "")
-            bullet = f"{path} - {heading}" if heading else path
-
-        relative = humanize_mtime(entry.get("mtime"))
-        if relative:
-            bullet = f"{bullet} ({relative})"
-        lines.append(bullet)
-    return "\n".join(lines)
-
-
-def _derive_index_name(pattern: str) -> str:
-    """Derive a default index attachment name from a glob pattern.
-
-    Uses the deepest non-glob path segment, suffixed with `_index`. Falls back to
-    `attachment_index` if the pattern is purely glob characters.
-    """
-    parts = Path(pattern).parts
-    for segment in reversed(parts):
-        if segment and not has_glob_chars(segment) and segment not in ("/", "."):
-            return f"{segment}_index"
-    return "attachment_index"
+    skills: List[Skill]
+    expiring: Dict[str, int]
+    expired: List[str]
+    triggered: List[str]
+    auto_loaded: List[str]
 
 
 @dataclass
@@ -394,17 +84,18 @@ class AgentPreparer:
     This class consolidates all agent preparation logic that was previously
     duplicated across render command, run_agent, and _execute_agent_with_prompt.
 
-    The preparation pipeline:
-    1. Parse agent file (with inheritance resolution)
-    2. Execute prefetch tools
-    3. Execute tool directives (optional)
-    4. Build template context
-    5. Render template
-    6. Build instructions
-    7. Expand and create tools
-    8. Build system prompt
+    `prepare()` orchestrates, one named step per phase:
 
-    This ensures that render shows EXACTLY what run executes.
+        _resolve_attachments     caller + frontmatter attachments, removals, dedupe
+        _install_skill_manager   workspace-aware SkillManager, made active
+        _run_prefetch            frontmatter prefetch tools + agent-list injection
+        _resolve_paths           cwd / invoked_from / workspace_dir
+        _build_template_context  the Jinja context and its framework defaults
+        _expand_tools            tool specs + capability-based auto-injection
+        _load_skills             auto-load, sticky TTL, trigger matching
+
+    Both `render` and `run` go through here, so render shows EXACTLY what run
+    executes.
     """
 
     def _build_directive_placeholders(
@@ -450,6 +141,264 @@ class AgentPreparer:
             rewrite_to=lambda d: f"<!-- Exec '{d.name}' skipped (--no-exec) -->",
         )
 
+    def _resolve_attachments(
+        self, agent_config: AgentConfig, attachments: Optional[List[Attachment]]
+    ) -> Tuple[List[Attachment], Dict[str, Any]]:
+        """Merge caller attachments with the agent's own, honoring removals.
+
+        Front-matter attachments carry the cache tiers and are the intended
+        source, so they dedupe ahead of any same-named attachment the caller
+        passed in. Legacy `-filename` string entries drop a same-named entry.
+        Front-matter paths resolve via cwd (workspace_path is None in production).
+        """
+        all_attachments = list(attachments or [])
+
+        removals, keep_items = split_attachment_removals(agent_config.attachments or [])
+        if removals:
+            all_attachments = [a for a in all_attachments if a.name not in removals]
+
+        loaded, bindings = resolve_agent_config_attachments(keep_items, None)
+        all_attachments = loaded + all_attachments
+
+        seen_names: set[str] = set()
+        deduped: List[Attachment] = []
+        for att in all_attachments:
+            if att.name not in seen_names:
+                seen_names.add(att.name)
+                deduped.append(att)
+        return deduped, bindings
+
+    def _install_skill_manager(
+        self, agent_config: AgentConfig, path_context: Optional["PathContext"]
+    ) -> "SkillManager":
+        """Build the workspace-aware skill manager and make it the active one.
+
+        The workspace comes from path_context.workspace_dir so daemon and chat
+        callers still get workspace skills.
+        """
+        from tsugite.config import load_config
+        from tsugite.tools.skills import SkillManager, set_skill_manager
+        from tsugite.workspace.models import Workspace
+
+        workspace = Workspace.try_load(path_context.workspace_dir if path_context else None)
+        extra_paths = (agent_config.skill_paths or []) + (load_config().skill_paths or [])
+        manager = SkillManager(workspace=workspace, extra_paths=extra_paths or None)
+        set_skill_manager(manager)
+        return manager
+
+    def _run_prefetch(self, agent_config: AgentConfig) -> Dict[str, Any]:
+        """Run frontmatter prefetch tools, plus the opt-in agent-list injection.
+
+        A failing prefetch yields an empty context rather than failing the run:
+        prefetch is supplementary context, not a precondition.
+        """
+        from tsugite.agent_runner import execute_prefetch
+
+        prefetch_context: Dict[str, Any] = {}
+        if agent_config.prefetch:
+            try:
+                prefetch_context = execute_prefetch(agent_config.prefetch)
+            except Exception:
+                prefetch_context = {}
+
+        # Default agents call list_available_agents() on demand instead of
+        # carrying the full list, so this stays opt-in.
+        if "available_agents" not in prefetch_context and (
+            agent_config.auto_load_agent_list or agent_config.auto_load_agents
+        ):
+            from tsugite.tools.agents import discover_agents, format_agents_markdown
+
+            agents = discover_agents()
+            if agent_config.auto_load_agents:
+                wanted = set(agent_config.auto_load_agents)
+                agents = [a for a in agents if a["name"] in wanted]
+            prefetch_context["available_agents"] = format_agents_markdown(agents)
+
+        return prefetch_context
+
+    def _load_skills(
+        self,
+        agent_config: AgentConfig,
+        prompt: str,
+        full_context: Dict[str, Any],
+        skill_manager: "SkillManager",
+        event_bus: Optional[Any],
+    ) -> SkillLoad:
+        """Load auto, sticky and trigger-matched skills for this turn."""
+        from tsugite.events.events import SkillLoadFailedEvent
+
+        # Skills the user explicitly removed this session (populated by the daemon).
+        suppressed_skills = set(full_context.get("suppressed_skills") or [])
+
+        # Sticky skills carried over from prior turns on this session (daemon-only).
+        # Shape: {skill_name: turns_unused_counter}
+        sticky_counters: Dict[str, int] = dict(full_context.get("sticky_skills") or {})
+        ttl_default = int(full_context.get("skill_ttl_default") or 10)
+
+        auto_load_skills = [s for s in (agent_config.auto_load_skills or []) if s not in suppressed_skills]
+
+        for skill_name in auto_load_skills:
+            result = skill_manager.load_skill(skill_name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
+
+        # unless the counter already exceeded the skill's effective TTL (expired).
+        skill_manager._ensure_registry_initialized()
+        registry = skill_manager._skill_registry
+        expiring_skills: Dict[str, int] = {}
+        expired_sticky: List[str] = []
+        for name, counter in sticky_counters.items():
+            if name in suppressed_skills:
+                expired_sticky.append(name)
+                continue
+            meta = registry.get(name)
+            if meta is None:
+                # Skill vanished (renamed/removed) between turns — drop it.
+                expired_sticky.append(name)
+                continue
+            effective_ttl = meta.ttl if meta.ttl is not None else ttl_default
+            if effective_ttl > 0 and counter > effective_ttl:
+                expired_sticky.append(name)
+                continue
+            if name in auto_load_skills:
+                # Already loaded above; no need to double-load but it's still sticky.
+                continue
+            result = skill_manager.load_skill(name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=name, error_message=result))
+                continue
+            if effective_ttl > 0:
+                remaining = effective_ttl - counter
+                if remaining <= 1:
+                    expiring_skills[name] = max(remaining, 0)
+
+        triggered_skill_names = [
+            name for name in skill_manager.get_triggered_skills(prompt) if name not in suppressed_skills
+        ]
+        for skill_name in triggered_skill_names:
+            logger.info(f"Trigger-loading skill '{skill_name}' based on user prompt")
+            result = skill_manager.load_skill(skill_name)
+            if result.startswith("Failed") or result.startswith("Skill '"):
+                if event_bus:
+                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
+
+        loaded_skills_dict = skill_manager.get_loaded_skills()
+        return SkillLoad(
+            skills=[Skill(name=name, content=content) for name, content in loaded_skills_dict.items()],
+            expiring=expiring_skills,
+            expired=expired_sticky,
+            triggered=list(triggered_skill_names),
+            auto_loaded=list(auto_load_skills),
+        )
+
+    def _expand_tools(
+        self, agent_config: AgentConfig, full_context: Dict[str, Any], interactive_mode: bool
+    ) -> List[Tool]:
+        """Expand the agent's tool specs and apply the capability-based auto-injections.
+
+        Interactive tools are added only when something can actually answer, and
+        stripped otherwise, so a scheduled run cannot offer the model a prompt
+        nobody will see.
+        """
+        from tsugite.core.tools import create_tool_from_tsugite
+        from tsugite.interaction import get_interaction_backend
+        from tsugite.tools import _tools, expand_tool_specs
+
+        try:
+            expanded = (
+                expand_tool_specs(agent_config.tools, strict=agent_config.strict_tools) if agent_config.tools else []
+            )
+
+            interactive_tool_names = ["ask_user", "ask_user_batch"]
+            has_interaction = (
+                interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
+            )
+            if has_interaction:
+                for name in interactive_tool_names:
+                    if name not in expanded and name in _tools:
+                        expanded.append(name)
+            else:
+                expanded = [t for t in expanded if t not in interactive_tool_names]
+
+            # Scheduled tasks get a way to reach the user even if the agent didn't ask.
+            if full_context.get("has_notify_tool", False):
+                if "notify_user" not in expanded and "notify_user" in _tools:
+                    expanded.append("notify_user")
+
+            return [create_tool_from_tsugite(name) for name in expanded]
+        except Exception as e:
+            raise RuntimeError(f"Failed to create tools: {e}") from e
+
+    @staticmethod
+    def _resolve_paths(path_context: Optional["PathContext"]) -> Tuple[str, Optional[str], Optional[str]]:
+        """Return (cwd, invoked_from, workspace_dir) as strings for the template context.
+
+        The daemon supplies an effective_cwd that differs from the process cwd.
+        """
+        if path_context and path_context.effective_cwd:
+            cwd = str(path_context.effective_cwd)
+        else:
+            cwd = str(Path.cwd())
+        invoked_from = str(path_context.invoked_from) if path_context else None
+        workspace_dir = str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None
+        return cwd, invoked_from, workspace_dir
+
+    def _build_template_context(
+        self,
+        *,
+        agent_config: AgentConfig,
+        prompt: str,
+        context: Dict[str, Any],
+        directive_context: Dict[str, Any],
+        attachment_bindings: Dict[str, Any],
+        interactive_mode: bool,
+        cwd: str,
+        invoked_from: Optional[str],
+        workspace_dir: Optional[str],
+    ) -> Dict[str, Any]:
+        """Assemble the Jinja context every agent template renders against.
+
+        Framework flags default here rather than in the template so a caller that
+        supplies none of them still renders under StrictUndefined.
+        """
+        from tsugite.tools import list_tools
+
+        full_context = {
+            **context,
+            **directive_context,
+            "user_prompt": prompt,
+            "agent_name": agent_config.name,
+            "is_interactive": interactive_mode,
+            "is_daemon": context.get("is_daemon", False),
+            "is_scheduled": context.get("is_scheduled", False),
+            "schedule_id": context.get("schedule_id", ""),
+            "has_notify_tool": context.get("has_notify_tool", False),
+            "running_tasks": context.get("running_tasks", []),
+            "tsugite_url": context.get("tsugite_url", ""),
+            "tsugite_token": context.get("tsugite_token", ""),
+            "tools": agent_config.tools,
+            # Tool names actually installed, so templates can conditionally mention optional
+            # tools, e.g. `{% if 'web_search' in available_tools %}`.
+            "available_tools": list_tools(),
+            "is_subagent": context.get("is_subagent", False),
+            "parent_agent": context.get("parent_agent", None),
+            "chat_history": context.get("chat_history", []),
+            "CWD": cwd,
+            "INVOKED_FROM": invoked_from,
+            "WORKSPACE_DIR": workspace_dir,
+        }
+
+        # User-specified attachment `assign:` bindings win over built-in or
+        # prefetch values; warn so collisions surface rather than confuse.
+        for name, value in attachment_bindings.items():
+            if name in full_context:
+                logger.warning("Attachment binding %r overrides existing context variable", name)
+            full_context[name] = value
+
+        return full_context
+
     def prepare(
         self,
         agent: Agent,
@@ -459,7 +408,7 @@ class AgentPreparer:
         skip_exec_directives: bool = False,
         attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
-        path_context: Optional[Any] = None,
+        path_context: Optional["PathContext"] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -482,14 +431,11 @@ class AgentPreparer:
         from tsugite.agent_runner import (
             _combine_instructions,
             execute_exec_directives,
-            execute_prefetch,
             execute_tool_directives,
             get_default_instructions,
         )
         from tsugite.core.agent import build_system_prompt
-        from tsugite.core.tools import create_tool_from_tsugite
         from tsugite.renderer import AgentRenderer
-        from tsugite.tools import expand_tool_specs, list_tools
         from tsugite.utils import is_interactive
 
         if context is None:
@@ -497,65 +443,12 @@ class AgentPreparer:
 
         agent_config = agent.config
 
-        all_attachments = list(attachments or [])
+        all_attachments, attachment_bindings = self._resolve_attachments(agent_config, attachments)
 
-        # Load agent-config attachments (Jinja-rendered paths). Legacy `-filename`
-        # string entries drop a same-named entry from the attachments above.
-        # Front-matter paths resolve via cwd (workspace_path is None in production).
-        workspace_path = None
-        removals, keep_items = split_attachment_removals(agent_config.attachments or [])
-        if removals:
-            all_attachments = [a for a in all_attachments if a.name not in removals]
-        loaded, attachment_bindings = resolve_agent_config_attachments(keep_items, workspace_path)
-        # Front-matter attachments carry the cache tiers and are the intended source,
-        # so they dedupe AHEAD of any same-named attachment the caller passed in.
-        all_attachments = loaded + all_attachments
+        _skill_manager = self._install_skill_manager(agent_config, path_context)
 
-        # Deduplicate by name (keep first occurrence)
-        seen_names: set[str] = set()
-        deduped: List[Attachment] = []
-        for att in all_attachments:
-            if att.name not in seen_names:
-                seen_names.add(att.name)
-                deduped.append(att)
-        all_attachments = deduped
+        prefetch_context = self._run_prefetch(agent_config)
 
-        # Set up the workspace-aware skill manager, resolving the workspace from
-        # path_context.workspace_dir so daemon/chat callers still get workspace skills.
-        from tsugite.config import load_config as _load_config
-        from tsugite.tools.skills import SkillManager, set_skill_manager
-        from tsugite.workspace.models import Workspace
-
-        effective_workspace = Workspace.try_load(path_context.workspace_dir if path_context else None)
-
-        _config = _load_config()
-        extra_skill_paths = (agent_config.skill_paths or []) + (_config.skill_paths or [])
-        _skill_manager = SkillManager(workspace=effective_workspace, extra_paths=extra_skill_paths or None)
-        set_skill_manager(_skill_manager)
-
-        # Step 1: Execute prefetch tools
-        prefetch_context = {}
-        if agent_config.prefetch:
-            try:
-                prefetch_context = execute_prefetch(agent_config.prefetch)
-            except Exception:
-                # Silently continue if prefetch fails
-                prefetch_context = {}
-
-        # Step 1b: Opt-in <available_agents> injection. Default agents call
-        # list_available_agents() on demand instead of carrying the full list.
-        if "available_agents" not in prefetch_context and (
-            agent_config.auto_load_agent_list or agent_config.auto_load_agents
-        ):
-            from tsugite.tools.agents import discover_agents, format_agents_markdown
-
-            agents = discover_agents()
-            if agent_config.auto_load_agents:
-                wanted = set(agent_config.auto_load_agents)
-                agents = [a for a in agents if a["name"] in wanted]
-            prefetch_context["available_agents"] = format_agents_markdown(agents)
-
-        # Step 2: Execute tool directives (unless skip_tool_directives=True for render)
         if skip_tool_directives:
             modified_content = agent.content
             # Extract tool directive variable names and provide placeholders
@@ -563,7 +456,6 @@ class AgentPreparer:
         else:
             modified_content, tool_context = execute_tool_directives(agent.content, prefetch_context)
 
-        # Step 2.5: Execute exec directives. Default-on for `tsu render` so the preview
         # reflects what the LLM would see; `--no-exec` opts out for side-effecty blocks.
         if skip_exec_directives:
             modified_content, exec_context = self._extract_exec_directive_placeholders(modified_content)
@@ -575,58 +467,22 @@ class AgentPreparer:
                 event_bus=event_bus,
             )
 
-        # Step 3: Build template context
         interactive_mode = is_interactive()
-
-        # Extract path context values if available
-        # Use effective_cwd from path_context (for daemon) or fall back to actual cwd
-        if path_context and path_context.effective_cwd:
-            cwd = str(path_context.effective_cwd)
-        else:
-            cwd = str(Path.cwd())
-        invoked_from = str(path_context.invoked_from) if path_context else None
-        workspace_dir = str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None
-
-        full_context = {
-            **context,
-            **prefetch_context,
-            **tool_context,
-            **exec_context,
-            "user_prompt": prompt,
-            "agent_name": agent_config.name,
-            "is_interactive": interactive_mode,
-            "is_daemon": context.get("is_daemon", False),
-            "is_scheduled": context.get("is_scheduled", False),
-            "schedule_id": context.get("schedule_id", ""),
-            "has_notify_tool": context.get("has_notify_tool", False),
-            "running_tasks": context.get("running_tasks", []),
-            "tsugite_url": context.get("tsugite_url", ""),
-            "tsugite_token": context.get("tsugite_token", ""),
-            "tools": agent_config.tools,
-            # Tool names actually installed, so templates can conditionally mention optional
-            # tools, e.g. `{% if 'web_search' in available_tools %}`.
-            "available_tools": list_tools(),
-            # Subagent context
-            "is_subagent": context.get("is_subagent", False),
-            "parent_agent": context.get("parent_agent", None),
-            # Chat history (for chat agents)
-            "chat_history": context.get("chat_history", []),
-            # Path context for workspace-aware agents
-            "CWD": cwd,
-            "INVOKED_FROM": invoked_from,
-            "WORKSPACE_DIR": workspace_dir,
-        }
-
-        # Apply attachment `assign:` bindings on top of full_context. User-specified
-        # bindings override built-in or prefetch values; warn so collisions surface.
-        for name, value in attachment_bindings.items():
-            if name in full_context:
-                logger.warning("Attachment binding %r overrides existing context variable", name)
-            full_context[name] = value
+        cwd, invoked_from, workspace_dir = self._resolve_paths(path_context)
+        full_context = self._build_template_context(
+            agent_config=agent_config,
+            prompt=prompt,
+            context=context,
+            directive_context={**prefetch_context, **tool_context, **exec_context},
+            attachment_bindings=attachment_bindings,
+            interactive_mode=interactive_mode,
+            cwd=cwd,
+            invoked_from=invoked_from,
+            workspace_dir=workspace_dir,
+        )
 
         renderer = AgentRenderer()
 
-        # Step 3b: Evaluate run_if guard (skip agent if expression is falsy)
         if agent_config.run_if:
             skip_reason = None
             try:
@@ -650,13 +506,11 @@ class AgentPreparer:
                     skip_reason=skip_reason,
                 )
 
-        # Step 4: Render template
         try:
             rendered_prompt = renderer.render(modified_content, full_context)
         except Exception as e:
             raise RuntimeError(f"Template rendering failed: {e}") from e
 
-        # Step 5: Build instructions
         base_instructions = get_default_instructions()
         agent_instructions = getattr(agent_config, "instructions", "")
 
@@ -669,111 +523,15 @@ class AgentPreparer:
 
         combined_instructions = _combine_instructions(base_instructions, agent_instructions)
 
-        # Step 6: Expand and create tools
-        try:
-            # Expand tool specifications (categories, globs, regular names)
-            expanded_tools = (
-                expand_tool_specs(agent_config.tools, strict=agent_config.strict_tools) if agent_config.tools else []
-            )
+        tools = self._expand_tools(agent_config, full_context, interactive_mode)
 
-            # Auto-inject or filter interactive tools based on interaction capability.
-            from tsugite.interaction import get_interaction_backend
-            from tsugite.tools import _tools
+        skill_load = self._load_skills(agent_config, prompt, full_context, _skill_manager, event_bus)
+        skills, expiring_skills = skill_load.skills, skill_load.expiring
+        # The daemon reads these back off the context to update sticky state.
+        full_context["_expired_sticky_skills"] = skill_load.expired
+        full_context["_triggered_skill_names"] = skill_load.triggered
+        full_context["_auto_loaded_skill_names"] = skill_load.auto_loaded
 
-            interactive_tool_names = ["ask_user", "ask_user_batch"]
-            has_interaction = (
-                interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
-            )
-            if has_interaction:
-                for name in interactive_tool_names:
-                    if name not in expanded_tools and name in _tools:
-                        expanded_tools.append(name)
-            else:
-                expanded_tools = [t for t in expanded_tools if t not in interactive_tool_names]
-
-            # Auto-inject notify_user when has_notify_tool is set (scheduled tasks)
-            if full_context.get("has_notify_tool", False):
-                if "notify_user" not in expanded_tools and "notify_user" in _tools:
-                    expanded_tools.append("notify_user")
-
-            # Convert to Tool objects
-            tools = [create_tool_from_tsugite(name) for name in expanded_tools]
-        except Exception as e:
-            raise RuntimeError(f"Failed to create tools: {e}") from e
-
-        # Step 7: Load auto_load_skills, sticky skills, and trigger-matched skills
-        from tsugite.events.events import SkillLoadFailedEvent
-
-        # Skills the user explicitly removed this session (populated by the daemon).
-        suppressed_skills = set(full_context.get("suppressed_skills") or [])
-
-        # Sticky skills carried over from prior turns on this session (daemon-only).
-        # Shape: {skill_name: turns_unused_counter}
-        sticky_counters: Dict[str, int] = dict(full_context.get("sticky_skills") or {})
-        ttl_default = int(full_context.get("skill_ttl_default") or 10)
-
-        # Step 7a: auto_load_skills (exempt from TTL, re-loaded every turn from frontmatter)
-        auto_load_skills = [s for s in (agent_config.auto_load_skills or []) if s not in suppressed_skills]
-
-        for skill_name in auto_load_skills:
-            result = _skill_manager.load_skill(skill_name)
-            if result.startswith("Failed") or result.startswith("Skill '"):
-                if event_bus:
-                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
-
-        # Step 7b: sticky skills — re-load whatever carried over from prior turns,
-        # unless the counter already exceeded the skill's effective TTL (expired).
-        _skill_manager._ensure_registry_initialized()
-        registry = _skill_manager._skill_registry
-        expiring_skills: Dict[str, int] = {}
-        expired_sticky: List[str] = []
-        for name, counter in sticky_counters.items():
-            if name in suppressed_skills:
-                expired_sticky.append(name)
-                continue
-            meta = registry.get(name)
-            if meta is None:
-                # Skill vanished (renamed/removed) between turns — drop it.
-                expired_sticky.append(name)
-                continue
-            effective_ttl = meta.ttl if meta.ttl is not None else ttl_default
-            if effective_ttl > 0 and counter > effective_ttl:
-                expired_sticky.append(name)
-                continue
-            if name in auto_load_skills:
-                # Already loaded above; no need to double-load but it's still sticky.
-                continue
-            result = _skill_manager.load_skill(name)
-            if result.startswith("Failed") or result.startswith("Skill '"):
-                if event_bus:
-                    event_bus.emit(SkillLoadFailedEvent(skill_name=name, error_message=result))
-                continue
-            if effective_ttl > 0:
-                remaining = effective_ttl - counter
-                if remaining <= 1:
-                    expiring_skills[name] = max(remaining, 0)
-
-        # Step 7c: trigger-matched skills (new stickies start here when daemon adds them).
-        triggered_skill_names = [
-            name for name in _skill_manager.get_triggered_skills(prompt) if name not in suppressed_skills
-        ]
-        for skill_name in triggered_skill_names:
-            logger.info(f"Trigger-loading skill '{skill_name}' based on user prompt")
-            result = _skill_manager.load_skill(skill_name)
-            if result.startswith("Failed") or result.startswith("Skill '"):
-                if event_bus:
-                    event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
-
-        # Stash expired/triggered names so the daemon can update its sticky state post-turn.
-        full_context["_expired_sticky_skills"] = expired_sticky
-        full_context["_triggered_skill_names"] = list(triggered_skill_names)
-        full_context["_auto_loaded_skill_names"] = list(auto_load_skills)
-
-        # Get all successfully loaded skills as Skill objects
-        loaded_skills_dict = _skill_manager.get_loaded_skills()
-        skills = [Skill(name=name, content=content) for name, content in loaded_skills_dict.items()]
-
-        # Step 8: Build system message (what LLM actually sees)
         system_message = build_system_prompt(tools, combined_instructions)
 
         # Add environment context when invoked_from differs from CWD

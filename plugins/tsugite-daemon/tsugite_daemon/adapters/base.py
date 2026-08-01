@@ -1256,7 +1256,7 @@ class BaseAdapter(ABC):
         try:
             agent_path = self._resolve_agent_path()
             if agent_path:
-                from tsugite.agent_preparation import split_attachment_removals
+                from tsugite.attachments.agent_config import split_attachment_removals
                 from tsugite.md_agents import parse_agent_file
 
                 attachments_spec = parse_agent_file(agent_path).config.attachments or []
