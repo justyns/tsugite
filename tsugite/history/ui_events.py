@@ -28,45 +28,6 @@ _INJECTED_RES = {tag: re.compile(rf"<{tag}(\s[^>]*)?>(.*?)</{tag}>", re.DOTALL) 
 _ID_RE = re.compile(r'id="([^"]+)"')
 
 
-def _parse_client_context_items(body: str) -> List[Dict[str, Any]]:
-    """Parse the item children of a ``<client_context>`` block back into structured
-    ``{key, label, value, untrusted?}`` dicts (ElementTree unescapes attribute and
-    text content). The context payload is an Attachment now, folded as
-    ``<attachment name=..>``; blocks recorded before the collapse used
-    ``<item label=..>``, and both are read so old turns still render. The daemon
-    escapes every field when folding (see ``_build_client_context_block``), so the
-    fragment is well-formed; a malformed one yields no items rather than raising.
-    """
-    import xml.etree.ElementTree as ET
-
-    try:
-        root = ET.fromstring(f"<client_context>{body}</client_context>")
-    except (ET.ParseError, ValueError):
-        return []
-    items: List[Dict[str, Any]] = []
-    for el in root:
-        # New history folds items as <attachment name=..>; pre-collapse history used
-        # <item label=..>. Read both (in document order) so a turn recorded before
-        # the ContextItem->Attachment collapse still renders its context gutter. The
-        # <note> preamble is neither tag, so it is skipped.
-        if el.tag not in ("attachment", "item"):
-            continue
-        label = el.get("name") or el.get("label") or ""
-        item: Dict[str, Any] = {"key": el.get("key", ""), "label": label, "value": el.text or ""}
-        if el.get("untrusted") == "true":
-            item["untrusted"] = True
-        items.append(item)
-    return items
-
-
-def _structure_injected_block(block: Dict[str, str]) -> Dict[str, Any]:
-    """client_context carries structured items for the UI gutter; every other
-    injected tag keeps its raw {tag, id?, body} shape."""
-    if block.get("tag") == "client_context":
-        return {"tag": "client_context", "items": _parse_client_context_items(block.get("body", ""))}
-    return block
-
-
 def split_injected_context(text: str) -> Tuple[List[Dict[str, str]], str]:
     """Peel leading injection tags off a user message.
 
@@ -120,16 +81,16 @@ def _normalize(out: Dict[str, Any], event_type: str) -> None:
             else:
                 out.pop("tail", None)
     elif event_type == "user_input":
-        # client_context recorded as structured event data is preferred over
-        # re-parsing the folded <client_context> XML; the XML stays as the prompt
-        # rendering and the fallback for turns recorded before the dual-write.
+        # The UI gutter's context items come from the structured client_context the
+        # recorder wrote, never from the folded <client_context> XML: that block is
+        # prompt rendering, peeled off the visible text and otherwise left alone.
         stored = out.pop("client_context", None)
         blocks, rest = split_injected_context(out.get("text") or "")
         if blocks:
             out["injected"] = [
                 {"tag": "client_context", "items": stored}
                 if stored is not None and b.get("tag") == "client_context"
-                else _structure_injected_block(b)
+                else b
                 for b in blocks
             ]
             out["display_text"] = rest

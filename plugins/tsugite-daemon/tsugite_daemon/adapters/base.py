@@ -88,8 +88,11 @@ def _build_client_context_block(items: Any) -> str:
     most 16 items; items with an empty key or value are skipped; values truncate
     to ``_MAX_CONTEXT_VALUE_CHARS``, keys and labels to 64. Returns "" when there
     is nothing to fold, so the prompt stays byte-identical to the no-context case.
-    The read side (``tsugite/history/ui_events.py``) parses this shape back into
-    structured items for the UI.
+    This block is what the model reads; the UI's own copy of the items is recorded
+    structurally on the user_input event, so nothing parses this shape back.
+
+    ``items`` is ``Any`` because it arrives as client-supplied JSON off the request
+    metadata, hence the per-field guards.
     """
     from xml.sax.saxutils import escape, quoteattr
 
