@@ -672,11 +672,6 @@ async def _execute_agent_with_prompt(
             storage=session_storage,
             pre_llm_call=pre_llm_call_cb,
         )
-        # Tell the agent we already wrote the user_input event so it doesn't
-        # duplicate.
-        if session_storage is not None:
-            agent._user_input_recorded = True
-
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)
 

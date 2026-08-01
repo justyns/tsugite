@@ -367,7 +367,6 @@ class TsugiteAgent:
         self.cache_read_tokens = 0
         self._previous_turn_had_error = False
         self.storage = storage
-        self._user_input_recorded = False  # caller may pre-record before run()
 
         self._inject_tools_into_executor()
 
@@ -405,8 +404,6 @@ class TsugiteAgent:
         self.memory.add_task(task)
         if self.event_bus:
             self.event_bus.emit(TaskStartEvent(task=task, model=self.model_name))
-
-        self._record_user_input_if_needed(task)
 
         unset = object()
         final_value: Any = unset
@@ -649,11 +646,6 @@ class TsugiteAgent:
             return final_value
         finally:
             await self._provider.stop()
-
-    def _record_user_input_if_needed(self, task: str) -> None:
-        if self.storage and not self._user_input_recorded:
-            self.storage.record("user_input", text=task)
-            self._user_input_recorded = True
 
     def _record_code_execution(self, code: str, exec_result, duration_ms: int) -> None:
         if not self.storage:

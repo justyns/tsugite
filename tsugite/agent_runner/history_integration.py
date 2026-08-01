@@ -111,11 +111,13 @@ def record_user_input(
 ) -> None:
     """Record a user_input event at the start of a turn.
 
-    Idempotent within a turn: the live runner and the error-path
-    save_run_to_history can both reach here for the same message with no shared
-    in-memory flag, so a turn that failed before completing is deduped from the
-    session's own events rather than by content-matching (which would collapse
-    legitimate repeats).
+    Every user_input goes through here, and this is the only guard against
+    recording two for one turn. Several callers legitimately reach it for the
+    same message with no shared in-memory flag (a daemon adapter recording up
+    front so a turn parked on an approval prompt is durable, the live runner,
+    a resume retry, the error-path save_run_to_history), so a turn that failed
+    before completing is deduped from the session's own events rather than by
+    content-matching (which would collapse legitimate repeats).
     """
     if _current_turn_already_has_user_input(storage):
         return

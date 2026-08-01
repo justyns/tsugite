@@ -127,4 +127,3 @@ def test_run_agent_creates_storage_at_runtime(history_dir, fake_agent_path):
         storage=storage,
     )
     assert agent.storage is storage
-    assert agent._user_input_recorded is False

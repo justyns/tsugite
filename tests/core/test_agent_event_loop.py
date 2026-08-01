@@ -53,7 +53,11 @@ async def test_no_code_response_ends_loop_and_returns_text(storage):
 
     assert result == "Hello, this is just text."
     types = [e.type for e in storage.iter_events()]
-    assert "user_input" in types
+    # Recording the user's message belongs to record_user_input(), which knows the
+    # text the person actually typed and holds the one-per-turn guard. The loop only
+    # ever sees the fully rendered prompt (tools, skills, instructions), so a
+    # user_input from here would be both a duplicate and template noise in the bubble.
+    assert "user_input" not in types
     assert "model_request" in types
     assert "model_response" in types
     # No code = no execution event
