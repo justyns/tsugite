@@ -1,7 +1,6 @@
 """Shared helper functions for agent execution."""
 
 import contextvars
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
@@ -16,15 +15,20 @@ if TYPE_CHECKING:
 # Console for warnings and debug output (stderr)
 _stderr_console = get_stderr_console()
 
-# Thread-local storage for tracking currently executing agent
-_current_agent_context = threading.local()
+# Every piece of per-run ambient state below is a ContextVar, set with a token and
+# reset on the way out. Two properties matter and only ContextVars give both:
+# concurrent daemon sessions (each an `asyncio.to_thread` worker) stay isolated,
+# and a NESTED run - an agent hook, which `hooks.py` awaits through
+# `asyncio.wait_for` and therefore runs in the parent's own context - restores
+# what it found instead of clobbering the parent for the rest of its run.
+_current_agent_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_agent", default=None)
 
-# Thread-local storage for the active sandbox policy. Set per-run (in the same
-# thread as the agent loop and its parent-only tool dispatch) when an agent runs
-# sandboxed; read by host-exec/spawn tools to inherit the sandbox or be denied.
-# Thread-local (like _current_agent_context) so concurrent daemon sessions don't
-# clobber each other.
-_sandbox_context = threading.local()
+# Active sandbox policy. Presence means "this agent is running sandboxed"; tools
+# read it to propagate the same isolation or to refuse. A nested run leaking its
+# teardown here would fail OPEN, so the reset is load-bearing.
+_sandbox_context_var: contextvars.ContextVar[Optional["SandboxContext"]] = contextvars.ContextVar(
+    "sandbox_context", default=None
+)
 
 
 @dataclass
@@ -48,20 +52,28 @@ class SandboxToolDeniedError(RuntimeError):
     (see the deny_when_sandboxed decorator)."""
 
 
-def set_sandbox_context(ctx: Optional["SandboxContext"]) -> None:
-    """Set (or clear, with None) the active sandbox policy for this thread."""
-    _sandbox_context.value = ctx
+def set_sandbox_context(ctx: Optional["SandboxContext"]) -> contextvars.Token:
+    """Set (or clear, with None) the active sandbox policy. Returns a reset token."""
+    return _sandbox_context_var.set(ctx)
 
 
 def get_sandbox_context() -> Optional["SandboxContext"]:
     """Return the active sandbox policy, or None when not running sandboxed."""
-    return getattr(_sandbox_context, "value", None)
+    return _sandbox_context_var.get()
+
+
+def reset_sandbox_context(token: contextvars.Token) -> None:
+    """Restore whatever sandbox policy was active before the matching set."""
+    _sandbox_context_var.reset(token)
 
 
 def clear_sandbox_context() -> None:
-    """Clear the active sandbox policy from thread-local storage."""
-    if hasattr(_sandbox_context, "value"):
-        delattr(_sandbox_context, "value")
+    """Drop the sandbox policy outright.
+
+    For top-level callers that own the whole context (`tsu exec`, test teardown).
+    Anything that nests a run inside another must use the token reset instead.
+    """
+    _sandbox_context_var.set(None)
 
 
 def sandbox_context_to_override() -> Optional[dict]:
@@ -133,20 +145,34 @@ def build_sandbox_policy(
     return config, ctx
 
 
-# Module-level storage for allowed agents (single-threaded CLI execution)
-# Subagents run in separate processes, so this doesn't need to be thread-local
-_allowed_agents: Optional[List[str]] = None
-_allowed_secrets: Optional[List[str]] = None
+# Per-run policy set by the runner and read by tools during execution.
+#
+# ContextVars, not module globals: the daemon runs each agent loop in an
+# `asyncio.to_thread` worker, so several runs are in flight at once and a global
+# would hand one run another's policy. `to_thread` copies the caller's context
+# into the worker and discards mutations on the way out, which also scopes these
+# to the run that set them without an explicit clear.
+_allowed_agents_var: contextvars.ContextVar[Optional[List[str]]] = contextvars.ContextVar(
+    "allowed_agents", default=None
+)
+_allowed_secrets_var: contextvars.ContextVar[Optional[List[str]]] = contextvars.ContextVar(
+    "allowed_secrets", default=None
+)
 
 
-def set_current_agent(name: str) -> None:
-    """Set the name of the currently executing agent in thread-local storage."""
-    _current_agent_context.name = name
+def set_current_agent(name: str) -> contextvars.Token:
+    """Record the currently executing agent. Returns a reset token."""
+    return _current_agent_var.set(name)
 
 
 def get_current_agent() -> Optional[str]:
-    """Get the name of the currently executing agent from thread-local storage."""
-    return getattr(_current_agent_context, "name", None)
+    """Return the currently executing agent's name, or None."""
+    return _current_agent_var.get()
+
+
+def reset_current_agent(token: contextvars.Token) -> None:
+    """Restore whatever agent was current before the matching set."""
+    _current_agent_var.reset(token)
 
 
 # The daemon can register an agent adapter under a name that differs from the
@@ -155,11 +181,9 @@ def get_current_agent() -> Optional[str]:
 # live adapter, so spawn/start-session tools must default their target agent to
 # THAT name rather than the agent-file config name.
 #
-# This is a ContextVar (NOT a threading.local like _current_agent_context)
-# because the daemon sets it in the async request handler before the run, and
-# the value must reach the code-execution worker thread through the context that
-# asyncio.to_thread copies. A thread-local set on the async handler thread would
-# never reach that worker.
+# Set by the daemon in the async request handler before the run; the value must
+# reach the code-execution worker thread through the context asyncio.to_thread
+# copies.
 _current_daemon_agent_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "current_daemon_agent", default=None
 )
@@ -195,29 +219,44 @@ def resolve_current_agent(explicit: Optional[str] = None, default: str = "defaul
     return get_current_agent() or default
 
 
-def set_allowed_secrets(secrets: Optional[List[str]]) -> None:
-    global _allowed_secrets
-    _allowed_secrets = secrets
+def set_allowed_secrets(secrets: Optional[List[str]]) -> contextvars.Token:
+    """Set the secret allowlist for the current run. Returns a reset token.
+
+    An empty list and None both mean unrestricted; agents express a restriction
+    by listing names.
+    """
+    return _allowed_secrets_var.set(secrets)
+
+
+def reset_allowed_secrets(token: contextvars.Token) -> None:
+    """Restore whatever secret allowlist was active before the matching set."""
+    _allowed_secrets_var.reset(token)
 
 
 def get_allowed_secrets() -> Optional[List[str]]:
-    return _allowed_secrets
+    """Return the current run's secret allowlist. Empty or None = unrestricted."""
+    return _allowed_secrets_var.get()
 
 
 def clear_current_agent() -> None:
-    """Clear the currently executing agent from thread-local storage."""
-    if hasattr(_current_agent_context, "name"):
-        delattr(_current_agent_context, "name")
+    """Clear the currently executing agent (tests and top-level teardown)."""
+    _current_agent_var.set(None)
 
 
-def set_allowed_agents(agents: Optional[List[str]]) -> None:
+def set_allowed_agents(agents: Optional[List[str]]) -> contextvars.Token:
     """Set list of allowed agents for spawning in multi-agent mode.
+
+    Returns a reset token.
 
     Args:
         agents: List of agent names allowed to spawn, or None for unrestricted
     """
-    global _allowed_agents
-    _allowed_agents = agents
+    return _allowed_agents_var.set(agents)
+
+
+def reset_allowed_agents(token: contextvars.Token) -> None:
+    """Restore whatever spawn allowlist was active before the matching set."""
+    _allowed_agents_var.reset(token)
 
 
 def get_allowed_agents() -> Optional[List[str]]:
@@ -226,13 +265,12 @@ def get_allowed_agents() -> Optional[List[str]]:
     Returns:
         List of allowed agent names, or None if unrestricted
     """
-    return _allowed_agents
+    return _allowed_agents_var.get()
 
 
 def clear_allowed_agents() -> None:
-    """Clear the allowed agents list from module-level storage."""
-    global _allowed_agents
-    _allowed_agents = None
+    """Clear the allowed agents list for the current run."""
+    _allowed_agents_var.set(None)
 
 
 def get_display_console(custom_logger: Optional[Any]) -> Console:

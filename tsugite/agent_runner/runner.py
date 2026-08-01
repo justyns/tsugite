@@ -28,11 +28,11 @@ from tsugite.utils import is_interactive  # noqa: E402
 from .helpers import (  # noqa: E402
     _stderr_console,
     build_sandbox_policy,
-    clear_allowed_agents,
-    clear_current_agent,
-    clear_sandbox_context,
     get_display_console,
     get_ui_handler,
+    reset_allowed_secrets,
+    reset_current_agent,
+    reset_sandbox_context,
     set_allowed_secrets,
     set_current_agent,
     set_sandbox_context,
@@ -538,7 +538,7 @@ async def _execute_agent_with_prompt(
             session_id=continue_conversation_id,
         )
         # Presence of the context == "this agent is sandboxed".
-        set_sandbox_context(sandbox_ctx)
+        sandbox_token = set_sandbox_context(sandbox_ctx)
     else:
         executor_cls = get_executor_class()
         executor = executor_cls(
@@ -548,7 +548,7 @@ async def _execute_agent_with_prompt(
             state_path=state_path,
             session_id=continue_conversation_id,
         )
-        set_sandbox_context(None)
+        sandbox_token = set_sandbox_context(None)
 
     # Inject variables into executor (for multi-step agents)
     if injectable_vars:
@@ -713,10 +713,11 @@ async def _execute_agent_with_prompt(
         else:
             raise RuntimeError(f"Agent execution failed: {e}")
     finally:
-        # Drop the sandbox policy from this thread so a later run on the same
-        # pooled thread (daemon asyncio.to_thread) can't read a stale context
-        # before it sets its own.
-        clear_sandbox_context()
+        # Restore the caller's sandbox policy rather than clearing it. An agent
+        # hook nests a full execution inside a sandboxed parent, and clearing
+        # outright would leave the parent's remaining turns unsandboxed - the
+        # gate fails OPEN.
+        reset_sandbox_context(sandbox_token)
 
         # Clean up subprocess executor temp files
         if hasattr(executor, "cleanup"):
@@ -1163,9 +1164,10 @@ async def run_agent_async(
     except Exception as e:
         raise ValueError(f"Failed to parse agent file: {e}")
 
-    # Set current agent in thread-local storage for spawn_agent tracking
-    set_current_agent(agent_config.name)
-    set_allowed_secrets(agent_config.allowed_secrets)
+    # Scope this run's ambient state with tokens: an agent hook nests a full run
+    # inside this one and must restore what it found rather than clobber it.
+    agent_token = set_current_agent(agent_config.name)
+    secrets_token = set_allowed_secrets(agent_config.allowed_secrets)
 
     setup = _RunSetup(
         exec_options=exec_options,
@@ -1197,9 +1199,8 @@ async def run_agent_async(
             return await run_steps(agent, prompt, context, setup)
         return await _run_unit(agent, prompt, context, setup)
     finally:
-        # Always clear the current agent context when done
-        clear_current_agent()
-        clear_allowed_agents()
+        reset_current_agent(agent_token)
+        reset_allowed_secrets(secrets_token)
 
 
 def preview_multistep_agent(

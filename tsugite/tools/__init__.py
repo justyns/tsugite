@@ -364,37 +364,36 @@ def load_custom_shell_tools() -> None:
     import os
     import sys
 
+    from ..shell_tool_config import get_custom_tools_config_path, load_custom_tools_config
+    from .shell_tools import register_shell_tools
+
+    # Resolved before the try: it is a pure XDG path lookup with no failure mode,
+    # and the handler below exists precisely to name this file. A first-party
+    # import failing here means a broken install, not bad user config, and must
+    # not be swallowed - load_custom_shell_tools runs before the plugin loaders
+    # and before _tools_loaded latches, so silently continuing loses every tool.
+    config_path = get_custom_tools_config_path()
+    if not config_path.exists():
+        return
+
     try:
-        from ..shell_tool_config import get_custom_tools_config_path, load_custom_tools_config
-        from .shell_tools import register_shell_tools
-
-        config_path = get_custom_tools_config_path()
-
-        # Only try to load if config file exists
-        if not config_path.exists():
-            # Silently skip if no custom tools configured
-            return
-
         definitions = load_custom_tools_config()
         if definitions:
             register_shell_tools(definitions)
 
-            # Show helpful message if verbose mode enabled
             if os.environ.get("TSUGITE_VERBOSE") or os.environ.get("TSUGITE_DEBUG"):
                 tool_names = [d.name for d in definitions]
                 print(
                     f"✓ Loaded {len(definitions)} custom tool(s): {', '.join(tool_names)}",
                     file=sys.stderr,
                 )
-        else:
-            # Config exists but no tools defined
-            if os.environ.get("TSUGITE_VERBOSE") or os.environ.get("TSUGITE_DEBUG"):
-                print(f"⚠ Custom tools config exists but no tools defined: {config_path}", file=sys.stderr)
+        elif os.environ.get("TSUGITE_VERBOSE") or os.environ.get("TSUGITE_DEBUG"):
+            print(f"⚠ Custom tools config exists but no tools defined: {config_path}", file=sys.stderr)
 
     except Exception as e:
-        # Don't fail startup if custom tools can't be loaded, but show clear error
+        # A malformed custom_tools.yaml must not take down tool loading.
         print(f"⚠ Failed to load custom tools: {e}", file=sys.stderr)
-        print(f"  Config file: {get_custom_tools_config_path()}", file=sys.stderr)
+        print(f"  Config file: {config_path}", file=sys.stderr)
         print("  Use 'tsugite tools validate' to check your config", file=sys.stderr)
 
 
