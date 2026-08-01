@@ -50,9 +50,7 @@ def test_extends_none_agent_without_attachments_gets_nothing(tmp_path):
 def test_frontmatter_attachments_still_resolve(tmp_path):
     ws = _workspace_with_identity(tmp_path)
     agent = ws / "declared.md"
-    agent.write_text(
-        "---\nname: declared\nextends: none\nattachments:\n  - [PERSONA.md, USER.md]\n---\n\nHi.\n"
-    )
+    agent.write_text("---\nname: declared\nextends: none\nattachments:\n  - [PERSONA.md, USER.md]\n---\n\nHi.\n")
 
     adapter = _adapter(ws, str(agent))
 
