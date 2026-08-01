@@ -189,14 +189,14 @@ Previous result was: {{ result1 }}
 Now return "Step 2 complete"
 """)
 
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import run_agent
 
         # Note: This will actually try to run the agent with a model
         # In a real test environment, you'd mock the model/agent execution
         # For now, we just test that the function can be called
         with pytest.raises((RuntimeError, ValueError)):
             # Will fail because no model available in test, but tests parsing
-            run_multistep_agent(agent_file, "test prompt")
+            run_agent(agent_file, "test prompt")
 
     def test_multistep_detection_integration(self, tmp_path):
         """Test that CLI can detect multi-step agents."""
@@ -222,7 +222,7 @@ Regular content
 
     def test_duplicate_step_names_validation(self, tmp_path):
         """Test that duplicate step names are caught."""
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import run_agent
 
         agent_file = tmp_path / "duplicate.md"
         agent_file.write_text("""---
@@ -237,11 +237,11 @@ Duplicate name
 """)
 
         with pytest.raises(ValueError, match="Duplicate step names"):
-            run_multistep_agent(agent_file, "test")
+            run_agent(agent_file, "test")
 
     def test_unresolvable_spawn_agent_path_fails_preflight(self, tmp_path):
         """A step referencing a non-existent agent file should fail before any step runs."""
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import run_agent
 
         agent_file = tmp_path / "bad_spawn.md"
         agent_file.write_text("""---
@@ -253,7 +253,7 @@ Review nothing
 """)
 
         with pytest.raises(ValueError, match="unresolvable agent paths") as exc_info:
-            run_multistep_agent(agent_file, "test")
+            run_agent(agent_file, "test")
         msg = str(exc_info.value)
         assert "review" in msg
         assert "does/not/exist.md" in msg
@@ -261,7 +261,7 @@ Review nothing
     def test_spawn_agent_step_routes_through_spawn_agent(self, tmp_path, monkeypatch):
         """When agent= is set, the step should be executed via spawn_agent and its
         return value captured into the assigned variable."""
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import run_agent
 
         # Use the existing simple.md fixture so pre-flight resolves the path.
         fixture_path = Path(__file__).parent / "fixtures" / "agents" / "simple.md"
@@ -288,7 +288,7 @@ tools: []
 Review the diff: HELLO
 """)
 
-        result = run_multistep_agent(agent_file, "test")
+        result = run_agent(agent_file, "test")
 
         assert result == "REVIEW_OK"
         assert captured["agent_path"] == str(fixture_path)
@@ -314,28 +314,44 @@ File content was: {{ file_content }}
         test_file = tmp_path / "test.txt"
         test_file.write_text("Hello from prefetch")
 
-        from tsugite.agent_runner import run_multistep_agent
+        from tsugite.agent_runner import run_agent
 
         # This will fail in test due to no model, but validates parsing
         with pytest.raises((RuntimeError, ValueError)):
-            run_multistep_agent(agent_file, "test", context={})
+            run_agent(agent_file, "test", context={})
 
 
 class TestStepValidation:
-    def test_non_multistep_agent_raises_error(self, tmp_path):
-        """Test that calling multistep executor on regular agent fails."""
-        from tsugite.agent_runner import run_multistep_agent
+    def test_stepless_agent_runs_as_a_single_prompt(self, tmp_path, monkeypatch):
+        """One entry point handles both shapes.
+
+        `run_agent` used to reject stepless agents when the caller had picked the
+        multi-step executor; there is no separate executor to pick any more, so a
+        stepless agent is simply a run with one prompt.
+        """
+        from tsugite.agent_runner import run_agent
 
         agent_file = tmp_path / "regular.md"
         agent_file.write_text("""---
 name: regular
 model: ollama:qwen2.5-coder:7b
+extends: none
+tools: []
 ---
 Regular agent content without steps
 """)
 
-        with pytest.raises(ValueError, match="does not contain step directives"):
-            run_multistep_agent(agent_file, "test")
+        prompts = []
+
+        async def fake_agent_run(self, task, return_full_result=False, stream=False):
+            prompts.append(task)
+            return "done"
+
+        monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+        assert run_agent(agent_file, "test") == "done"
+        assert len(prompts) == 1
+        assert "Regular agent content without steps" in prompts[0]
 
     def test_step_positions(self):
         """Test that step positions are tracked correctly."""
@@ -762,7 +778,7 @@ class TestVariableInjection:
 
     def test_injectable_vars_filtering(self):
         """Test that only user-assigned variables are exposed at top-level, not metadata."""
-        from tsugite.agent_runner.runner import _build_injectable_vars
+        from tsugite.agent_runner.steps import _build_injectable_vars
 
         # Simulate step_context with metadata and user-assigned variables
         step_context = {
@@ -884,7 +900,7 @@ Invalid config
 
     def test_evaluate_loop_condition_custom_jinja2_expression(self):
         """Test evaluating custom Jinja2 expressions."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
+        from tsugite.agent_runner.steps import evaluate_loop_condition
 
         # Test numeric comparison
         context = {
@@ -905,7 +921,7 @@ Invalid config
 
     def test_evaluate_loop_condition_invalid_expression_raises_error(self):
         """Test that invalid loop condition expression raises ValueError."""
-        from tsugite.agent_runner.runner import evaluate_loop_condition
+        from tsugite.agent_runner.steps import evaluate_loop_condition
 
         context = {"items": []}
 

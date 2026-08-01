@@ -33,16 +33,12 @@ from tsugite.agent_runner.runner import (  # noqa: F401
     preview_multistep_agent,
     run_agent,
     run_agent_async,
-    run_multistep_agent,
-    run_multistep_agent_async,
 )
 from tsugite.agent_runner.validation import get_agent_info, validate_agent_file  # noqa: F401
 
 __all__ = [
     "run_agent",
     "run_agent_async",
-    "run_multistep_agent",
-    "run_multistep_agent_async",
     "preview_multistep_agent",
     "execute_prefetch",
     "execute_tool_directives",

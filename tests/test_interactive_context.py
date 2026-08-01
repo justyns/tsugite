@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tsugite.agent_runner import run_agent_async, run_multistep_agent_async
+from tsugite.agent_runner import run_agent_async
 from tsugite.md_agents import AgentConfig
 
 
@@ -131,7 +131,7 @@ Task: {{ user_prompt }}
     mock_instance, captured_prompts = mock_agent_runner("Step complete")
 
     with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
-        await run_multistep_agent_async(agent_file, "test prompt")
+        await run_agent_async(agent_file, "test prompt")
 
     # Verify at least one prompt was captured
     assert len(captured_prompts) > 0

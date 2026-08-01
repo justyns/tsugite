@@ -110,27 +110,22 @@ def _build_executor_kwargs(
     exec_opts: ExecutionOptions,
     history_opts: HistoryOptions,
     resolved_attachments: List[Tuple[str, str]],
-    executor: Any,
     path_context: Optional["PathContext"] = None,
 ) -> Dict[str, Any]:
-    """Build executor kwargs dict for run_agent/run_multistep_agent."""
-    from tsugite.agent_runner import run_agent
+    """Build run_agent kwargs dict."""
+    if history_opts.enabled:
+        from dataclasses import replace
 
-    kwargs: Dict[str, Any] = {
+        exec_opts = replace(exec_opts, return_token_usage=True)
+
+    return {
         "agent_path": agent_file,
         "prompt": prompt,
         "exec_options": exec_opts,
+        "continue_conversation_id": history_opts.continue_id,
+        "attachments": resolved_attachments,
+        "path_context": path_context,
     }
-    # continue_conversation_id, attachments, and path_context are only accepted by run_agent
-    if executor == run_agent:
-        kwargs["continue_conversation_id"] = history_opts.continue_id
-        kwargs["attachments"] = resolved_attachments
-        kwargs["path_context"] = path_context
-        if history_opts.enabled:
-            from dataclasses import replace
-
-            kwargs["exec_options"] = replace(exec_opts, return_token_usage=True)
-    return kwargs
 
 
 def _execute_agent_with_ui(
@@ -596,11 +591,10 @@ def run(
             stderr_console.print(f"[red]Agent validation failed: {error_msg}[/red]")
             raise typer.Exit(1)
 
-        from tsugite.agent_runner import preview_multistep_agent, run_multistep_agent
+        from tsugite.agent_runner import preview_multistep_agent
         from tsugite.md_agents import has_step_directives
 
-        agent_text = agent_file.read_text()
-        is_multistep = has_step_directives(agent_text)
+        is_multistep = has_step_directives(agent_file.read_text())
 
         if exec_opts.dry_run:
             if is_multistep:
@@ -613,8 +607,6 @@ def run(
                 stderr_console.print("[yellow]Dry-run mode is for multi-step agents only.[/yellow]")
                 stderr_console.print("[dim]This is a single-step agent. Use --debug to see the rendered prompt.[/dim]")
             return
-
-        executor = run_multistep_agent if is_multistep else run_agent
 
         if not ui_opts.headless and not ui_opts.final_only:
             execution_type = "multi-step agent" if is_multistep else "agent"
@@ -668,12 +660,11 @@ def run(
                 exec_opts,
                 history_opts,
                 resolved_attachments,
-                executor,
                 path_context,
             )
 
             result = _execute_agent_with_ui(
-                executor,
+                run_agent,
                 executor_kwargs,
                 ui_opts,
                 stderr_console,

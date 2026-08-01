@@ -1,16 +1,33 @@
-"""`_execute_step_with_retries` in tsugite/agent_runner/runner.py retries a
+"""`_execute_step_with_retries` in tsugite/agent_runner/steps.py retries a
 failed step by invoking the full agent run again. If the step's first attempt
 already executed code (with possible side effects), the second attempt will
 happily re-issue those calls. Gate retry on whether any step-level code ran.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from tsugite.agent_runner.runner import _execute_step_with_retries
+from tsugite.agent_runner.runner import _RunSetup
+from tsugite.agent_runner.steps import _execute_step_with_retries
 from tsugite.exceptions import AgentExecutionError
+from tsugite.md_agents import parse_agent
 from tsugite.options import ExecutionOptions
+
+
+def _setup() -> _RunSetup:
+    return _RunSetup(
+        exec_options=ExecutionOptions(),
+        hooks_dir=Path("."),
+        hook_message="",
+        hook_vars={},
+        agent_stem="demo",
+    )
+
+
+def _agent():
+    return parse_agent("---\nname: demo\nextends: none\n---\nbody")
 
 
 def _make_step(max_retries: int = 2):
@@ -37,30 +54,19 @@ async def test_retry_skipped_when_prior_attempt_executed_code(monkeypatch):
         exec_step.code = "x = http_request('POST', ...)"
         raise AgentExecutionError("something went wrong", execution_steps=[exec_step])
 
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._execute_agent_with_prompt",
-        fake_execute,
-    )
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._render_step_template",
-        lambda *a, **kw: "rendered",
-    )
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._build_prepared_agent_for_step",
-        lambda *a, **kw: MagicMock(),
-    )
+    monkeypatch.setattr("tsugite.agent_runner.steps._run_unit", fake_execute)
 
     with pytest.raises(Exception):
         await _execute_step_with_retries(
             step=step,
             step_context={},
-            agent=MagicMock(),
+            agent=_agent(),
             i=1,
             total_steps=1,
             steps=[step],
             step_header="Step 1",
-            exec_options=ExecutionOptions(),
-            custom_logger=None,
+            prompt="task",
+            setup=_setup(),
         )
 
     assert call_count["n"] == 1, f"step retried after side-effecting code ran; fired {call_count['n']} times"
@@ -80,29 +86,18 @@ async def test_retry_still_fires_for_pre_execution_failures(monkeypatch):
             raise AgentExecutionError("pre-exec error", execution_steps=[])
         return "ok"
 
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._execute_agent_with_prompt",
-        fake_execute,
-    )
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._render_step_template",
-        lambda *a, **kw: "rendered",
-    )
-    monkeypatch.setattr(
-        "tsugite.agent_runner.runner._build_prepared_agent_for_step",
-        lambda *a, **kw: MagicMock(),
-    )
+    monkeypatch.setattr("tsugite.agent_runner.steps._run_unit", fake_execute)
 
     result, _duration = await _execute_step_with_retries(
         step=step,
         step_context={},
-        agent=MagicMock(),
+        agent=_agent(),
         i=1,
         total_steps=1,
         steps=[step],
         step_header="Step 1",
-        exec_options=ExecutionOptions(),
-        custom_logger=None,
+        prompt="task",
+        setup=_setup(),
     )
     assert result == "ok"
     assert call_count["n"] == 2

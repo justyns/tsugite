@@ -93,12 +93,13 @@ File-based agents distributed with the package in `tsugite/builtin_agents/` dire
 **Execution:**
 - Ignore blocks: `renderer.py` strips before Jinja2
 - Tool directives: `agent_runner.py:execute_tool_directives()` runs before rendering
-- Step directives: `agent_runner.py:run_multistep_agent()` executes sequentially
+- Step directives: `agent_runner/runner.py:_run_steps()` executes sequentially
 
 **Scoping:**
 - Preamble directives: Execute once, available to all steps
 - Step directives: Execute per step, scoped to that step
-- Variables from previous steps: Always available in later steps
+- Variables from previous steps: `assign=` results are available in later steps;
+  a step directive's own `assign=` is scoped to the step that declares it
 
 ### Development Workflows
 

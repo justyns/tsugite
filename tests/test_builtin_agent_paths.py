@@ -2,13 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from tsugite.agent_inheritance import get_builtin_agents_path
 from tsugite.agent_runner import (
     get_agent_info,
     run_agent,
-    run_multistep_agent,
     validate_agent_file,
 )
 from tsugite.md_agents import validate_agent_execution
@@ -78,12 +75,16 @@ class TestBuiltinAgentPathHandling:
             # Should not fail due to path issues
             assert "No such file or directory" not in str(e)
 
-    def test_run_multistep_agent_with_builtin_no_steps(self):
-        """Test run_multistep_agent handles builtin agent without steps."""
+    def test_run_agent_with_builtin_no_steps(self, monkeypatch):
+        """A stepless builtin runs as a single prompt rather than being rejected."""
         builtin_path = get_builtin_agents_path() / "default.md"
-        # default agent doesn't have step directives
-        with pytest.raises(ValueError, match="does not contain step directives"):
-            run_multistep_agent(agent_path=builtin_path, prompt="Test task")
+
+        async def fake_agent_run(self, task, return_full_result=False, stream=False):
+            return "done"
+
+        monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+        assert run_agent(agent_path=builtin_path, prompt="Test task") == "done"
 
     def test_validate_agent_file_rejects_invalid_builtin(self):
         """Test validate_agent_file rejects non-existent built-in agent."""

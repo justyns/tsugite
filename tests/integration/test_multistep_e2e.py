@@ -1,6 +1,6 @@
 """Integration tests for multi-step agent pipelines with a live LLM."""
 
-from tsugite.agent_runner.runner import run_multistep_agent
+from tsugite.agent_runner.runner import run_agent
 from tsugite.options import ExecutionOptions
 
 
@@ -16,7 +16,7 @@ The research step produced: {{ research_data }}
 Read notes.txt and call return_value confirming the file exists and what it contains.
 """
         agent = agent_file(name="pipeline", body=body)
-        result = run_multistep_agent(
+        result = run_agent(
             agent_path=agent,
             prompt="Run the two-step pipeline",
             exec_options=ExecutionOptions(return_token_usage=False),
@@ -36,7 +36,7 @@ The previous step returned: {{ magic_number }}
 Call return_value confirming the magic number is 42.
 """
         agent = agent_file(name="varpass", body=body)
-        result = run_multistep_agent(
+        result = run_agent(
             agent_path=agent,
             prompt="Test variable passing",
             exec_options=ExecutionOptions(return_token_usage=False),

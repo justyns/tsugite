@@ -10,11 +10,12 @@ Two layers of defense are tested:
 
 1. `default.md` itself must render against a minimal step_context (defensive
    `| default(...)` filters on every framework flag).
-2. The step_context built by `_run_multistep_agent_impl` includes the
-   framework flags with safe defaults so any other plugin templates that
-   reference them naturally also work.
+2. Steps render through the same preparation pipeline as single-shot
+   prompts, so the flags a step sees are the flags the pipeline supplies -
+   not a separate hardcoded set that can drift from it.
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -31,9 +32,10 @@ def _builtin_default_body() -> str:
 
 
 def _minimal_step_context() -> dict:
-    """The variables a multi-step agent's step_context starts with, before any
-    framework flags get injected. Mirrors the keys assembled in
-    `_run_multistep_agent_impl` (runner.py around line 1558)."""
+    """A deliberately bare step context: no framework flags at all.
+
+    `default.md` must survive this on its own defensive filters, which is what
+    protects templates when a caller supplies none of the optional flags."""
     return {
         "user_prompt": "test",
         "is_interactive": False,
@@ -74,35 +76,76 @@ def test_default_md_preamble_renders_with_minimal_step_context():
         "{% if is_daemon %}DAEMON{% endif %}",
         "{% if is_scheduled %}SCHEDULED{% endif %}",
         "{% if has_notify_tool %}NOTIFY{% endif %}",
-        "{% if can_spawn_jobs %}JOBS{% endif %}",
-        "{% if is_channel_session %}CHANNEL{% endif %}",
     ],
 )
-def test_step_context_provides_framework_flag_defaults(flag_template):
-    """`_run_multistep_agent_impl` should populate framework flags with safe
-    defaults so user-authored steps and inherited templates can reference them
-    without `| default(...)`. We build the step_context the same way the
-    runner does and assert the conditional renders without raising.
+def test_steps_get_the_same_framework_flags_as_single_shot_prompts(tmp_path, monkeypatch, flag_template):
+    """Steps are prepared by AgentPreparer, so a step template sees exactly the
+    framework flags a single-shot prompt sees.
+
+    Multi-step used to render against a bespoke context dict with its own
+    hardcoded flag defaults, which drifted from the real pipeline. Flags outside
+    that set (`can_spawn_jobs`, `is_channel_session`, ...) are supplied by the
+    daemon adapter via `context` and guarded with `| default(...)` in templates,
+    which is the same contract single-shot agents have always had.
     """
-    from tsugite.agent_runner.runner import _build_multistep_step_context
+    from tsugite.agent_runner import runner
 
-    step_context = _build_multistep_step_context(prompt="test", context={}, agent_tools=[])
+    agent_file = tmp_path / "flags.md"
+    agent_file.write_text(f"""---
+name: flag_probe
+model: ollama:qwen2.5-coder:7b
+extends: none
+tools: []
+---
+<!-- tsu:step name="probe" -->
+FLAG[{flag_template}]
+""")
 
-    renderer = AgentRenderer()
-    rendered = renderer.render(flag_template, step_context)
+    prompts = []
 
-    assert rendered == ""
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        prompts.append(task)
+        return "done"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    asyncio.run(runner.run_agent_async(agent_file, "test prompt"))
+
+    assert prompts, "the step never rendered"
+    assert "FLAG[]" in prompts[0]
 
 
-def test_step_context_inherits_caller_provided_flags():
+def test_steps_inherit_caller_provided_flags(tmp_path, monkeypatch):
     """When the caller (e.g. daemon adapter) injects framework flags via
-    context, the step_context must preserve them - the defaults are only
-    fallbacks."""
-    from tsugite.agent_runner.runner import _build_multistep_step_context
+    context, a step template must see them rather than a stale default."""
+    from tsugite.agent_runner import runner
 
-    caller_context = {"is_daemon": True, "agent_name": "default", "schedule_id": "sched-42"}
-    step_context = _build_multistep_step_context(prompt="test", context=caller_context, agent_tools=[])
+    agent_file = tmp_path / "inherit.md"
+    agent_file.write_text("""---
+name: flag_inherit
+model: ollama:qwen2.5-coder:7b
+extends: none
+tools: []
+---
+<!-- tsu:step name="probe" -->
+{% if is_daemon %}DAEMON{% endif %} schedule={{ schedule_id }}
+""")
 
-    assert step_context["is_daemon"] is True
-    assert step_context["agent_name"] == "default"
-    assert step_context["schedule_id"] == "sched-42"
+    prompts = []
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        prompts.append(task)
+        return "done"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    asyncio.run(
+        runner.run_agent_async(
+            agent_file,
+            "test prompt",
+            context={"is_daemon": True, "schedule_id": "sched-42"},
+        )
+    )
+
+    assert "DAEMON" in prompts[0]
+    assert "schedule=sched-42" in prompts[0]

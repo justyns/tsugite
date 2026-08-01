@@ -3,9 +3,9 @@
 import asyncio
 import fnmatch
 import logging
-import time
 
 logger = logging.getLogger(__name__)
+from dataclasses import dataclass, field  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
@@ -30,18 +30,14 @@ from .helpers import (  # noqa: E402
     build_sandbox_policy,
     clear_allowed_agents,
     clear_current_agent,
-    clear_multistep_ui_context,
     clear_sandbox_context,
     get_display_console,
     get_ui_handler,
-    print_step_progress,
     set_allowed_secrets,
     set_current_agent,
-    set_multistep_ui_context,
     set_sandbox_context,
 )
-from .metrics import StepMetrics, display_step_metrics  # noqa: E402
-from .models import AgentExecutionResult  # noqa: E402
+from .models import AgentExecutionResult, AgentSkippedError  # noqa: E402
 
 # Display constants for truncating long output
 MAX_VARIABLE_PREVIEW_LENGTH = 100  # Max characters to show in variable documentation
@@ -53,22 +49,6 @@ def _resolve_state_path(session_id: Optional[str]) -> Optional[Path]:
     if not session_id:
         return None
     return get_xdg_data_path("state") / session_id / "state.json"
-
-
-class ExecutionContext:
-    """Namespace for tsugite-provided execution context.
-
-    Provides access to runtime metadata via attribute access (ctx.user_prompt, ctx.tasks, etc.)
-    while keeping user-assigned step variables as top-level names in the execution namespace.
-    """
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-    def __repr__(self):
-        attrs = ", ".join(f"{k}={v!r}" for k, v in self.__dict__.items())
-        return f"ExecutionContext({attrs})"
 
 
 if TYPE_CHECKING:
@@ -148,50 +128,6 @@ def _get_model_string(model_override: Optional[str], agent_config: AgentConfig) 
         )
 
     return model_string
-
-
-def _build_step_error_message(
-    error_type: str,
-    step_name: str,
-    step_number: int,
-    total_steps: int,
-    errors: List[str],
-    available_vars: List[str],
-    previous_step: str,
-    max_attempts: int,
-    debug_tips: List[str],
-) -> str:
-    """Build detailed error message for step failures."""
-    error_lines = [
-        "",
-        f"Step {error_type}",
-        "━" * 60,
-        f"Step: {step_name} ({step_number}/{total_steps})",
-        f"Previous Step: {previous_step}",
-        f"Attempts: {max_attempts}",
-        "",
-    ]
-
-    # Add variables section (format depends on whether we have any)
-    if available_vars:
-        var_label = "Context Variables" if "Template" in error_type else "Available Variables"
-        error_lines.append(f"{var_label}: {', '.join(available_vars)}")
-    else:
-        error_lines.append("Available Variables: None")
-
-    error_lines.extend(["", "Errors:"])
-
-    # Add all error attempts
-    for idx, err in enumerate(errors, 1):
-        error_lines.append(f"  Attempt {idx}: {err}")
-
-    # Add debugging tips
-    error_lines.extend(["━" * 60, "", "To debug:"])
-    for tip in debug_tips:
-        error_lines.append(f"  {tip}")
-    error_lines.append("")
-
-    return "\n".join(error_lines)
 
 
 def _combine_instructions(*segments: str) -> str:
@@ -463,7 +399,7 @@ async def _execute_agent_with_prompt(
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
-    Low-level execution function used by both run_agent and run_multistep_agent.
+    Shared by single-shot runs and by each step of a multi-step run.
     """
     if exec_options is None:
         exec_options = ExecutionOptions()
@@ -882,6 +818,157 @@ def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]
     return None
 
 
+@dataclass
+class _RunSetup:
+    """State established once per run and reused by every prompt within it.
+
+    A single-shot agent sends one prompt; a multi-step agent sends one per step.
+    Both go through `_run_unit`, so everything resolved before the first prompt
+    (hooks, history, resume state, UI wiring) is gathered here rather than
+    threaded through as a dozen parameters.
+    """
+
+    exec_options: ExecutionOptions
+    hooks_dir: Path
+    hook_message: str
+    hook_vars: Dict[str, str]
+    agent_stem: str
+    ui_handler: Optional[Any] = None
+    on_status: Optional[Any] = None
+    on_hook_result: Optional[Any] = None
+    workspace: Optional[Any] = None
+    custom_logger: Optional[Any] = None
+    path_context: Optional[Any] = None
+    attachments: Optional[List[Any]] = None
+    channel_metadata: Optional[Dict[str, Any]] = None
+    user_input_for_history: Optional[str] = None
+    previous_messages: List[Dict] = field(default_factory=list)
+    resume_session: Optional[str] = None
+    resume_after_compaction: bool = False
+    conversation_id: Optional[str] = None
+
+
+def _prepare_step(agent: Any, prompt: str, context: Dict[str, Any], setup: "_RunSetup") -> "PreparedAgent":
+    """Run one prompt through the preparation pipeline.
+
+    Shared by normal steps and by steps that delegate via `agent=`, so both see
+    the same tool directives and template variables.
+    """
+    from tsugite.agent_preparation import AgentPreparer
+
+    return AgentPreparer().prepare(
+        agent=agent,
+        prompt=prompt,
+        context=context,
+        attachments=setup.attachments,
+        path_context=setup.path_context,
+    )
+
+
+async def _run_unit(
+    agent: Any,
+    prompt: str,
+    context: Dict[str, Any],
+    setup: _RunSetup,
+    *,
+    model_kwargs: Optional[Dict[str, Any]] = None,
+    injectable_vars: Optional[Dict[str, Any]] = None,
+) -> str | AgentExecutionResult:
+    """Prepare and execute one prompt: the whole agent, or one step of it.
+
+    Multi-step agents reach here once per step with `agent.content` narrowed to
+    that step's content, which is what keeps a step from seeing its siblings'
+    instructions.
+    """
+    from tsugite.hooks import fire_hooks
+
+    exec_options = setup.exec_options
+
+    prepared = _prepare_step(agent, prompt, context, setup)
+
+    post_ctx_results = await fire_hooks(
+        setup.hooks_dir,
+        "post_context_build",
+        {
+            "message": setup.hook_message,
+            "agent_name": setup.agent_stem,
+            "system_message": prepared.system_message[:500] if prepared.system_message else "",
+            "rendered_prompt": prepared.rendered_prompt[:500] if prepared.rendered_prompt else "",
+            "tools": [t.name for t in prepared.tools] if prepared.tools else [],
+        },
+        interactive=is_interactive(),
+        on_status=setup.on_status,
+        on_result=setup.on_hook_result,
+    )
+    if post_ctx_results.captured:
+        if "system_message" in post_ctx_results.captured:
+            prepared.system_message = post_ctx_results.captured["system_message"]
+        if "rendered_prompt" in post_ctx_results.captured:
+            prepared.rendered_prompt = post_ctx_results.captured["rendered_prompt"]
+
+    # Short-circuit if run_if guard evaluated to false
+    if prepared.skipped:
+        raise AgentSkippedError(prepared.skip_reason or "run_if guard")
+
+    if exec_options.debug:
+        import sys
+
+        print(_format_debug_output(prepared), file=sys.stderr)
+
+    execute_kwargs = dict(
+        prepared=prepared,
+        exec_options=exec_options,
+        workspace=setup.workspace,
+        custom_logger=setup.custom_logger,
+        path_context=setup.path_context,
+        hook_vars=setup.hook_vars,
+        continue_conversation_id=setup.conversation_id,
+        user_input_for_history=setup.user_input_for_history,
+        channel_metadata=setup.channel_metadata,
+        model_kwargs=model_kwargs,
+        injectable_vars=injectable_vars,
+    )
+
+    try:
+        return await _execute_agent_with_prompt(
+            previous_messages=setup.previous_messages,
+            resume_session=setup.resume_session,
+            resume_after_compaction=setup.resume_after_compaction,
+            **execute_kwargs,
+        )
+    except (RuntimeError, AgentExecutionError) as e:
+        err_str = str(e).lower()
+        poisoned = is_unresumable_history_error(err_str)
+        if setup.resume_session and (
+            "process ended" in err_str
+            or "no conversation found" in err_str
+            or is_prompt_too_long_error(err_str)
+            or "format_error_loop" in err_str
+            or poisoned
+        ):
+            logger.warning("Provider session resume failed (%s), retrying with fresh session", e)
+            if poisoned:
+                # Durably sever the unresumable session so later messages stop
+                # re-resolving it from history; the retry below runs fresh.
+                from tsugite.agent_runner.history_integration import record_resume_reset
+
+                reset = record_resume_reset(setup.conversation_id)
+                # Surface it live on this turn too: the durable record alone only
+                # shows on the next reload, so emit an SSE frame the open
+                # conversation renders before the fresh retry streams in.
+                if reset and setup.ui_handler is not None and hasattr(setup.ui_handler, "_emit"):
+                    setup.ui_handler._emit("resume_reset", reset)
+            try:
+                from tsugite.agent_runner.history_integration import load_and_apply_history
+
+                fallback_messages = load_and_apply_history(setup.conversation_id)
+            except Exception:
+                logger.warning("Failed to load history for fallback, starting fresh")
+                fallback_messages = []
+            return await _execute_agent_with_prompt(previous_messages=fallback_messages, **execute_kwargs)
+        raise
+
+
 def run_agent(
     agent_path: Path,
     prompt: str,
@@ -1080,864 +1167,39 @@ async def run_agent_async(
     set_current_agent(agent_config.name)
     set_allowed_secrets(agent_config.allowed_secrets)
 
-    try:
-        # Prepare agent using unified preparation pipeline
-        from tsugite.agent_preparation import AgentPreparer
-
-        preparer = AgentPreparer()
-        prepared = preparer.prepare(
-            agent=agent,
-            prompt=prompt,
-            context=context,
-            attachments=attachments,
-            path_context=path_context,
-        )
-
-        # Fire post_context_build hooks
-        post_ctx_results = await fire_hooks(
-            hooks_dir,
-            "post_context_build",
-            {
-                "message": hook_message,
-                "agent_name": agent_path.stem,
-                "system_message": prepared.system_message[:500] if prepared.system_message else "",
-                "rendered_prompt": prepared.rendered_prompt[:500] if prepared.rendered_prompt else "",
-                "tools": [t.name for t in prepared.tools] if prepared.tools else [],
-            },
-            interactive=is_interactive(),
-            on_status=on_status,
-            on_result=on_hook_result,
-        )
-        if post_ctx_results.captured:
-            if "system_message" in post_ctx_results.captured:
-                prepared.system_message = post_ctx_results.captured["system_message"]
-            if "rendered_prompt" in post_ctx_results.captured:
-                prepared.rendered_prompt = post_ctx_results.captured["rendered_prompt"]
-
-        # Short-circuit if run_if guard evaluated to false
-        if prepared.skipped:
-            from tsugite.agent_runner.models import AgentSkippedError
-
-            raise AgentSkippedError(prepared.skip_reason or "run_if guard")
-
-        # Debug output if requested
-        if exec_options.debug:
-            import sys
-
-            print(_format_debug_output(prepared), file=sys.stderr)
-
-        # Execute with the low-level helper (async - no asyncio.run wrapper)
-        try:
-            return await _execute_agent_with_prompt(
-                prepared=prepared,
-                exec_options=exec_options,
-                workspace=workspace,
-                custom_logger=custom_logger,
-                previous_messages=previous_messages,
-                path_context=path_context,
-                resume_session=resume_session,
-                resume_after_compaction=resume_after_compaction,
-                hook_vars=hook_vars,
-                continue_conversation_id=continue_conversation_id,
-                user_input_for_history=user_input_for_history,
-                channel_metadata=channel_metadata,
-            )
-        except (RuntimeError, AgentExecutionError) as e:
-            err_str = str(e).lower()
-            poisoned = is_unresumable_history_error(err_str)
-            if resume_session and (
-                "process ended" in err_str
-                or "no conversation found" in err_str
-                or is_prompt_too_long_error(err_str)
-                or "format_error_loop" in err_str
-                or poisoned
-            ):
-                logger.warning("Provider session resume failed (%s), retrying with fresh session", e)
-                if poisoned:
-                    # Durably sever the unresumable session so later messages stop
-                    # re-resolving it from history; the retry below runs fresh.
-                    from tsugite.agent_runner.history_integration import record_resume_reset
-
-                    reset = record_resume_reset(continue_conversation_id)
-                    # Surface it live on this turn too: the durable record alone only
-                    # shows on the next reload, so emit an SSE frame the open
-                    # conversation renders before the fresh retry streams in.
-                    if reset and ui_handler is not None and hasattr(ui_handler, "_emit"):
-                        ui_handler._emit("resume_reset", reset)
-                try:
-                    previous_messages = load_and_apply_history(continue_conversation_id)
-                except Exception:
-                    logger.warning("Failed to load history for fallback, starting fresh")
-                    previous_messages = []
-                return await _execute_agent_with_prompt(
-                    prepared=prepared,
-                    exec_options=exec_options,
-                    workspace=workspace,
-                    custom_logger=custom_logger,
-                    previous_messages=previous_messages,
-                    path_context=path_context,
-                    hook_vars=hook_vars,
-                    continue_conversation_id=continue_conversation_id,
-                    user_input_for_history=user_input_for_history,
-                    channel_metadata=channel_metadata,
-                )
-            raise
-    finally:
-        # Always clear the current agent context when done
-        clear_current_agent()
-        clear_allowed_agents()
-
-
-# Framework flags that builtin agent templates (default.md and friends) may
-# reference in `{% if %}` blocks. Bare references would raise under
-# StrictUndefined when running multi-step agents, since step_context starts
-# fresh for each step. The caller (e.g. daemon adapter) can override any of
-# these by passing them in `context`; otherwise the safe default applies.
-_MULTISTEP_FRAMEWORK_FLAG_DEFAULTS: Dict[str, Any] = {
-    "is_daemon": False,
-    "is_scheduled": False,
-    "schedule_id": "",
-    "has_notify_tool": False,
-    "agent_name": "",
-    "can_spawn_jobs": False,
-    "can_use_pty": False,
-    "is_channel_session": False,
-    "active_sessions": [],
-    "recent_completions": [],
-}
-
-
-def _build_multistep_step_context(
-    prompt: str, context: Dict[str, Any], agent_tools: Optional[List[Any]] = None
-) -> Dict[str, Any]:
-    """Build the initial step_context dict for a multi-step agent run.
-
-    Why this exists: builtin agent templates (notably `default.md`'s
-    environment block) reference framework flags like `is_daemon`,
-    `is_scheduled`, etc. The single-shot agent path threads those through via
-    `agent_preparation.py`, but the multi-step path renders each step against
-    `step_context` directly, so any flag the caller didn't supply would raise
-    `UndefinedError` under Jinja's StrictUndefined.
-    """
-    return {
-        **_MULTISTEP_FRAMEWORK_FLAG_DEFAULTS,
-        **context,
-        "user_prompt": prompt,
-        "is_interactive": is_interactive(),
-        "tools": agent_tools or [],
-        "is_subagent": context.get("is_subagent", False),
-        "parent_agent": context.get("parent_agent", None),
-    }
-
-
-def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional[set] = None) -> Dict[str, Any]:
-    """Build variables for injection into Python execution namespace.
-
-    Creates a `ctx` object containing everything. Only user-assigned step variables
-    (from `assign="varname"`) are exposed at top-level to avoid namespace pollution.
-
-    Args:
-        step_context: Full step context dictionary
-        assigned_vars: Set of variable names assigned by user via step.assign_var.
-                       If None, no variables are exposed at top-level.
-
-    Returns:
-        Dictionary with 'ctx' ExecutionContext and user-assigned variables at top-level
-    """
-    ctx = ExecutionContext(**step_context)
-
-    # Only user-assigned step variables at top-level (not tsugite metadata)
-    if assigned_vars:
-        top_level = {k: v for k, v in step_context.items() if k in assigned_vars}
-    else:
-        top_level = {}
-
-    return {"ctx": ctx, **top_level}
-
-
-def _build_prepared_agent_for_step(
-    agent: Any,
-    rendered_step_prompt: str,
-    step_context: Dict[str, Any],
-    attachments: Optional[List[Any]] = None,
-) -> "PreparedAgent":
-    """Build a PreparedAgent for step execution.
-
-    This creates the PreparedAgent manually since multistep agents handle
-    their own rendering with accumulated context.
-
-    Args:
-        agent: Parsed agent with config
-        rendered_step_prompt: Already-rendered step prompt
-        step_context: Step execution context
-        attachments: List of Attachment objects for prompt caching
-
-    Returns:
-        PreparedAgent ready for execution
-    """
-    from tsugite.agent_preparation import PreparedAgent
-    from tsugite.core.agent import build_system_prompt
-    from tsugite.core.tools import create_tool_from_tsugite
-    from tsugite.tools import expand_tool_specs
-
-    # Build instructions
-    base_instructions = get_default_instructions()
-    agent_instructions = getattr(agent.config, "instructions", "")
-    combined_instructions = _combine_instructions(base_instructions, agent_instructions)
-
-    # Expand and create tools
-    expanded_tools = (
-        expand_tool_specs(agent.config.tools, strict=agent.config.strict_tools) if agent.config.tools else []
-    )
-    # Always include spawn_agent if not already present
-    if "spawn_agent" not in expanded_tools:
-        expanded_tools.append("spawn_agent")
-    tools = [create_tool_from_tsugite(name) for name in expanded_tools]
-
-    # Build system message
-    system_message = build_system_prompt(tools, combined_instructions)
-
-    # Create PreparedAgent
-    return PreparedAgent(
-        agent=agent,
-        agent_config=agent.config,
-        system_message=system_message,
-        user_message=rendered_step_prompt,
-        rendered_prompt=rendered_step_prompt,
-        tools=tools,
-        context=step_context,
-        combined_instructions=combined_instructions,
-        attachments=attachments or [],
-    )
-
-
-def evaluate_loop_condition(expression: str, context: Dict[str, Any]) -> bool:
-    """Evaluate a Jinja2 expression or helper as a boolean condition.
-
-    Args:
-        expression: Jinja2 template expression or predefined helper name
-        context: Template context with tasks, variables, etc.
-
-    Returns:
-        Boolean result of condition evaluation
-
-    Raises:
-        ValueError: If expression is invalid or evaluation fails
-    """
-    from jinja2 import Template, TemplateSyntaxError
-
-    try:
-        # Wrap expression in {% if %} to get boolean result
-        template_str = f"{{% if {expression} %}}true{{% endif %}}"
-        template = Template(template_str)
-        result = template.render(**context)
-        return result.strip() == "true"
-    except TemplateSyntaxError as e:
-        raise ValueError(f"Invalid loop condition expression '{expression}': {e}") from e
-    except Exception as e:
-        raise ValueError(f"Error evaluating loop condition '{expression}': {e}") from e
-
-
-def _attempt_executed_code(exc: BaseException) -> bool:
-    """Did the failed attempt run any code? Retrying would re-issue its side effects."""
-    steps = getattr(exc, "execution_steps", None) or []
-    return any(getattr(s, "code", "") for s in steps)
-
-
-def _prepare_retry_context(step_context: Dict[str, Any], step: Any, attempt: int, errors: List[str]) -> None:
-    """Add retry-specific variables to step context.
-
-    Args:
-        step_context: Step context to update
-        step: Step configuration
-        attempt: Current attempt number (0-indexed)
-        errors: List of previous errors
-    """
-    step_context["is_retry"] = attempt > 0
-    step_context["retry_count"] = attempt
-    step_context["max_retries"] = step.max_retries
-    step_context["last_error"] = errors[-1] if errors else ""
-    step_context["all_errors"] = errors
-
-
-def _show_step_progress_message(
-    custom_logger: Any,
-    step_header: str,
-    attempt: int,
-    max_retries: int,
-    i: int,
-    step_name: str,
-    total_steps: int,
-    max_attempts: int,
-    debug: bool,
-    event_bus: Optional["EventBus"],
-) -> None:
-    """Display step progress message in UI.
-
-    Args:
-        custom_logger: Logger for UI updates
-        step_header: Formatted step header
-        attempt: Current attempt number (0-indexed)
-        max_retries: Maximum retries allowed
-        i: Step number (1-indexed)
-        step_name: Name of the step
-        total_steps: Total number of steps
-        max_attempts: Total attempts (retries + 1)
-        debug: Debug mode flag
-        event_bus: Event bus for debug messages
-    """
-    if not debug:
-        set_multistep_ui_context(custom_logger, i, step_name, total_steps)
-        if attempt > 0:
-            print_step_progress(custom_logger, step_header, f"Retry {attempt}/{max_retries}...", debug, "yellow")
-        else:
-            print_step_progress(custom_logger, step_header, "Starting...", debug, "cyan")
-
-    if debug and event_bus:
-        from tsugite.events import DebugMessageEvent
-
-        if attempt > 0:
-            event_bus.emit(
-                DebugMessageEvent(
-                    message=f"DEBUG: Retrying Step {i}/{total_steps}: {step_name} "
-                    f"(Attempt {attempt + 1}/{max_attempts})"
-                )
-            )
-        else:
-            event_bus.emit(DebugMessageEvent(message=f"DEBUG: Executing Step {i}/{total_steps}: {step_name}"))
-
-
-def _render_step_template(
-    step: Any,
-    step_context: Dict[str, Any],
-    debug: bool,
-    event_bus: Optional["EventBus"],
-) -> str:
-    """Render step template with current context.
-
-    Args:
-        step: Step configuration
-        step_context: Current step context
-        debug: Debug mode flag
-        event_bus: Event bus for debug output
-
-    Returns:
-        Rendered step prompt
-
-    Raises:
-        Exception: If template rendering fails
-    """
-    # Execute tool directives in this step's content
-    step_modified_content, step_tool_context = execute_tool_directives(step.content, step_context, event_bus)
-    step_context.update(step_tool_context)
-
-    # Render this step's content with current context
-    renderer = AgentRenderer()
-    rendered_step_prompt = renderer.render(step_modified_content, step_context)
-
-    if debug and event_bus:
-        from tsugite.events import DebugMessageEvent
-
-        event_bus.emit(DebugMessageEvent(message="\n[bold]Rendered Prompt:[/bold]\n" + rendered_step_prompt))
-
-    return rendered_step_prompt
-
-
-async def _execute_step_with_retries(
-    step: Any,
-    step_context: Dict[str, Any],
-    agent: Any,
-    i: int,
-    total_steps: int,
-    steps: List[Any],
-    step_header: str,
-    exec_options: ExecutionOptions,
-    custom_logger: Optional[Any],
-    event_bus: Optional["EventBus"] = None,
-    assigned_vars: Optional[set] = None,
-) -> tuple[str, float]:
-    """Execute a step with automatic retries on failure.
-
-    Handles template rendering, step execution, error handling, and metrics recording.
-    Retries up to max_retries times before failing.
-    """
-    debug = exec_options.debug
-    max_attempts = step.max_retries + 1
-    errors = []
-    step_start_time = time.time()
-
-    for attempt in range(max_attempts):
-        # Add retry context variables
-        _prepare_retry_context(step_context, step, attempt, errors)
-
-        # Show progress message
-        _show_step_progress_message(
-            custom_logger,
-            step_header,
-            attempt,
-            step.max_retries,
-            i,
-            step.name,
-            total_steps,
-            max_attempts,
-            debug,
-            event_bus,
-        )
-
-        # Render step template
-        try:
-            rendered_step_prompt = _render_step_template(step, step_context, debug, event_bus)
-        except Exception as e:
-            error_msg = f"Template rendering failed: {e}"
-            errors.append(error_msg)
-
-            if attempt == max_attempts - 1:
-                clear_multistep_ui_context(custom_logger)
-                error_msg = _build_step_error_message(
-                    error_type="Template Rendering Failed",
-                    step_name=step.name,
-                    step_number=i,
-                    total_steps=total_steps,
-                    errors=errors,
-                    available_vars=list(step_context.keys()),
-                    previous_step=steps[i - 2].name if i > 1 else "None",
-                    max_attempts=max_attempts,
-                    debug_tips=[
-                        "1. Check for undefined variables in step template",
-                        "2. Verify previous steps assigned expected variables",
-                        "3. Run with --debug to see full context",
-                    ],
-                )
-                raise RuntimeError(error_msg)
-
-            if step.retry_delay > 0:
-                time.sleep(step.retry_delay)
-            continue
-
-        injectable_vars = _build_injectable_vars(step_context, assigned_vars)
-
-        if step.spawn_agent_path:
-            from tsugite.tools.agents import spawn_agent
-
-            coro = asyncio.to_thread(
-                spawn_agent,
-                agent_path=step.spawn_agent_path,
-                prompt=rendered_step_prompt,
-            )
-        else:
-            prepared = _build_prepared_agent_for_step(
-                agent=agent,
-                rendered_step_prompt=rendered_step_prompt,
-                step_context=step_context,
-            )
-            coro = _execute_agent_with_prompt(
-                prepared=prepared,
-                exec_options=exec_options,
-                custom_logger=custom_logger,
-                model_kwargs=step.model_kwargs,
-                injectable_vars=injectable_vars,
-            )
-
-        if step.timeout:
-            coro = asyncio.wait_for(coro, timeout=step.timeout)
-
-        try:
-            step_result = await coro
-
-            # Store result in context if assign variable specified
-            if step.assign_var:
-                step_context[step.assign_var] = step_result
-                if assigned_vars is not None:
-                    assigned_vars.add(step.assign_var)
-                if debug and event_bus:
-                    from tsugite.events import DebugMessageEvent
-
-                    event_bus.emit(DebugMessageEvent(message=f"Assigned result to variable: {step.assign_var}"))
-
-            # Show step completion
-            if not debug:
-                clear_multistep_ui_context(custom_logger)
-                print_step_progress(custom_logger, step_header, "Complete", debug, "green")
-
-            # Calculate duration and return
-            step_duration = time.time() - step_start_time
-            return step_result, step_duration
-
-        except asyncio.TimeoutError:
-            error_msg = f"Step timed out after {step.timeout} seconds"
-            errors.append(error_msg)
-            code_executed_this_attempt = False
-        except Exception as e:
-            error_msg = str(e)
-            errors.append(error_msg)
-            code_executed_this_attempt = _attempt_executed_code(e)
-
-        if code_executed_this_attempt and attempt < max_attempts - 1:
-            clear_multistep_ui_context(custom_logger)
-            if event_bus:
-                from tsugite.events import WarningEvent
-
-                event_bus.emit(
-                    WarningEvent(
-                        message=(
-                            f"Step '{step.name}' failed after executing code; skipping retry "
-                            "to avoid re-issuing side effects."
-                        )
-                    )
-                )
-            raise RuntimeError(
-                f"Step '{step.name}' failed after executing code: {error_msg}. "
-                "Retry skipped to avoid duplicate side effects."
-            )
-
-        # If not last attempt, handle retry delay and continue
-        if attempt < max_attempts - 1:
-            if step.retry_delay > 0:
-                time.sleep(step.retry_delay)
-            if not debug and event_bus:
-                from tsugite.events import WarningEvent
-
-                event_bus.emit(WarningEvent(message=f"Step '{step.name}' failed: {error_msg}"))
-        else:
-            # Last attempt failed
-            clear_multistep_ui_context(custom_logger)
-            error_msg = _build_step_error_message(
-                error_type="Execution Failed",
-                step_name=step.name,
-                step_number=i,
-                total_steps=total_steps,
-                errors=errors,
-                available_vars=list(_build_injectable_vars(step_context, assigned_vars).keys()),
-                previous_step=steps[i - 2].name if i > 1 else "None",
-                max_attempts=max_attempts,
-                debug_tips=[
-                    "1. Run with --debug to see rendered prompts",
-                    "2. Check variable values in previous steps",
-                    "3. Verify step dependencies are correct",
-                ],
-            )
-            raise RuntimeError(error_msg)
-
-    # Should never reach here, but for type safety
-    raise RuntimeError("Unexpected: Retry loop completed without success or raising")
-
-
-def _should_repeat_step(
-    step: Any, step_context: Dict[str, Any], iteration: int, debug: bool, event_bus: Optional["EventBus"] = None
-) -> bool:
-    """Determine if a step should repeat based on loop conditions.
-
-    Evaluates repeat_while, repeat_until, and max_iterations to decide
-    whether the step should execute again.
-
-    Args:
-        step: Step configuration with repeat conditions
-        step_context: Current step context for condition evaluation
-        iteration: Current iteration count (1-indexed)
-        debug: Whether debug mode is active
-        event_bus: Optional event bus for emitting debug/warning messages
-
-    Returns:
-        True if step should repeat, False otherwise
-    """
-    should_repeat = False
-
-    # Evaluate repeat conditions
-    if step.repeat_while:
-        try:
-            should_repeat = evaluate_loop_condition(step.repeat_while, step_context)
-            if debug and event_bus:
-                from tsugite.events import DebugMessageEvent
-
-                event_bus.emit(DebugMessageEvent(message=f"Loop condition (while): {should_repeat}"))
-        except Exception as e:
-            if event_bus:
-                from tsugite.events import WarningEvent
-
-                event_bus.emit(WarningEvent(message=f"Loop condition evaluation failed: {e}"))
-            should_repeat = False
-
-    elif step.repeat_until:
-        try:
-            condition_met = evaluate_loop_condition(step.repeat_until, step_context)
-            should_repeat = not condition_met  # Repeat UNTIL condition is true
-            if debug and event_bus:
-                from tsugite.events import DebugMessageEvent
-
-                event_bus.emit(
-                    DebugMessageEvent(
-                        message=f"Loop condition (until): condition_met={condition_met}, repeat={should_repeat}"
-                    )
-                )
-        except Exception as e:
-            if event_bus:
-                from tsugite.events import WarningEvent
-
-                event_bus.emit(WarningEvent(message=f"Loop condition evaluation failed: {e}"))
-            should_repeat = False
-
-    # Safety check: max iterations
-    if should_repeat and iteration >= step.max_iterations:
-        if event_bus:
-            from tsugite.events import WarningEvent
-
-            event_bus.emit(
-                WarningEvent(
-                    message=f"⚠️  Step '{step.name}' reached max_iterations ({step.max_iterations}). "
-                    f'Use max_iterations="N" to increase limit.'
-                )
-            )
-        should_repeat = False
-
-    return should_repeat
-
-
-async def _run_multistep_agent_impl(
-    agent_path: Path,
-    prompt: str,
-    exec_options: Optional[ExecutionOptions] = None,
-    context: Optional[Dict[str, Any]] = None,
-    custom_logger: Optional[Any] = None,
-) -> str:
-    """Async implementation of multi-step agent execution."""
-    if exec_options is None:
-        exec_options = ExecutionOptions()
-    from tsugite.md_agents import extract_step_directives, has_step_directives
-
-    if context is None:
-        context = {}
-
-    # Parse agent (with inheritance resolution)
-    try:
-        agent = parse_agent_file(agent_path)
-    except Exception as e:
-        raise ValueError(f"Failed to parse agent file: {e}")
-
-    # Set current agent in thread-local storage for spawn_agent tracking
-    set_current_agent(agent.config.name)
-    set_allowed_secrets(agent.config.allowed_secrets)
-
-    try:
-        # Extract steps from raw markdown (before any rendering)
-        if not has_step_directives(agent.content):
-            raise ValueError(f"Agent {agent_path} does not contain step directives. Use run_agent() instead.")
-
-        preamble, steps = extract_step_directives(agent.content)
-    except Exception as e:
-        raise ValueError(f"Failed to parse step directives: {e}")
-
-    try:
-        if not steps:
-            raise ValueError("No valid step directives found in agent")
-
-        # Validate unique step names
-        step_names = [s.name for s in steps]
-        if len(step_names) != len(set(step_names)):
-            duplicates = [name for name in step_names if step_names.count(name) > 1]
-            raise ValueError(f"Duplicate step names found: {', '.join(set(duplicates))}")
-
-        # Pre-flight: resolve every step's spawn_agent_path so unresolved paths
-        # fail before any step runs
-        from tsugite.tools.agents import resolve_agent_path
-
-        unresolved = [
-            (s.name, s.spawn_agent_path)
-            for s in steps
-            if s.spawn_agent_path and resolve_agent_path(s.spawn_agent_path) is None
-        ]
-        if unresolved:
-            details = "\n".join(f"  - step '{name}': {path}" for name, path in unresolved)
-            raise ValueError(f"Step(s) reference unresolvable agent paths:\n{details}")
-
-        # Create event_bus for emitting events throughout multi-step execution
-        from tsugite.events import DebugMessageEvent, EventBus, InfoEvent, WarningEvent
-
-        event_bus = EventBus()
-        ui_handler = get_ui_handler(custom_logger)
-        if ui_handler:
-            event_bus.subscribe(ui_handler.handle_event)
-
-        step_context = _build_multistep_step_context(prompt=prompt, context=context, agent_tools=agent.config.tools)
-
-        # Execute prefetch once (before any steps)
-        if agent.config.prefetch:
-            try:
-                prefetch_context = execute_prefetch(agent.config.prefetch, event_bus)
-                step_context.update(prefetch_context)
-            except Exception as e:
-                event_bus.emit(WarningEvent(message=f"Prefetch execution failed: {e}"))
-
-        # Execute each step sequentially
-        final_result = None
-        step_metrics: List[StepMetrics] = []
-        assigned_vars: set = set()  # Track user-assigned variables for namespace isolation
-
-        for i, step in enumerate(steps, 1):
-            # Add step information to context for this step
-            step_context["step_number"] = i
-            step_context["step_name"] = step.name
-            step_context["total_steps"] = len(steps)
-
-            # Loop control: iterate if step has repeat_while or repeat_until
-            iteration = 0
-            step_is_looping = bool(step.repeat_while or step.repeat_until)
-
-            while True:
-                iteration += 1
-
-                # Add iteration context
-                step_context["iteration"] = iteration
-                step_context["max_iterations"] = step.max_iterations
-                step_context["is_looping_step"] = step_is_looping
-
-                # Show step progress (unless in debug mode which has its own output)
-                if step_is_looping:
-                    step_header = f"[Step {i}/{len(steps)}: {step.name} (Iteration {iteration})]"
-                else:
-                    step_header = f"[Step {i}/{len(steps)}: {step.name}]"
-
-                # Execute step with automatic retries
-                step_start_time = time.time()
-                try:
-                    step_result, step_duration = await _execute_step_with_retries(
-                        step=step,
-                        step_context=step_context,
-                        agent=agent,
-                        i=i,
-                        total_steps=len(steps),
-                        steps=steps,
-                        step_header=step_header,
-                        exec_options=exec_options,
-                        custom_logger=custom_logger,
-                        event_bus=event_bus,
-                        assigned_vars=assigned_vars,
-                    )
-
-                    # Success - store result and record metrics
-                    final_result = step_result
-                    step_metrics.append(
-                        StepMetrics(
-                            step_name=step.name,
-                            step_number=i,
-                            duration=step_duration,
-                            status="success",
-                        )
-                    )
-
-                except RuntimeError as e:
-                    # Step execution failed after all retries
-                    if step.continue_on_error:
-                        # Log warning but continue execution
-                        clear_multistep_ui_context(custom_logger)
-
-                        warning_msg = f"⚠ Step '{step.name}' failed but continuing (continue_on_error=true)"
-                        event_bus.emit(WarningEvent(message=warning_msg))
-                        event_bus.emit(InfoEvent(message=f"Error: {str(e)}"))
-
-                        # Assign None to the variable if specified
-                        if step.assign_var:
-                            step_context[step.assign_var] = None
-                            assigned_vars.add(step.assign_var)
-                            if exec_options.debug:
-                                event_bus.emit(
-                                    DebugMessageEvent(message=f"Assigned None to variable: {step.assign_var}")
-                                )
-
-                        # Record metrics for skipped step
-                        step_duration = time.time() - step_start_time
-                        step_metrics.append(
-                            StepMetrics(
-                                step_name=step.name,
-                                step_number=i,
-                                duration=step_duration,
-                                status="skipped",
-                                error=str(e),
-                            )
-                        )
-                    else:
-                        # Re-raise if not continuing on error
-                        raise
-
-                # End of step execution - now check if we should repeat the step
-
-                # Check if we should repeat this step (loop control)
-                should_repeat = _should_repeat_step(step, step_context, iteration, exec_options.debug, event_bus)
-
-                # Exit while loop if we shouldn't repeat
-                if not should_repeat:
-                    if step_is_looping and iteration > 1 and not exec_options.debug:
-                        event_bus.emit(InfoEvent(message=f"Step '{step.name}' completed after {iteration} iterations"))
-                    break
-
-                if not exec_options.debug:
-                    event_bus.emit(InfoEvent(message=f"🔁 Repeating step '{step.name}' (iteration {iteration + 1})"))
-
-            # End of while True loop for step iteration
-
-        # Display metrics summary
-        if step_metrics:
-            display_step_metrics(step_metrics, custom_logger if custom_logger else None)
-
-        return final_result or ""
-    finally:
-        # Always clear the current agent context when done
-        clear_current_agent()
-        clear_allowed_agents()
-
-        await _cancel_sibling_tasks()
-
-
-def run_multistep_agent(
-    agent_path: Path,
-    prompt: str,
-    exec_options: Optional[ExecutionOptions] = None,
-    context: Optional[Dict[str, Any]] = None,
-    custom_logger: Optional[Any] = None,
-) -> str:
-    """Synchronous wrapper for multi-step agent execution.
-
-    Args:
-        agent_path: Path to agent markdown file
-        prompt: User prompt/task for the agent
-        exec_options: Execution options (model, debug, stream, etc.)
-        context: Additional context variables
-        custom_logger: Custom logger for agent output
-
-    Returns:
-        Result from the final step
-    """
-    if exec_options is None:
-        exec_options = ExecutionOptions()
-
-    return asyncio.run(
-        _run_multistep_agent_impl(
-            agent_path=agent_path,
-            prompt=prompt,
-            exec_options=exec_options,
-            context=context,
-            custom_logger=custom_logger,
-        )
-    )
-
-
-async def run_multistep_agent_async(
-    agent_path: Path,
-    prompt: str,
-    exec_options: Optional[ExecutionOptions] = None,
-    context: Optional[Dict[str, Any]] = None,
-    custom_logger: Optional[Any] = None,
-) -> str:
-    """Asynchronous wrapper for multi-step agent execution."""
-    if exec_options is None:
-        exec_options = ExecutionOptions()
-
-    return await _run_multistep_agent_impl(
-        agent_path=agent_path,
-        prompt=prompt,
+    setup = _RunSetup(
         exec_options=exec_options,
-        context=context,
+        hooks_dir=hooks_dir,
+        hook_message=hook_message,
+        hook_vars=hook_vars,
+        agent_stem=agent_path.stem,
+        ui_handler=ui_handler,
+        on_status=on_status,
+        on_hook_result=on_hook_result,
+        workspace=workspace,
         custom_logger=custom_logger,
+        path_context=path_context,
+        attachments=attachments,
+        channel_metadata=channel_metadata,
+        user_input_for_history=user_input_for_history,
+        previous_messages=previous_messages,
+        resume_session=resume_session,
+        resume_after_compaction=resume_after_compaction,
+        conversation_id=continue_conversation_id,
     )
+
+    try:
+        from tsugite.md_agents import has_step_directives
+
+        if has_step_directives(agent.content):
+            from .steps import run_steps
+
+            return await run_steps(agent, prompt, context, setup)
+        return await _run_unit(agent, prompt, context, setup)
+    finally:
+        # Always clear the current agent context when done
+        clear_current_agent()
+        clear_allowed_agents()
 
 
 def preview_multistep_agent(
