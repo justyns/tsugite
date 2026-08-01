@@ -1,11 +1,11 @@
 [project]
 name = "tsugite-discord"
-version = "0.18.0"
+version = "0.19.0"
 description = "Tsugite plugin: Discord bot adapter for the daemon"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-daemon==0.18.0",
+  "tsugite-daemon==0.19.0",
   "discord.py>=2.3.2",
 ]
 
