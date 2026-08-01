@@ -13,7 +13,6 @@ from rich.syntax import Syntax
 from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
-    ContentBlockEvent,
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
@@ -35,6 +34,7 @@ from tsugite.events import (
     TaskStartEvent,
     WarningEvent,
 )
+from tsugite.ui.dispatch import EventDispatchMixin, handles
 from tsugite.ui_context import clear_ui_context, set_ui_context
 
 
@@ -85,7 +85,7 @@ class CustomUILogger:
         self.console = console
 
 
-class CustomUIHandler:
+class CustomUIHandler(EventDispatchMixin):
     """Handles UI events and displays custom progress interface."""
 
     def __init__(
@@ -127,37 +127,10 @@ class CustomUIHandler:
         else:
             self.console.print(*args, **kwargs)
 
-    _DISPATCH: dict[type, str] = {
-        TaskStartEvent: "_handle_task_start",
-        StepStartEvent: "_handle_step_start",
-        CodeExecutionEvent: "_handle_code_execution",
-        ObservationEvent: "_handle_observation",
-        ContentBlockEvent: "_handle_content_block",
-        FinalAnswerEvent: "_handle_final_answer",
-        ErrorEvent: "_handle_error",
-        LLMMessageEvent: "_handle_llm_message",
-        ReasoningContentEvent: "_handle_reasoning_content",
-        ReasoningTokensEvent: "_handle_reasoning_tokens",
-        CostSummaryEvent: "_handle_cost_summary",
-        StreamChunkEvent: "_handle_stream_chunk",
-        StreamCompleteEvent: "_handle_stream_complete",
-        InfoEvent: "_handle_info",
-        SkillLoadedEvent: "_handle_skill_loaded",
-        SkillLoadFailedEvent: "_handle_skill_load_failed",
-        SkillUnloadedEvent: "_handle_skill_unloaded",
-        DebugMessageEvent: "_handle_debug_message",
-        WarningEvent: "_handle_warning",
-        StepProgressEvent: "_handle_step_progress",
-        FileReadEvent: "_handle_file_read",
-        FileWriteEvent: "_handle_file_write",
-    }
-
     def handle_event(self, event: BaseEvent) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
-            handler_name = self._DISPATCH.get(type(event))
-            if handler_name:
-                getattr(self, handler_name)(event)
+            super().handle_event(event)
             self._update_display()
 
     def _get_display_prefix(self) -> str:
@@ -179,6 +152,7 @@ class CustomUIHandler:
         error_keywords = ["error", "failed", "exception", "not found", "invalid", "traceback"]
         return any(keyword in text.lower() for keyword in error_keywords)
 
+    @handles(TaskStartEvent)
     def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start event."""
         self.state.task = event.task
@@ -200,6 +174,7 @@ class CustomUIHandler:
             self.file_read_buffer = []
             self.buffer_active = False
 
+    @handles(StepStartEvent)
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start event."""
         self.state.current_step = event.step
@@ -219,6 +194,7 @@ class CustomUIHandler:
         # Add step to history
         self.state.steps_history.append({"step": self.state.current_step, "status": "in_progress", "actions": []})
 
+    @handles(CodeExecutionEvent)
     def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution event."""
         self.state.code_being_executed = event.code
@@ -236,6 +212,7 @@ class CustomUIHandler:
             # Code display disabled - just show indicator
             self._print("[dim yellow]⚡ Executing code...[/dim yellow]")
 
+    @handles(ObservationEvent)
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation event."""
         observation = event.observation
@@ -272,10 +249,7 @@ class CustomUIHandler:
             self.state.steps_history[-1]["actions"].append({"type": "observation", "content": observation})
             self.state.steps_history[-1]["status"] = "completed"
 
-    def _handle_content_block(self, event: ContentBlockEvent) -> None:
-        """Handle content block event."""
-        pass
-
+    @handles(FinalAnswerEvent)
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer event."""
         answer = event.answer
@@ -285,6 +259,7 @@ class CustomUIHandler:
 
         self._print(Markdown(str(answer)))
 
+    @handles(ErrorEvent)
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error event."""
         # Skip suppressible errors unless debug/verbose is enabled
@@ -306,6 +281,7 @@ class CustomUIHandler:
             self.state.steps_history[-1]["actions"].append({"type": "error", "content": error})
             self.state.steps_history[-1]["status"] = "error"
 
+    @handles(LLMMessageEvent)
     def _handle_llm_message(self, event: LLMMessageEvent) -> None:
         """Handle LLM reasoning message event."""
         if not self.show_llm_messages:
@@ -340,6 +316,7 @@ class CustomUIHandler:
         content = re.sub(r"(?m)^[ ]{4,}.*$", "", content)
         return content
 
+    @handles(ReasoningContentEvent)
     def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         """Handle reasoning content from reasoning models (Claude, Deepseek with exposed reasoning)."""
         content = event.content
@@ -365,6 +342,7 @@ class CustomUIHandler:
             self._print(f"[magenta]{title_prefix}:[/magenta]")
             self._print(f"[dim magenta]{display_content}[/dim magenta]")
 
+    @handles(ReasoningTokensEvent)
     def _handle_reasoning_tokens(self, event: ReasoningTokensEvent) -> None:
         """Handle reasoning token counts from models like o1/o3 that don't expose reasoning content."""
         tokens = event.tokens
@@ -430,6 +408,7 @@ class CustomUIHandler:
 
         return " | ".join(parts)
 
+    @handles(CostSummaryEvent)
     def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary display after final answer."""
         cost = event.cost
@@ -460,6 +439,7 @@ class CustomUIHandler:
             cache_summary = " | ".join(cache_parts)
             self._print(f"[dim green]{cache_summary}[/dim green]")
 
+    @handles(StreamChunkEvent)
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         """Handle streaming chunk event."""
         chunk = event.chunk
@@ -473,6 +453,7 @@ class CustomUIHandler:
         # Print the chunk directly for real-time feedback
         self._print(chunk, end="", highlight=False)
 
+    @handles(StreamCompleteEvent)
     def _handle_stream_complete(self, event: StreamCompleteEvent) -> None:
         """Handle streaming complete event."""
         self.is_streaming = False
@@ -487,12 +468,14 @@ class CustomUIHandler:
         # Clear streaming content for next step
         self.streaming_content = ""
 
+    @handles(InfoEvent)
     def _handle_info(self, event: InfoEvent) -> None:
         """Handle info event for informational messages."""
         message = event.message
         if message:
             self._print(f"[dim]{message}[/dim]")
 
+    @handles(SkillLoadedEvent)
     def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
         """Handle skill loaded event."""
         skill_name = event.skill_name
@@ -502,17 +485,20 @@ class CustomUIHandler:
         else:
             self._print(f"[dim]📚 Loaded skill: {skill_name}[/dim]")
 
+    @handles(SkillUnloadedEvent)
     def _handle_skill_unloaded(self, event: SkillUnloadedEvent) -> None:
         """Handle skill unloaded event."""
         skill_name = event.skill_name
         self._print(f"[dim]📚 Unloaded skill: {skill_name}[/dim]")
 
+    @handles(SkillLoadFailedEvent)
     def _handle_skill_load_failed(self, event: SkillLoadFailedEvent) -> None:
         """Handle skill load failed event."""
         skill_name = event.skill_name
         error_message = event.error_message
         self._print(f"[yellow]⚠️  Failed to load skill '{skill_name}': {error_message}[/yellow]")
 
+    @handles(DebugMessageEvent)
     def _handle_debug_message(self, event: DebugMessageEvent) -> None:
         """Handle debug message event."""
         if not self.show_debug_messages:
@@ -521,12 +507,14 @@ class CustomUIHandler:
         if message:
             self._print(f"[dim blue]{message}[/dim blue]")
 
+    @handles(WarningEvent)
     def _handle_warning(self, event: WarningEvent) -> None:
         """Handle warning event."""
         message = event.message
         if message:
             self._print(f"[yellow]{message}[/yellow]")
 
+    @handles(StepProgressEvent)
     def _handle_step_progress(self, event: StepProgressEvent) -> None:
         """Handle step progress event."""
         message = event.message
@@ -542,6 +530,7 @@ class CustomUIHandler:
         size_str = format_file_size(event.byte_count)
         return f"{verb} {event.path} ({event.line_count} lines, {size_str})"
 
+    @handles(FileReadEvent)
     def _handle_file_read(self, event: FileReadEvent) -> None:
         """Handle file read event."""
         if self.buffer_active:
@@ -550,6 +539,7 @@ class CustomUIHandler:
 
         self._print(f"[dim]{self._format_file_event('Read', event)}[/dim]")
 
+    @handles(FileWriteEvent)
     def _handle_file_write(self, event: FileWriteEvent) -> None:
         """Handle file write event."""
         self._print(f"[dim]{self._format_file_event('Wrote', event)}[/dim]")

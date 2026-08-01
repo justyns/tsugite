@@ -12,7 +12,6 @@ from rich.syntax import Syntax
 from tsugite.events import (
     BaseEvent,
     CodeExecutionEvent,
-    ContentBlockEvent,
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
@@ -29,9 +28,10 @@ from tsugite.events import (
     TaskStartEvent,
     WarningEvent,
 )
+from tsugite.ui.dispatch import EventDispatchMixin, handles
 
 
-class ReplUIHandler:
+class ReplUIHandler(EventDispatchMixin):
     """Simplified UI handler for REPL chat mode.
 
     Uses rich for beautiful output while keeping things minimal and readable.
@@ -74,38 +74,18 @@ class ReplUIHandler:
         # Tool execution tracking (for progress indicators)
         self.active_tools: dict[str, float] = {}  # tool_name -> start_time
 
-    _DISPATCH: dict[type, str] = {
-        TaskStartEvent: "_handle_task_start",
-        StepStartEvent: "_handle_step_start",
-        CodeExecutionEvent: "_handle_code_execution",
-        ObservationEvent: "_handle_observation",
-        ContentBlockEvent: "_handle_content_block",
-        FinalAnswerEvent: "_handle_final_answer",
-        ErrorEvent: "_handle_error",
-        LLMMessageEvent: "_handle_llm_message",
-        ReasoningContentEvent: "_handle_reasoning_content",
-        ReasoningTokensEvent: "_handle_reasoning_tokens",
-        CostSummaryEvent: "_handle_cost_summary",
-        StreamChunkEvent: "_handle_stream_chunk",
-        StreamCompleteEvent: "_handle_stream_complete",
-        InfoEvent: "_handle_info",
-        DebugMessageEvent: "_handle_debug_message",
-        WarningEvent: "_handle_warning",
-        StepProgressEvent: "_handle_step_progress",
-    }
-
     def handle_event(self, event: BaseEvent) -> None:
         """Handle a UI event and update the display."""
         with self._lock:
-            handler_name = self._DISPATCH.get(type(event))
-            if handler_name:
-                getattr(self, handler_name)(event)
+            super().handle_event(event)
 
+    @handles(TaskStartEvent)
     def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle task start - show model in compact mode."""
         if self.show_debug_messages:
             self.console.print(f"[dim]Model: {event.model}[/dim]")
 
+    @handles(StepStartEvent)
     def _handle_step_start(self, event: StepStartEvent) -> None:
         """Handle step start - show spinner during thinking."""
         self.current_step = event.step
@@ -122,6 +102,7 @@ class ReplUIHandler:
         self.current_status = self.console.status(status_msg, spinner="dots")
         self.current_status.start()
 
+    @handles(CodeExecutionEvent)
     def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         """Handle code execution - optionally show code."""
         if self.show_code and event.code:
@@ -137,6 +118,7 @@ class ReplUIHandler:
             # Just show a minimal indicator
             pass  # Spinner already shows activity
 
+    @handles(ObservationEvent)
     def _handle_observation(self, event: ObservationEvent) -> None:
         """Handle observation - show if enabled and update tool progress."""
         # If this observation is for a tracked tool, show completion
@@ -172,6 +154,7 @@ class ReplUIHandler:
         else:
             self.console.print(f"[dim]💡 {observation}[/dim]")
 
+    @handles(FinalAnswerEvent)
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         """Handle final answer - render with rich markdown."""
         # Stop status spinner
@@ -190,6 +173,7 @@ class ReplUIHandler:
         self.console.print(Markdown(str(event.answer)))
         self.console.print()
 
+    @handles(ErrorEvent)
     def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error - show with panel for prominence."""
         # Skip suppressible errors unless debug is enabled
@@ -211,6 +195,7 @@ class ReplUIHandler:
         )
         self.console.print(error_panel)
 
+    @handles(LLMMessageEvent)
     def _handle_llm_message(self, event: LLMMessageEvent) -> None:
         """Handle LLM message - show if enabled."""
         if not self.show_llm_messages or not event.content:
@@ -225,6 +210,7 @@ class ReplUIHandler:
 
             self.console.print(Markdown(content))
 
+    @handles(ReasoningContentEvent)
     def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         """Handle reasoning content from models that expose it."""
         if not event.content:
@@ -251,6 +237,7 @@ class ReplUIHandler:
         self.console.print(f"[magenta]{title}:[/magenta]")
         self.console.print(f"[dim magenta]{content}[/dim magenta]")
 
+    @handles(ReasoningTokensEvent)
     def _handle_reasoning_tokens(self, event: ReasoningTokensEvent) -> None:
         """Handle reasoning token counts."""
         if not event.tokens:
@@ -263,6 +250,7 @@ class ReplUIHandler:
 
         self.console.print(f"[dim magenta]{message}[/dim magenta]")
 
+    @handles(CostSummaryEvent)
     def _handle_cost_summary(self, event: CostSummaryEvent) -> None:
         """Handle cost summary - show compact stats."""
         # Per-turn stats
@@ -332,6 +320,7 @@ class ReplUIHandler:
             cache_summary = " | ".join(cache_parts)
             self.console.print(f"[dim green]{cache_summary}[/dim green]")
 
+    @handles(StreamChunkEvent)
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         """Handle streaming chunk - display in real-time.
 
@@ -351,6 +340,7 @@ class ReplUIHandler:
         self.console.print(event.chunk, end="")
         self.streaming_content += event.chunk
 
+    @handles(StreamCompleteEvent)
     def _handle_stream_complete(self, event: StreamCompleteEvent) -> None:
         """Handle streaming complete."""
         if self.is_streaming:
@@ -358,21 +348,25 @@ class ReplUIHandler:
         self.is_streaming = False
         self.streaming_content = ""
 
+    @handles(InfoEvent)
     def _handle_info(self, event: InfoEvent) -> None:
         """Handle info message."""
         if event.message:
             self.console.print(f"[dim]{event.message}[/dim]")
 
+    @handles(DebugMessageEvent)
     def _handle_debug_message(self, event: DebugMessageEvent) -> None:
         """Handle debug message."""
         if self.show_debug_messages and event.message:
             self.console.print(f"[dim blue]{event.message}[/dim blue]")
 
+    @handles(WarningEvent)
     def _handle_warning(self, event: WarningEvent) -> None:
         """Handle warning."""
         if event.message:
             self.console.print(f"[yellow]{event.message}[/yellow]")
 
+    @handles(StepProgressEvent)
     def _handle_step_progress(self, event: StepProgressEvent) -> None:
         """Handle step progress."""
         if event.message:

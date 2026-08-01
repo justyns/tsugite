@@ -4,7 +4,6 @@ import json
 from typing import Any, Dict
 
 from tsugite.events import (
-    BaseEvent,
     CodeExecutionEvent,
     ContentBlockEvent,
     ErrorEvent,
@@ -30,12 +29,13 @@ from tsugite.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from tsugite.ui.dispatch import EventDispatchMixin, handles
 
 # Event types that share the same file-io payload shape
 _FILE_IO_EVENTS = {FileReadEvent: "file_read", FileWriteEvent: "file_write"}
 
 
-class JSONLUIHandler:
+class JSONLUIHandler(EventDispatchMixin):
     """Emit UI events as JSONL to stdout for subprocess communication.
 
     This handler converts all UI events to line-delimited JSON objects,
@@ -67,59 +67,33 @@ class JSONLUIHandler:
     - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
     """
 
-    _DISPATCH: dict[type, str] = {
-        TaskStartEvent: "_handle_task_start",
-        StepStartEvent: "_handle_step_start",
-        LLMMessageEvent: "_handle_llm_message",
-        CodeExecutionEvent: "_handle_code_execution",
-        ObservationEvent: "_handle_observation",
-        ContentBlockEvent: "_handle_content_block",
-        ModelResponseEvent: "_handle_model_response",
-        FinalAnswerEvent: "_handle_final_answer",
-        ErrorEvent: "_handle_error",
-        SkillLoadedEvent: "_handle_skill_loaded",
-        SkillLoadFailedEvent: "_handle_skill_load_failed",
-        SkillUnloadedEvent: "_handle_skill_unloaded",
-        FileReadEvent: "_handle_file_io",
-        FileWriteEvent: "_handle_file_io",
-        ToolCallEvent: "_handle_tool_call",
-        ToolResultEvent: "_handle_tool_result",
-        InfoEvent: "_handle_info",
-        ReasoningContentEvent: "_handle_reasoning_content",
-        ReasoningTokensEvent: "_handle_reasoning_tokens",
-        StreamChunkEvent: "_handle_stream_chunk",
-        StreamCompleteEvent: "_handle_stream_complete",
-        SecretAccessEvent: "_handle_secret_access",
-        PromptSnapshotEvent: "_handle_prompt_snapshot",
-        LLMWaitProgressEvent: "_handle_llm_wait_progress",
-    }
-
-    def handle_event(self, event: BaseEvent) -> None:
-        """Convert UI event to JSONL and print to stdout."""
-        handler_name = self._DISPATCH.get(type(event))
-        if handler_name:
-            getattr(self, handler_name)(event)
-
+    @handles(TaskStartEvent)
     def _handle_task_start(self, event: TaskStartEvent) -> None:
         self._emit("init", {"agent": event.task, "model": event.model})
 
+    @handles(StepStartEvent)
     def _handle_step_start(self, event: StepStartEvent) -> None:
         self._emit("turn_start", {"turn": event.step})
 
+    @handles(LLMMessageEvent)
     def _handle_llm_message(self, event: LLMMessageEvent) -> None:
         if event.content.strip():
             self._emit("thought", {"content": event.content})
 
+    @handles(StreamChunkEvent)
     def _handle_stream_chunk(self, event: StreamChunkEvent) -> None:
         self._emit("stream_chunk", {"chunk": event.chunk})
 
+    @handles(StreamCompleteEvent)
     def _handle_stream_complete(self, event: StreamCompleteEvent) -> None:
         self._emit("stream_complete", {})
 
+    @handles(CodeExecutionEvent)
     def _handle_code_execution(self, event: CodeExecutionEvent) -> None:
         if event.code:
             self._emit("code", {"content": event.code})
 
+    @handles(ObservationEvent)
     def _handle_observation(self, event: ObservationEvent) -> None:
         if event.success:
             self._emit("tool_result", {"tool": event.tool or "unknown", "success": True, "output": event.observation})
@@ -129,9 +103,11 @@ class JSONLUIHandler:
                 {"tool": event.tool or "unknown", "success": False, "error": event.error or event.observation},
             )
 
+    @handles(ContentBlockEvent)
     def _handle_content_block(self, event: ContentBlockEvent) -> None:
         self._emit("content_block", {"name": event.name, "content": event.content})
 
+    @handles(ModelResponseEvent)
     def _handle_model_response(self, event: ModelResponseEvent) -> None:
         # The settled parse of one model turn; shares its type and field names
         # with the persisted model_response event so the timeline reducer
@@ -146,6 +122,7 @@ class JSONLUIHandler:
             },
         )
 
+    @handles(FinalAnswerEvent)
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
         self._emit(
             "final_result",
@@ -158,24 +135,29 @@ class JSONLUIHandler:
             },
         )
 
+    @handles(ErrorEvent)
     def _handle_error(self, event: ErrorEvent) -> None:
         self._emit("error", {"error": event.error, "step": event.step})
 
+    @handles(SkillLoadedEvent)
     def _handle_skill_loaded(self, event: SkillLoadedEvent) -> None:
         payload = {"name": event.skill_name, "description": event.description or ""}
         if event.session_id:
             payload["session_id"] = event.session_id
         self._emit("skill_loaded", payload)
 
+    @handles(SkillLoadFailedEvent)
     def _handle_skill_load_failed(self, event: SkillLoadFailedEvent) -> None:
         self._emit("warning", {"message": f"Failed to load skill '{event.skill_name}': {event.error_message}"})
 
+    @handles(SkillUnloadedEvent)
     def _handle_skill_unloaded(self, event: SkillUnloadedEvent) -> None:
         payload = {"name": event.skill_name}
         if event.session_id:
             payload["session_id"] = event.session_id
         self._emit("skill_unloaded", payload)
 
+    @handles(FileReadEvent, FileWriteEvent)
     def _handle_file_io(self, event) -> None:
         self._emit(
             _FILE_IO_EVENTS[type(event)],
@@ -187,12 +169,15 @@ class JSONLUIHandler:
             },
         )
 
+    @handles(SecretAccessEvent)
     def _handle_secret_access(self, event: SecretAccessEvent) -> None:
         self._emit("secret_access", {"name": event.name})
 
+    @handles(ToolCallEvent)
     def _handle_tool_call(self, event: ToolCallEvent) -> None:
         self._emit("tool_call", {"tool": event.tool_name, "arguments": event.arguments, "step": event.step})
 
+    @handles(ToolResultEvent)
     def _handle_tool_result(self, event: ToolResultEvent) -> None:
         self._emit(
             "tool_result_audit",
@@ -205,18 +190,23 @@ class JSONLUIHandler:
             },
         )
 
+    @handles(InfoEvent)
     def _handle_info(self, event: InfoEvent) -> None:
         self._emit("info", {"message": event.message})
 
+    @handles(PromptSnapshotEvent)
     def _handle_prompt_snapshot(self, event: PromptSnapshotEvent) -> None:
         self._emit("prompt_snapshot", {"token_breakdown": event.token_breakdown})
 
+    @handles(ReasoningContentEvent)
     def _handle_reasoning_content(self, event: ReasoningContentEvent) -> None:
         self._emit("reasoning_content", {"content": event.content, "step": event.step})
 
+    @handles(ReasoningTokensEvent)
     def _handle_reasoning_tokens(self, event: ReasoningTokensEvent) -> None:
         self._emit("reasoning_tokens", {"tokens": event.tokens, "step": event.step})
 
+    @handles(LLMWaitProgressEvent)
     def _handle_llm_wait_progress(self, event: LLMWaitProgressEvent) -> None:
         self._emit("llm_wait_progress", {"elapsed_seconds": event.elapsed_seconds})
 

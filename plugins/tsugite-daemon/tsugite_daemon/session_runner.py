@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
 
+from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.session_store import (
     Session,
@@ -45,21 +46,13 @@ def set_current_chain_depth(depth: int) -> None:
 _TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress"})
 
 
-class LoggingProgressHandler:
+class LoggingProgressHandler(JSONLUIHandler):
     """Wraps SSE event emission to also append events to the session JSONL log and broadcast via SSE."""
 
     def __init__(self, store: SessionStore, session_id: str, broadcaster=None):
         self._store = store
         self._session_id = session_id
         self._broadcaster = broadcaster
-
-    def handle_event(self, event) -> None:
-        """Handle BaseEvent from EventBus — delegate to JSONLUIHandler's logic."""
-        from tsugite.ui.jsonl import JSONLUIHandler
-
-        handler_name = JSONLUIHandler._DISPATCH.get(type(event))
-        if handler_name:
-            getattr(JSONLUIHandler, handler_name)(self, event)
 
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         event = {"type": event_type, "timestamp": datetime.now(timezone.utc).isoformat(), **data}
