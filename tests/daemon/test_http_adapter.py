@@ -1177,9 +1177,9 @@ class TestWorkspaceRawEndpoint:
         assert resp.status_code == 401
 
     def test_oversize_is_413(self, client, test_token, tmp_workspace, monkeypatch):
-        import tsugite_daemon.adapters.http.agents as agents_mod
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
 
-        monkeypatch.setattr(agents_mod, "MAX_WORKSPACE_RAW_SIZE", 4)
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_RAW_SIZE", 4)
         (tmp_workspace / "big.png").write_bytes(self.IMG_BYTES)
         resp = self._get(client, test_token, "big.png")
         assert resp.status_code == 413
@@ -1236,11 +1236,11 @@ class TestWorkspaceListEndpoint:
         assert "link/secret.md" not in paths
 
     def test_recursive_caps_and_flags_truncation(self, client, test_token, tmp_workspace, monkeypatch):
-        import tsugite_daemon.adapters.http.agents as agents_mod
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
 
         for i in range(5):
             (tmp_workspace / f"f{i}.md").write_text("x\n")
-        monkeypatch.setattr(agents_mod, "MAX_WORKSPACE_ENTRIES", 2)
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 2)
         resp = self._get(client, test_token, "?recursive=1")
         assert resp.status_code == 200, resp.text
         body = resp.json()

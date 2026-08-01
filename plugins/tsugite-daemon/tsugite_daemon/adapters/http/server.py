@@ -17,6 +17,7 @@ from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
     logger,
 )
+from tsugite_daemon.adapters.http.hooks_config import HooksConfigMixin
 from tsugite_daemon.adapters.http.introspection import IntrospectionMixin
 from tsugite_daemon.adapters.http.jobs import JobsMixin
 from tsugite_daemon.adapters.http.push import PushMixin
@@ -31,12 +32,15 @@ from tsugite_daemon.adapters.http.static import StaticMixin
 from tsugite_daemon.adapters.http.terminals import TerminalsMixin
 from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
+from tsugite_daemon.adapters.http.workspace_files import WorkspaceFilesMixin
 from tsugite_daemon.config import AgentConfig, HTTPConfig
 from tsugite_daemon.webhook_store import WebhookStore
 
 
 class HTTPServer(
     AgentsMixin,
+    WorkspaceFilesMixin,
+    HooksConfigMixin,
     SessionsMixin,
     SchedulesMixin,
     JobsMixin,
@@ -181,6 +185,8 @@ class HTTPServer(
         routes = [
             *self._core_routes(),
             *self._agent_routes(),
+            *self._workspace_routes(),
+            *self._hooks_routes(),
             *self._session_routes(),
             *self._schedule_routes(),
             *self._job_routes(),
