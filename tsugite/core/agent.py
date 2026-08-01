@@ -739,25 +739,34 @@ class TsugiteAgent:
 
         async with self._llm_wait_heartbeat():
             if stream:
-                return await self._provider_turn_streaming(messages, turn_num)
-            return await self._provider_turn_blocking(messages, turn_num)
+                response = await self._consume_stream(messages, turn_num)
+            else:
+                response: ProviderResponse = await self._provider.acompletion(
+                    messages=messages, model=self._model_id, stream=False, **self._model_kwargs
+                )
 
-    async def _provider_turn_streaming(self, messages, turn_num) -> TurnResult:
-        accumulated_content = ""
-        accumulated_reasoning = ""
-        step_cost = 0.0
+        return self._settle_turn(response, turn_num, already_delivered_live=stream)
+
+    async def _consume_stream(self, messages, turn_num) -> ProviderResponse:
+        """Drain the chunk stream into the same response shape a blocking call returns.
+
+        Chunks are surfaced live as they arrive; the accumulated result then goes
+        through the identical settling path, so the two modes cannot drift.
+        """
+        content = ""
+        reasoning = ""
         final_chunk = None
-        result = await self._provider.acompletion(
+
+        chunks = await self._provider.acompletion(
             messages=messages, model=self._model_id, stream=True, **self._model_kwargs
         )
-
-        async for chunk in result:
+        async for chunk in chunks:
             if chunk.content:
-                accumulated_content += chunk.content
+                content += chunk.content
                 if self.event_bus:
                     self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
             if getattr(chunk, "reasoning_content", ""):
-                accumulated_reasoning += chunk.reasoning_content
+                reasoning += chunk.reasoning_content
                 if self.event_bus:
                     self.event_bus.emit(ReasoningContentEvent(content=chunk.reasoning_content, step=turn_num + 1))
             if chunk.done:
@@ -766,54 +775,30 @@ class TsugiteAgent:
         if self.event_bus:
             self.event_bus.emit(StreamCompleteEvent())
 
-        if final_chunk and final_chunk.usage:
-            step_cost = self._accumulate_usage(final_chunk.usage, final_chunk.cost)
-
-        accumulated_content, spoofed = escape_runtime_injection_tags(accumulated_content)
-        parsed = self._parse_response_from_text(accumulated_content)
-        if accumulated_reasoning:
-            self.memory.add_reasoning(accumulated_reasoning)
-            self._record_reasoning(accumulated_reasoning)
-        self._record_model_response(
-            turn_num,
-            raw_content=accumulated_content,
-            parsed=parsed,
+        # No `raw`: chunks carry no provider envelope, so a streamed turn
+        # persists stop_reason=None where a blocking one records the real value.
+        return ProviderResponse(
+            content=content,
+            reasoning_content=reasoning or None,
             usage=final_chunk.usage if final_chunk else None,
             cost=final_chunk.cost if final_chunk else None,
-            response=None,
         )
 
-        synthetic = ProviderResponse(content=accumulated_content)
-        return TurnResult(
-            thought=parsed.thought,
-            code=parsed.code,
-            step_cost=step_cost,
-            content_blocks=parsed.content_blocks,
-            response=synthetic,
-            num_code_blocks=parsed.num_code_blocks,
-            spoofed_runtime_tag=spoofed,
-            has_bare_python=parsed.has_bare_python,
-        )
+    def _settle_turn(self, response: ProviderResponse, turn_num: int, *, already_delivered_live: bool) -> TurnResult:
+        """Escape, parse, account and record one model turn.
 
-    async def _provider_turn_blocking(self, messages, turn_num) -> TurnResult:
-        response: ProviderResponse = await self._provider.acompletion(
-            messages=messages, model=self._model_id, stream=False, **self._model_kwargs
-        )
+        `already_delivered_live` gates only the two aggregate emissions that
+        would otherwise replay what the chunk stream already showed the user.
+        """
         response.content, spoofed = escape_runtime_injection_tags(response.content)
         parsed = self._parse_response_from_text(response.content)
 
-        step_cost = response.cost or 0.0
-        if response.usage:
-            self._accumulate_usage(response.usage, response.cost)
-        else:
-            if response.cost is not None:
-                self.cost_reported = True
-            self.total_cost += step_cost
+        step_cost = self._accumulate_usage(response.usage, response.cost)
 
         if response.reasoning_content:
             self.memory.add_reasoning(response.reasoning_content)
             self._record_reasoning(response.reasoning_content)
-            if self.event_bus:
+            if self.event_bus and not already_delivered_live:
                 self.event_bus.emit(ReasoningContentEvent(content=response.reasoning_content, step=turn_num + 1))
 
         if self.event_bus and response.usage and response.usage.reasoning_tokens:
@@ -822,7 +807,8 @@ class TsugiteAgent:
         # Only emit thought prose. Falling back to response.content would include the
         # raw ```python-exec fence, causing the UI to render the code block twice (once
         # inside the thought markdown, once as a separate code-execution event).
-        if self.event_bus and parsed.thought and parsed.thought.strip():
+        # Streaming already delivered this prose chunk by chunk.
+        if self.event_bus and not already_delivered_live and parsed.thought and parsed.thought.strip():
             self.event_bus.emit(
                 LLMMessageEvent(content=parsed.thought, title=f"Turn {turn_num + 1} Reasoning", step=turn_num + 1)
             )
@@ -1292,10 +1278,18 @@ class TsugiteAgent:
         return self.total_cost if (self.cost_reported or self.total_cost > 0) else None
 
     def _accumulate_usage(self, usage, cost: float | None = None) -> float:
-        """Update cumulative token/cost counters from a usage object.
+        """Update cumulative token/cost counters and return the step cost.
 
-        Returns the step cost for caller convenience.
+        `usage` may be None: providers on a subscription report a cost with no
+        token breakdown. Cost is always accounted; only the token half is gated,
+        so callers never need their own no-usage branch.
         """
+        if usage is None:
+            if cost is not None:
+                self.cost_reported = True
+            self.total_cost += cost or 0.0
+            return cost or 0.0
+
         self.total_tokens += usage.total_tokens
         self.last_input_tokens = (
             usage.prompt_tokens + (usage.cache_creation_input_tokens or 0) + (usage.cache_read_input_tokens or 0)
