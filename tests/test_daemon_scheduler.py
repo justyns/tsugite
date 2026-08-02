@@ -145,7 +145,12 @@ class TestNextRunComputation:
 
     def test_cron_with_timezone(self, scheduler):
         entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", timezone="US/Eastern"
+            id="job1",
+            agent="bot",
+            prompt="hi",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+            timezone="America/New_York",
         )
         scheduler.add(entry)
         stored = scheduler.get("job1")

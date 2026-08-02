@@ -55,14 +55,17 @@ def test_read_directory_as_file(temp_dir, file_tools):
         call_tool("read_file", path=str(directory))
 
 
-def test_write_file_error_handling(file_tools):
+def test_write_file_error_handling(temp_dir, file_tools):
     """Test write_file error handling."""
 
-    # Try to write to an invalid path (assuming /invalid doesn't exist and can't be created)
-    invalid_path = "/invalid/path/that/cannot/be/created/file.txt"
+    # Nest the target under a regular file: that is ENOTDIR for every user, so the
+    # error path is exercised even when the suite runs as root (CI containers do,
+    # and root would happily create a directory an unprivileged user could not).
+    blocker = temp_dir / "not-a-dir"
+    blocker.write_text("i am a file")
 
     with pytest.raises(RuntimeError, match="Tool 'write_file' failed"):
-        call_tool("write_file", path=invalid_path, content="test")
+        call_tool("write_file", path=str(blocker / "sub" / "file.txt"), content="test")
 
 
 def test_list_files_basic(temp_dir, file_tools):
@@ -198,14 +201,16 @@ def test_create_directory_existing(temp_dir, file_tools):
     assert existing_dir.exists()
 
 
-def test_create_directory_error(file_tools):
+def test_create_directory_error(temp_dir, file_tools):
     """Test create_directory error handling."""
 
-    # Try to create directory where we don't have permissions
-    invalid_path = "/root/cannot_create_here"
+    # See test_write_file_error_handling: a regular file as the parent fails with
+    # ENOTDIR regardless of uid, unlike a permission-based path such as /root.
+    blocker = temp_dir / "not-a-dir"
+    blocker.write_text("i am a file")
 
     with pytest.raises(RuntimeError, match="Tool 'create_directory' failed"):
-        call_tool("create_directory", path=invalid_path)
+        call_tool("create_directory", path=str(blocker / "sub"))
 
 
 def test_file_tools_integration(temp_dir, file_tools):

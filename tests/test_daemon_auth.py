@@ -300,3 +300,27 @@ class TestCliTokensPathResolution:
         assert (
             _get_tokens_path(tmp_path / "nonexistent.yaml") == tmp_path / "data" / "tsugite" / "daemon" / "tokens.json"
         )
+
+
+class TestConcurrentValidation:
+    def test_concurrent_validate_never_spuriously_rejects(self, tmp_path):
+        """A persistent token lives in SQLite, and the daemon authenticates
+        requests from many threads at once. The shared connection is not
+        internally synchronized (see SqliteCollectionStorage), so an unguarded
+        read can raise `sqlite3.InterfaceError: bad parameter or other API
+        misuse` mid-query; validate() then reports a perfectly good token as
+        invalid and the caller gets a spurious 401.
+        """
+        import concurrent.futures
+
+        store = TokenStore(tmp_path / "tokens.json")
+        _t, raw = store.create_admin_token(name="concurrent")
+
+        def check(_):
+            return store.validate(raw)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(check, range(400)))
+
+        bad = [r for r in results if r != (True, "admin:concurrent")]
+        assert not bad, f"{len(bad)} of {len(results)} concurrent validations rejected a valid token: {bad[:3]}"
