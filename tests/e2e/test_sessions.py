@@ -6,7 +6,7 @@ import re
 from playwright.sync_api import expect
 from tsugite_daemon.session_store import Session, SessionSource
 
-from tsugite.history.storage import generate_session_id
+from tsugite.history import generate_session_id
 
 from .helpers import E2E_USER_ID, wait_for_authed
 

@@ -13,7 +13,7 @@ import json
 import pytest
 from tsugite_daemon.session_store import Session, SessionSource
 
-from tsugite.history.storage import generate_session_id
+from tsugite.history import generate_session_id
 
 from .helpers import E2E_USER_ID, open_view, wait_for_authed
 
