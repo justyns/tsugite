@@ -25,7 +25,7 @@ Standard event types (documented for reference; runtime treats `type` as opaque)
 """
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, Iterable, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
