@@ -12,7 +12,7 @@ from tsugite_daemon.memory import (
     track_compaction_usage,
 )
 
-from tsugite.history import SessionStorage, events_to_messages
+from tsugite.history import events_to_messages, get_history_backend
 from tsugite.history.models import Event
 from tsugite.providers.base import CompletionResponse, Usage
 
@@ -159,12 +159,10 @@ class TestCompactionWritesEventInPlace:
         """A compacted session's JSONL begins with session_start, then a
         compaction event whose data carries the summary, then the retained
         events."""
-        new_session_path = tmp_path / "post.jsonl"
-        storage = SessionStorage.create(
+        storage = get_history_backend().create(
             agent_name="agent",
             model="openai:gpt-4o-mini",
             parent_session="old-session-id",
-            session_path=new_session_path,
         )
         storage.record(
             "compaction",

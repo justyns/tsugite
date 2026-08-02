@@ -12,6 +12,8 @@ from tsugite_daemon.config import AgentConfig, HTTPConfig
 from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite_daemon.webhook_store import WebhookStore
 
+from tests.history_helpers import seed_history_session
+
 
 @pytest.fixture
 def tmp_workspace(tmp_path):
@@ -705,9 +707,10 @@ class TestWebhookEndpoint:
 class TestHistoryEndpoint:
     @pytest.fixture(autouse=True)
     def _jsonl(self):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        set_history_backend(JsonlHistoryBackend())
+        set_history_backend(SqliteHistoryBackend())
         yield
 
     def test_history_empty_for_new_user(self, client, test_token):
@@ -733,13 +736,8 @@ class TestHistoryEndpoint:
 
     def test_history_returns_event_stream(self, client, test_token, mock_adapter, tmp_path):
         """The history endpoint returns the raw event log (session_start, user_input, model_response, ...)."""
-        from tsugite.history.storage import SessionStorage, get_history_dir
-
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_path = get_history_dir() / f"{session.id}.jsonl"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
-
-        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="hello")
         storage.record("model_response", raw_content="hi", usage={"total_tokens": 5})
         storage.record("session_end", status="success")
@@ -758,13 +756,8 @@ class TestHistoryEndpoint:
 
     def test_history_includes_ui_events(self, client, test_token, mock_adapter, tmp_path):
         """UI events from the live session event log appear as their own events in history."""
-        from tsugite.history.storage import SessionStorage, get_history_dir
-
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_path = get_history_dir() / f"{session.id}.jsonl"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
-
-        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="hello")
         storage.record("model_response", raw_content="hi")
 
@@ -786,13 +779,8 @@ class TestHistoryEndpoint:
 
     def test_history_preserves_execution_result(self, client, test_token, mock_adapter, tmp_path):
         """Code execution events round-trip through the endpoint with output, error, duration."""
-        from tsugite.history.storage import SessionStorage, get_history_dir
-
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
-        session_path = get_history_dir() / f"{session.id}.jsonl"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
-
-        storage = SessionStorage.create("test-agent", model="test", session_path=session_path)
+        storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="go")
         storage.record("model_response", raw_content="```python-exec\nprint('hi')\n```")
         storage.record("code_execution", code="print('hi')", output="hi\n", duration_ms=12)

@@ -1,52 +1,30 @@
 """Regression tests for HTTPServer._collect_events.
 
-Single-file semantics: only the requested session's JSONL is read. The
+Single-session semantics: only the requested session's events are read. The
 predecessor chain (via `parent_session` in `session_start`) is intentionally
-not walked — the new file's leading `compaction` event already carries the
+not walked — the new session's leading `compaction` event already carries the
 canonical pre-compaction summary, so re-rendering predecessor events would
 duplicate context the agent already received.
 
 Two correctness axes:
-- chronological order of returned events (oldest first) within the single file
-- limit-driven trimming applied within the single file
+- chronological order of returned events (oldest first) within the session
+- limit-driven trimming applied within the session
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 from tsugite_daemon.adapters.http import HTTPServer
 
-from tsugite.history import SessionStorage
+from tests.history_helpers import seed_history_session
 
 
-@pytest.fixture
-def history_dir(tmp_path: Path):
-    h = tmp_path / "history"
-    h.mkdir()
-    # _collect_events now reads through the history backend, which resolves storage.get_history_dir.
-    with patch("tsugite.history.storage.get_history_dir", return_value=h):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-        set_history_backend(JsonlHistoryBackend())
-        yield h
-
-
-def _seed_session(history_dir: Path, sid: str, *, parent: str | None = None, n_user_inputs: int = 5) -> Path:
-    path = history_dir / f"{sid}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="t",
-        model="m",
-        session_path=path,
-        parent_session=parent,
-    )
+def _seed_session(history_dir: Path, sid: str, *, parent: str | None = None, n_user_inputs: int = 5) -> None:
+    storage = seed_history_session(sid, agent="t", model="m", parent_session=parent)
     for i in range(n_user_inputs):
         storage.record("user_input", text=f"{sid}-input-{i}")
         storage.record("model_response", raw_content=f"{sid}-resp-{i}")
-    return path
 
 
 def test_single_file_returns_chronological(history_dir):
@@ -56,13 +34,12 @@ def test_single_file_returns_chronological(history_dir):
     assert [e["data"]["text"] for e in user_inputs] == ["solo-input-0", "solo-input-1", "solo-input-2"]
 
 
-def test_predecessor_file_not_read(history_dir, jsonl_open_spy):
-    """Parent session's events must NOT appear in the result. The new file's
+def test_predecessor_session_not_merged(history_dir):
+    """Parent session's events must NOT appear in the result. The new session's
     leading `compaction` event is the canonical pre-compaction context — the
     raw predecessor events would duplicate it."""
     _seed_session(history_dir, "p", n_user_inputs=2)
     _seed_session(history_dir, "c", parent="p", n_user_inputs=2)
-    jsonl_open_spy.clear()
 
     events = HTTPServer._collect_events("c", limit=0)
 
@@ -71,8 +48,9 @@ def test_predecessor_file_not_read(history_dir, jsonl_open_spy):
         "c-input-0",
         "c-input-1",
     ], "Only the requested session's user_inputs should appear; predecessor must not be merged"
-    parent_opens = [p for p in jsonl_open_spy if p.endswith("p.jsonl")]
-    assert parent_opens == [], f"Predecessor file should never be opened: {jsonl_open_spy}"
+    assert not [e for e in events if e.get("data", {}).get("text", "").startswith("p-")], (
+        "No predecessor event should appear in the result"
+    )
 
 
 def test_limit_keeps_last_n_user_inputs(history_dir):
@@ -103,16 +81,10 @@ def test_missing_session_returns_empty(history_dir):
 
 
 def test_circular_parent_self_reference_handled(history_dir):
-    """Defensive: a malformed file whose session_start.parent_session points
-    back at itself shouldn't matter (we don't walk parents anyway), but the
-    single-file read must still complete cleanly."""
-    p = history_dir / "loop.jsonl"
-    p.write_text(
-        json.dumps({"type": "session_start", "ts": "2026-01-01T00:00:00+00:00", "data": {"parent_session": "loop"}})
-        + "\n"
-        + json.dumps({"type": "user_input", "ts": "2026-01-01T00:00:01+00:00", "data": {"text": "hi"}})
-        + "\n"
-    )
+    """A session naming itself as parent must not send the walk into a loop."""
+    storage = seed_history_session("loop", agent="t", model="m", parent_session="loop")
+    storage.record("user_input", text="hi")
+
     events = HTTPServer._collect_events("loop", limit=0)
     user_inputs = [e for e in events if e.get("type") == "user_input"]
     assert len(user_inputs) == 1

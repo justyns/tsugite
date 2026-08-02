@@ -2,16 +2,14 @@
 
 A `HistoryBackend` owns session lifecycle (create / load / list / metadata) keyed
 by conversation id; a `Session` is the per-conversation read/write handle it returns.
-The default `JsonlHistoryBackend` (storage.py) wraps one JSONL file per session; a
-plugin backend (e.g. postgres) answers the same calls from its own store.
+`SqliteHistoryBackend` is the built-in implementation; a plugin backend (e.g.
+postgres) answers the same calls from its own store.
 """
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Protocol, runtime_checkable
 
-from .models import Event
-from .storage import SessionSummary
+from .models import Event, SessionSummary
 
 
 @runtime_checkable
@@ -87,8 +85,6 @@ class HistoryBackend(Protocol):
     def search(self, query: str, *, agent: Optional[str] = None, limit: int = 50) -> List[dict]: ...
 
     def export_jsonl(self, session_id: str) -> Iterator[str]: ...
-
-    def import_jsonl(self, paths: Iterable[Path], *, dry_run: bool = False) -> dict: ...
 
     def create_branch(
         self,

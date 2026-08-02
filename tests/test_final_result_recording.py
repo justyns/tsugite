@@ -12,7 +12,7 @@ import pytest
 
 from tsugite.agent_runner.history_integration import record_final_result
 from tsugite.core.agent import TsugiteAgent
-from tsugite.history import SessionStorage
+from tsugite.history import Session, get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 
 
@@ -32,8 +32,8 @@ def _patch(agent, *, side_effect=None, return_value=None):
     return mock
 
 
-def _storage(tmp_path: Path) -> SessionStorage:
-    return SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+def _storage(tmp_path: Path) -> Session:
+    return get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
 
 
 def _finals(storage):

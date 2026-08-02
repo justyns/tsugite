@@ -14,6 +14,7 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.session_store import SessionStore
 
+from tests.history_helpers import seed_history_session
 from tsugite.history.models import Event
 
 
@@ -109,14 +110,14 @@ class TestCompactionTopic:
 
     @pytest.fixture(autouse=True)
     def _jsonl(self):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        set_history_backend(JsonlHistoryBackend())
+        set_history_backend(SqliteHistoryBackend())
         yield
 
     @pytest.mark.asyncio
     async def test_topic_appears_in_compaction_prompt(self, adapter, tmp_path):
-        from tsugite.history import SessionStorage
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -124,12 +125,7 @@ class TestCompactionTopic:
         session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
         adapter.session_store.set_metadata_bulk(session.id, {"topic": "focus this week is plugin sandboxing"})
 
-        session_path = history_dir / f"{session.id}.jsonl"
-        storage = SessionStorage.create(
-            agent_name="test-agent",
-            model="anthropic:claude-sonnet-4-5",
-            session_path=session_path,
-        )
+        storage = seed_history_session(session.id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
         for i in range(4):
             storage.record("user_input", text=f"message {i}")
             storage.record("model_response", raw_content=f"reply {i}")
@@ -155,8 +151,7 @@ class TestCompactionTopic:
                 return_value=(old_events, recent_events),
             ),
             patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
-            patch("tsugite.history.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(session.id)
@@ -167,7 +162,6 @@ class TestCompactionTopic:
 
     @pytest.mark.asyncio
     async def test_no_topic_no_block_in_compaction(self, adapter, tmp_path):
-        from tsugite.history import SessionStorage
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
@@ -175,12 +169,7 @@ class TestCompactionTopic:
         session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
         # No topic set.
 
-        session_path = history_dir / f"{session.id}.jsonl"
-        storage = SessionStorage.create(
-            agent_name="test-agent",
-            model="anthropic:claude-sonnet-4-5",
-            session_path=session_path,
-        )
+        storage = seed_history_session(session.id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
         for i in range(2):
             storage.record("user_input", text=f"m {i}")
             storage.record("model_response", raw_content=f"r {i}")
@@ -202,8 +191,7 @@ class TestCompactionTopic:
                 return_value=(old_events, recent_events),
             ),
             patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
-            patch("tsugite.history.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(session.id)

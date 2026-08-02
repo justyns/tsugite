@@ -13,11 +13,11 @@ a turn runs from its `user_input` to its `session_end`, so an already-recorded
 from pathlib import Path
 
 from tsugite.agent_runner.history_integration import record_user_input, save_run_to_history
-from tsugite.history import SessionStorage, get_history_backend
+from tsugite.history import Session, get_history_backend
 
 
-def _storage(tmp_path: Path) -> SessionStorage:
-    return SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+def _storage(tmp_path: Path) -> Session:
+    return get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
 
 
 def _user_inputs(storage):

@@ -100,16 +100,7 @@ def history_list(
 
         if not session_ids:
             console.print("[yellow]No conversations found[/yellow]")
-            from tsugite.history import list_session_files
-
-            legacy = list_session_files()
-            if legacy and not any(backend.exists(f.stem) for f in legacy[:50]):
-                console.print(
-                    f"[dim]Found {len(legacy)} legacy JSONL file(s) not yet in the database. "
-                    "Run [/dim][cyan]tsugite history import[/cyan][dim] to migrate them.[/dim]"
-                )
-            else:
-                console.print("Conversations are saved automatically when you use chat mode.")
+            console.print("Conversations are saved automatically when you use chat mode.")
             return
 
         table = Table(title="Conversation History")
@@ -559,88 +550,6 @@ def migrate_daemon_sessions(daemon_dir: Path, history_dir: Path, *, backup: bool
         merged += 1
 
     return (merged, skipped)
-
-
-@history_app.command("migrate")
-def history_migrate(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would change without writing"),
-    backup: bool = typer.Option(True, "--backup/--no-backup", help="Keep .bak copies of originals"),
-):
-    """Convert pre-event-log session JSONLs to the per-event format.
-
-    Scans:
-      - the main history dir
-      - each workspace's archived sessions
-      - the legacy daemon UI event log (merged into matching history files)
-
-    Runs idempotently — already-new files are skipped.
-    """
-    from tsugite.config import get_xdg_data_path
-    from tsugite.history import get_history_dir
-
-    history_dir = get_history_dir()
-    data_root = get_xdg_data_path("")  # ~/.local/share/tsugite/
-
-    total_migrated = total_skipped = total_failed = 0
-
-    console.print(f"[bold]Scanning history dir:[/bold] {history_dir}")
-    m, s, f = migrate_path(history_dir, backup=backup, dry_run=dry_run, recursive=False)
-    total_migrated += m
-    total_skipped += s
-    total_failed += f
-
-    workspaces_root = data_root / "workspaces"
-    if workspaces_root.exists():
-        console.print(f"\n[bold]Scanning workspace archives:[/bold] {workspaces_root}")
-        for ws in sorted(p for p in workspaces_root.iterdir() if p.is_dir()):
-            sessions_dir = ws / "sessions"
-            if sessions_dir.exists():
-                m, s, f = migrate_path(sessions_dir, backup=backup, dry_run=dry_run, recursive=False)
-                total_migrated += m
-                total_skipped += s
-                total_failed += f
-
-    daemon_dir = data_root / "daemon" / "sessions"
-    if daemon_dir.exists():
-        console.print(f"\n[bold]Merging legacy daemon event log:[/bold] {daemon_dir}")
-        merged, skipped = migrate_daemon_sessions(daemon_dir, history_dir, backup=backup, dry_run=dry_run)
-        total_migrated += merged
-        total_skipped += skipped
-
-    verb = "Would migrate" if dry_run else "Migrated"
-    console.print(
-        f"\n[bold]{verb}:[/bold] {total_migrated}  [dim]skipped:[/dim] {total_skipped}  [dim]failed:[/dim] {total_failed}"
-    )
-    if not dry_run and backup and total_migrated:
-        console.print("[dim]Originals saved as *.bak — delete when satisfied.[/dim]")
-
-
-@history_app.command("import")
-def history_import(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would import without writing"),
-):
-    """Import legacy per-session JSONL files into the SQLite history database.
-
-    Idempotent — sessions already in the database are skipped. Original JSONL files are
-    left untouched as a backup. Run `history migrate` first to fold in legacy daemon logs.
-    """
-    from tsugite.history import get_history_dir
-    from tsugite.history.sqlite_backend import SqliteHistoryBackend
-
-    history_dir = get_history_dir()
-    files = sorted(history_dir.glob("*.jsonl"))
-    if not files:
-        console.print(f"[dim]No JSONL session files found in {history_dir}[/dim]")
-        return
-
-    report = SqliteHistoryBackend().import_jsonl(files, dry_run=dry_run)
-    verb = "Would import" if dry_run else "Imported"
-    console.print(
-        f"[bold]{verb}:[/bold] {report['imported']}  [dim]skipped:[/dim] {report['skipped']}"
-        f"  [dim]without session_start:[/dim] {report['no_session_start']}"
-    )
-    if not dry_run and report["imported"]:
-        console.print("[dim]Original JSONL files kept as backup.[/dim]")
 
 
 @history_app.command("export")

@@ -23,6 +23,7 @@ from tsugite_daemon.adapters.base import BaseAdapter
 from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
+from tests.history_helpers import seed_history_session
 from tsugite.history.models import Event
 
 
@@ -39,26 +40,8 @@ def workspace_dir(tmp_path):
     return tmp_path / "workspace"
 
 
-@pytest.fixture
-def history_dir(tmp_path):
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-    d = tmp_path / "history"
-    d.mkdir()
-    # These tests assert on JSONL file structure; drive the gateway with jsonl
-    # (the autouse reset_history_backend_fixture restores the default afterward).
-    set_history_backend(JsonlHistoryBackend())
-    return d
-
-
-def _seed_session_events(session_path, count=6):
-    from tsugite.history import SessionStorage
-
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="anthropic:claude-sonnet-4-5",
-        session_path=session_path,
-    )
+def _seed_session_events(session_id, count=6):
+    storage = seed_history_session(session_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
     for i in range(count):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
@@ -82,8 +65,7 @@ def _patches(history_dir):
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ]
 
@@ -97,7 +79,7 @@ async def test_compact_session_returns_new_session(workspace_dir, history_dir, t
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -126,7 +108,7 @@ async def test_post_compaction_counters_update(workspace_dir, history_dir, tmp_p
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -162,7 +144,7 @@ async def test_post_compaction_seeds_token_estimate(workspace_dir, history_dir, 
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -205,7 +187,7 @@ async def test_compact_session_for_named_session_returns_correct_id(workspace_di
     store.create_session(named)
     store.update_token_count(named.id, 100)
 
-    _seed_session_events(history_dir / f"{named_id}.jsonl")
+    _seed_session_events(named_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -233,7 +215,7 @@ async def test_compact_session_returns_none_when_nothing_to_compact(workspace_di
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl", count=2)
+    _seed_session_events(conv_id, count=2)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -248,8 +230,7 @@ async def test_compact_session_returns_none_when_nothing_to_compact(workspace_di
         # Empty old_events triggers the early-exit at base.py:753-755.
         patch("tsugite_daemon.memory.split_events_for_compaction", return_value=([], [])),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._compact_session(conv_id)

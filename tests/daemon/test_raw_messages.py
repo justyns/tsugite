@@ -10,30 +10,18 @@ loader, which must feed that core function the SAME ``Event`` objects resume rea
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 from tsugite_daemon.adapters.http.agents import _load_session_events
 
-from tsugite.history import SessionStorage, reconstruct_raw_turns
+from tests.history_helpers import seed_history_session
+from tsugite.history import reconstruct_raw_turns
 from tsugite.history.models import Event
-
-
-@pytest.fixture
-def history_dir(tmp_path: Path):
-    h = tmp_path / "history"
-    h.mkdir()
-    with patch("tsugite.history.storage.get_history_dir", return_value=h):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-        set_history_backend(JsonlHistoryBackend())
-        yield h
 
 
 def test_load_session_events_yields_event_objects_for_reconstruction(history_dir: Path):
     """The endpoint's event source must yield Event objects (not dicts) so the
     reconstruction matches what resume rebuilds."""
-    storage = SessionStorage.create(agent_name="t", model="m", session_path=history_dir / "sess.jsonl")
+    storage = seed_history_session("sess", agent="t", model="m")
     storage.record("user_input", text="hi")
     storage.record("model_request", turn=0, provider="anthropic", model="claude-x")
     storage.record("model_response", turn=0, provider="anthropic", model="claude-x", raw_content="done")

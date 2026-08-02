@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tsugite.core.agent import TsugiteAgent
-from tsugite.history import SessionStorage
+from tsugite.history import get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 
 
@@ -44,7 +44,7 @@ def _code_exec_event(storage):
 
 @pytest.mark.asyncio
 async def test_return_value_dict_records_expr_and_type(tmp_path: Path):
-    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = _agent(storage)
     _patch(agent, return_value=_resp('```python-exec\nreturn_value({"a": 1, "b": [1, 2, 3]})\n```'))
 
@@ -58,7 +58,7 @@ async def test_return_value_dict_records_expr_and_type(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_trailing_statement_has_no_return_value(tmp_path: Path):
-    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = _agent(storage)
     calls = 0
 
@@ -79,7 +79,7 @@ async def test_trailing_statement_has_no_return_value(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_non_serializable_return_value_stored_as_repr(tmp_path: Path):
-    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = _agent(storage)
     # A set is not JSON-serializable; recording must not attempt json.dumps on it.
     _patch(agent, return_value=_resp("```python-exec\nreturn_value({1, 2, 3})\n```"))

@@ -3,23 +3,12 @@ history — there shouldn't be a separate `daemon/sessions/` log."""
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from tsugite_daemon.session_store import SessionStore
 
-from tsugite.history import SessionStorage
-
-
-@pytest.fixture
-def history_dir(tmp_path: Path):
-    h = tmp_path / "history"
-    h.mkdir()
-    with patch("tsugite.history.storage.get_history_dir", return_value=h):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-        set_history_backend(JsonlHistoryBackend())
-        yield h
+from tests.history_helpers import load_history_session, seed_history_session
+from tsugite.history import Session, get_history_backend
 
 
 @pytest.fixture
@@ -27,13 +16,9 @@ def store(tmp_path: Path, history_dir):
     return SessionStore(tmp_path / "session_store.json")
 
 
-def _make_history_session(history_dir: Path, session_id: str) -> SessionStorage:
+def _make_history_session(history_dir: Path, session_id: str) -> Session:
     """Pre-create a history file so append_event has a target."""
-    return SessionStorage.create(
-        agent_name="test",
-        model="m",
-        session_path=history_dir / f"{session_id}.jsonl",
-    )
+    return seed_history_session(session_id, agent="test", model="m")
 
 
 def test_append_event_writes_to_history_file(store, history_dir):
@@ -41,7 +26,7 @@ def test_append_event_writes_to_history_file(store, history_dir):
     _make_history_session(history_dir, sid)
     store.append_event(sid, {"type": "reaction", "emoji": "👍", "timestamp": "2026-01-01T00:00:00+00:00"})
 
-    storage = SessionStorage.load(history_dir / f"{sid}.jsonl")
+    storage = load_history_session(sid)
     types = [e.type for e in storage.iter_events()]
     assert "reaction" in types
     reaction = next(e for e in storage.iter_events() if e.type == "reaction")
@@ -75,11 +60,14 @@ def test_event_count_matches_appends(store, history_dir):
     assert store.event_count(sid) == 4
 
 
-def test_append_event_handles_missing_history_file_gracefully(store, history_dir):
-    """If no history file exists yet, append_event should create one."""
+def test_append_event_handles_missing_session_gracefully(store, history_dir):
+    """If the session doesn't exist yet, append_event should create it."""
+
     sid = "fresh-session"
     store.append_event(sid, {"type": "reaction", "emoji": "✨"})
-    assert (history_dir / f"{sid}.jsonl").exists()
+
+    assert get_history_backend().exists(sid)
+    assert [e.type for e in get_history_backend().load(sid).load_events()] == ["reaction"]
 
 
 class TestExtendedMigration:

@@ -6,7 +6,7 @@ import pytest
 
 from tsugite.core.agent import CONTEXT_ACK, TsugiteAgent, estimate_content_tokens
 from tsugite.events import EventType, PromptSnapshotEvent
-from tsugite.history import SessionStorage
+from tsugite.history import Session, get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 from tsugite.ui.jsonl import JSONLUIHandler
 
@@ -132,8 +132,8 @@ def _patch(agent, *, side_effect=None, return_value=None):
     return mock
 
 
-def _agent(tmp_path: Path, **kw) -> tuple[TsugiteAgent, SessionStorage]:
-    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+def _agent(tmp_path: Path, **kw) -> tuple[TsugiteAgent, Session]:
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[],

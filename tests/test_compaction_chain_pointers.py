@@ -16,24 +16,13 @@ import pytest
 from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.session_store import SessionStore
 
+from tests.history_helpers import load_history_session
 from tests.test_post_compaction_counters import _patches, _seed_session_events, _StubAdapter
-from tsugite.history import SessionStorage
 
 
 @pytest.fixture
 def workspace_dir(tmp_path):
     return tmp_path / "workspace"
-
-
-@pytest.fixture
-def history_dir(tmp_path):
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-    d = tmp_path / "history"
-    d.mkdir()
-    # These tests assert on JSONL file structure; drive the gateway with jsonl.
-    set_history_backend(JsonlHistoryBackend())
-    return d
 
 
 @pytest.mark.asyncio
@@ -46,7 +35,7 @@ async def test_new_session_compaction_event_carries_source_session_id(workspace_
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -58,7 +47,7 @@ async def test_new_session_compaction_event_carries_source_session_id(workspace_
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    new_events = load_history_session(new_session.id).load_events()
     leading_compaction = next(e for e in new_events if e.type == "compaction")
     assert leading_compaction.data.get("source_session_id") == conv_id
 
@@ -73,7 +62,7 @@ async def test_old_session_gets_compacted_into_terminal_event(workspace_dir, his
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -85,7 +74,7 @@ async def test_old_session_gets_compacted_into_terminal_event(workspace_dir, his
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    old_events = SessionStorage.load(history_dir / f"{conv_id}.jsonl").load_events()
+    old_events = load_history_session(conv_id).load_events()
     assert old_events[-1].type == "compacted_into", (
         f"expected last event to be 'compacted_into', got {old_events[-1].type}"
     )
@@ -109,7 +98,7 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl", count=2)
+    _seed_session_events(conv_id, count=2)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -124,13 +113,13 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
         patch("tsugite_daemon.memory.split_events_for_compaction", return_value=([], [])),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._compact_session(conv_id)
 
     assert result is None
-    old_events = SessionStorage.load(history_dir / f"{conv_id}.jsonl").load_events()
+    old_events = load_history_session(conv_id).load_events()
     assert all(e.type != "compacted_into" for e in old_events), (
         "early-exit must not write a forward pointer when no rotation happened"
     )
@@ -157,7 +146,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
     recent_events = [
@@ -189,19 +178,19 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
         patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    new_events = load_history_session(new_session.id).load_events()
     model_responses = [e for e in new_events if e.type == "model_response"]
     assert len(model_responses) == 1
     state_delta = model_responses[0].data.get("state_delta") or {}
     assert "session_id" not in state_delta, f"Retained model_response leaked pre-compaction session_id: {state_delta}"
 
-    with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+    with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
         info = get_resumable_session_state(new_session.id)
     assert info is None, f"Expected no resume target post-compaction, got {info}"
 
@@ -221,7 +210,7 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
     store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     old_ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
@@ -244,13 +233,13 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
         patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    new_events = load_history_session(new_session.id).load_events()
     assert all(e.type != "session_end" for e in new_events), "retained session_end must not be copied mid-file"
     carried = [e for e in new_events if e.type in ("user_input", "model_response")]
     assert carried, "expected carried turns in the new session"
@@ -268,7 +257,7 @@ async def test_compaction_session_start_records_effective_model_override(workspa
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
     store.set_model_override(conv_id, "codex_cli:gpt-5.5")
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -280,7 +269,7 @@ async def test_compaction_session_start_records_effective_model_override(workspa
         new_session = await adapter._compact_session(conv_id, reason="manual")
 
     assert new_session is not None
-    new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+    new_events = load_history_session(new_session.id).load_events()
     start = next(e for e in new_events if e.type == "session_start")
     assert start.data["model"] == "codex_cli:gpt-5.5"
 
@@ -316,7 +305,7 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
-    _seed_session_events(history_dir / f"{conv_id}.jsonl")
+    _seed_session_events(conv_id)
 
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "old"})]
     recent_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": "recent"})]
@@ -339,7 +328,7 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
         patch("tsugite.models.get_provider_and_model", return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini")),
         patch("tsugite.usage.get_usage_store", return_value=usage_store),
         patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         new_session = await adapter._compact_session(conv_id, reason="manual")

@@ -12,27 +12,15 @@ turn was in flight (or that was left RUNNING) when the previous daemon died.
 """
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
-from tsugite.history import SessionStorage
-
-
-@pytest.fixture
-def history_dir(tmp_path: Path):
-    h = tmp_path / "history"
-    h.mkdir()
-    with patch("tsugite.history.storage.get_history_dir", return_value=h):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
-
-        set_history_backend(JsonlHistoryBackend())
-        yield h
+from tests.history_helpers import load_history_session, seed_history_session
 
 
 def _seed_mid_turn_history(history_dir: Path, session_id: str) -> None:
-    storage = SessionStorage.create(agent_name="test", model="m", session_path=history_dir / f"{session_id}.jsonl")
+    storage = seed_history_session(session_id, agent="test", model="m")
     storage.record("user_input", text="do the thing")
     storage.record("turn_start", turn=1)
     storage.record("code", content="x = 1")
@@ -40,7 +28,7 @@ def _seed_mid_turn_history(history_dir: Path, session_id: str) -> None:
 
 
 def _event_types(history_dir: Path, session_id: str) -> list[str]:
-    storage = SessionStorage.load(history_dir / f"{session_id}.jsonl")
+    storage = load_history_session(session_id)
     return [e.type for e in storage.iter_events()]
 
 
@@ -85,7 +73,7 @@ def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, histor
 def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):
     store = SessionStore(tmp_path / "session_store.json")
     store.create_session(Session(id="s3", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
-    storage = SessionStorage.create(agent_name="test", model="m", session_path=history_dir / "s3.jsonl")
+    storage = seed_history_session("s3", agent="test", model="m")
     storage.record("user_input", text="hi")
     storage.record("session_end", status="success")
     before = _event_types(history_dir, "s3")

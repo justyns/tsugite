@@ -13,15 +13,17 @@ from tsugite_daemon.adapters.base import BaseAdapter
 from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.session_store import SessionStore
 
+from tests.history_helpers import seed_history_session
 from tsugite.history.models import Event
 
 
 @pytest.fixture(autouse=True)
 def _use_jsonl_backend():
     # These tests assert on JSONL file structure; drive the gateway with jsonl.
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
+    from tsugite.history import set_history_backend
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-    set_history_backend(JsonlHistoryBackend())
+    set_history_backend(SqliteHistoryBackend())
     yield
 
 
@@ -53,7 +55,6 @@ def workspace_dir(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_path):
-    from tsugite.history import SessionStorage
 
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -62,12 +63,7 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    session_path = history_dir / f"{conv_id}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="openai:gpt-4o-mini",
-        session_path=session_path,
-    )
+    storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
     for i in range(6):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
@@ -95,8 +91,7 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         await adapter._run_compaction("test-user", conv_id, reason="manual")
@@ -137,7 +132,6 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
 @pytest.mark.asyncio
 async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp_path):
     """Adapters without an attached event_bus (e.g. CLI) still complete cleanly."""
-    from tsugite.history import SessionStorage
 
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -146,12 +140,7 @@ async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    session_path = history_dir / f"{conv_id}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="openai:gpt-4o-mini",
-        session_path=session_path,
-    )
+    storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
     storage.record("user_input", text="hi")
     storage.record("model_response", raw_content="hello")
 
@@ -169,8 +158,7 @@ async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         result = await adapter._run_compaction("test-user", conv_id, reason="manual")

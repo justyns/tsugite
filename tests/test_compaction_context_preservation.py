@@ -19,15 +19,17 @@ from tsugite_daemon.config import AgentConfig
 from tsugite_daemon.memory import _llm_complete
 from tsugite_daemon.session_store import SessionStore
 
+from tests.history_helpers import seed_history_session
 from tsugite.history.models import Event
 
 
 @pytest.fixture(autouse=True)
 def _use_jsonl_backend():
     # These tests assert on JSONL file structure; drive the gateway with jsonl.
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
+    from tsugite.history import set_history_backend
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-    set_history_backend(JsonlHistoryBackend())
+    set_history_backend(SqliteHistoryBackend())
     yield
 
 
@@ -126,7 +128,6 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     context limits should equal their pre-compaction values, even if
     summarization's path mutates them mid-call.
     """
-    from tsugite.history import SessionStorage
 
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -137,12 +138,7 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    session_path = history_dir / f"{conv_id}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="anthropic:claude-sonnet-4-5",
-        session_path=session_path,
-    )
+    storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
     for i in range(6):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
@@ -171,8 +167,7 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new=fake_summarize_with_pollution),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         await adapter._compact_session(conv_id)
@@ -193,7 +188,6 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
     post-create token estimate, etc.). The snapshot must cover the whole
     `_compact_session` body so any path that mutates context_limit is restored.
     """
-    from tsugite.history import SessionStorage
 
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -204,12 +198,7 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    session_path = history_dir / f"{conv_id}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="anthropic:claude-sonnet-4-5",
-        session_path=session_path,
-    )
+    storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
     for i in range(6):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
@@ -242,8 +231,7 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new=clean_summarize),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new=post_summarize_pollution),
     ):
         await adapter._compact_session(conv_id)
@@ -259,7 +247,6 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
 @pytest.mark.asyncio
 async def test_compact_session_restores_even_on_summarize_failure(workspace_dir, tmp_path):
     """If summarization raises, context_limit must still be restored."""
-    from tsugite.history import SessionStorage
 
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -270,12 +257,7 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
     session = store.get_or_create_interactive("test-user", "test-agent")
     conv_id = session.id
 
-    session_path = history_dir / f"{conv_id}.jsonl"
-    storage = SessionStorage.create(
-        agent_name="test-agent",
-        model="anthropic:claude-sonnet-4-5",
-        session_path=session_path,
-    )
+    storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
     for i in range(4):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
@@ -302,8 +284,7 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
             return_value=(old_events, recent_events),
         ),
         patch("tsugite_daemon.memory.summarize_session", new=failing_summarize),
-        patch("tsugite.history.get_history_dir", return_value=history_dir),
-        patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+        patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ):
         with pytest.raises(RuntimeError, match="simulated summarization failure"):

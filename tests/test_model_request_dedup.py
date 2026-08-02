@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tsugite.core.agent import TsugiteAgent
-from tsugite.history import SessionStorage
+from tsugite.history import get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 
 
@@ -32,7 +32,7 @@ def _patch(agent, *, return_value=None):
 
 @pytest.mark.asyncio
 async def test_model_request_stores_hash_not_messages(tmp_path: Path):
-    storage = SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5, storage=storage)
     mock = _patch(agent, return_value=_resp("just text, no code"))
 

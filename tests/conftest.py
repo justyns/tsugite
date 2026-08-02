@@ -633,3 +633,25 @@ def jsonl_open_spy(monkeypatch):
     monkeypatch.setattr(builtins, "open", builtin_open)
     monkeypatch.setattr(Path, "open", path_open)
     return paths
+
+
+@pytest.fixture
+def history_dir(tmp_path):
+    """Isolated sqlite history rooted at a tmp dir, yielded as that dir.
+
+    Named `history_dir` because tests were written against the per-session JSONL
+    layout; the directory now holds `history.db` instead of one file per session,
+    and tests read sessions back through `get_history_backend()` rather than by
+    path. `sqlite_backend` binds `get_history_dir` at import time, so the patch
+    has to target its copy.
+    """
+    from unittest.mock import patch
+
+    h = tmp_path / "history"
+    h.mkdir(exist_ok=True)
+    with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=h):
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
+        set_history_backend(SqliteHistoryBackend())
+        yield h

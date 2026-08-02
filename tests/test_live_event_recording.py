@@ -6,18 +6,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.history_helpers import load_history_session, seed_history_session
 from tsugite.agent_runner.history_integration import save_run_to_history
-from tsugite.history import SessionStorage
 
 
 @pytest.fixture
 def history_dir(tmp_path: Path):
     history = tmp_path / "history"
     history.mkdir()
-    with patch("tsugite.history.storage.get_history_dir", return_value=history):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
+    with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history):
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        set_history_backend(JsonlHistoryBackend())
+        set_history_backend(SqliteHistoryBackend())
         yield history
 
 
@@ -30,11 +31,7 @@ def fake_agent_path(tmp_path: Path) -> Path:
 
 def test_save_run_to_history_idempotent_when_agent_already_recorded(history_dir, fake_agent_path):
     """If the agent recorded events live, save_run_to_history must not duplicate."""
-    storage = SessionStorage.create(
-        agent_name="fake",
-        model="openai:gpt-4o-mini",
-        session_path=history_dir / "live.jsonl",
-    )
+    storage = seed_history_session("live", agent="fake", model="openai:gpt-4o-mini")
     storage.record("user_input", text="hello")
     storage.record("code_execution", code="print('x')", output="x\n", duration_ms=5)
     storage.record("model_response", raw_content="Done.", usage={"total_tokens": 50})
@@ -58,11 +55,7 @@ def test_save_run_to_history_idempotent_when_agent_already_recorded(history_dir,
 
 def test_save_run_to_history_finalizes_when_agent_recorded_but_no_session_end(history_dir, fake_agent_path):
     """If the agent crashed mid-run after recording events, save adds session_end."""
-    storage = SessionStorage.create(
-        agent_name="fake",
-        model="openai:gpt-4o-mini",
-        session_path=history_dir / "crash.jsonl",
-    )
+    storage = seed_history_session("crash", agent="fake", model="openai:gpt-4o-mini")
     storage.record("user_input", text="hello")
     storage.record("model_response", raw_content="partial")
 
@@ -102,7 +95,7 @@ def test_save_run_to_history_legacy_path_writes_full_events(history_dir, fake_ag
             model="openai:gpt-4o-mini",
         )
 
-    storage = SessionStorage.load(history_dir / f"{session_id}.jsonl")
+    storage = load_history_session(session_id)
     types = [e.type for e in storage.iter_events()]
     assert types == ["session_start", "user_input", "model_response", "session_end"]
 
@@ -112,13 +105,8 @@ def test_run_agent_creates_storage_at_runtime(history_dir, fake_agent_path):
     on the instance — confirms the plumbing endpoint exists. (Integration is
     covered by the live CLI smoke run.)"""
     from tsugite.core.agent import TsugiteAgent
-    from tsugite.history import SessionStorage
 
-    storage = SessionStorage.create(
-        agent_name="t",
-        model="openai:gpt-4o-mini",
-        session_path=history_dir / "t.jsonl",
-    )
+    storage = seed_history_session("t", agent="t", model="openai:gpt-4o-mini")
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[],

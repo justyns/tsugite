@@ -1,6 +1,5 @@
 """Tests for scheduled task history injection into user sessions."""
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,10 +12,10 @@ from tsugite_daemon.scheduler import ScheduleEntry
 
 @pytest.fixture(autouse=True)
 def _use_jsonl_backend():
-    # Synthetic-turn injection asserts on JSONL files; drive the gateway with jsonl.
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
+    from tsugite.history import set_history_backend
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-    set_history_backend(JsonlHistoryBackend())
+    set_history_backend(SqliteHistoryBackend())
     yield
 
 
@@ -73,16 +72,20 @@ class TestRecordSyntheticTurn:
         return adapter
 
     def _record_and_load(self, tmp_path, session_id, result):
-        """Run _record_synthetic_turn and return parsed JSONL records."""
-        mock_adapter = self._mock_adapter(session_id)
-        session_path = tmp_path / "history" / f"{session_id}.jsonl"
-        session_path.parent.mkdir(parents=True, exist_ok=True)
+        """Run _record_synthetic_turn and return the events it recorded."""
+        from tsugite.history import get_history_backend, set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        with patch("tsugite.history.storage.get_history_dir", return_value=tmp_path / "history"):
+        mock_adapter = self._mock_adapter(session_id)
+        history = tmp_path / "history"
+        history.mkdir(parents=True, exist_ok=True)
+
+        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history):
+            set_history_backend(SqliteHistoryBackend())
             SchedulerAdapter._record_synthetic_turn(mock_adapter, "alice", _make_entry(), result)
 
-        assert session_path.exists()
-        return [json.loads(line) for line in session_path.read_text().strip().split("\n")]
+            assert get_history_backend().exists(session_id), "synthetic turn was never recorded"
+            return [{"type": e.type, "data": e.data} for e in get_history_backend().load(session_id).load_events()]
 
     def test_writes_synthetic_user_input_and_response(self, tmp_path):
         records = self._record_and_load(tmp_path, "test-session", "Task completed successfully")
@@ -347,12 +350,16 @@ class TestRecordSyntheticTurnWithResolver:
         adapter = self._make_real_adapter(store)
         entry = _make_entry(target_session="resolved-target")
 
+        from tsugite.history import get_history_backend, set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
+            set_history_backend(SqliteHistoryBackend())
             SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
 
-        assert (history_dir / "resolved-target.jsonl").exists()
+            assert get_history_backend().exists("resolved-target")
 
     def test_no_target_skips_injection(self, tmp_path):
         from tsugite_daemon.session_store import SessionStore
@@ -363,7 +370,7 @@ class TestRecordSyntheticTurnWithResolver:
 
         history_dir = tmp_path / "history"
         history_dir.mkdir()
-        with patch("tsugite.history.storage.get_history_dir", return_value=history_dir):
+        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
             SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
 
         assert list(history_dir.iterdir()) == []

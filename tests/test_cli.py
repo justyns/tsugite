@@ -720,16 +720,16 @@ class TestRunCommandHistory:
         from tests.conftest import mock_agent_execution_result
 
         with (
-            patch("tsugite.history.storage.get_history_dir", return_value=tmp_path),
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=tmp_path),
             patch("tsugite.agent_runner.run_agent") as mock_run_agent,
             patch("tsugite.md_agents.validate_agent_execution") as mock_validate,
             patch("tsugite.config.load_config") as mock_config,
             patch("tsugite.md_agents.parse_agent_file") as mock_parse,
         ):
-            from tsugite.history import JsonlHistoryBackend, SessionStorage, set_history_backend
+            from tsugite.history import get_history_backend, set_history_backend
+            from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-            # This test asserts a JSONL conversation file is written; use the jsonl backend.
-            set_history_backend(JsonlHistoryBackend())
+            set_history_backend(SqliteHistoryBackend())
 
             mock_run_agent.return_value = mock_agent_execution_result(
                 response="Result",
@@ -750,11 +750,11 @@ class TestRunCommandHistory:
 
             assert result.exit_code == 0
 
-            conv_files = list(tmp_path.glob("*.jsonl"))
-            assert len(conv_files) > 0
+            backend = get_history_backend()
+            sessions = backend.list_sessions()
+            assert sessions, "the run recorded no conversation"
 
-            storage = SessionStorage.load(conv_files[0])
-            types = [e.type for e in storage.iter_events()]
+            types = [e.type for e in backend.load(sessions[0]).load_events()]
             assert "session_start" in types
             assert "user_input" in types
             assert "model_response" in types

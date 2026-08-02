@@ -9,6 +9,7 @@ a single ``BEGIN IMMEDIATE`` (no nested transactions).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -17,13 +18,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional
 
-from .models import Event, _parse_iso, dedup_model_request_data, iso_utc
+from tsugite.config import get_xdg_data_path
+
+from .models import Event, SessionSummary, _parse_iso, iso_utc
 from .sqlite_conn import connect_history_db
-from .storage import SessionSummary, generate_session_id, get_history_dir
 
 
 class SessionAlreadyExistsError(Exception):
     """create() was called with an explicit session_id that already exists."""
+
+
+def get_history_dir() -> Path:
+    return get_xdg_data_path("history")
+
+
+def generate_session_id(agent_name: str, timestamp: Optional[datetime] = None) -> str:
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+    date_str = timestamp.strftime("%Y%m%d_%H%M%S")
+    clean_agent = "".join(c if c.isalnum() or c == "-" else "_" for c in agent_name)[:20]
+    digest = hashlib.sha256(f"{timestamp.isoformat()}_{agent_name}".encode()).hexdigest()[:6]
+    return f"{date_str}_{clean_agent}_{digest}"
 
 
 def _db_path(explicit: str | Path | None) -> Path:
@@ -495,51 +510,6 @@ class SqliteHistoryBackend:
         """
         for event in self.load(session_id).iter_events():
             yield event.model_dump_json(exclude={"id"}, exclude_none=True)
-
-    def import_jsonl(self, paths: Iterable[Path], *, dry_run: bool = False) -> dict:
-        """Import legacy per-session JSONL files into the database. Idempotent.
-
-        Skips sessions already imported (by stem). Reads via the existing SessionStorage
-        reader, which tolerates malformed lines. A file with no session_start still
-        imports (a bare sessions row is synthesized from the first event's timestamp).
-        """
-        from .storage import SessionStorage
-
-        report = {"imported": 0, "skipped": 0, "no_session_start": 0}
-        for path in paths:
-            path = Path(path)
-            sid = path.stem
-            if self.exists(sid):
-                report["skipped"] += 1
-                continue
-            events = list(SessionStorage(path).iter_events())
-            if not events:
-                continue
-            has_start = any(e.type == "session_start" for e in events)
-            if not dry_run:
-                conn = self._conn()
-
-                def body(sid=sid, events=events):
-                    conn.execute(
-                        "INSERT INTO sessions(session_id, created_at) VALUES (?, ?)", (sid, iso_utc(events[0].ts))
-                    )
-                    now_iso = iso_utc()
-                    for event in events:
-                        if event.type == "model_request":
-                            # Strip the legacy full messages array (the on-disk de-dup); reconstruction
-                            # never reads it, so this shrinks an imported db dramatically.
-                            event = Event(type=event.type, ts=event.ts, data=dedup_model_request_data(event.data))
-                        _insert_event(conn, sid, event)
-                        _fold_event(conn, sid, event, now_iso)
-                    # Recency reflects the imported conversation's real last activity, not import
-                    # time, so list/sidebar ordering stays chronological after a migration.
-                    conn.execute("UPDATE sessions SET updated_at = last_event_ts WHERE session_id = ?", (sid,))
-
-                _run_write(conn, body)
-            report["imported"] += 1
-            if not has_start:
-                report["no_session_start"] += 1
-        return report
 
     def create_branch(
         self,

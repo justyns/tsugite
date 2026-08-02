@@ -1,6 +1,6 @@
 """SqliteSession + SqliteHistoryBackend: the event-log battery on SQLite.
 
-Mirrors the JSONL SessionStorage contract (record / iter / load / summary / create /
+Mirrors the Session contract (record / iter / load / summary / create /
 load / exists / get_meta / list_sessions) and pins the two load-bearing invariants:
 - summary() read from maintained columns equals SessionSummary.from_events over the
   same event stream (fold-on-write parity);
@@ -12,11 +12,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tsugite.history.models import Event, iso_utc
+from tsugite.history.models import Event, SessionSummary, iso_utc
 from tsugite.history.reconstruction import events_to_messages
 from tsugite.history.sqlite_backend import SessionAlreadyExistsError, SqliteHistoryBackend
 from tsugite.history.sqlite_conn import close_all
-from tsugite.history.storage import SessionSummary
 
 T0 = datetime(2026, 6, 22, 10, 0, 0, tzinfo=timezone.utc)
 

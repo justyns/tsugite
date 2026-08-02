@@ -2,7 +2,7 @@
 
 from tsugite.agent_runner.history_integration import record_user_input
 from tsugite.attachments.base import Attachment, AttachmentContentType
-from tsugite.history import SessionStorage
+from tsugite.history import get_history_backend
 
 
 def _att(name: str, user_upload: bool) -> Attachment:
@@ -16,11 +16,10 @@ def _att(name: str, user_upload: bool) -> Attachment:
 
 
 def _new_storage(tmp_path):
-    return SessionStorage.create(
+    return get_history_backend().create(
         agent_name="test-agent",
         model="anthropic:claude-3-5-sonnet-20241022",
         workspace=None,
-        session_path=tmp_path / "session.jsonl",
     )
 
 

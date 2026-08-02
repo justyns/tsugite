@@ -15,7 +15,7 @@ import pytest
 
 from tsugite.core.agent import TsugiteAgent
 from tsugite.events import EventBus, EventType
-from tsugite.history import SessionStorage
+from tsugite.history import Session, get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 
 
@@ -34,8 +34,8 @@ def _patch(agent, *, side_effect=None, return_value=None):
 
 
 @pytest.fixture
-def storage(tmp_path: Path) -> SessionStorage:
-    return SessionStorage.create(agent_name="t", model="openai:gpt-4o-mini", session_path=tmp_path / "s.jsonl")
+def storage(tmp_path: Path) -> Session:
+    return get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
 
 
 @pytest.mark.asyncio

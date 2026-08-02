@@ -10,6 +10,8 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import AgentConfig, DaemonConfig
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
+from tests.history_helpers import load_history_session, seed_history_session
+
 
 def _seed_session(store, sid="session-1", agent="test-agent"):
     """Insert a minimal Session record so per-session state has somewhere to live."""
@@ -417,14 +419,14 @@ class TestCompactSessionClearsSkills:
 
     @pytest.fixture(autouse=True)
     def _jsonl(self):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        set_history_backend(JsonlHistoryBackend())
+        set_history_backend(SqliteHistoryBackend())
         yield
 
     @pytest.mark.asyncio
     async def test_compact_session_clears_loaded_skills(self, workspace_dir, tmp_path):
-        from tsugite.history import SessionStorage
         from tsugite.history.models import Event
 
         history_dir = tmp_path / "history"
@@ -434,12 +436,7 @@ class TestCompactSessionClearsSkills:
         session = store.get_or_create_interactive("test-user", "test-agent")
         conv_id = session.id
 
-        session_path = history_dir / f"{conv_id}.jsonl"
-        storage = SessionStorage.create(
-            agent_name="test-agent",
-            model="openai:gpt-4o-mini",
-            session_path=session_path,
-        )
+        storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
         for i in range(5):
             storage.record("user_input", text=f"message {i}")
             storage.record("model_response", raw_content=f"reply {i}")
@@ -462,8 +459,7 @@ class TestCompactSessionClearsSkills:
                 return_value=(old_events, recent_events),
             ),
             patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
-            patch("tsugite.history.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             await adapter._compact_session(conv_id)
@@ -479,14 +475,14 @@ class TestCompactSessionRecordsRange:
 
     @pytest.fixture(autouse=True)
     def _jsonl(self):
-        from tsugite.history import JsonlHistoryBackend, set_history_backend
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-        set_history_backend(JsonlHistoryBackend())
+        set_history_backend(SqliteHistoryBackend())
         yield
 
     @pytest.mark.asyncio
     async def test_compaction_event_records_range_start_and_end(self, workspace_dir, tmp_path):
-        from tsugite.history import SessionStorage
         from tsugite.history.models import Event
 
         history_dir = tmp_path / "history"
@@ -496,12 +492,7 @@ class TestCompactSessionRecordsRange:
         session = store.get_or_create_interactive("test-user", "test-agent")
         conv_id = session.id
 
-        session_path = history_dir / f"{conv_id}.jsonl"
-        storage = SessionStorage.create(
-            agent_name="test-agent",
-            model="openai:gpt-4o-mini",
-            session_path=session_path,
-        )
+        storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
         for i in range(5):
             storage.record("user_input", text=f"message {i}")
 
@@ -523,13 +514,12 @@ class TestCompactSessionRecordsRange:
                 return_value=(old_events, recent_events),
             ),
             patch("tsugite_daemon.memory.summarize_session", new_callable=AsyncMock, return_value="Summary"),
-            patch("tsugite.history.get_history_dir", return_value=history_dir),
-            patch("tsugite.history.storage.get_history_dir", return_value=history_dir),
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
             patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
         ):
             new_session = await adapter._compact_session(conv_id)
 
-        new_events = SessionStorage.load(history_dir / f"{new_session.id}.jsonl").load_events()
+        new_events = load_history_session(new_session.id).load_events()
         compaction_event = next(e for e in new_events if e.type == "compaction")
         assert compaction_event.data["range_start"] == first_ts.isoformat()
         assert compaction_event.data["range_end"] == last_ts.isoformat()

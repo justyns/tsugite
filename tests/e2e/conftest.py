@@ -144,14 +144,15 @@ def _e2e_jsonl_history(reset_history_backend_fixture):
     """Pin the JSONL history backend for the e2e suite.
 
     These tests were written for the JSONL era: they seed `<id>.jsonl` files and
-    patch `tsugite.history.storage.get_history_dir`. The daemon now defaults to the
+    patch `tsugite.history.sqlite_backend.get_history_dir`. The daemon now defaults to the
     SQLite backend, so without this the in-process daemon would never read the
     seeded files. Depends on the global (autouse) reset_history_backend_fixture so
     that reset runs first on setup and the default backend is restored on teardown.
     """
-    from tsugite.history import JsonlHistoryBackend, set_history_backend
+    from tsugite.history import set_history_backend
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
 
-    set_history_backend(JsonlHistoryBackend())
+    set_history_backend(SqliteHistoryBackend())
 
 
 @pytest.fixture

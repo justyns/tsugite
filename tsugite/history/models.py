@@ -77,3 +77,57 @@ class Event(BaseModel):
     type: str = Field(..., description="Event type string")
     ts: ISODatetime = Field(..., description="When the event occurred")
     data: Dict[str, Any] = Field(default_factory=dict, description="Event-specific payload")
+
+
+class SessionSummary:
+    """Aggregates derived from an event log: agent, model, totals, status."""
+
+    def __init__(self):
+        self.agent: Optional[str] = None
+        self.model: Optional[str] = None
+        self.workspace: Optional[str] = None
+        self.created_at: Optional[datetime] = None
+        self.parent_session: Optional[str] = None
+        self.status: Optional[str] = None
+        self.error_message: Optional[str] = None
+        self.turn_count: int = 0  # number of user_input events
+        self.total_tokens: int = 0
+        self.total_cost: float = 0.0
+        self.total_duration_ms: int = 0
+        self.functions_called: set[str] = set()
+        self.last_response_text: str = ""
+
+    @classmethod
+    def from_events(cls, events: Iterable[Event]) -> "SessionSummary":
+        s = cls()
+        for event in events:
+            data = event.data
+            if event.type == "session_start":
+                s.agent = data.get("agent")
+                s.model = data.get("model")
+                s.workspace = data.get("workspace")
+                s.created_at = event.ts
+                s.parent_session = data.get("parent_session")
+            elif event.type == "user_input":
+                s.turn_count += 1
+            elif event.type == "model_response":
+                usage = data.get("usage") or {}
+                if isinstance(usage, dict):
+                    s.total_tokens += int(usage.get("total_tokens") or 0)
+                cost = data.get("cost")
+                if cost:
+                    s.total_cost += float(cost)
+                s.last_response_text = data.get("raw_content", s.last_response_text)
+            elif event.type == "code_execution":
+                s.total_duration_ms += int(data.get("duration_ms") or 0)
+                for fn in data.get("tools_called") or []:
+                    s.functions_called.add(fn)
+            elif event.type == "tool_invocation":
+                name = data.get("name")
+                if name:
+                    s.functions_called.add(name)
+                s.total_duration_ms += int(data.get("duration_ms") or 0)
+            elif event.type == "session_end":
+                s.status = data.get("status")
+                s.error_message = data.get("error_message")
+        return s
