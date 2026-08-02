@@ -1,7 +1,5 @@
 """Tests for builtin agent path handling in agent_runner functions."""
 
-from unittest.mock import MagicMock, patch
-
 from tsugite.agent_inheritance import get_builtin_agents_path
 from tsugite.agent_runner import (
     get_agent_info,
@@ -9,6 +7,13 @@ from tsugite.agent_runner import (
     validate_agent_file,
 )
 from tsugite.md_agents import validate_agent_execution
+from tsugite.options import ExecutionOptions
+
+
+def _exec_options() -> ExecutionOptions:
+    """Builtins declare no model, so a run without one falls back to the machine's
+    configured default and fails wherever none is set."""
+    return ExecutionOptions(model_override="openai:gpt-4o-mini")
 
 
 class TestBuiltinAgentPathHandling:
@@ -57,23 +62,21 @@ class TestBuiltinAgentPathHandling:
         info = get_agent_info(agent_path)
         assert info["model_raw"] is None
 
-    @patch("tsugite.agent_runner.runner.TsugiteAgent")
-    @patch("tsugite.core.tools.create_tool_from_tsugite")
-    def test_run_agent_with_builtin(self, mock_create_tool, mock_agent_class):
-        """Test run_agent can execute builtin agents."""
+    def test_run_agent_with_builtin(self, monkeypatch):
+        """run_agent resolves a builtin agent file and runs it, prompt included."""
         builtin_path = get_builtin_agents_path() / "default.md"
-        # Mock the agent execution
-        mock_agent = MagicMock()
-        mock_agent.run.return_value.output = "Test result"
-        mock_agent_class.return_value = mock_agent
+        seen = {}
 
-        try:
-            result = run_agent(agent_path=builtin_path, prompt="Test task", model_override="openai:gpt-4o-mini")
-            # If it doesn't raise, the path handling works
-            assert isinstance(result, str)
-        except Exception as e:
-            # Should not fail due to path issues
-            assert "No such file or directory" not in str(e)
+        async def fake_agent_run(self, task, return_full_result=False, stream=False):
+            seen["task"] = task
+            return "Test result"
+
+        monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+        result = run_agent(agent_path=builtin_path, prompt="Test task", exec_options=_exec_options())
+
+        assert result == "Test result"
+        assert "Test task" in seen["task"]
 
     def test_run_agent_with_builtin_no_steps(self, monkeypatch):
         """A stepless builtin runs as a single prompt rather than being rejected."""
@@ -84,12 +87,7 @@ class TestBuiltinAgentPathHandling:
 
         monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
 
-        # Explicit model: the builtin declares none, so without this the run falls
-        # back to the machine's configured default and fails where none is set.
-        from tsugite.options import ExecutionOptions
-
-        opts = ExecutionOptions(model_override="openai:gpt-4o-mini")
-        assert run_agent(agent_path=builtin_path, prompt="Test task", exec_options=opts) == "done"
+        assert run_agent(agent_path=builtin_path, prompt="Test task", exec_options=_exec_options()) == "done"
 
     def test_validate_agent_file_rejects_invalid_builtin(self):
         """Test validate_agent_file rejects non-existent built-in agent."""
