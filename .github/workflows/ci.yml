@@ -1,9 +1,7 @@
 name: CI
 
-# Portability note: keep `uses:` refs bare (`actions/checkout@v4`, never a full
-# URL) and avoid third-party actions. uv installs from its own script and fetches
-# the interpreter itself, so no setup-python step is needed and the jobs behave
-# the same on hosted and self-hosted runners.
+# Keep `uses:` refs bare and avoid third-party actions, so this runs on any host.
+# uv fetches its own interpreter, so no setup-python step is needed.
 
 on:
   push:
@@ -14,6 +12,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # Version for lint and the coverage artifact; must stay in the matrix below.
+  PRIMARY_PYTHON: "3.14"
 
 jobs:
   lint:
@@ -28,7 +30,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        run: uv sync --dev --all-extras --python 3.12
+        run: uv sync --dev --all-extras --python ${{ env.PRIMARY_PYTHON }}
 
       - name: Run ruff check
         run: uv run ruff check --show-fixes .
@@ -42,7 +44,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # Ends of the supported range (requires-python = ">=3.11").
+        python-version:
+          - "3.11"
+          # - "3.12"
+          # - "3.13"
+          - "3.14"
 
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +67,7 @@ jobs:
 
       # Artifact storage is a GitHub-hosted service; uploading elsewhere fails.
       - name: Upload coverage reports
-        if: matrix.python-version == '3.12' && github.server_url == 'https://github.com'
+        if: matrix.python-version == env.PRIMARY_PYTHON && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
