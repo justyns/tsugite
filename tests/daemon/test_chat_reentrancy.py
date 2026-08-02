@@ -72,7 +72,7 @@ def client(server):
     return TestClient(server.app)
 
 
-def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_adapter, test_token):
+def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_adapter, test_token, server):
     """Second POST /chat for the same (agent, user_id) while the first is
     still running returns 409 and does not spawn a second agent run.
     """
@@ -113,8 +113,7 @@ def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_ada
         t = threading.Thread(target=first_request, daemon=True)
         t.start()
 
-        # Wait briefly so the first request begins running.
-        time.sleep(0.1)
+        _wait_for_any_active_chat(server)
 
         resp2 = client.post(
             "/api/agents/test-agent/chat",
@@ -176,6 +175,17 @@ def _wait_for_active_chats(server, *session_ids, timeout=5.0):
             return
         time.sleep(0.02)
     raise AssertionError(f"chats never registered for {session_ids}; have {list(server._active_chats)}")
+
+
+def _wait_for_any_active_chat(server, timeout=5.0):
+    """Poll until some chat has registered. A blind sleep races the chat thread on
+    a slow worker, and the reentrancy guard only rejects once the first is live."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if server._active_chats:
+            return
+        time.sleep(0.02)
+    raise AssertionError("no chat ever registered")
 
 
 def _start_chat_in_thread(client, test_token, *, session_id: str, user_id: str, message: str = "hi"):

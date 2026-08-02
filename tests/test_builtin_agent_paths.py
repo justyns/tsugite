@@ -84,7 +84,12 @@ class TestBuiltinAgentPathHandling:
 
         monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
 
-        assert run_agent(agent_path=builtin_path, prompt="Test task") == "done"
+        # Explicit model: the builtin declares none, so without this the run falls
+        # back to the machine's configured default and fails where none is set.
+        from tsugite.options import ExecutionOptions
+
+        opts = ExecutionOptions(model_override="openai:gpt-4o-mini")
+        assert run_agent(agent_path=builtin_path, prompt="Test task", exec_options=opts) == "done"
 
     def test_validate_agent_file_rejects_invalid_builtin(self):
         """Test validate_agent_file rejects non-existent built-in agent."""
