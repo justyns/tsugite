@@ -1,10 +1,15 @@
 name: CI
 
+# Portability note: keep `uses:` refs bare (`actions/checkout@v4`, never a full
+# URL) and avoid third-party actions. uv installs from its own script and fetches
+# the interpreter itself, so no setup-python step is needed and the jobs behave
+# the same on hosted and self-hosted runners.
+
 on:
   push:
     branches: [master, development]
   pull_request:
-    branches: [master]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,18 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        run: uv sync --dev --all-extras
+        run: uv sync --dev --all-extras --python 3.12
 
       - name: Run ruff check
         run: uv run ruff check --show-fixes .
@@ -47,24 +47,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        run: uv sync --dev --all-extras
+        run: uv sync --dev --all-extras --python ${{ matrix.python-version }}
 
       - name: Run tests
         run: uv run pytest -v
 
+      # Artifact storage is a GitHub-hosted service; uploading elsewhere fails.
       - name: Upload coverage reports
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.12' && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
