@@ -73,6 +73,7 @@ _OPENAI_MODELS: dict[str, ModelInfo] = {
 # fmt: on
 # --- END GENERATED MODELS (openai) --- #
 
+
 _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
     "openai": {
         "api_base": "https://api.openai.com/v1",
@@ -103,6 +104,16 @@ _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "api_key_env": "CEREBRAS_API_KEY",
     },
 }
+
+
+def _drop_cache_control(messages: list[dict]) -> list[dict]:
+    """Drop the ``cache_control`` cache-breakpoint hint messages may carry.
+
+    The hint has no OpenAI-schema equivalent - these endpoints cache automatically -
+    and strict ones (e.g. Fireworks) reject the unknown field with HTTP 400. Returns
+    new dicts so the caller's list, which other providers still read, is untouched.
+    """
+    return [{k: v for k, v in msg.items() if k != "cache_control"} for msg in messages]
 
 
 class OpenAICompatProvider:
@@ -151,7 +162,7 @@ class OpenAICompatProvider:
         stream: bool = False,
         **kwargs: Any,
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
-        body: dict[str, Any] = {"model": model, "messages": messages, "stream": stream, **kwargs}
+        body: dict[str, Any] = {"model": model, "messages": _drop_cache_control(messages), "stream": stream, **kwargs}
         body = {k: v for k, v in body.items() if not k.startswith("_") and v is not None}
         url = f"{self.api_base}/chat/completions"
         headers = self._build_headers()

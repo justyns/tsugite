@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 API_BASE = "https://api.anthropic.com"
 API_VERSION = "2023-06-01"
 
+# The API rejects a request carrying more than this many cache breakpoints.
+MAX_CACHE_BREAKPOINTS = 4
+
 # Mapping from tsugite effort string to Anthropic extended-thinking budget_tokens.
 # Values are provider-internal; users only see the string vocab.
 _EFFORT_TO_BUDGET = {
@@ -262,6 +265,7 @@ def _translate_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
     """
     system = None
     translated = []
+    breakpoints: list[tuple[dict, dict]] = []
 
     for msg in messages:
         role = msg.get("role", "user")
@@ -278,7 +282,30 @@ def _translate_messages(messages: list[dict]) -> tuple[str | None, list[dict]]:
         else:
             translated.append({"role": _map_role(role), "content": str(content)})
 
+        hint = msg.get("cache_control")
+        if hint:
+            breakpoints.append((translated[-1], hint))
+
+    # Keep the last MAX_CACHE_BREAKPOINTS marks: each caches everything up to it, so
+    # the latest ones cover the longest stable prefixes and the earlier tiers stay
+    # cached underneath them.
+    for target, hint in breakpoints[-MAX_CACHE_BREAKPOINTS:]:
+        _apply_cache_breakpoint(target, hint)
+
     return system, translated
+
+
+def _apply_cache_breakpoint(msg: dict, hint: dict) -> None:
+    """Move a message-level cache hint onto the message's last content block.
+
+    Callers mark whole messages, but the Anthropic API takes ``cache_control`` on a
+    content block, so a string body is promoted to a single text block first.
+    """
+    content = msg["content"]
+    if isinstance(content, str):
+        content = msg["content"] = [{"type": "text", "text": content}]
+    if content:
+        content[-1] = {**content[-1], "cache_control": hint}
 
 
 def _map_role(role: str) -> str:

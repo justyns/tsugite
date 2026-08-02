@@ -1136,7 +1136,10 @@ class TsugiteAgent:
         #    tier (stable first), so a volatile tier's change doesn't invalidate the
         #    stable tiers' cache. One breakpoint per tier (on the context message) to
         #    stay within the provider's cache-breakpoint budget; the ack closes the
-        #    pair for role alternation.
+        #    pair for role alternation. `cache_control` is a provider-neutral hint:
+        #    each provider translates it for its own API (Anthropic moves it onto a
+        #    content block, OpenAI-compatible endpoints cache automatically and drop
+        #    it), so it is marked here whatever the model.
         for context in self._build_context_turns():
             messages.append({"role": "user", "content": context, "cache_control": {"type": "ephemeral"}})
             messages.append({"role": "assistant", "content": CONTEXT_ACK})

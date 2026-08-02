@@ -266,11 +266,11 @@ tsugite run +coordinator +researcher +writer "task"
 
 ### Prompt Caching
 
-Automatic caching for supported providers (OpenAI, Anthropic, Bedrock, Deepseek):
-
-- Attachments sent as separate system content blocks with `cache_control` markers
-- Skills also receive cache markers for reuse across turns
-- Cache markers added automatically by `tsugite/core/agent.py`
+- `tsugite/core/agent.py` marks each context turn (attachments, plus skills on the last tier) with a
+  provider-neutral `cache_control` hint
+- Each provider translates the hint for its own API: Anthropic moves it onto a content block, capped at the
+  API's 4 breakpoints; OpenAI-schema endpoints cache automatically and drop it, since strict ones reject the
+  unknown field
 
 ### Context Management (Daemon Mode)
 
