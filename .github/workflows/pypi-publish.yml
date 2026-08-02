@@ -8,6 +8,9 @@ on:
 
 jobs:
   build-and-publish:
+    # Relies on GitHub-hosted services (PyPI trusted publishing, GitHub Releases),
+    # so it only runs there.
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     permissions:
       contents: write    # Required for creating GitHub releases

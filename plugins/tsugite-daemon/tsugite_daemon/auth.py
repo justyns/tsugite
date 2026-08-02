@@ -13,6 +13,7 @@ migration source; the file is left untouched as a backup.
 import hashlib
 import logging
 import secrets
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -43,6 +44,12 @@ class TokenStore:
         self._storage = SqliteCollectionStorage.for_state_file(path, "auth_tokens")
         self._default_ttl = default_ttl_seconds
         self._tokens: dict[str, Token] = {}  # ephemeral (agent) tokens only
+        # SqliteCollectionStorage does not synchronize its connection; every
+        # store that shares one serializes access itself. Auth is the hottest
+        # concurrent path there is - every request validates - and unguarded
+        # reads interleave into corrupt rows, so a valid token intermittently
+        # fails to resolve and the caller gets a spurious 401.
+        self._lock = threading.RLock()
         self._migrate_legacy()
 
     @staticmethod
@@ -60,14 +67,16 @@ class TokenStore:
             return None
 
     def _migrate_legacy(self) -> None:
-        entries, migrating = self._storage.load_or_migrate(self._path, "auth_tokens")
-        if not migrating:
-            return
-        imported = {t.hash: asdict(t) for e in entries if (t := self._token_from_entry(e)) and t.persistent}
-        self._storage.replace_all(imported)
+        with self._lock:
+            entries, migrating = self._storage.load_or_migrate(self._path, "auth_tokens")
+            if not migrating:
+                return
+            imported = {t.hash: asdict(t) for e in entries if (t := self._token_from_entry(e)) and t.persistent}
+            self._storage.replace_all(imported)
 
     def _persistent_token(self, token_hash: str) -> Token | None:
-        entry = self._storage.get(token_hash)
+        with self._lock:
+            entry = self._storage.get(token_hash)
         return self._token_from_entry(entry) if entry is not None else None
 
     # --- Admin tokens (persistent, no expiry) ---
@@ -85,18 +94,22 @@ class TokenStore:
             prefix=raw[:8],
             persistent=True,
         )
-        self._storage.upsert(t.hash, asdict(t))
+        with self._lock:
+            self._storage.upsert(t.hash, asdict(t))
         return t, raw
 
     def list_admin_tokens(self) -> list[Token]:
-        return [t for e in self._storage.load_all() if (t := self._token_from_entry(e))]
+        with self._lock:
+            entries = self._storage.load_all()
+        return [t for e in entries if (t := self._token_from_entry(e))]
 
     def revoke_admin_token(self, name_or_prefix: str) -> bool:
         """Revoke an admin token by name or prefix. Returns True if found."""
         target = f"admin:{name_or_prefix}"
         for t in self.list_admin_tokens():
             if t.identity == target or t.prefix == name_or_prefix:
-                self._storage.delete(t.hash)
+                with self._lock:
+                    self._storage.delete(t.hash)
                 return True
         return False
 
@@ -104,8 +117,9 @@ class TokenStore:
 
     def issue(self, agent: str, schedule_id: str = "", ttl: int | None = None) -> str:
         """Issue a temporary token for an agent/schedule. Returns the raw token."""
-        if len(self._tokens) > 100:
-            self.cleanup_expired()
+        with self._lock:
+            if len(self._tokens) > 100:
+                self.cleanup_expired()
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc)
         t = Token(
@@ -115,31 +129,37 @@ class TokenStore:
             prefix=raw[:8],
             expires_at=(now + timedelta(seconds=ttl or self._default_ttl)).isoformat(),
         )
-        self._tokens[t.hash] = t
+        with self._lock:
+            self._tokens[t.hash] = t
         return raw
 
     def revoke(self, token: str) -> None:
         """Revoke a token by raw value (ephemeral or persistent)."""
         h = self._hash(token)
-        self._tokens.pop(h, None)
-        self._storage.delete(h)
+        with self._lock:
+            self._tokens.pop(h, None)
+            self._storage.delete(h)
 
     def cleanup_expired(self) -> int:
         """Remove expired ephemeral tokens. Returns count removed."""
         now = datetime.now(timezone.utc).isoformat()
-        before = len(self._tokens)
-        self._tokens = {h: t for h, t in self._tokens.items() if t.expires_at is None or t.expires_at > now}
-        return before - len(self._tokens)
+        with self._lock:
+            before = len(self._tokens)
+            self._tokens = {h: t for h, t in self._tokens.items() if t.expires_at is None or t.expires_at > now}
+            return before - len(self._tokens)
 
     # --- Validation ---
 
     def validate(self, token: str) -> tuple[bool, str]:
         """Validate a token. Returns (valid, identity)."""
         h = self._hash(token)
-        t = self._tokens.get(h) or self._persistent_token(h)
+        with self._lock:
+            t = self._tokens.get(h)
+        t = t or self._persistent_token(h)
         if not t:
             return False, ""
         if t.expires_at and t.expires_at < datetime.now(timezone.utc).isoformat():
-            self._tokens.pop(h, None)
+            with self._lock:
+                self._tokens.pop(h, None)
             return False, ""
         return True, t.identity
