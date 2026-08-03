@@ -1,10 +1,10 @@
 [project]
 name = "tsugite-sandbox"
-version = "0.19.0"
+version = "0.19.1"
 description = "Tsugite plugin: bubblewrap sandbox backend (default-installed)"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
-dependencies = ["tsugite-cli==0.19.0"]
+dependencies = ["tsugite-cli==0.19.1"]
 
 [project.entry-points."tsugite.sandbox"]
 bwrap = "tsugite_sandbox:BubblewrapSandbox"
