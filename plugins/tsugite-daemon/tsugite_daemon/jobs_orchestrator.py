@@ -569,14 +569,17 @@ class JobsOrchestrator:
             raise ValueError(f"Unknown job: {job_id}")
         if job.executor == "agent":
             raise ValueError("respond_to_job only supports executor jobs; agent workers have no steering channel")
-        if job.state == JobState.AWAITING_INPUT.value:
-            job = await self.resume_worker(job_id)
-        elif job.state != JobState.RUNNING.value:
+        if job.state not in (JobState.AWAITING_INPUT.value, JobState.RUNNING.value):
             raise ValueError(f"job '{job_id}' is {job.state}, not running - use retry for parked jobs")
         executor = self._executors.get(job.executor)
         if executor is None:
             raise ValueError(f"executor '{job.executor}' is not loaded")
+        # Deliver first: resuming clears the pending question and re-arms the timer,
+        # so an answer that never lands would leave the job RUNNING with nobody
+        # driving it.
         await executor.start(job, followup=message)
+        if job.state == JobState.AWAITING_INPUT.value:
+            await self.resume_worker(job_id)
         return self._jobs.get(job_id)
 
     async def resume_worker(self, job_id: str) -> Job:

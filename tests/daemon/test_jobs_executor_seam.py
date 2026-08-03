@@ -530,3 +530,59 @@ async def test_emit_job_event_prefers_worker_terminal_id_field_over_lookup(store
     assert emitted, "an event must have been emitted"
     assert emitted[-1][1]["worker_terminal_id"] == "term-abc"
     assert term_store.calls == 0, "the field must win; the list_for_parent lookup must be skipped"
+
+
+# ── answer delivery is atomic with the resume ──
+
+
+class DeliveryFailingExecutor(FakeExecutor):
+    """Accepts the initial start, then fails to deliver any followup."""
+
+    async def start(self, job, followup=None):
+        if followup is not None:
+            raise RuntimeError("pty is gone")
+        await super().start(job, followup=followup)
+
+
+async def _park_on_question(store, orchestrator, runner, executor_name, question="which branch?"):
+    """Seed an executor job and park it awaiting input. pause_worker wakes the
+    parent session, so the runner needs a reply stub."""
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    job = _seed_running_executor_job(store, orchestrator, executor=executor_name)
+    await orchestrator.pause_worker(job.id, question)
+    return store.get(job.id)
+
+
+@pytest.mark.asyncio
+async def test_failed_answer_delivery_keeps_the_job_awaiting_input(store, orchestrator, runner):
+    """If the executor cannot take the answer, the question must survive. Resuming
+    first means a failed delivery leaves the job RUNNING with no pending question
+    and nobody driving it."""
+    orchestrator.register_executor("failing-delivery", DeliveryFailingExecutor())
+    job = await _park_on_question(store, orchestrator, runner, "failing-delivery")
+    assert job.state == JobState.AWAITING_INPUT.value
+
+    with pytest.raises(RuntimeError):
+        await orchestrator.respond_to_job(job.id, "main")
+
+    parked = store.get(job.id)
+    assert parked.state == JobState.AWAITING_INPUT.value, "a failed delivery must not resume the job"
+    assert parked.pending_question == "which branch?", "the unanswered question must survive"
+
+
+@pytest.mark.asyncio
+async def test_missing_executor_keeps_the_job_awaiting_input(store, orchestrator, runner):
+    """The executor-exists check ran after the resume, so answering a job whose
+    executor is not loaded cleared the question before failing."""
+    job = await _park_on_question(store, orchestrator, runner, "never-registered")
+
+    with pytest.raises(ValueError, match="not loaded"):
+        await orchestrator.respond_to_job(job.id, "main")
+
+    parked = store.get(job.id)
+    assert parked.state == JobState.AWAITING_INPUT.value
+    assert parked.pending_question == "which branch?"
