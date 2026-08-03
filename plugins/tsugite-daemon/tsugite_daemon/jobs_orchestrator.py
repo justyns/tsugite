@@ -14,15 +14,26 @@ bounded.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
-import re
-import subprocess
 from pathlib import Path
 from typing import Optional
 
+from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
+from tsugite_daemon.job_prompts import (
+    _build_followup_prompt,
+    _build_hint_prompt,
+    _build_notify_message,
+    _build_verifier_prompt,
+    build_worker_prompt,
+)
 from tsugite_daemon.job_store import Job, JobState, JobStateTransitionError, JobStore
+from tsugite_daemon.job_verdicts import (
+    _extract_failed_acs,
+    _is_infra_failure,
+    _parse_verifier_output,
+    _sanitize_output_excerpt,
+)
+from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
 from tsugite_daemon.session_store import FINISHED_STATUSES, METADATA_JOB_HOST, Session, SessionSource, SessionStatus
 
 logger = logging.getLogger(__name__)
@@ -46,11 +57,8 @@ _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "never"}
 # Hard cap per predicate. Subprocess hang shouldn't strand a Job; the per-phase
 # Job.timeout_minutes timer covers the verification phase too, so even if all
 # predicates take the full 30s the phase timeout will reap any longer hang.
-_PREDICATE_TIMEOUT_SECONDS = 30
 # Stderr snippet length surfaced in the failure reason.
-_PREDICATE_STDERR_TRUNCATE = 100
 # Excerpt length for unparseable-verifier-output diagnostics.
-_VERIFIER_EXCERPT_LIMIT = 200
 
 
 def _with_sandbox(job: Job, metadata: dict) -> dict:
@@ -1190,10 +1198,10 @@ class JobsOrchestrator:
         # STUCK/ERRORED keep it for inspection and for retry-with-hint to --resume into.
         if fresh:
             prune = terminal in (JobState.DONE, JobState.CANCELLED)
+            # worktree_path is cleared by the teardown once the tree is actually
+            # gone. Clearing it here would drop the only pointer to a directory a
+            # failed prune left behind.
             self._schedule_executor_teardown(fresh, prune_worktree=prune)
-            if prune and fresh.worktree_path:
-                self._jobs.update(job.id, worktree_path=None)
-                fresh = self._jobs.get(job.id)
         self._emit_job_event(fresh)
         self._reconcile_host_session(job, terminal)
         if fresh and _should_notify(fresh, terminal):
@@ -1222,25 +1230,19 @@ class JobsOrchestrator:
         worktree_path = job.worktree_path if prune_worktree else None
         if job.executor == "agent":
             if worktree_path:
-                self._prune_worktree_bg(worktree_path)
+                self._prune_worktree_bg(job.id, worktree_path)
             return
 
         async def _teardown() -> None:
             await self._cancel_executor(job)
             if worktree_path:
-                await asyncio.to_thread(_prune_worktree, worktree_path)
+                await self._prune_and_clear(job.id, worktree_path)
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        if not self._spawn_bg(_teardown):
             # No loop (sync CLI/test path): the async executor cancel can't run,
             # but the worktree still needs pruning.
             if worktree_path:
-                _prune_worktree(worktree_path)
-            return
-        task = loop.create_task(_teardown())
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
+                self._prune_and_clear_sync(job.id, worktree_path)
 
     def _schedule_notify(self, job: Job) -> None:
         """Post a one-line wake-up message into the parent session so its agent
@@ -1271,27 +1273,44 @@ class JobsOrchestrator:
         self._notify_tasks.add(task)
         task.add_done_callback(self._notify_tasks.discard)
 
-    def _prune_worktree_bg(self, worktree_path: str) -> None:
-        """Remove a worktree off the event loop.
-
-        `git worktree remove` shells out and can stall on a large tree or a busy
-        `.git` lock; running it inline on the daemon's single loop would freeze
-        every other session, SSE stream, and timer until it returns. Fire-and-
-        forget: prune failures are logged inside `_prune_worktree`, and the
-        caller clears `worktree_path` regardless, so a dropped task only leaves
-        disk for a later `git worktree prune` to reap.
-
-        Falls back to an inline prune when no loop is running (sync CLI/test
-        context) - there's nothing to block there.
-        """
+    def _spawn_bg(self, make_coro) -> bool:
+        """Run `make_coro()` as a tracked background task, so it can't be garbage
+        collected mid-flight. Returns False when there is no running loop (sync
+        CLI/test context) and the caller must do the work inline instead."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            _prune_worktree(worktree_path)
-            return
-        task = loop.create_task(asyncio.to_thread(_prune_worktree, worktree_path))
+            return False
+        task = loop.create_task(make_coro())
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
+        return True
+
+    def _prune_and_clear_sync(self, job_id: str, worktree_path: str) -> None:
+        """Prune, then drop the path only once the tree is confirmed gone. A failed
+        prune keeps it, so the leftover directory stays visible for a later cleanup."""
+        if not _prune_worktree(worktree_path):
+            return
+        try:
+            self._jobs.update(job_id, worktree_path=None)
+        except KeyError:
+            # The job aged out of the store while the prune ran; nothing to clear.
+            pass
+
+    async def _prune_and_clear(self, job_id: str, worktree_path: str) -> None:
+        """`_prune_and_clear_sync` off the event loop.
+
+        `git worktree remove` shells out and can stall on a large tree or a busy
+        `.git` lock; running it inline on the daemon's single loop would freeze
+        every other session, SSE stream, and timer until it returns.
+        """
+        await asyncio.to_thread(self._prune_and_clear_sync, job_id, worktree_path)
+
+    def _prune_worktree_bg(self, job_id: str, worktree_path: str) -> None:
+        """Prune a worktree off the loop, falling back to an inline prune when no
+        loop is running (sync CLI/test context) - there's nothing to block there."""
+        if not self._spawn_bg(lambda: self._prune_and_clear(job_id, worktree_path)):
+            self._prune_and_clear_sync(job_id, worktree_path)
 
     def _schedule_timeout(self, job_id: str, timeout_minutes: int) -> None:
         self._cancel_timeout(job_id)
@@ -1517,129 +1536,6 @@ def _should_notify(job: Job, terminal: JobState) -> bool:
     return notify_when == state
 
 
-def build_worker_prompt(prompt: str, acceptance_criteria: list, repo: Optional[str]) -> str:
-    """Compose the worker's initial user_prompt with AC and repo context inlined.
-
-    Accepts AC as either legacy list[str] or normalised list[dict]; the worker
-    prompt only needs the text, so both shapes render the same.
-    """
-    parts = [prompt]
-    if acceptance_criteria:
-        parts.append("")
-        parts.append("Acceptance criteria (the verifier will grade your work against these):")
-        for i, ac in enumerate(acceptance_criteria, 1):
-            text = ac.get("text", "") if isinstance(ac, dict) else ac
-            parts.append(f"{i}. {text}")
-    if repo:
-        parts.append("")
-        parts.append(f"Working in repo: {repo}")
-    return "\n".join(parts)
-
-
-def _extract_failed_acs(ac_results) -> list[dict]:
-    """Return failing-AC dicts from the verifier's ac_results list.
-
-    Tolerates malformed entries (string, None, non-dict): each non-dict element
-    becomes a synthetic failed AC so the orchestrator never crashes and the user
-    sees a useful retry / stuck reason.
-    """
-    out: list[dict] = []
-    if not isinstance(ac_results, list):
-        return out
-    for item in ac_results:
-        if isinstance(item, dict):
-            if not item.get("pass"):
-                out.append(item)
-        else:
-            out.append({"ac_text": "(malformed verifier output)", "pass": False, "reason": repr(item)})
-    return out
-
-
-def _build_verifier_prompt(job: Job, worker_output: str, prose_acs: Optional[list[str]] = None) -> str:
-    """Build the verifier prompt.
-
-    If `prose_acs` is provided, only those ACs land in the prompt - predicate
-    ACs are evaluated locally and must not be sent to the LLM (the verifier has
-    no business grading something that's already been mechanically decided).
-    """
-    acs_to_render = prose_acs if prose_acs is not None else job.acceptance_criteria
-    parts = ["Acceptance criteria:"]
-    for i, ac in enumerate(acs_to_render, 1):
-        parts.append(f"{i}. {ac}")
-    parts.append("")
-    parts.append("Worker output:")
-    parts.append(worker_output.strip() or "(empty)")
-    parts.append("")
-    parts.append(
-        "You are running in the worker's working directory, so files it produced are "
-        "directly inspectable. For any criterion about a file's existence, contents, or "
-        "structure, read the actual file (`read_file`, or `run` for listings) before "
-        "deciding - do not fail a criterion just because the worker's summary doesn't "
-        "inline the contents."
-    )
-    if job.repo:
-        parts.append(f"Repo: {job.repo}")
-        parts.append("(use `run` to inspect `git diff` or `git log` if relevant.)")
-    return "\n".join(parts)
-
-
-def _retry_context_lines(job: Job) -> list[str]:
-    """Shared preamble for retry/hint worker prompts.
-
-    Retry workers are FRESH sessions with none of the prior attempt's
-    conversation. Without the original task restated, the worker has nothing to
-    ground its work in and (observed live) tends to emit a fabricated summary
-    with zero tool calls instead of doing the work.
-    """
-    return [
-        "You are a fresh session retrying an earlier Job attempt. Any files the previous",
-        "attempt produced are in your working directory; you have none of its conversation.",
-        "",
-        "Original task:",
-        "",
-        job.prompt,
-        "",
-        "Use tools to verify the current state and to make the changes - do not claim work",
-        "you have not performed in this session.",
-    ]
-
-
-_INFRA_FAILURE_RE = re.compile(
-    r"usage.?limit|rate.?limit|quota|\b429\b|too many requests|overloaded|"
-    r"insufficient credit|resource.?exhausted|capacity",
-    re.IGNORECASE,
-)
-
-
-def _is_infra_failure(text: str) -> bool:
-    """Usage/rate-limit/quota style failures are infrastructure, not quality:
-    they must not read as an acceptance-criteria problem and are the natural
-    trigger for escalating to a different model."""
-    return bool(text and _INFRA_FAILURE_RE.search(text))
-
-
-def _build_hint_prompt(job: Job, hint: str) -> str:
-    """Compose the retry prompt for a worker resurrected from STUCK/ERRORED.
-    With no hint (a pure retry-on-different-model), restate the failure instead."""
-    parts = _retry_context_lines(job)
-    parts.append("")
-    if hint.strip():
-        parts.append("This job previously hit the verifier's max-attempt limit. A user provided a hint:")
-        parts.append("")
-        parts.append(hint)
-    else:
-        parts.append("A previous attempt of this job failed; you are a fresh retry (possibly on a different model).")
-        if job.error:
-            parts.append(f"The recorded failure was: {job.error[:500]}")
-    parts.append("")
-    parts.append("Acceptance criteria the verifier will check:")
-    for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {ac}")
-    parts.append("")
-    parts.append("Address the hint, then produce the structured summary required by your instructions.")
-    return "\n".join(parts)
-
-
 def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: int = 3) -> str:
     """Render an XML block describing Jobs anchored on `session_id`, suitable for
     inclusion in `<message_context>` so the LLM is aware of what's running and
@@ -1706,361 +1602,7 @@ def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: 
     return "\n".join(lines)
 
 
-def _build_notify_message(job: Job) -> str:
-    """One-line wake-up message posted to the parent session on terminal transition.
-    Brief by design - the parent agent should call get_job(job_id) for details."""
-    prompt_short = (job.prompt or "")[:80]
-    if len(job.prompt or "") > 80:
-        prompt_short += "…"
-    base = f"Job {job.id} finished with state '{job.state}': {prompt_short}"
-    if job.state in (JobState.STUCK.value, JobState.ERRORED.value) and job.error:
-        first_line = job.error.splitlines()[0][:200]
-        base += f" - error: {first_line}"
-    elif job.state == JobState.CANCELLED.value and job.error:
-        base += f" - {job.error[:120]}"
-    base += f". Use get_job('{job.id}') for details."
-    return base
-
-
-def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:
-    parts = _retry_context_lines(job)
-    parts.append("")
-    parts.append("The verifier flagged these acceptance criteria as not met:")
-    for ac in failed_acs:
-        parts.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
-    parts.append("")
-    parts.append("Address them, then produce the structured summary required by your instructions.")
-    return "\n".join(parts)
-
-
-def _parse_ac_predicate(text: str) -> Optional[dict]:
-    """Recognise a predicate AC prefix and return a structured dict.
-
-    Returns None for free-text ACs (which then go to the LLM verifier as today).
-    Recognised prefixes:
-      `exit_code:<cmd>`       → {kind: "exit_code", cmd, expected: 0}
-      `exit_code:<cmd>:<n>`   → {kind: "exit_code", cmd, expected: <n>}
-      `cmd:<command>`         → {kind: "cmd", cmd} (sugar for exit_code:<cmd>:0)
-      `file_exists:<path>`    → {kind: "file_exists", path}
-    """
-    if not text:
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    if s.startswith("exit_code:"):
-        body = s[len("exit_code:") :].strip()
-        if not body:
-            return None
-        # The exit code suffix is the trailing `:<int>`. Tolerate command strings
-        # that themselves contain colons by splitting from the right and checking
-        # if the last segment parses as an int.
-        last_colon = body.rfind(":")
-        if last_colon != -1:
-            tail = body[last_colon + 1 :].strip()
-            try:
-                expected = int(tail)
-                cmd = body[:last_colon].strip()
-                if cmd:
-                    return {"kind": "exit_code", "cmd": cmd, "expected": expected}
-            except ValueError:
-                pass
-        return {"kind": "exit_code", "cmd": body, "expected": 0}
-    if s.startswith("cmd:"):
-        body = s[len("cmd:") :].strip()
-        if not body:
-            return None
-        return {"kind": "cmd", "cmd": body}
-    if s.startswith("file_exists:"):
-        body = s[len("file_exists:") :].strip()
-        if not body:
-            return None
-        return {"kind": "file_exists", "path": body}
-    return None
-
-
-def partition_acs(acs: list[str]) -> tuple[list[dict], list[dict]]:
-    """Split an AC list into (predicates, prose), preserving original indices.
-
-    Each predicate entry: {ac_index, ac_text, predicate}.
-    Each prose entry:     {ac_index, ac_text}.
-    Original ac_index is preserved so predicate and LLM results can be merged
-    back into a single ac_results list spanning the full AC index space.
-    """
-    predicates: list[dict] = []
-    prose: list[dict] = []
-    for i, ac in enumerate(acs or []):
-        parsed = _parse_ac_predicate(ac)
-        if parsed is not None:
-            predicates.append({"ac_index": i, "ac_text": ac, "predicate": parsed})
-        else:
-            prose.append({"ac_index": i, "ac_text": ac})
-    return predicates, prose
-
-
-def _resolve_predicate_cwd(job: Job) -> Optional[str]:
-    """Pick cwd for predicate evaluation: worktree_path > repo > workspace anchor.
-
-    The workspace fallback keeps non-repo jobs' `file_exists:`/`cmd:` predicates
-    resolving against the directory the worker wrote into, not the daemon CWD.
-    """
-    return job.worktree_path or job.repo or job.workspace_path
-
-
-def _evaluate_predicate(
-    predicate: dict,
-    *,
-    cwd: Optional[str],
-    ac_index: int,
-    ac_text: str,
-    attempt: int,
-    sandbox_override: Optional[dict] = None,
-) -> dict:
-    """Run a predicate locally and return an ac_results entry.
-
-    `exit_code:` / `cmd:` predicates shell out. When the job is sandboxed
-    (sandbox_override set, resolved from the agent's config or an inheriting
-    parent), the command runs inside bubblewrap - filesystem-isolated to the
-    predicate cwd (the worktree) and with no network - so a sandboxed agent's
-    predicate ACs can't execute outside the sandbox. Otherwise they run with
-    `shell=True` against the worktree, same surface as the worker session.
-    """
-
-    def verdict(passed: bool, reason: str) -> dict:
-        return {
-            "ac_index": ac_index,
-            "ac_text": ac_text,
-            "pass": passed,
-            "reason": reason,
-            "attempt": attempt,
-        }
-
-    kind = predicate.get("kind")
-    try:
-        if kind == "file_exists":
-            path = predicate.get("path", "")
-            p = Path(path)
-            if not p.is_absolute() and cwd:
-                p = Path(cwd) / path
-            if p.exists():
-                return verdict(True, "path exists")
-            return verdict(False, f"path does not exist: {path}")
-        if kind in ("exit_code", "cmd"):
-            cmd = predicate.get("cmd", "")
-            expected = predicate.get("expected", 0) if kind == "exit_code" else 0
-            if cwd is None:
-                logger.warning(
-                    "Predicate eval has no cwd (job has no worktree, repo, or workspace anchor); "
-                    "refusing to run '%s' in the daemon's cwd - marking criterion unmet",
-                    cmd,
-                )
-                return verdict(
-                    False, "no working directory for command predicate (job has no worktree, repo, or workspace anchor)"
-                )
-            if sandbox_override:
-                from tsugite.core.sandbox import SandboxConfig, get_sandbox_class
-
-                sandbox_cls = get_sandbox_class()
-                if sandbox_cls is None:
-                    return verdict(False, "command predicate requires a sandbox but no backend is installed")
-
-                bwrap = sandbox_cls(
-                    config=SandboxConfig(
-                        no_network=True,
-                        extra_ro_binds=[Path(p) for p in sandbox_override.get("extra_ro_binds", [])],
-                        extra_rw_binds=[Path(p) for p in sandbox_override.get("extra_rw_binds", [])],
-                        pass_env=list(sandbox_override.get("pass_env", [])),
-                    ),
-                    workspace_dir=Path(cwd),
-                    state_dir=None,
-                )
-                run_cmd = bwrap.build_command(["sh", "-c", cmd])
-                completed = subprocess.run(run_cmd, capture_output=True, timeout=_PREDICATE_TIMEOUT_SECONDS, cwd=cwd)
-            else:
-                completed = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    timeout=_PREDICATE_TIMEOUT_SECONDS,
-                    cwd=cwd,
-                )
-            if completed.returncode == expected:
-                return verdict(True, f"exit code {completed.returncode}")
-            stderr = (completed.stderr or b"").decode("utf-8", "replace").strip()
-            reason = f"exited with code {completed.returncode} (expected {expected})"
-            if stderr:
-                reason += f"; stderr: {stderr[:_PREDICATE_STDERR_TRUNCATE]}"
-            return verdict(False, reason)
-        # Unknown predicate kind - defensive; partition_acs only emits the
-        # three above. Treat as a fail rather than silently passing.
-        return verdict(False, f"unknown predicate kind: {kind!r}")
-    except subprocess.TimeoutExpired:
-        return verdict(False, "timeout")
-    except Exception as e:
-        return verdict(False, f"evaluation error: {e}")
-
-
-def _sanitize_output_excerpt(raw: str) -> str:
-    """Bounded single-line excerpt of verifier output for error diagnostics.
-
-    Masks registered secrets BEFORE truncating - truncating first could split a
-    secret so the mask no longer recognises it, leaking the remainder.
-    """
-    from tsugite.secrets.registry import get_registry
-
-    text = get_registry().mask(" ".join((raw or "").split()))
-    if len(text) > _VERIFIER_EXCERPT_LIMIT:
-        text = text[:_VERIFIER_EXCERPT_LIMIT] + "…"
-    return text or "(empty)"
-
-
-def _parse_verifier_output(raw: str) -> Optional[dict]:
-    """Extract the verifier's JSON verdict from its output text.
-
-    Verifier output is model text, not guaranteed clean JSON: real sessions have
-    produced junk-JSON preambles (`{"cmd": "dummy"}{}...` tool-call flailing),
-    markdown-fenced verdicts, prose around the object, and the verdict emitted
-    twice back-to-back. Scan every top-level JSON object in the text and prefer
-    the LAST one that looks like a verdict (has `ac_results` or `overall_pass`);
-    fall back to the first object so bare single-object output still parses.
-
-    Returns None when no JSON object is found at all (empty input, prose-only,
-    or non-object JSON like `42` / `[]`) - `_handle_verifier_complete` must be
-    able to do `parsed.get(...)` on the return value.
-    """
-    if not raw:
-        return None
-    decoder = json.JSONDecoder()
-    first_obj: Optional[dict] = None
-    last_verdict: Optional[dict] = None
-    idx = 0
-    while True:
-        start = raw.find("{", idx)
-        if start == -1:
-            break
-        try:
-            value, end = decoder.raw_decode(raw, start)
-        except json.JSONDecodeError:
-            idx = start + 1
-            continue
-        if isinstance(value, dict):
-            if first_obj is None:
-                first_obj = value
-            if "ac_results" in value or "overall_pass" in value:
-                last_verdict = value
-        idx = end
-    return last_verdict if last_verdict is not None else first_obj
-
-
 def _iso_now() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
-
-
-_WORKTREE_SUBDIR = ".tsugite-jobs"
-
-
-def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] = None) -> str:
-    """Add a git worktree at `<repo>/.tsugite-jobs/<job_id>` and return its absolute path.
-
-    The worktree starts from the repo's current HEAD on a detached HEAD so the job
-    can commit/branch freely without affecting the parent repo's branches.
-
-    A relative `repo` is interpreted against `workspace_root` (the job's workspace),
-    not the daemon process CWD. Absolute and `~`-expanded paths are left unchanged.
-    """
-    repo_path = Path(repo).expanduser()
-    if not repo_path.is_absolute() and workspace_root is not None:
-        repo_path = Path(workspace_root) / repo_path
-    repo_path = repo_path.resolve()
-    if not (repo_path / ".git").exists():
-        raise ValueError(f"repo path is not a git repository: {repo_path}")
-    target = repo_path / _WORKTREE_SUBDIR / job_id
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # --detach: don't create a branch; the job can branch later if it wants.
-    # HEAD: start from the repo's current commit.
-    # LC_ALL=C pins git's error messages to English so log scrapes are deterministic.
-    # GIT_TERMINAL_PROMPT=0 prevents git from blocking on credential prompts.
-    env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
-    try:
-        subprocess.run(
-            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-            env=env,
-        )
-    except subprocess.CalledProcessError as e:
-        # Surface git's actual fatal message instead of the bare exit-status string.
-        stderr_text = (e.stderr or b"").decode("utf-8", "replace").strip()
-        raise RuntimeError(f"git worktree add failed (exit {e.returncode}): {stderr_text or 'no stderr'}") from e
-    return str(target)
-
-
-def _prune_worktree(worktree_path: str) -> None:
-    """Remove a previously-provisioned worktree. Errors are logged, not raised -
-    cleanup must not fail a Job finalization.
-
-    Safety: the rmtree fallback REQUIRES the path to live under our own
-    `.tsugite-jobs/` subdir, so a corrupted or hand-edited worktree_path
-    (e.g. an absolute path pointing at the repo root) cannot rm the wrong tree.
-
-    `git worktree remove` needs to run inside a git repo, otherwise it errors with
-    "not a git repository". `<repo>/.tsugite-jobs/<job_id>` is the layout so the
-    parent's parent is the repo root - feed that as cwd. If the rmtree fallback
-    fires, also run `git worktree prune` to clear the stale metadata so the next
-    `worktree add` at the same path doesn't see a "missing but already registered"
-    record.
-    """
-    wt = Path(worktree_path)
-    if not wt.exists():
-        return
-    # The worktree path is `<repo>/.tsugite-jobs/<job_id>` - walk up two levels for the repo.
-    repo_root = wt.parent.parent if wt.parent.name == _WORKTREE_SUBDIR else None
-    # `git worktree remove --force` works even if the worktree has uncommitted changes.
-    try:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(wt)],
-            check=True,
-            capture_output=True,
-            cwd=str(repo_root) if repo_root else None,
-        )
-        return
-    except Exception as e:
-        stderr = getattr(e, "stderr", b"")
-        stderr_text = (
-            stderr.decode("utf-8", "replace").strip() if isinstance(stderr, (bytes, bytearray)) else str(stderr)
-        )
-        logger.warning("git worktree remove failed for %s: %s (stderr: %s); attempting rmtree", wt, e, stderr_text)
-
-    # rmtree fallback - but ONLY if the path is structurally inside .tsugite-jobs/.
-    # Any other location indicates corruption or tampering; refuse rather than
-    # nuke an arbitrary tree.
-    resolved = wt.resolve()
-    if _WORKTREE_SUBDIR not in resolved.parts:
-        logger.error(
-            "Refusing rmtree of %s: path is not inside %s/ - corrupted Job.worktree_path?",
-            resolved,
-            _WORKTREE_SUBDIR,
-        )
-        return
-    import shutil
-
-    try:
-        shutil.rmtree(wt, ignore_errors=True)
-    except Exception:
-        logger.exception("Failed to rmtree worktree at %s", wt)
-
-    # Tell git the worktree is gone so a subsequent `worktree add` at the same path
-    # doesn't trip on a stale registration.
-    if repo_root and repo_root.exists():
-        try:
-            subprocess.run(
-                ["git", "worktree", "prune"],
-                check=False,
-                capture_output=True,
-                cwd=str(repo_root),
-            )
-        except Exception:
-            logger.debug("git worktree prune fallback failed for %s", repo_root)

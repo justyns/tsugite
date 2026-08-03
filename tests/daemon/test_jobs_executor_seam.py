@@ -310,7 +310,7 @@ async def test_cancel_job_cancels_executor_before_worktree_prune(store, runner, 
     # Give the job a worktree so cancel triggers a prune; the child holds its cwd
     # open, so the executor must be cancelled first.
     store.update(job.id, worktree_path=str(tmp_path / "wt"))
-    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: seq.append("prune"))
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: (seq.append("prune"), True)[1])
 
     await orchestrator.cancel_job(job.id, reason="user clicked cancel")
     await _drain(orchestrator)
@@ -466,7 +466,7 @@ async def test_errored_job_tears_down_executor_but_keeps_worktree(store, runner,
     orchestrator.register_executor("fake", ex)
     job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
     store.update(job.id, worktree_path=str(tmp_path / "wt"))
-    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: seq.append("prune"))
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: (seq.append("prune"), True)[1])
 
     await orchestrator.fail_worker(job.id, "claude session exited (code 1)")
     await _drain(orchestrator)
@@ -487,7 +487,7 @@ async def test_stuck_job_tears_down_executor_but_keeps_worktree(store, runner, o
         store, orchestrator, acceptance_criteria=["file_exists:missing.txt"], workspace_path=str(tmp_path)
     )
     store.update(job.id, max_attempts=1, worktree_path=str(tmp_path / "wt"))
-    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: seq.append("prune"))
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: (seq.append("prune"), True)[1])
 
     await orchestrator.complete_worker(job.id, "claims it wrote the file")
     await _drain(orchestrator)

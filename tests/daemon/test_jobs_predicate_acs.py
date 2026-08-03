@@ -8,14 +8,10 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from tsugite_daemon.job_predicates import _evaluate_predicate, _parse_ac_predicate, partition_acs
+from tsugite_daemon.job_prompts import _build_verifier_prompt
 from tsugite_daemon.job_store import Job, JobState, JobStore
-from tsugite_daemon.jobs_orchestrator import (
-    JobsOrchestrator,
-    _build_verifier_prompt,
-    _evaluate_predicate,
-    _parse_ac_predicate,
-    partition_acs,
-)
+from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
 from tsugite_daemon.session_store import Session, SessionStatus
 
 
@@ -278,7 +274,7 @@ def test_predicate_timeout_marks_fail(tmp_path, monkeypatch):
     def fake_run(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=args[0] if args else "sleep", timeout=kwargs.get("timeout", 30))
 
-    monkeypatch.setattr("tsugite_daemon.jobs_orchestrator.subprocess.run", fake_run)
+    monkeypatch.setattr("tsugite_daemon.job_predicates.subprocess.run", fake_run)
 
     result = _evaluate_predicate(
         {"kind": "exit_code", "cmd": "sleep 60", "expected": 0},
@@ -326,7 +322,7 @@ def test_predicate_evaluation_error_is_handled(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
         raise OSError("permission denied")
 
-    monkeypatch.setattr("tsugite_daemon.jobs_orchestrator.subprocess.run", boom)
+    monkeypatch.setattr("tsugite_daemon.job_predicates.subprocess.run", boom)
 
     result = _evaluate_predicate(
         {"kind": "exit_code", "cmd": "anything", "expected": 0},
@@ -350,7 +346,7 @@ def test_cmd_predicate_with_no_cwd_is_not_run_and_marked_unmet(monkeypatch):
         ran.append((args, kwargs))
         raise AssertionError("subprocess.run must NOT be called when cwd is None")
 
-    monkeypatch.setattr("tsugite_daemon.jobs_orchestrator.subprocess.run", spy_run)
+    monkeypatch.setattr("tsugite_daemon.job_predicates.subprocess.run", spy_run)
 
     result = _evaluate_predicate(
         {"kind": "exit_code", "cmd": "true", "expected": 0},
@@ -375,7 +371,7 @@ async def test_cmd_predicate_job_without_worktree_marks_criterion_unmet(store, r
         ran.append((args, kwargs))
         raise AssertionError("subprocess.run must NOT be called when the job has no cwd")
 
-    monkeypatch.setattr("tsugite_daemon.jobs_orchestrator.subprocess.run", spy_run)
+    monkeypatch.setattr("tsugite_daemon.job_predicates.subprocess.run", spy_run)
 
     # worktree_path defaults to None and no repo is set → _resolve_predicate_cwd → None.
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["cmd:true"])
@@ -609,7 +605,7 @@ def test_build_verifier_prompt_backward_compat_without_prose_acs_arg():
 def test_predicate_cwd_resolution_uses_worktree_then_repo(tmp_path):
     """The orchestrator's predicate eval picks cwd from worktree_path then repo,
     falling back to None. This is structural - tested via the helper directly."""
-    from tsugite_daemon.jobs_orchestrator import _resolve_predicate_cwd
+    from tsugite_daemon.job_predicates import _resolve_predicate_cwd
 
     job_with_worktree = Job(id="j", parent_session_id="p", prompt="x", worktree_path=str(tmp_path))
     assert _resolve_predicate_cwd(job_with_worktree) == str(tmp_path)

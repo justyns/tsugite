@@ -6,7 +6,7 @@ from tsugite.core.sandbox import sandbox_available
 
 
 def test_unsandboxed_job_predicate_runs_via_shell(tmp_path):
-    from tsugite_daemon.jobs_orchestrator import _evaluate_predicate
+    from tsugite_daemon.job_predicates import _evaluate_predicate
 
     (tmp_path / "inside.txt").write_text("x")
     ok = _evaluate_predicate(
@@ -23,7 +23,7 @@ def test_unsandboxed_job_predicate_runs_via_shell(tmp_path):
 def test_sandboxed_job_predicate_runs_in_bwrap(tmp_path):
     """A sandboxed job's shell predicate runs inside bwrap: it sees the
     worktree (cwd) but cannot read outside it."""
-    from tsugite_daemon.jobs_orchestrator import _evaluate_predicate
+    from tsugite_daemon.job_predicates import _evaluate_predicate
 
     (tmp_path / "inside.txt").write_text("x")
     override = {

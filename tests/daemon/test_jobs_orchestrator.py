@@ -5,6 +5,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+import tsugite_daemon.jobs_orchestrator as orch_mod
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
@@ -1097,6 +1098,7 @@ async def test_worktree_prune_runs_off_the_event_loop_thread(store, runner, orch
 
     def recording_prune(path):
         seen["tid"] = threading.get_ident()
+        return True
 
     monkeypatch.setattr(orch_mod, "_prune_worktree", recording_prune)
 
@@ -2378,4 +2380,24 @@ async def test_stale_worker_completion_does_not_advance_a_newer_attempt(store, r
 
     assert store.get(job.id).state == JobState.RUNNING.value, (
         "a stale worker completion must not advance the newer attempt to VERIFYING"
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_prune_keeps_the_worktree_path_for_retry(store, runner, orchestrator, monkeypatch):
+    """A prune that fails must leave `worktree_path` on the record. Clearing it
+    regardless loses the only pointer to the directory that still needs removing,
+    so the leftover tree can never be cleaned up or retried."""
+    job = _seed_running_job(store, orchestrator, runner)
+    store.update(job.id, worktree_path="/tmp/does-not-matter/.tsugite-jobs/job-x")
+
+    # Matches the real contract: _prune_worktree swallows its errors and reports
+    # failure by returning False, so a stub that raises would not exercise it.
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: False)
+
+    orchestrator._finalize(store.get(job.id), JobState.CANCELLED, error="cancelled")
+    await asyncio.gather(*list(orchestrator._bg_tasks), return_exceptions=True)
+
+    assert store.get(job.id).worktree_path == "/tmp/does-not-matter/.tsugite-jobs/job-x", (
+        "a failed prune must keep the path so the leftover tree stays trackable"
     )
