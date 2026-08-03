@@ -2339,3 +2339,43 @@ async def test_retry_worker_session_gets_job_title(store, runner, orchestrator):
     retry = runner.started[-1]
     assert (retry.metadata or {}).get("loop_attempt") == 1
     assert retry.title == f"{job.id} · worker"
+
+
+# ── stale-callback ownership ──
+
+
+@pytest.mark.asyncio
+async def test_stale_verifier_failure_does_not_error_a_retried_job(store, runner, orchestrator):
+    """A verifier failing after its attempt was superseded must not finalize the
+    newer attempt (RUNNING -> ERRORED is legal, so nothing else stops it)."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["ships"])
+    store.update(job.id, state=JobState.VERIFYING.value, verifier_session_id="verifier-old")
+
+    # The attempt is superseded: a retry put a new worker in RUNNING, and the new
+    # phase has its own verifier slot (none yet).
+    store.update(job.id, state=JobState.RUNNING.value, worker_session_id="worker-2", verifier_session_id=None)
+
+    stale = _verifier_session(job, session_id="verifier-old", status=SessionStatus.FAILED.value)
+    await orchestrator.on_session_complete(stale, "boom")
+
+    assert store.get(job.id).state == JobState.RUNNING.value, (
+        "a stale verifier failure must not finalize the newer attempt"
+    )
+
+
+@pytest.mark.xfail(strict=True, reason="worker callbacks are state-guarded, not session-owned")
+@pytest.mark.asyncio
+async def test_stale_worker_completion_does_not_advance_a_newer_attempt(store, runner, orchestrator):
+    """A worker completing after its attempt was superseded must not push the job
+    into VERIFYING; a retried job is legitimately RUNNING again, so the state check
+    alone passes for the wrong session. Needs an attempt-ownership token."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["ships"])
+    # A retry replaced the worker; the job is RUNNING again under a NEW session.
+    store.update(job.id, worker_session_id="worker-2")
+
+    stale = _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.value)
+    await orchestrator.on_session_complete(stale, "old output")
+
+    assert store.get(job.id).state == JobState.RUNNING.value, (
+        "a stale worker completion must not advance the newer attempt to VERIFYING"
+    )

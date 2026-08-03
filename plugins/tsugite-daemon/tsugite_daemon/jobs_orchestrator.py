@@ -732,13 +732,23 @@ class JobsOrchestrator:
         is_verifier = bool((session.metadata or {}).get("verifier_for"))
         session_failed = session.status in (SessionStatus.FAILED.value, SessionStatus.CANCELLED.value)
 
-        if is_verifier and session_failed:
-            # Verifier crashed or got cancelled - infrastructure failure, NOT a
-            # verdict against the worker. Don't burn a verify attempt.
-            reason = session.error or result_str or f"verifier session ended with status '{session.status}'"
-            self._finalize(job, JobState.ERRORED, error=f"verifier infra failure: {reason}")
-        elif is_verifier:
-            await self._handle_verifier_complete(job, result_str)
+        if is_verifier:
+            # A verifier speaks only for the phase it was spawned in: once the job
+            # has moved on, a duplicate or superseded callback must not advance or
+            # finalize the attempt that replaced it (RUNNING -> ERRORED is legal).
+            if job.state != JobState.VERIFYING.value:
+                logger.warning(
+                    "Verifier callback for job '%s' in state '%s' (expected VERIFYING) - ignoring",
+                    job.id,
+                    job.state,
+                )
+            elif session_failed:
+                # Verifier crashed or got cancelled - infrastructure failure, NOT a
+                # verdict against the worker. Don't burn a verify attempt.
+                reason = session.error or result_str or f"verifier session ended with status '{session.status}'"
+                self._finalize(job, JobState.ERRORED, error=f"verifier infra failure: {reason}")
+            else:
+                await self._handle_verifier_complete(job, result_str)
         elif session_failed:
             await self._handle_worker_failed(job, session, result_str)
         else:
@@ -1020,17 +1030,6 @@ class JobsOrchestrator:
         self._finalize(job, JobState.ERRORED, error=reason, error_detail=detail)
 
     async def _handle_verifier_complete(self, job: Job, result_str: str) -> None:
-        # State guard: a duplicate or out-of-order verifier-complete for a Job
-        # that's no longer in VERIFYING must NOT advance the state again.
-        # Without this, a stale notify could spawn a second concurrent retry worker.
-        if job.state != JobState.VERIFYING.value:
-            logger.warning(
-                "Verifier completion for job '%s' in state '%s' (expected VERIFYING) - ignoring",
-                job.id,
-                job.state,
-            )
-            return
-
         # Attempt counter is 1-indexed (matches the UX of "attempt #N"). Captured
         # before _handle_verifier_failure bumps job.verify_attempts.
         attempt_num = job.verify_attempts + 1
