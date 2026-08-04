@@ -8,10 +8,16 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from tsugite.config import get_xdg_data_path, get_xdg_write_path
+from tsugite.config import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT, get_xdg_data_path, get_xdg_write_path
 
 daemon_app = typer.Typer(help="Daemon management commands")
 console = Console()
+
+# Connection flags shared by every daemon client command. Typer resolves
+# flag > env var > default natively, so there is nothing to hand-roll here.
+HOST_OPTION = typer.Option(DEFAULT_DAEMON_HOST, "--host", envvar="TSUGITE_DAEMON_HOST", help="Daemon HTTP host")
+PORT_OPTION = typer.Option(DEFAULT_DAEMON_PORT, "--port", "-p", envvar="TSUGITE_DAEMON_PORT", help="Daemon HTTP port")
+TOKEN_OPTION = typer.Option(None, "--token", "-t", envvar="TSUGITE_DAEMON_TOKEN", help="Auth token")
 
 
 def _get_questionary_style():
@@ -394,9 +400,9 @@ def _daemon_request(method: str, host: str, port: int, path: str, token: Optiona
 @daemon_app.command("sessions")
 def list_sessions(
     agent: str = typer.Argument(help="Agent name"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """List active sessions for a daemon agent."""
     data = _daemon_request("GET", host, port, f"/api/agents/{agent}/sessions", token)
@@ -421,9 +427,9 @@ def list_sessions(
 def compact_session(
     agent: str = typer.Argument(help="Agent name"),
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID to compact"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Force compact a daemon session."""
     data = _daemon_request(
@@ -451,9 +457,9 @@ daemon_app.add_typer(session_app, name="session")
 @session_app.command("set-primary")
 def session_set_primary(
     session_id: str = typer.Argument(help="Session ID to mark as primary"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Mark a session as the user's primary for its agent."""
     _daemon_request("POST", host, port, f"/api/sessions/{session_id}/set-primary", token, json={})
@@ -464,9 +470,9 @@ def session_set_primary(
 def session_clear_primary(
     agent: str = typer.Option(..., "--agent", "-a", help="Agent name"),
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove the primary flag from any session for (user, agent)."""
     from urllib.parse import urlencode
@@ -478,9 +484,9 @@ def session_clear_primary(
 
 @session_app.command("list")
 def session_list(
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """List all daemon sessions, indicating which one is primary."""
     from rich.table import Table
@@ -525,9 +531,9 @@ def _parse_every_to_cron(every: str) -> str:
 
 @schedule_app.command("list")
 def schedule_list(
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """List all schedules."""
     from rich.table import Table
@@ -579,9 +585,9 @@ def schedule_add(
         "--target-session",
         help="Where the inject_history turn lands: primary, originating, none, name:<n>, or <session_id>",
     ),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Add a new schedule."""
     spec_count = sum(1 for x in (cron, at, every) if x is not None)
@@ -617,9 +623,9 @@ def schedule_add(
 
 @schedule_app.command("cleanup")
 def schedule_cleanup(
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove all orphaned one-off schedules (disabled, already fired)."""
     data = _daemon_request("POST", host, port, "/api/schedules/cleanup", token)
@@ -635,9 +641,9 @@ def schedule_cleanup(
 @schedule_app.command("remove")
 def schedule_remove(
     schedule_id: str = typer.Argument(help="Schedule ID to remove"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove a schedule."""
     _daemon_request("DELETE", host, port, f"/api/schedules/{schedule_id}", token)
@@ -647,9 +653,9 @@ def schedule_remove(
 @schedule_app.command("enable")
 def schedule_enable(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Enable a schedule."""
     _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/enable", token)
@@ -659,9 +665,9 @@ def schedule_enable(
 @schedule_app.command("disable")
 def schedule_disable(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Disable a schedule."""
     _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/disable", token)
@@ -671,9 +677,9 @@ def schedule_disable(
 @schedule_app.command("run")
 def schedule_run(
     schedule_id: str = typer.Argument(help="Schedule ID to trigger now"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Trigger a schedule immediately."""
     _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/run", token)
@@ -683,9 +689,9 @@ def schedule_run(
 @schedule_app.command("show")
 def schedule_show(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = typer.Option("127.0.0.1", "--host", help="Daemon HTTP host"),
-    port: int = typer.Option(8321, "--port", "-p", help="Daemon HTTP port"),
-    token: Optional[str] = typer.Option(None, "--token", "-t", help="Auth token"),
+    host: str = HOST_OPTION,
+    port: int = PORT_OPTION,
+    token: Optional[str] = TOKEN_OPTION,
 ):
     """Show schedule details."""
     data = _daemon_request("GET", host, port, f"/api/schedules/{schedule_id}", token)

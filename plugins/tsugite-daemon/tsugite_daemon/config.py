@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Literal, Optional
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
+from tsugite.config import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+
 
 def _get_default_state_dir() -> Path:
     """Get the default state directory for daemon."""
@@ -132,8 +134,8 @@ class HTTPConfig(BaseModel):
     """
 
     enabled: bool = False
-    host: str = "127.0.0.1"
-    port: int = 8374
+    host: str = DEFAULT_DAEMON_HOST
+    port: int = DEFAULT_DAEMON_PORT
     max_workspace_file_size: int = 1024 * 1024  # 1MB
     image_max_edge: int = 1568  # longest-edge px cap; the API downscales past this anyway
     image_quality: float = 0.85  # JPEG quality for the client re-encode (0..1)

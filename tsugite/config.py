@@ -7,6 +7,12 @@ from typing import Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# The address the daemon serves on by default. Defined here rather than in the
+# daemon plugin so the server's bind default and the client's connect default
+# cannot drift apart; tsugite_daemon.config.HTTPConfig imports these.
+DEFAULT_DAEMON_HOST = "127.0.0.1"
+DEFAULT_DAEMON_PORT = 8374
+
 # XDG Base Directory utilities
 
 
