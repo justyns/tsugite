@@ -325,6 +325,60 @@ class TestAttachmentResolution:
         assert cache_info["size"] > 0
 
 
+class TestCodeFileContentType:
+    """Code and config files must resolve as text, not as base64 documents.
+
+    `mimetypes.guess_type` maps several plain-text formats to `application/*`
+    (`.sh` -> `application/x-sh`, `.json` -> `application/json`, ...), and the
+    platform mapping varies by machine, so these assert the resolved content
+    rather than the guessed MIME type.
+    """
+
+    @pytest.mark.parametrize(
+        "filename,body",
+        [
+            ("script.sh", "#!/bin/sh\necho hello\n"),
+            ("data.json", '{"key": "value"}\n'),
+            ("query.sql", "SELECT 1;\n"),
+            ("tool.pl", "#!/usr/bin/perl\nprint 1;\n"),
+        ],
+    )
+    def test_code_files_resolve_as_text(self, tmp_path, monkeypatch, filename, body):
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        source = tmp_path / filename
+        source.write_text(body)
+        add_attachment("code", source=str(source))
+
+        results = resolve_attachments(["code"])
+
+        assert results[0].content_type == AttachmentContentType.TEXT
+        assert results[0].content == body
+
+    def test_real_documents_still_resolve_as_documents(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        source = tmp_path / "report.pdf"
+        source.write_bytes(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        add_attachment("doc", source=str(source))
+
+        results = resolve_attachments(["doc"])
+
+        assert results[0].content_type == AttachmentContentType.DOCUMENT
+
+    def test_binary_archive_is_not_treated_as_text(self, tmp_path, monkeypatch):
+        """`application/epub+zip` ends in `+zip`, not a structured text suffix."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        source = tmp_path / "book.epub"
+        source.write_bytes(b"PK\x03\x04\x00\x00\x00\x00")
+        add_attachment("book", source=str(source))
+
+        results = resolve_attachments(["book"])
+
+        assert results[0].content_type == AttachmentContentType.DOCUMENT
+
+
 class TestAgentAttachments:
     """Test attachment support in agent definitions."""
 

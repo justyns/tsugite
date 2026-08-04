@@ -47,6 +47,39 @@ class FileHandler(AttachmentHandler):
         ),
     }
 
+    # `mimetypes` maps a number of plain-text formats into `application/*`
+    # (`.sh` -> `application/x-sh`, `.json` -> `application/json`), and which
+    # ones depends on the platform's mime.types. Reading those as documents
+    # base64-encodes source code the model was meant to read, so match them
+    # back to text. `+zip` and friends are deliberately absent from the
+    # structured suffixes: `application/epub+zip` is not text.
+    TEXT_MIME_TYPES = frozenset(
+        {
+            "application/ecmascript",
+            "application/javascript",
+            "application/json",
+            "application/sql",
+            "application/toml",
+            "application/x-csh",
+            "application/x-javascript",
+            "application/x-latex",
+            "application/x-perl",
+            "application/x-php",
+            "application/x-powershell",
+            "application/x-python",
+            "application/x-python-code",
+            "application/x-ruby",
+            "application/x-sh",
+            "application/x-shellscript",
+            "application/x-tcl",
+            "application/x-yaml",
+            "application/xml",
+            "application/yaml",
+        }
+    )
+
+    TEXT_MIME_SUFFIXES = ("+json", "+xml", "+yaml")
+
     def can_handle(self, source: str) -> bool:
         """Check if source is a file path.
 
@@ -92,11 +125,16 @@ class FileHandler(AttachmentHandler):
                 return (mime_type, AttachmentContentType.IMAGE)
             elif mime_type.startswith("audio/"):
                 return (mime_type, AttachmentContentType.AUDIO)
-            elif mime_type.startswith("application/"):
+            elif mime_type.startswith("application/") and not self._is_text_mime(mime_type):
                 return (mime_type, AttachmentContentType.DOCUMENT)
 
         # Default to text
         return ("text/plain", AttachmentContentType.TEXT)
+
+    @classmethod
+    def _is_text_mime(cls, mime_type: str) -> bool:
+        """Whether an `application/*` MIME type actually carries text."""
+        return mime_type in cls.TEXT_MIME_TYPES or mime_type.endswith(cls.TEXT_MIME_SUFFIXES)
 
     def fetch(self, source: str) -> Attachment:
         """Read file content.
