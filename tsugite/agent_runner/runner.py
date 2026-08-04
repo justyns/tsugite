@@ -180,7 +180,7 @@ def get_default_instructions() -> str:
     return base + output + rules
 
 
-def _render_args(value: Any, renderer: AgentRenderer) -> Any:
+def _render_args(value: Any, renderer: AgentRenderer, context: Dict[str, Any]) -> Any:
     """Recursively render Jinja in string leaves of a tool args structure.
 
     Non-string values pass through unchanged. Strings without Jinja markers
@@ -189,13 +189,13 @@ def _render_args(value: Any, renderer: AgentRenderer) -> Any:
     if isinstance(value, str):
         if "{{" not in value and "{%" not in value:
             return value
-        return renderer.render_string(value, {})
+        return renderer.render_string(value, context)
     if isinstance(value, dict):
-        return {k: _render_args(v, renderer) for k, v in value.items()}
+        return {k: _render_args(v, renderer, context) for k, v in value.items()}
     if isinstance(value, list):
-        return [_render_args(v, renderer) for v in value]
+        return [_render_args(v, renderer, context) for v in value]
     if isinstance(value, tuple):
-        return tuple(_render_args(v, renderer) for v in value)
+        return tuple(_render_args(v, renderer, context) for v in value)
     return value
 
 
@@ -219,7 +219,7 @@ def execute_prefetch(prefetch_config: List[Dict[str, Any]], event_bus: Optional[
             continue
 
         try:
-            rendered_args = _render_args(args, renderer)
+            rendered_args = _render_args(args, renderer, context)
         except Exception as e:
             raise RuntimeError(f"Prefetch render failed for tool '{tool_name}': {e}") from e
 
@@ -245,7 +245,7 @@ def execute_tool_directives(
 
     Args:
         content: Markdown content with tool directives
-        existing_context: Current template context (for error messages, not used for execution)
+        existing_context: Current template context; directive args render against it
         event_bus: Optional event bus for emitting warnings
 
     Returns:
@@ -289,8 +289,11 @@ def execute_tool_directives(
     renderer = AgentRenderer()
 
     for directive in directives:
+        # Directives run in order, so each one renders against the caller's
+        # context (step assignments, prefetch results) plus whatever earlier
+        # directives in this same content have assigned.
         try:
-            rendered_args = _render_args(directive.args, renderer)
+            rendered_args = _render_args(directive.args, renderer, {**existing_context, **new_context})
         except Exception as e:
             raise RuntimeError(f"Tool directive render failed for '{directive.name}': {e}") from e
 

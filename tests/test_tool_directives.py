@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tsugite.agent_runner import execute_tool_directives
+from tsugite.agent_runner import execute_prefetch, execute_tool_directives
 from tsugite.md_agents import extract_tool_directives
 
 
@@ -187,6 +187,59 @@ class TestToolDirectiveExecution:
             # New tool context should only have new variables
             assert "new_data" in tool_context
             assert "existing_var" not in tool_context
+
+    def test_directive_args_render_against_existing_context(self):
+        """A step-assigned variable is usable inside a later directive's args."""
+        content = """
+<!-- tsu:tool name="test_tool" args={"prompt": "TARGET:\\n{{ target }}"} assign="result" -->
+"""
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
+            mock_call_tool.return_value = "ok"
+
+            _, context = execute_tool_directives(content, {"target": "review packet"})
+
+            mock_call_tool.assert_called_once_with("test_tool", prompt="TARGET:\nreview packet")
+            assert context["result"] == "ok"
+
+    def test_directive_args_render_against_earlier_directive_results(self):
+        """Directives execute in order, so a later one can use an earlier assignment."""
+        content = """
+<!-- tsu:tool name="gather" args={"path": "packet.md"} assign="packet" -->
+<!-- tsu:tool name="review" args={"prompt": "{{ packet }}"} assign="review" -->
+"""
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
+            mock_call_tool.side_effect = ["gathered packet", "reviewed"]
+
+            _, context = execute_tool_directives(content)
+
+            assert mock_call_tool.call_args_list[1].kwargs == {"prompt": "gathered packet"}
+            assert context["review"] == "reviewed"
+
+    def test_directive_args_render_non_string_leaves_unchanged(self):
+        """Rendering context must not coerce non-string args (timeout stays an int)."""
+        content = """
+<!-- tsu:tool name="spawn_agent" args={"prompt": "{{ target }}", "timeout": 600} assign="out" -->
+"""
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
+            mock_call_tool.return_value = "ok"
+
+            execute_tool_directives(content, {"target": "packet"})
+
+            mock_call_tool.assert_called_once_with("spawn_agent", prompt="packet", timeout=600)
+
+    def test_prefetch_args_render_against_earlier_prefetch_results(self):
+        """Prefetch entries run in order and share the accumulating context."""
+        config = [
+            {"tool": "gather", "args": {"path": "packet.md"}, "assign": "packet"},
+            {"tool": "review", "args": {"prompt": "{{ packet }}"}, "assign": "review"},
+        ]
+        with patch("tsugite.tools.call_tool") as mock_call_tool:
+            mock_call_tool.side_effect = ["gathered packet", "reviewed"]
+
+            context = execute_prefetch(config)
+
+            assert mock_call_tool.call_args_list[1].kwargs == {"prompt": "gathered packet"}
+            assert context["review"] == "reviewed"
 
     def test_no_directives_returns_unchanged(self):
         """Test that content without directives is returned unchanged."""
