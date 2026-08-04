@@ -253,7 +253,11 @@ class TestMidTurnGuard:
     def test_check_agent_skips_session_with_turn_in_flight(self, tmp_path):
         """Rotating a session mid-turn loses every event the in-flight turn
         writes after the compaction snapshot - the exchange vanishes from the
-        successor. status_text is non-empty exactly while a turn runs."""
+        successor.
+
+        Drives the real turn marker rather than a stubbed progress dict: the
+        guard must follow session state, not a rendered status label.
+        """
         from tsugite_daemon.session_store import Session, SessionSource
 
         store = _make_session_store(tmp_path)
@@ -263,19 +267,17 @@ class TestMidTurnGuard:
         adapter = _make_adapter()
         scheduler, agent_config = _make_scheduler(tmp_path, adapter, store, min_turns=1)
 
-        store.session_progress_summary = lambda sid: {
-            "status_text": "Turn 2...",
-            "turn_count": 2,
-            "last_event_time": "2026-06-10T00:00:00Z",
-        }
+        store.begin_turn("busy")
         asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_not_called()
+
         # And the mutex must not be left held - the next cycle (turn settled)
         # must be able to compact.
-        store.session_progress_summary = lambda sid: {
-            "status_text": "",
-            "turn_count": 2,
-            "last_event_time": "2026-06-10T00:00:01Z",
-        }
+        store.end_turn("busy")
         asyncio.run(scheduler._check_agent("test-agent", agent_config))
         adapter._compact_session.assert_called_once()
+
+        # No sibling test for the RUNNING branch of has_live_work here: this
+        # scheduler only ever sees ACTIVE sessions (list_interactive_by_agent
+        # filters on status), so such a test would pass with the guard removed.
+        # That branch is covered where it bites, in test_session_progress_cache.

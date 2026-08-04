@@ -255,6 +255,23 @@ class Session:
     def is_primary(self) -> bool:
         return bool(self.metadata.get(METADATA_PRIMARY_FLAG))
 
+    @property
+    def has_live_work(self) -> bool:
+        """Whether this session currently has work running.
+
+        Two signals, because the two kinds of run are marked differently:
+        interactive turns set `turn_in_flight` for the turn's duration, while
+        scheduled and background runs are created with status RUNNING and never
+        begin a turn at all.
+
+        The durable half of "is this session busy". The HTTP layer's
+        `_session_busy` builds on this, adding the live chat task that only it
+        can see. Anything that needs to know whether a session is working
+        should ask this rather than infer it from progress fields — a progress
+        label reports the last event, not what is happening now.
+        """
+        return self.turn_in_flight or self.status == SessionStatus.RUNNING.value
+
     def __post_init__(self):
         if not self.id:
             self.id = f"session-{uuid4().hex[:8]}"
@@ -1216,6 +1233,15 @@ class SessionStore:
         with what the UI would render if it replayed the event log. The first
         call cold-loads the file; subsequent calls hit the in-memory cache,
         which `append_event` keeps current.
+
+        `status_text` is the last status-bearing event, which is the session's
+        *current* status only while the log ends on a terminator. A log can end
+        mid-turn with nothing running — compaction retains a slice of turns and
+        deliberately drops their `session_end` markers, and a crash or truncated
+        write leaves the same shape. Callers rendering the label must therefore
+        gate it on `has_live_work` (or the HTTP layer's broader `_session_busy`),
+        or an idle session displays a stale "Waiting on LLM..." forever. This
+        stays a pure derivation from events; liveness is not an event.
 
         Callers MUST treat the returned dict as read-only — it's the cached
         object itself, shared across calls. Mutating it corrupts the cache.

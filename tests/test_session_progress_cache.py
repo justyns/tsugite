@@ -124,3 +124,55 @@ def test_progress_cache_evicted_on_session_finish(store, history_dir):
 
     store.update_session(sid, status=SessionStatus.COMPLETED.value)
     assert sid not in store._progress_cache
+
+
+def _mid_turn_tail(store, sid):
+    """Events ending mid-turn: a status-bearing model_request with no terminator after it."""
+    store.append_event(sid, {"type": "final_result", "result": "done"})
+    store.append_event(sid, {"type": "model_response", "content": "ok"})
+    store.append_event(sid, {"type": "model_request", "model": "m"})
+    store.append_event(sid, {"type": "model_response", "content": "ok"})
+
+
+def test_progress_summary_stays_a_pure_fold_when_idle(store, history_dir):
+    """A retained slice can end mid-turn (compaction drops per-turn session_end
+    markers). The fold still reports the last status-bearing event - suppressing
+    it is the caller's job, because liveness is not an event."""
+    from tsugite_daemon.session_store import Session
+
+    session = store.create_session(Session(id="idle-tail", agent="t", status=SessionStatus.ACTIVE.value))
+    _make_history_session(history_dir, session.id)
+    _mid_turn_tail(store, session.id)
+
+    assert store.session_progress_summary(session.id)["status_text"] == "Waiting on LLM..."
+    assert session.has_live_work is False
+
+
+class TestSessionHasLiveWork:
+    """The durable half of "is this session busy"; `_session_busy` builds on it."""
+
+    def _session(self, **kw):
+        from tsugite_daemon.session_store import Session
+
+        return Session(id="s", agent="t", **kw)
+
+    def test_idle_interactive_session_has_no_live_work(self):
+        assert self._session(status=SessionStatus.ACTIVE.value).has_live_work is False
+
+    def test_in_flight_turn_is_live_work(self):
+        session = self._session(status=SessionStatus.ACTIVE.value)
+        session.turn_in_flight = True
+        assert session.has_live_work is True
+
+    def test_running_background_session_is_live_work(self):
+        """Scheduled and background runs never call begin_turn, so the turn
+        marker alone would report them idle for their whole run."""
+        assert self._session(status=SessionStatus.RUNNING.value).has_live_work is True
+
+    def test_finished_session_has_no_live_work(self):
+        assert self._session(status=SessionStatus.COMPLETED.value).has_live_work is False
+
+    def test_turn_marker_wins_over_a_non_running_status(self):
+        session = self._session(status=SessionStatus.COMPLETED.value)
+        session.turn_in_flight = True
+        assert session.has_live_work is True

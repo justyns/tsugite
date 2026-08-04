@@ -131,10 +131,11 @@ class AgentsMixin:
     def _session_busy(self, agent_name: str, session) -> bool:
         """The one definition of busy, shared by the sessions payload, /status,
         and the /chat 409 guard - the server must never 409 a send while
-        reporting the session idle. True when the durable turn_in_flight marker
-        is set OR a live HTTP chat task exists (covers the brief window between
-        task creation and begin_turn)."""
-        if session.turn_in_flight:
+        reporting the session idle. True when the store reports durable live
+        work (an in-flight turn, or a background/scheduled run) OR a live HTTP
+        chat task exists (covers the brief window between task creation and
+        begin_turn, which only this layer can see)."""
+        if session.has_live_work:
             return True
         return any(
             a == agent_name and sid == session.id and chat.task is not None and not chat.task.done()
@@ -217,7 +218,15 @@ class AgentsMixin:
                 "busy": self._session_busy(adapter.agent_name, s),
             }
             if s.status in live_statuses:
-                row["progress"] = adapter.session_store.session_progress_summary(s.id)
+                progress = adapter.session_store.session_progress_summary(s.id)
+                if not row["busy"]:
+                    # The fold reports the last status-bearing event, which is the
+                    # current status only while the log ends on a terminator. An
+                    # idle session whose log ends mid-turn (compaction drops the
+                    # retained turns' session_end markers; a crash truncates the
+                    # same way) would otherwise show "Waiting on LLM..." forever.
+                    progress = {**progress, "status_text": ""}
+                row["progress"] = progress
             sessions.append(row)
 
         return JSONResponse({"sessions": sessions})

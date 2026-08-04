@@ -310,6 +310,55 @@ class TestAgentSessionsEndpoint:
         assert row["progress"]["tool_count"] == 1
         assert row["progress"]["status_text"] == "Tool: bash"
 
+    def _sessions_row(self, client, test_token, session_id):
+        resp = client.get(
+            "/api/agents/test-agent/sessions",
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200
+        return next(s for s in resp.json()["sessions"] if s["id"] == session_id)
+
+    def _idle_session_ending_mid_turn(self, store):
+        """A compacted successor: retained turns keep their events but not their
+        `session_end` markers, so the log ends on an un-terminated model_request."""
+        from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
+
+        session = store.create_session(
+            Session(
+                id="compacted_successor",
+                agent="test-agent",
+                source=SessionSource.INTERACTIVE.value,
+                status=SessionStatus.ACTIVE.value,
+                user_id="u",
+            )
+        )
+        store.append_event(session.id, {"type": "final_result", "result": "done"})
+        store.append_event(session.id, {"type": "model_response", "content": "ok"})
+        store.append_event(session.id, {"type": "model_request", "model": "m"})
+        store.append_event(session.id, {"type": "model_response", "content": "ok"})
+        return session
+
+    def test_idle_session_reports_no_in_flight_status_label(self, client, mock_adapter, test_token):
+        """A session whose log ends mid-turn with nothing running showed a stale
+        'Waiting on LLM...' in the sidebar until the next user turn."""
+        session = self._idle_session_ending_mid_turn(mock_adapter.session_store)
+
+        row = self._sessions_row(client, test_token, session.id)
+
+        assert row["busy"] is False
+        assert row["progress"]["status_text"] == ""
+
+    def test_in_flight_turn_still_reports_its_status_label(self, client, mock_adapter, test_token):
+        """The suppression keys off busy, not off the shape of the event tail."""
+        store = mock_adapter.session_store
+        session = self._idle_session_ending_mid_turn(store)
+        store.begin_turn(session.id)
+
+        row = self._sessions_row(client, test_token, session.id)
+
+        assert row["busy"] is True
+        assert row["progress"]["status_text"] == "Waiting on LLM..."
+
     def test_completed_session_omits_progress(self, client, mock_adapter, test_token):
         from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
 
