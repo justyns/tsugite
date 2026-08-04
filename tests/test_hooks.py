@@ -147,6 +147,38 @@ class TestHookHandler:
             mock_run.assert_called_once()
             assert mock_run.call_args[0][0] == "echo memory/note.md"
 
+    def test_relative_path_resolved_against_workspace_not_cwd(self, tmp_path, monkeypatch):
+        """`write_file` resolves relative paths against the workspace, so the hook must too.
+
+        When the process cwd has moved below the workspace root, resolving against
+        cwd yields a path that was never written (and does not exist).
+        """
+        subdir = tmp_path / "repos" / "tsugite"
+        subdir.mkdir(parents=True)
+        monkeypatch.chdir(subdir)
+
+        handler = self._make_handler(
+            [HookRule(tools=["write_file"], run="echo {{ path }}")],
+            workspace_dir=tmp_path,
+        )
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            self._simulate_tool_call(handler, "write_file", {"path": "memory/note.md"})
+            assert mock_run.call_args[0][0] == "echo memory/note.md"
+
+    def test_relative_path_outside_workspace_left_untouched(self, tmp_path, monkeypatch):
+        """A path escaping the workspace has no workspace-relative form; pass the raw arg."""
+        monkeypatch.chdir(tmp_path)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        handler = self._make_handler(
+            [HookRule(tools=["write_file"], run="echo {{ path }}")],
+            workspace_dir=workspace,
+        )
+        with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+            self._simulate_tool_call(handler, "write_file", {"path": "../outside.md"})
+            assert mock_run.call_args[0][0] == "echo ../outside.md"
+
     def test_error_logged_not_raised(self):
         handler = self._make_handler([HookRule(tools=["write_file"], run="echo done")])
         with patch("tsugite.hooks.subprocess.run", side_effect=OSError("boom")):

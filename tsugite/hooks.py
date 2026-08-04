@@ -540,8 +540,14 @@ class HookHandler:
     def _build_tool_context(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         context: dict[str, Any] = {"tool": tool_name, **arguments}
         if "path" in arguments:
+            # Resolve against the workspace, not the process cwd: the fs tools
+            # do the same (resolve_workspace_path), and a session that has cd'd
+            # below the workspace root would otherwise get the cwd segment
+            # prefixed onto an already-workspace-relative path.
+            # `/` keeps an absolute argument as-is, so this only rebases relative ones.
+            workspace = self.workspace_dir.resolve()
             try:
-                context["path"] = str(Path(arguments["path"]).resolve().relative_to(self.workspace_dir.resolve()))
+                context["path"] = str((workspace / arguments["path"]).resolve().relative_to(workspace))
             except ValueError:
                 pass
         return context
