@@ -244,13 +244,9 @@ class Scheduler:
             return
 
         # Auto-expiry checks
-        if entry.expires_at:
-            expires_dt = datetime.fromisoformat(entry.expires_at)
-            if expires_dt.tzinfo is None:
-                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-            if now >= expires_dt:
-                self._auto_disable(entry, "expired")
-                return
+        if entry.expires_at and now >= self._parse_local_datetime(entry.expires_at, entry.timezone):
+            self._auto_disable(entry, "expired")
+            return
         if entry.max_runs is not None and entry.run_count >= entry.max_runs:
             self._auto_disable(entry, "max_runs_reached")
             return
@@ -385,11 +381,7 @@ class Scheduler:
         if entry.schedule_type == "once":
             if not entry.run_at:
                 return None
-            run_dt = datetime.fromisoformat(entry.run_at)
-            if run_dt.tzinfo is None:
-                run_dt = run_dt.replace(tzinfo=timezone.utc)
-            else:
-                run_dt = run_dt.astimezone(timezone.utc)
+            run_dt = self._parse_local_datetime(entry.run_at, entry.timezone)
             # A slightly-late one-off (daemon restart spanning the fire time)
             # is still fireable within its misfire grace - _fire_due_schedules
             # applies the same window. Beyond grace it's a miss (None).
@@ -407,6 +399,24 @@ class Scheduler:
                 return None
 
         return None
+
+    def _parse_local_datetime(self, value: str, tz_name: str) -> datetime:
+        """Parse a user-supplied ISO datetime as a UTC instant.
+
+        A naive value is a wall-clock time in `tz_name` - the same reading the
+        cron branch gives it. Without this, `run_at` and `expires_at` silently
+        meant UTC, so a schedule created for 8pm Central fired (or expired) at
+        3pm Central. An offset-aware value already names an instant and is only
+        converted.
+
+        Not `naive.astimezone(utc)`: that resolves a naive value against the
+        *host's* timezone and ignores `tz_name`, which is right only when the
+        two happen to match. It is silently wrong for the `UTC` default.
+        """
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=self._zoneinfo(tz_name))
+        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def _zoneinfo(name: str) -> ZoneInfo:

@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
@@ -155,6 +156,70 @@ class TestNextRunComputation:
         scheduler.add(entry)
         stored = scheduler.get("job1")
         assert stored.next_run is not None
+
+
+CHICAGO = ZoneInfo("America/Chicago")
+
+
+def _fire_time(scheduler, run_at, **kw):
+    """Add a one-off schedule and return the UTC instant it resolved to."""
+    scheduler.add(ScheduleEntry(id="s", agent="bot", prompt="hi", schedule_type="once", run_at=run_at, **kw))
+    return datetime.fromisoformat(scheduler.get("s").next_run)
+
+
+class TestNaiveDatetimesHonorEntryTimezone:
+    """A bare wall-clock time must mean the same for `once` as it does for `cron`."""
+
+    def test_naive_run_at_is_localized_to_entry_timezone(self, scheduler):
+        """The reported symptom: 8pm Central fired at 8pm UTC, five hours early."""
+        assert _fire_time(scheduler, "2099-07-09T20:00:00", timezone="America/Chicago") == datetime(
+            2099, 7, 9, 20, 0, tzinfo=CHICAGO
+        )
+
+    def test_naive_run_at_defaults_to_utc_when_timezone_unset(self, scheduler):
+        """The `UTC` default is unchanged, so existing schedules keep their timing."""
+        assert _fire_time(scheduler, "2099-07-09T20:00:00") == datetime(2099, 7, 9, 20, 0, tzinfo=timezone.utc)
+
+    def test_explicit_offset_is_not_shifted_by_entry_timezone(self, scheduler):
+        """An offset-aware run_at already names an instant."""
+        assert _fire_time(scheduler, "2099-07-09T20:00:00-06:00", timezone="America/Chicago") == datetime(
+            2099, 7, 10, 2, 0, tzinfo=timezone.utc
+        )
+
+    def test_once_and_cron_agree_on_a_bare_local_time(self, scheduler):
+        """The issue's actual complaint: the two schedule types disagreed."""
+        once = _fire_time(scheduler, "2099-07-09T09:00:00", timezone="America/Chicago")
+        scheduler.add(
+            ScheduleEntry(
+                id="c",
+                agent="bot",
+                prompt="hi",
+                schedule_type="cron",
+                cron_expr="0 9 * * *",
+                timezone="America/Chicago",
+            )
+        )
+        cron = datetime.fromisoformat(scheduler.get("c").next_run)
+
+        assert once.astimezone(CHICAGO).hour == cron.astimezone(CHICAGO).hour == 9
+
+    def test_naive_expires_at_is_localized_to_entry_timezone(self, scheduler):
+        """The same trap on the expiry side, which the issue does not mention."""
+        scheduler.add(
+            ScheduleEntry(
+                id="e",
+                agent="bot",
+                prompt="hi",
+                schedule_type="cron",
+                cron_expr="*/5 * * * *",
+                timezone="America/Chicago",
+                expires_at="2099-07-09T20:00:00",
+            )
+        )
+        # 20:00 Chicago has not passed yet at 20:30 UTC (= 15:30 Chicago).
+        scheduler._fire_if_due(scheduler.get("e"), datetime(2099, 7, 9, 20, 30, tzinfo=timezone.utc))
+
+        assert scheduler.get("e").enabled is True
 
 
 class TestSchedulerExecution:
