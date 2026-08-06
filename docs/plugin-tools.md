@@ -48,6 +48,7 @@ The function name becomes the tool name (`my_plugin_search`). The first line of 
 - `parent_only` — tool runs in the parent process, not the sandbox. Use for tools that need direct user interaction or spawn subprocesses.
 - `interactive_only` — tool is hidden in scheduled tasks (where there's no UI to display output).
 - `require_daemon` — tool only registers when running in daemon mode.
+- `sensitive_args` — dotted argument paths whose values are always secret, e.g. `@tool(sensitive_args=["headers.Authorization", "body.password", "token"])`. They are replaced with `***` in audit events, the per-call records history persists, and replay. Common header names (`Authorization`, `Cookie`, `X-API-Key`, ...) are redacted everywhere without declaring anything; use this for the arguments only the tool author knows about, so a token derived at runtime doesn't have to be registered by hand.
 
 ## Plugin config
 

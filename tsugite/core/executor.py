@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runt
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
+from tsugite.secrets.redaction import redact_sensitive_obj
 
 PPRINT_WIDTH = 100
 
@@ -666,10 +667,14 @@ class LocalExecutor:
         def tool_wrapper(*args, **kwargs):
             self._tools_called.append(tool_obj.name)
             convert_positional_to_kwargs(tool_obj, args, kwargs)
-            record: Dict[str, Any] = {"tool": tool_obj.name, "arguments": _jsonable_call_args(kwargs)}
+            # Redact BEFORE _jsonable_call_args: it flattens nested values into
+            # capped repr() strings, and a token baked into one of those is no
+            # longer reachable by key or path.
+            audit_args = redact_sensitive_obj(kwargs, getattr(tool_obj, "sensitive_paths", ()))
+            record: Dict[str, Any] = {"tool": tool_obj.name, "arguments": _jsonable_call_args(audit_args)}
             self._tool_calls.append(record)
             if self.event_bus:
-                self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=kwargs))
+                self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=audit_args))
             t0 = time.perf_counter()
             try:
                 result = run_async_in_sync_context(tool_obj.execute(**kwargs))

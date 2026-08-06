@@ -12,6 +12,7 @@ via __reduce__.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -22,8 +23,16 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from tsugite.secrets import redaction as _redaction
+
 from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult, LocalExecutor
 from .state import load_state, save_state
+
+# The child builds its own per-call audit records, so it needs the redaction
+# walk before it flattens nested args to repr(). Injected as source rather than
+# imported: the child may run sandboxed with a trimmed import path, and a
+# redaction import that silently failed would leak the values it exists to hide.
+_REDACTION_SOURCE = inspect.getsource(_redaction)
 
 logger = logging.getLogger(__name__)
 
@@ -134,9 +143,10 @@ _SPLIT_CODE_FN = textwrap.dedent("""\
 """)
 
 _TIMED_AUDIT_WRAPPER = textwrap.dedent("""\
-    def _timed_audit_call(tool_name, fn, kwargs):
+    def _timed_audit_call(tool_name, fn, kwargs, sensitive_paths=()):
         _tools_called.append(tool_name)
-        _record = {"tool": tool_name, "arguments": _jsonable_call_args(kwargs)}
+        _audit_args = redact_sensitive_obj(kwargs, sensitive_paths)
+        _record = {"tool": tool_name, "arguments": _jsonable_call_args(_audit_args)}
         _tool_calls.append(_record)
         _ipc_audit("tool_call", tool_name, args=_record["arguments"])
         t0 = time.time()
@@ -207,12 +217,14 @@ def _positional_param_names(func) -> list:
     return [p.name for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
 
 
-def _build_parent_only_tool_stub(name: str, param_names: list) -> str:
+def _build_parent_only_tool_stub(name: str, param_names: list, sensitive_paths: tuple = ()) -> str:
     """Generate an IPC stub function for a parent-only tool."""
     return textwrap.dedent(f"""\
     def {name}(*args, **kwargs):
         kwargs = _bind_positional("{name}", {param_names!r}, args, kwargs)
-        return _timed_audit_call("{name}", lambda **kw: _ipc_call("tool_call", name="{name}", kwargs=kw), kwargs)
+        return _timed_audit_call(
+            "{name}", lambda **kw: _ipc_call("tool_call", name="{name}", kwargs=kw), kwargs, {sensitive_paths!r}
+        )
     """)
 
 
@@ -234,13 +246,15 @@ def _importable_in_child(module: str, name: str, func) -> bool:
     return getattr(mod, name, None) is func
 
 
-def _build_local_tool_stub(name: str, module_path: str, param_names: list) -> str:
+def _build_local_tool_stub(name: str, module_path: str, param_names: list, sensitive_paths: tuple = ()) -> str:
     """Generate a wrapper for a non-parent-only tool that runs locally in the child."""
     return textwrap.dedent(f"""\
     from {module_path} import {name} as _raw_{name}
     def {name}(*args, **kwargs):
         kwargs = _bind_positional("{name}", {param_names!r}, args, kwargs)
-        return _timed_audit_call("{name}", lambda **kw: _run_maybe_async(_raw_{name}, kw), kwargs)
+        return _timed_audit_call(
+            "{name}", lambda **kw: _run_maybe_async(_raw_{name}, kw), kwargs, {sensitive_paths!r}
+        )
     """)
 
 
@@ -361,10 +375,11 @@ class SubprocessExecutor:
             if t.name in EXECUTOR_BUILTIN_TOOLS:
                 continue
             params = self._tool_param_names.get(t.name, [])
+            declared = tuple(getattr(t, "sensitive_paths", ()) or ())
             if t.name in self._parent_only_tools:
-                tool_stubs.append(_build_parent_only_tool_stub(t.name, params))
+                tool_stubs.append(_build_parent_only_tool_stub(t.name, params, declared))
             elif t.name in self._local_tools:
-                tool_stubs.append(_build_local_tool_stub(t.name, self._local_tools[t.name], params))
+                tool_stubs.append(_build_local_tool_stub(t.name, self._local_tools[t.name], params, declared))
 
         # Escape the user code for embedding
         code_escaped = json.dumps(code)
@@ -374,6 +389,7 @@ class SubprocessExecutor:
 os.environ.setdefault("_TSUGITE_REQ_PATH", {json.dumps(req_fifo)})
 os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_IPC_HELPER}
+{_REDACTION_SOURCE}
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
 {_SEND_MESSAGE_STUB}

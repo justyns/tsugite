@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import Field, field_validator
 
+from tsugite.secrets.redaction import redact_sensitive_obj
 from tsugite.secrets.registry import get_registry
 
 from .base import BaseEvent, EventType
@@ -334,7 +335,10 @@ class ToolCallEvent(BaseEvent):
     @field_validator("arguments", mode="before")
     @classmethod
     def _mask_arguments(cls, v):
-        return get_registry().mask_obj(v)
+        # Two passes, because they catch different things: registered secret
+        # values (whatever get_secret() handed out) and sensitive positions
+        # (an Authorization header holding a token nobody registered).
+        return redact_sensitive_obj(get_registry().mask_obj(v))
 
 
 class ToolResultEvent(BaseEvent):

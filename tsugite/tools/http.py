@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Union
 
 import httpx
 
+from tsugite.secrets.redaction import redact_sensitive_obj
 from tsugite.tools import tool
 from tsugite.user_agent import set_user_agent_header
 from tsugite.utils import convert_html_to_markdown
@@ -158,7 +159,10 @@ def fetch_text(
         raise RuntimeError(f"Request failed: {e}") from e
 
 
-@tool
+# `headers` / `body` are redacted by built-in key rules already; the declaration
+# covers the shapes those rules can't know about (an API key in a query-ish body
+# field, a token passed positionally by a caller).
+@tool(sensitive_args=["headers", "body.password", "body.token", "body.api_key", "body.client_secret"])
 def http_request(
     url: str,
     method: str = "GET",
@@ -182,7 +186,9 @@ def http_request(
 
         return HttpResponse(
             status_code=response.status_code,
-            headers=dict(response.headers),
+            # Response headers are handed to the model and stringified into the
+            # audit summary, so Set-Cookie must not survive the boundary.
+            headers=redact_sensitive_obj(dict(response.headers)),
             text=response.text,
             url=str(response.url),
         )
@@ -246,7 +252,7 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
             return {
                 "url": str(response.url),
                 "status_code": response.status_code,
-                "headers": dict(response.headers),
+                "headers": redact_sensitive_obj(dict(response.headers)),
                 "accessible": response.status_code < 400,
                 "content_type": response.headers.get("content-type", "unknown"),
                 "content_length": response.headers.get("content-length", "unknown"),

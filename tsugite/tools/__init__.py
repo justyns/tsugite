@@ -36,6 +36,9 @@ class ToolInfo:
     interactive_only: bool = False
     require_daemon: bool = False
     category: str | None = None
+    # Dotted argument paths whose values are always sensitive (e.g.
+    # "headers.Authorization"), redacted before display and persistence.
+    sensitive_args: tuple[str, ...] = ()
 
 
 # Global tool registry
@@ -79,10 +82,19 @@ def _register_tool(func: Callable) -> None:
         interactive_only=getattr(func, "_interactive_only", False),
         require_daemon=getattr(func, "_require_daemon", False),
         category=getattr(func, "_category", None),
+        sensitive_args=tuple(getattr(func, "_sensitive_args", ()) or ()),
     )
 
 
-def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only=False, category: str | None = None):
+def tool(
+    func=None,
+    *,
+    require_daemon=False,
+    parent_only=False,
+    interactive_only=False,
+    category: str | None = None,
+    sensitive_args: list[str] | None = None,
+):
     """Register a function as a tool.
 
     Args:
@@ -95,10 +107,15 @@ def tool(func=None, *, require_daemon=False, parent_only=False, interactive_only
             get_tools_by_category(). Defaults to the function's module basename.
             Plugins should set this when their package name doesn't match the
             user-facing category.
+        sensitive_args: Dotted argument paths whose values are always secret
+            (e.g. ["headers.Authorization", "body.password", "token"]). They are
+            redacted in audit events, per-call records, and replay, so tool
+            authors don't have to register every derived value by hand.
     """
 
     def decorator(fn):
         fn._parent_only = parent_only
+        fn._sensitive_args = tuple(sensitive_args or ())
         fn._interactive_only = interactive_only
         fn._require_daemon = require_daemon
         fn._category = category
