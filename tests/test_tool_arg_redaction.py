@@ -224,3 +224,86 @@ class TestSubprocessExecutorPath:
         out = http_mod.check_url(url="https://example.com")
         assert out["headers"]["Set-Cookie"] == "***"
         assert out["headers"]["Content-Type"] == "text/html"
+
+
+class TestRealRegisteredTools:
+    """The mechanism tests above all use synthetic tools. These pin what the
+    tools we actually ship redact - the gap that let `sensitive_args=["headers"]`
+    (a path naming a whole dict) blank out every header, including the
+    non-sensitive ones the audit trail exists to show.
+
+    Declarations are read off the module functions, not the registry: an autouse
+    conftest fixture empties the registry per test, and re-registering with a
+    bare `tool(fn)` would reset the very attribute under test.
+    """
+
+    def test_http_request_keeps_non_sensitive_headers_readable(self):
+        from tsugite.tools.http import http_request
+
+        redacted = redact_sensitive_obj(
+            {
+                "url": "https://api.example.com/v1/me",
+                "headers": {
+                    "Authorization": "Bearer eyJraw.token",
+                    "Cookie": "sid=1",
+                    "X-API-Key": "sk-live",
+                    "Content-Type": "application/json",
+                },
+            },
+            getattr(http_request, "_sensitive_args", ()),
+        )
+        assert redacted["headers"]["Authorization"] == "Bearer ***"
+        assert redacted["headers"]["Cookie"] == "***"
+        assert redacted["headers"]["X-API-Key"] == "***"
+        assert redacted["headers"]["Content-Type"] == "application/json"
+        assert redacted["url"] == "https://api.example.com/v1/me"
+
+    def test_no_shipped_tool_declares_a_path_naming_a_whole_container(self):
+        """A declared path that names a dict/list argument redacts it wholesale.
+        Declare the leaf inside it, or rely on the built-in keys, which already
+        reach any depth."""
+        import inspect
+        import typing
+
+        from tsugite.tools import _ensure_tools_loaded
+
+        _ensure_tools_loaded()
+
+        def is_container(annotation) -> bool:
+            if annotation in (dict, list):
+                return True
+            origin = typing.get_origin(annotation)
+            if origin in (dict, list):
+                return True
+            if origin is typing.Union:
+                return any(is_container(a) for a in typing.get_args(annotation))
+            return False
+
+        checked = 0
+        for module in _tool_modules():
+            for name, fn in vars(module).items():
+                declared = getattr(fn, "_sensitive_args", ()) if callable(fn) else ()
+                if not declared:
+                    continue
+                params = inspect.signature(fn).parameters
+                for path in declared:
+                    checked += 1
+                    if "." in path:
+                        continue
+                    param = params.get(path)
+                    assert param is None or not is_container(param.annotation), (
+                        f"{name} declares '{path}', which names a whole container argument; "
+                        "declare the leaf paths inside it instead"
+                    )
+        assert checked >= 0  # a shipped-declaration audit, vacuous only when none exist
+
+
+def _tool_modules():
+    """The built-in tool modules, for auditing shipped @tool declarations."""
+    import importlib
+    import pkgutil
+
+    import tsugite.tools as tools_pkg
+
+    for info in pkgutil.iter_modules(tools_pkg.__path__):
+        yield importlib.import_module(f"tsugite.tools.{info.name}")

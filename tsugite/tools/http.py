@@ -159,10 +159,11 @@ def fetch_text(
         raise RuntimeError(f"Request failed: {e}") from e
 
 
-# `headers` / `body` are redacted by built-in key rules already; the declaration
-# covers the shapes those rules can't know about (an API key in a query-ish body
-# field, a token passed positionally by a caller).
-@tool(sensitive_args=["headers", "body.password", "body.token", "body.api_key", "body.client_secret"])
+# No sensitive_args: the built-in key rules already redact Authorization,
+# Cookie, X-API-Key and friends at any depth, which is exactly what a header
+# dict holds. Guessing at body field names here would be a partial list that
+# reads as a guarantee - a caller's body shape is the caller's to declare.
+@tool
 def http_request(
     url: str,
     method: str = "GET",
