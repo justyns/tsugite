@@ -47,7 +47,7 @@ class Tool:
     function: Callable
     # Dotted argument paths this tool declares as always sensitive; the executor
     # redacts them before recording or emitting the call.
-    sensitive_paths: tuple = ()
+    sensitive_paths: tuple[str, ...] = ()
 
     def to_code_prompt(self) -> str:
         """Format tool as Python function for system prompt.
@@ -161,12 +161,7 @@ class Tool:
             return self.function(**kwargs)
 
 
-def create_tool_from_function(
-    func: Callable,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    sensitive_paths: tuple = (),
-) -> Tool:
+def create_tool_from_function(func: Callable, name: Optional[str] = None, description: Optional[str] = None) -> Tool:
     """Create a Tool from a Python function.
 
     Extracts parameter info from function signature and docstring.
@@ -231,9 +226,8 @@ def create_tool_from_function(
         description=tool_description,
         parameters=parameters,
         function=func,
-        # Declared on the registered function via @tool(sensitive_args=...); read
-        # off the wrapped callable so a hand-wrapped tool keeps its declaration.
-        sensitive_paths=sensitive_paths or tuple(getattr(func, "_sensitive_args", ()) or ()),
+        # Declared via @tool(sensitive_args=...), which stamps the function.
+        sensitive_paths=tuple(getattr(func, "_sensitive_args", ()) or ()),
     )
 
 
@@ -272,11 +266,13 @@ def create_tool_from_tsugite(tool_name: str) -> Tool:
 
     # Set the signature on the wrapper
     tool_wrapper.__signature__ = sig
+    # ...and carry the registered tool's sensitive-arg declaration onto it, so
+    # the wrapper looks like any other @tool-decorated function downstream.
+    tool_wrapper._sensitive_args = tool_info.sensitive_args
 
     # Create Tool using function converter
     return create_tool_from_function(
         tool_wrapper,
         name=tool_name,
         description=tool_info.description,
-        sensitive_paths=tool_info.sensitive_args,
     )
