@@ -21,6 +21,9 @@ API_BASE = "https://chatgpt.com/backend-api/codex"
 _REASONING_LEVELS = ["low", "medium", "high"]
 # gpt-5.5 added xhigh; older codex models don't accept it.
 _REASONING_LEVELS_V5_5 = ["low", "medium", "high", "xhigh"]
+# gpt-5.6 added max, and its sol/terra tiers also accept ultra (delegating).
+_REASONING_LEVELS_V5_6 = [*_REASONING_LEVELS_V5_5, "max"]
+_REASONING_LEVELS_V5_6_AGENTIC = [*_REASONING_LEVELS_V5_6, "ultra"]
 
 
 def _codex_model_info(max_input_tokens: int, effort_levels: list[str] = _REASONING_LEVELS) -> ModelInfo:
@@ -36,11 +39,15 @@ def _codex_model_info(max_input_tokens: int, effort_levels: list[str] = _REASONI
     )
 
 
+# Context windows are the `context_window` the backend reports for the
+# subscription path, which is smaller than the same model's API tier.
 _CODEX_CLI_MODELS: dict[str, ModelInfo] = {
+    "codex_cli/gpt-5.6-sol": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
+    "codex_cli/gpt-5.6-terra": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
+    "codex_cli/gpt-5.6-luna": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6),
     "codex_cli/gpt-5.5": _codex_model_info(1_050_000, effort_levels=_REASONING_LEVELS_V5_5),
     "codex_cli/gpt-5.4": _codex_model_info(1_050_000),
     "codex_cli/gpt-5.4-mini": _codex_model_info(272_000),
-    "codex_cli/gpt-5.4-nano": _codex_model_info(272_000),
 }
 
 # Used when /models is unreachable; kept in sync with the registry above.
@@ -339,7 +346,11 @@ class CodexCliProvider:
                 headers=self._build_headers(access_token, account_id),
             )
             resp.raise_for_status()
-            return [m["id"] for m in resp.json().get("data", [])]
+            # The Codex backend answers {"models":[{"slug":...}]}, not the OpenAI
+            # {"data":[{"id":...}]} shape. `visibility: hide` marks special-purpose
+            # entries (auto-review, watermark variants) the CLI keeps out of its
+            # own picker, so they stay out of ours too.
+            return [m["slug"] for m in resp.json()["models"] if isinstance(m, dict) and m.get("visibility") != "hide"]
         except (httpx.HTTPError, KeyError, ValueError, CodexAuthError):
             return list(_FALLBACK_MODELS)
 

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 from tsugite_codex_cli.auth import CodexAuthError
-from tsugite_codex_cli.provider import CodexCliProvider, CodexResponsesError, _build_usage
+from tsugite_codex_cli.provider import _FALLBACK_MODELS, CodexCliProvider, CodexResponsesError, _build_usage
 
 
 @contextmanager
@@ -395,7 +395,7 @@ async def test_list_models_falls_back_on_auth_error():
     provider = CodexCliProvider()
     with _patched_auth_error(provider):
         models = await provider.list_models()
-    assert models == ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
 
 
 @pytest.mark.asyncio
@@ -408,7 +408,7 @@ async def test_list_models_falls_back_on_network_error():
     with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=boom)):
         models = await provider.list_models()
 
-    assert models == ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
 
 
 # ── Fix #2: stop() must not break the shared client when concurrent agents share it ──
@@ -517,3 +517,85 @@ async def test_provider_resolves_via_entry_points():
     provider = get_provider("codex_cli")
     assert provider.name == "codex_cli"
     assert isinstance(provider, CodexCliProvider)
+
+
+# ── GPT-5.6 support: /models payload shape + registry entries ──
+_MODELS_PAYLOAD = {
+    "models": [
+        {"slug": "gpt-5.6-sol", "visibility": "list", "context_window": 272_000},
+        {"slug": "gpt-5.6-sol-wm", "visibility": "hide", "context_window": 272_000},
+        {"slug": "gpt-5.6-terra", "visibility": "list", "context_window": 272_000},
+        {"slug": "gpt-5.6-luna", "visibility": "list", "context_window": 272_000},
+        {"slug": "gpt-5.5", "visibility": "list", "context_window": 272_000},
+        {"slug": "codex-auto-review", "visibility": "hide", "context_window": 272_000},
+    ]
+}
+
+
+@pytest.mark.asyncio
+async def test_list_models_reads_the_backend_model_slugs():
+    """The Codex backend answers {"models":[{"slug":...}]}, not the OpenAI
+    {"data":[{"id":...}]} shape. Misreading it returns an empty list - a picker
+    with no models at all, and no fallback (nothing raised)."""
+    provider = CodexCliProvider()
+    resp = _FakeResp(json_body=_MODELS_PAYLOAD)
+
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=resp)):
+        models = await provider.list_models()
+
+    assert "gpt-5.6-sol" in models
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
+
+
+@pytest.mark.asyncio
+async def test_list_models_hides_internal_models():
+    """Special-purpose entries (auto-review, watermark variants) are flagged
+    `visibility: hide` by the backend and must not reach the picker."""
+    provider = CodexCliProvider()
+    resp = _FakeResp(json_body=_MODELS_PAYLOAD)
+
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=resp)):
+        models = await provider.list_models()
+
+    assert "codex-auto-review" not in models
+    assert "gpt-5.6-sol-wm" not in models
+
+
+@pytest.mark.parametrize(
+    "model,efforts",
+    [
+        ("gpt-5.6-sol", ["low", "medium", "high", "xhigh", "max", "ultra"]),
+        ("gpt-5.6-terra", ["low", "medium", "high", "xhigh", "max", "ultra"]),
+        ("gpt-5.6-luna", ["low", "medium", "high", "xhigh", "max"]),
+    ],
+)
+def test_gpt_5_6_models_carry_their_effort_levels(model, efforts):
+    """models_are_definitive=True means an unregistered id is reported as a typo,
+    so every offered GPT-5.6 model needs an entry - with the effort vocabulary
+    the backend actually accepts (5.6 added `max`; sol/terra also take `ultra`)."""
+    provider = CodexCliProvider()
+    info = provider.get_model_info(model)
+    assert info is not None, f"{model} is offered by the backend but unregistered"
+    assert info.supported_effort_levels == efforts
+    assert info.max_input_tokens == 272_000
+    assert info.supports_vision is True
+
+
+def test_offline_fallback_offers_the_gpt_5_6_models():
+    """The fallback list (used when /models is unreachable) mirrors the registry,
+    so a logged-out picker offers the current models rather than retired ones."""
+    assert "gpt-5.6-sol" in _FALLBACK_MODELS
+    assert "gpt-5.4-nano" not in _FALLBACK_MODELS, "no longer offered by the Codex backend"
+
+
+@pytest.mark.asyncio
+async def test_list_models_falls_back_on_unexpected_payload():
+    """A backend shape change must degrade to the static list, not to an empty
+    picker - the failure mode this bug shipped as."""
+    provider = CodexCliProvider()
+    resp = _FakeResp(json_body={"data": [{"id": "gpt-5.6-sol"}]})
+
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=resp)):
+        models = await provider.list_models()
+
+    assert models == _FALLBACK_MODELS

@@ -44,13 +44,16 @@ Override the location with `CODEX_HOME=/some/other/dir`.
 Pick the provider via the model string:
 
 ```bash
-uv run tsu run examples/simple_variable_injection.md "say hi" --model codex_cli:gpt-5.5
+uv run tsu run examples/simple_variable_injection.md "say hi" --model codex_cli:gpt-5.6-sol
 ```
 
-Available models: `codex_cli:gpt-5.5`, `codex_cli:gpt-5.4`, `codex_cli:gpt-5.4-mini`,
-`codex_cli:gpt-5.4-nano`. Use `provider.list_models()` to discover what your
-ChatGPT plan currently exposes; the plugin queries the Codex `/models` endpoint
-and falls back to the four above if that call fails.
+Available models: `codex_cli:gpt-5.6-sol`, `codex_cli:gpt-5.6-terra`,
+`codex_cli:gpt-5.6-luna`, `codex_cli:gpt-5.5`, `codex_cli:gpt-5.4`,
+`codex_cli:gpt-5.4-mini`. The 5.6 models add a `max` reasoning effort, and
+sol/terra also accept `ultra`. Use `provider.list_models()` to discover what
+your ChatGPT plan currently exposes; the plugin queries the Codex `/models`
+endpoint (skipping entries the backend marks hidden) and falls back to the six
+above if that call fails.
 
 ## Token-sink caveat
 

@@ -167,3 +167,12 @@ class TestShouldSkip:
 
     def test_keeps_chat_models(self):
         assert umr.should_skip("gpt-4o", _entry()) is False
+
+    def test_keeps_gpt_5_6_family(self):
+        # The `codex-` skip prefix targets the standalone codex-* utility models;
+        # it must not swallow the gpt-5.6 tiers, which are ordinary chat models.
+        for key in ("gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            assert umr.should_skip(key, _entry()) is False
+
+    def test_skips_standalone_codex_utility_models(self):
+        assert umr.should_skip("codex-mini-latest", _entry()) is True
