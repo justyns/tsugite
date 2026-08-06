@@ -809,3 +809,17 @@ test('a hook message mentioning compaction does not by itself light the pill', a
   render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
   await expect.poll(pillState).toBe('busy');
 });
+
+test('the jobs chip links to the jobs board filtered to this session', async () => {
+  // The chip is a shortcut to "the jobs this chat spawned" - landing on the
+  // unfiltered board makes the user re-find them by hand.
+  await page.viewport(1440, 900);
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'ship it', timestamp: '2026-08-01T10:00:00Z' },
+    { type: 'job_status', job_id: 'job-1', state: 'running', agent: 'coder', prompt: 'ship it' },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  const chip = document.querySelector('.hd-chip') as HTMLAnchorElement | null;
+  expect(chip?.textContent).toContain('1 job');
+  expect(chip?.getAttribute('href')).toBe('#jobs?q=session%3Asess-1');
+});

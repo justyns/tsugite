@@ -40,6 +40,12 @@ export function navigate(view: string, params?: RouteParams): void {
   location.hash = buildHash(view, params);
 }
 
+/** navigate() without a history entry - for params that track a live control
+ *  (a search box), where every keystroke would otherwise become a Back step. */
+export function replaceRoute(view: string, params?: RouteParams): void {
+  location.replace(buildHash(view, params));
+}
+
 export function initRouter(): void {
   const sync = () => {
     const next = parseHash(location.hash);

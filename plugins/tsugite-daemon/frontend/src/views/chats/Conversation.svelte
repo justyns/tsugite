@@ -23,6 +23,7 @@
   import { ScrollFollow } from './scrollFollow.svelte';
   import { splitStreamFence, type Compaction } from './turns';
   import { relativeTime } from '$lib/relativeTime';
+  import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
   import { sessionSourceType, isFinishedSession } from './sessionModel';
@@ -94,6 +95,11 @@
   const canCancel = $derived(ctrl.streaming || (row?.busy ?? false));
   const jobCount = $derived(
     timeline.turns.reduce((n, t) => n + t.blocks.filter((b) => b.kind === 'job').length, 0),
+  );
+  // The chip is a shortcut to "the jobs this chat spawned", so it carries the
+  // board's session filter rather than dropping the user on the whole board.
+  const jobsHref = $derived(
+    ctrl.sessionId ? buildHash('jobs', { q: `session:${ctrl.sessionId}` }) : '#jobs',
   );
 
   // The most recent user prompt, re-sent by the retry affordance on the last turn.
@@ -374,7 +380,7 @@
     <div class="grow"></div>
 
     {#if jobCount > 0}
-      <a class="hd-chip" href="#jobs" title="{jobCount} job(s) spawned from this session">
+      <a class="hd-chip" href={jobsHref} title="{jobCount} job(s) spawned from this session">
         <Icon name="jobs" size={11} />{jobCount} job{jobCount === 1 ? '' : 's'}
       </a>
     {/if}

@@ -6,6 +6,7 @@
  * Grammar: whitespace-separated tokens.
  *   state:running   -> restrict to that job state (repeatable, OR within the axis)
  *   agent:odyn      -> restrict to that agent   (repeatable, OR within the axis)
+ *   session:abc123  -> restrict to jobs spawned by that chat (parent_session_id)
  *   #job-abc123     -> free-text term (the '#' is stripped)
  *   anything else   -> free-text term
  * Axes combine with AND; every free-text term must substring-match the job's
@@ -26,6 +27,7 @@ export interface JobLike {
 export interface JobFilter {
   states: string[];
   agents: string[];
+  sessions: string[];
   terms: string[];
 }
 
@@ -42,15 +44,17 @@ export type JobGroup = keyof typeof JOB_GROUPS;
 export function parseJobFilter(text: string): JobFilter {
   const states: string[] = [];
   const agents: string[] = [];
+  const sessions: string[] = [];
   const terms: string[] = [];
   for (const token of text.trim().split(/\s+/)) {
     if (!token) continue;
     if (token.startsWith('state:')) states.push(token.slice(6).toLowerCase());
     else if (token.startsWith('agent:')) agents.push(token.slice(6).toLowerCase());
+    else if (token.startsWith('session:')) sessions.push(token.slice(8).toLowerCase());
     else if (token.startsWith('#')) terms.push(token.slice(1).toLowerCase());
     else terms.push(token.toLowerCase());
   }
-  return { states, agents, terms };
+  return { states, agents, sessions, terms };
 }
 
 function haystack(job: JobLike): string {
@@ -64,6 +68,11 @@ export function jobMatchesFilter(job: JobLike, filter: JobFilter): boolean {
   if (filter.states.length && !filter.states.includes((job.state ?? '').toLowerCase()))
     return false;
   if (filter.agents.length && !filter.agents.includes((job.agent ?? '').toLowerCase()))
+    return false;
+  if (
+    filter.sessions.length &&
+    !filter.sessions.includes((job.parent_session_id ?? '').toLowerCase())
+  )
     return false;
   if (filter.terms.length) {
     const hay = haystack(job);

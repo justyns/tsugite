@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Seg from '$lib/components/inputs/Seg.svelte';
@@ -12,7 +13,7 @@
   import { jobs, type Job, type JobRetryOpts } from '$lib/stores/jobs.svelte';
   import { jobDrawerRequest } from './jobDrawerSignal.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
-  import { navigate } from '$lib/router.svelte';
+  import { navigate, replaceRoute, router } from '$lib/router.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import {
     ATTENTION_COL,
@@ -84,6 +85,30 @@
     void jobs.load();
     void jobs.loadExecutors();
     void agentsMeta.load();
+  });
+
+  // The route's `q` is the durable home of the board filter, so a chat's jobs
+  // chip (#jobs?q=session:<id>), a bookmark, and a reload all land on the same
+  // filtered board. The two effects mirror one way each; both no-op once the
+  // values agree, so they settle instead of ping-ponging. The write-back sets
+  // router.params itself rather than waiting for the hashchange it triggers, so
+  // no reader sees a stale filter in between.
+  $effect(() => {
+    const q = router.params.q ?? '';
+    untrack(() => {
+      if (q !== jobs.filterText) jobs.filterText = q;
+    });
+  });
+  $effect(() => {
+    const text = jobs.filterText;
+    untrack(() => {
+      if (router.view !== 'jobs' || (router.params.q ?? '') === text) return;
+      const params = { ...router.params };
+      if (text) params.q = text;
+      else delete params.q;
+      router.params = params;
+      replaceRoute('jobs', params);
+    });
   });
 
   // An in-chat job tile's "open" lands here (via #jobs) with a pending request:
