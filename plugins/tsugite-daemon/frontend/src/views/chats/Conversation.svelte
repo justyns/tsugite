@@ -105,16 +105,14 @@
 
   // Header status pill. Failed/cancelled sessions map to the session-pill
   // vocabulary's `interrupted` (stopped, kept for the record) with an accurate
-  // label; a compaction in flight (surfaced via progress text) shows `compacting`.
-  const compacting = $derived(
-    String(row?.progress?.status_text ?? '')
-      .toLowerCase()
-      .includes('compact'),
-  );
+  // label; a compaction in flight shows `compacting`. That comes from the row's
+  // authoritative flag (served from Session.compacting, kept live by the
+  // compaction_started/finished broadcasts) - never from the progress label,
+  // whose free-form hook_status text is neither reliable nor trustworthy.
   const pillState = $derived<PillState>(
     ctrl.streaming
       ? 'streaming'
-      : compacting
+      : row?.compacting
         ? 'compacting'
         : row?.status === 'failed' || row?.status === 'cancelled'
           ? 'interrupted'

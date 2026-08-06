@@ -35,6 +35,24 @@ describe('SessionsStore SSE application', () => {
     expect(p?.status_text).toBe('Tool: grep');
   });
 
+  test('applyCompaction flips the row flag the pill reads, and clears it again', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1'), row('s2')];
+    store.applyCompaction({ session_id: 's1' }, true);
+    expect(store.rows.find((r) => r.id === 's1')?.compacting).toBe(true);
+    // Scoped to the compacting session - it must not bleed to its siblings.
+    expect(store.rows.find((r) => r.id === 's2')?.compacting).toBeUndefined();
+    store.applyCompaction({ session_id: 's1' }, false);
+    expect(store.rows.find((r) => r.id === 's1')?.compacting).toBe(false);
+  });
+
+  test('applyCompaction ignores a broadcast with no session id', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1')];
+    store.applyCompaction({ agent: 'a' }, true);
+    expect(store.rows.find((r) => r.id === 's1')?.compacting).toBeUndefined();
+  });
+
   test('applySessionEvent ignores an event with no session id', () => {
     const store = new SessionsStore();
     store.applySessionEvent({ event_type: 'turn_start', turn: 1 });

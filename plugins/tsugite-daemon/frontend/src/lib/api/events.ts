@@ -20,6 +20,10 @@ export interface ShellEventSink {
   onSessionEvent?: (data: Record<string, unknown>) => void;
   /** session_update: a lifecycle transition (busy/titled/completed/...). */
   onSessionUpdate?: (data: Record<string, unknown>) => void;
+  /** compaction_started: {agent, session_id} - that session is now compacting. */
+  onCompactionStarted?: (data: Record<string, unknown>) => void;
+  /** compaction_finished: {agent, session_id} - the compaction settled. */
+  onCompactionFinished?: (data: Record<string, unknown>) => void;
   /** job_update: a full Job payload for the jobs board. */
   onJobUpdate?: (data: Record<string, unknown>) => void;
   /** schedule_update: {action, id} for the schedules list. */
@@ -38,6 +42,8 @@ const ROUTES: Record<string, keyof ShellEventSink> = {
   reconnect: 'onReconnect',
   session_event: 'onSessionEvent',
   session_update: 'onSessionUpdate',
+  compaction_started: 'onCompactionStarted',
+  compaction_finished: 'onCompactionFinished',
   job_update: 'onJobUpdate',
   schedule_update: 'onScheduleUpdate',
   terminal_state: 'onTerminalState',

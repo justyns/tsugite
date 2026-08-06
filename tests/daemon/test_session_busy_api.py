@@ -106,3 +106,25 @@ def test_sessions_payload_busy_from_live_http_task(adapter, client_and_token):
         assert rows[sid]["busy"] is True
     finally:
         http_server._active_chats.pop(("test-agent", "u1", sid), None)
+
+
+def test_sessions_payload_exposes_compacting_flag(adapter, client_and_token):
+    """Same contract as `busy`: the compaction state pill must read an
+    authoritative per-session flag, not a progress label that happens to
+    mention compaction."""
+    client, token = client_and_token
+    sid = _mk_session(adapter, "s-compacting")
+
+    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    rows = {r["id"]: r for r in resp.json()["sessions"]}
+    assert rows[sid]["compacting"] is False
+
+    adapter.session_store.begin_compaction("u1", "test-agent", session_id=sid)
+    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    rows = {r["id"]: r for r in resp.json()["sessions"]}
+    assert rows[sid]["compacting"] is True
+
+    adapter.session_store.end_compaction("u1", "test-agent", session_id=sid)
+    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    rows = {r["id"]: r for r in resp.json()["sessions"]}
+    assert rows[sid]["compacting"] is False

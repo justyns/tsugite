@@ -295,6 +295,8 @@
     onReconnect: () => location.reload(),
     onSessionEvent: (data) => sessions.applySessionEvent(data),
     onSessionUpdate: (data) => sessions.applySessionUpdate(data),
+    onCompactionStarted: (data) => sessions.applyCompaction(data, true),
+    onCompactionFinished: (data) => sessions.applyCompaction(data, false),
     onJobUpdate: (data) => jobs.applyJobUpdate(data),
     onScheduleUpdate: (data) => schedules.applyScheduleUpdate(data),
     onTerminalState: (data) => terminals.applyTerminalState(data),

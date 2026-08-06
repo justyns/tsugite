@@ -29,6 +29,20 @@ describe('routeShellEvent', () => {
     expect(sink.onTerminalState).toHaveBeenCalledWith({ terminal_id: 't1', state: 'running' });
   });
 
+  it('routes the compaction lifecycle broadcasts to their sinks', () => {
+    const onCompactionStarted = vi.fn();
+    const onCompactionFinished = vi.fn();
+    const sink = { onCompactionStarted, onCompactionFinished };
+    expect(routeShellEvent({ type: 'compaction_started', data: { session_id: 's1' } }, sink)).toBe(
+      'onCompactionStarted',
+    );
+    expect(routeShellEvent({ type: 'compaction_finished', data: { session_id: 's1' } }, sink)).toBe(
+      'onCompactionFinished',
+    );
+    expect(onCompactionStarted).toHaveBeenCalledWith({ session_id: 's1' });
+    expect(onCompactionFinished).toHaveBeenCalledWith({ session_id: 's1' });
+  });
+
   it('invokes the reconnect handler with no argument', () => {
     const onReconnect = vi.fn();
     expect(routeShellEvent({ type: 'reconnect' }, { onReconnect })).toBe('onReconnect');

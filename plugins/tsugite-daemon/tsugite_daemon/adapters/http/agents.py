@@ -216,6 +216,10 @@ class AgentsMixin:
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.
                 "busy": self._session_busy(adapter.agent_name, s),
+                # Same contract for compaction: the pill reads this flag (kept
+                # live by the compaction_started/finished broadcasts), never a
+                # progress label that happens to mention compaction.
+                "compacting": bool(s.compacting),
             }
             if s.status in live_statuses:
                 progress = adapter.session_store.session_progress_summary(s.id)

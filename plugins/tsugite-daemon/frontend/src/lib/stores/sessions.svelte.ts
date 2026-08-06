@@ -50,6 +50,9 @@ export interface SessionRow extends SessionRowLike {
   unread: boolean;
   is_primary: boolean;
   busy: boolean;
+  /** Authoritative "a compaction is running for this session" flag. Absent on
+   *  rows painted from an older SWR cache, so consumers test for `=== true`. */
+  compacting?: boolean;
   progress?: Progress;
 }
 
@@ -195,6 +198,15 @@ export class SessionsStore {
       current.delete(sink);
       if (current.size === 0) this.convSinks.delete(id);
     };
+  }
+
+  /** Apply a `compaction_started` / `compaction_finished` broadcast to the
+   *  session's authoritative compacting flag, so the pill tracks the live
+   *  transitions between server list loads. */
+  applyCompaction(data: Record<string, unknown>, compacting: boolean): void {
+    const id = data.session_id as string | undefined;
+    if (!id) return;
+    this.rows = patchRow(this.rows, id, { compacting } as Partial<SessionRow>);
   }
 
   /** Apply a `session_update` broadcast. Fast-path the field-level actions;
