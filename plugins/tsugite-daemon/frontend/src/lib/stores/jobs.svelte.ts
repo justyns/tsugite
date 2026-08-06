@@ -2,8 +2,8 @@
  * Jobs store: the Jobs board's backing data. Lists GET /api/jobs (newest first),
  * folds live `job_update` broadcasts (each carries a full Job payload) by id, and
  * owns the cancel / mark-done / retry mutations plus the executor list the
- * new-job composer needs. Filtering + board grouping run through the pure
- * jobsFilter grammar over the same list.
+ * new-job composer needs. Board grouping runs through the pure jobsFilter
+ * helpers; the board's own filter lives in the route, not here.
  *
  * Two distinct envelopes carry a Job: the global broadcast
  * `{type:'job_update', data:<payload>}` (this store) and the per-session history
@@ -11,7 +11,7 @@
  * This store only handles the broadcast shape. Exported as a class instance.
  */
 import { api } from '$lib/api/client';
-import { filterJobs, groupCounts, type JobGroup, type JobLike } from './jobsFilter';
+import { groupCounts, type JobGroup, type JobLike } from './jobsFilter';
 
 export interface JobAttempt {
   index: number;
@@ -80,11 +80,7 @@ export class JobsStore {
   executors = $state<string[]>(['agent']);
   loading = $state(false);
   error = $state<string | null>(null);
-  filterText = $state('');
 
-  get filtered(): Job[] {
-    return filterJobs(this.jobs, this.filterText);
-  }
   get counts(): Record<JobGroup, number> {
     return groupCounts(this.jobs);
   }

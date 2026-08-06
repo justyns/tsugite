@@ -67,14 +67,12 @@ const SEED: Job[] = [
 
 beforeEach(() => {
   jobs.jobs = SEED;
-  jobs.filterText = '';
   router.view = 'jobs';
   router.params = {};
 });
 
 afterEach(() => {
   jobs.jobs = [];
-  jobs.filterText = '';
   router.params = {};
   location.hash = '';
 });
@@ -96,15 +94,24 @@ test('a session filter in the route shows only that chat’s jobs, visibly', asy
 });
 
 test('clearing the filter drops it from the route so a reload does not restore it', async () => {
+  // Driven through the search field the way a user clears it, so the test pins
+  // the behaviour rather than whichever binding currently backs the box.
   router.params = { q: 'session:sess-a' };
   location.hash = '#jobs?q=session%3Asess-a';
   render(View);
-  const search = document.querySelector(
-    `[data-testid="${TESTID.jobsSearch}"] input`,
-  ) as HTMLInputElement;
-  await expect.poll(() => search.value).toBe('session:sess-a');
+  const search = page.getByRole('searchbox', { name: 'Search jobs' });
+  await expect.poll(() => (search.element() as HTMLInputElement).value).toBe('session:sess-a');
 
-  jobs.filterText = '';
+  await search.fill('');
   await expect.element(page.getByTestId(TESTID.jobCard('job-2'))).toBeInTheDocument();
   await expect.poll(() => location.hash).toBe('#jobs');
+});
+
+test('typing a filter puts it in the route, so the view is linkable and reload-safe', async () => {
+  render(View);
+  const search = page.getByRole('searchbox', { name: 'Search jobs' });
+  await search.fill('session:sess-b');
+  await expect.element(page.getByTestId(TESTID.jobCard('job-2'))).toBeInTheDocument();
+  await expect.element(page.getByTestId(TESTID.jobCard('job-1'))).not.toBeInTheDocument();
+  await expect.poll(() => location.hash).toBe('#jobs?q=session%3Asess-b');
 });

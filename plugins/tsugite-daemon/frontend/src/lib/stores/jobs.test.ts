@@ -30,16 +30,6 @@ describe('JobsStore.applyJobUpdate', () => {
 });
 
 describe('JobsStore derived views', () => {
-  test('filtered applies the filter grammar over the list', () => {
-    const store = new JobsStore();
-    store.jobs = [
-      job('job-1', { state: 'running', agent: 'odyn' }),
-      job('job-2', { state: 'done', agent: 'scout' }),
-    ];
-    store.filterText = 'state:running';
-    expect(store.filtered.map((j) => j.job_id)).toEqual(['job-1']);
-  });
-
   test('counts groups the board buckets', () => {
     const store = new JobsStore();
     store.jobs = [
