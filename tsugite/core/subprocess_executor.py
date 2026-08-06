@@ -12,7 +12,6 @@ via __reduce__.
 """
 
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -23,16 +22,8 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from tsugite.secrets import redaction as _redaction
-
 from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult, LocalExecutor
 from .state import load_state, save_state
-
-# The child builds its own per-call audit records, so it needs the redaction
-# walk before it flattens nested args to repr(). Injected as source rather than
-# imported: the child may run sandboxed with a trimmed import path, and a
-# redaction import that silently failed would leak the values it exists to hide.
-_REDACTION_SOURCE = inspect.getsource(_redaction)
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +132,12 @@ _SPLIT_CODE_FN = textwrap.dedent("""\
         except SyntaxError:
             return (code, None)
 """)
+
+# The child builds its own audit records, so it redacts there - before
+# _jsonable_call_args flattens nested args into capped repr() strings. Imported,
+# not inlined: the child already imports tsugite for local tool stubs, and an
+# unimportable redaction must raise here rather than quietly record raw values.
+_REDACTION_IMPORT = "from tsugite.secrets.redaction import redact_sensitive_obj"
 
 _TIMED_AUDIT_WRAPPER = textwrap.dedent("""\
     def _timed_audit_call(tool_name, fn, kwargs, sensitive_paths=()):
@@ -389,7 +386,7 @@ class SubprocessExecutor:
 os.environ.setdefault("_TSUGITE_REQ_PATH", {json.dumps(req_fifo)})
 os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_IPC_HELPER}
-{_REDACTION_SOURCE}
+{_REDACTION_IMPORT}
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
 {_SEND_MESSAGE_STUB}
