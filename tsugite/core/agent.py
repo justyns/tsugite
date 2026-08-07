@@ -10,14 +10,9 @@ import time
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
-# Cap the persisted return_value repr so a huge structured return doesn't bloat the event.
-RETURN_VALUE_REPR_MAX = 2048
-
-from tsugite.attachments.base import Attachment, AttachmentContentType, format_attachment_open_tag  # noqa: E402
-from tsugite.cancellation import is_cancelled  # noqa: E402
-from tsugite.events import (  # noqa: E402
+from tsugite.attachments.base import Attachment, AttachmentContentType, format_attachment_open_tag
+from tsugite.cancellation import is_cancelled
+from tsugite.events import (
     CodeExecutionEvent,
     ContentBlockEvent,
     CostSummaryEvent,
@@ -36,17 +31,21 @@ from tsugite.events import (  # noqa: E402
     TaskStartEvent,
     WarningEvent,
 )
-from tsugite.providers.base import CompletionResponse as ProviderResponse  # noqa: E402
-from tsugite.skill_discovery import Skill  # noqa: E402
+from tsugite.providers.base import CompletionResponse as ProviderResponse
+from tsugite.skill_discovery import Skill
 
-from .content_blocks import extract_content_blocks  # noqa: E402
-from .executor import Executor  # noqa: E402
-from .executor_registry import get_executor_class  # noqa: E402
-from .memory import AgentMemory, StepResult  # noqa: E402
-from .tools import Tool  # noqa: E402
+from .content_blocks import extract_content_blocks
+from .executor import Executor
+from .executor_registry import get_executor_class
+from .memory import AgentMemory, StepResult
+from .tools import Tool
 
-# Agent execution constants
-DEFAULT_MAX_TURNS = 10  # Default maximum reasoning iterations before timeout
+logger = logging.getLogger(__name__)
+
+# Cap the persisted return_value repr so a huge structured return doesn't bloat the event.
+RETURN_VALUE_REPR_MAX = 2048
+
+DEFAULT_MAX_TURNS = 10  # Maximum reasoning iterations before the run is cut off
 
 _LLM_WAIT_HEARTBEAT_INTERVAL = 10.0
 
@@ -108,7 +107,7 @@ def build_system_prompt(tools: List[Tool], instructions: str = "") -> str:
 _EXEC_FENCE = "```python-exec"
 _CLOSE_FENCE = "\n```"
 
-# Start-of-line ```python fence whose info string is exactly "python" (bare) — i.e.
+# Start-of-line ```python fence whose info string is exactly "python" (bare) - i.e.
 # NOT ```python-exec. Used to nudge the model toward the exec fence when it emits a
 # bare block. The negative lookahead keeps ```python-exec from matching.
 _BARE_PYTHON_FENCE = re.compile(r"(?:^|\n)```python(?!-exec)[ \t]*\r?\n")
@@ -450,7 +449,7 @@ class TsugiteAgent:
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
                 # Multiple python blocks: the parser already took just the first
-                # one as `code`. Surface the drop on two channels — a UI warning
+                # one as `code`. Surface the drop on two channels - a UI warning
                 # for the human, and an in-conversation observation for the
                 # model. Without the latter the model sees its full N-block
                 # response in raw_content but only one execution result, and
@@ -621,7 +620,7 @@ class TsugiteAgent:
                 from tsugite.agent_runner.history_integration import record_final_result, record_session_end
 
                 # Durable answer record for run paths with no live SSE persist
-                # (scheduled, subprocess, CLI) — the conversation view renders
+                # (scheduled, subprocess, CLI) - the conversation view renders
                 # the answer bubble from this event.
                 record_final_result(
                     self.storage,
@@ -1187,46 +1186,30 @@ class TsugiteAgent:
     def _compute_token_breakdown(self, messages: List[Dict]) -> Dict:
         """Compute per-category token breakdown with individual item details."""
         est = estimate_content_tokens
-        categories = []
 
-        # Instructions (system prompt minus tools)
-        instructions_tokens = est(self.instructions) if self.instructions else 0
-        categories.append({"name": "instructions", "tokens": instructions_tokens, "items": []})
+        def itemized(name: str, items: list) -> Dict:
+            return {"name": name, "tokens": sum(i["tokens"] for i in items), "items": items}
 
-        # Tools — per-tool breakdown
-        tool_items = []
-        for tool in self.tools:
-            tok = est(tool.to_code_prompt())
-            tool_items.append({"name": tool.name, "tokens": tok})
-        tool_items.sort(key=lambda x: x["tokens"], reverse=True)
-        tools_total = sum(t["tokens"] for t in tool_items)
-        categories.append({"name": "tools", "tokens": tools_total, "items": tool_items})
+        # Tools sort largest-first; the other item lists keep their natural order.
+        tool_items = sorted(
+            ({"name": t.name, "tokens": est(t.to_code_prompt())} for t in self.tools),
+            key=lambda i: i["tokens"],
+            reverse=True,
+        )
+        categories = [
+            # The system prompt minus tools; no per-item breakdown to give.
+            {"name": "instructions", "tokens": est(self.instructions) if self.instructions else 0, "items": []},
+            itemized("tools", tool_items),
+            itemized(
+                "attachments",
+                [{"name": a.name, "tokens": est(a.content) if a.content else 0} for a in self.attachments],
+            ),
+            itemized("skills", [{"name": s.name, "tokens": est(s.content) if s.content else 0} for s in self.skills]),
+            # Hooks carry pre_message captured output, e.g. rag_context.
+            itemized("hooks", [{"name": n, "tokens": est(c) if c else 0} for n, c in self.hook_vars.items()]),
+        ]
 
-        # Attachments — per-attachment breakdown
-        att_items = []
-        for att in self.attachments:
-            tok = est(att.content) if att.content else 0
-            att_items.append({"name": att.name, "tokens": tok})
-        att_total = sum(a["tokens"] for a in att_items)
-        categories.append({"name": "attachments", "tokens": att_total, "items": att_items})
-
-        # Skills — per-skill breakdown
-        skill_items = []
-        for skill in self.skills:
-            tok = est(skill.content) if skill.content else 0
-            skill_items.append({"name": skill.name, "tokens": tok})
-        skills_total = sum(s["tokens"] for s in skill_items)
-        categories.append({"name": "skills", "tokens": skills_total, "items": skill_items})
-
-        # Hooks (pre_message hook captured output like rag_context)
-        hook_items = []
-        for name, content in self.hook_vars.items():
-            tok = est(content) if content else 0
-            hook_items.append({"name": name, "tokens": tok})
-        hooks_total = sum(h["tokens"] for h in hook_items)
-        categories.append({"name": "hooks", "tokens": hooks_total, "items": hook_items})
-
-        # History — walk messages between context turn and task
+        # History - walk messages between context turn and task
         history_tokens = 0
         i = 0
         n = len(messages)

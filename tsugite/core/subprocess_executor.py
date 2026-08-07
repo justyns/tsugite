@@ -110,7 +110,7 @@ _SEND_MESSAGE_STUB = textwrap.dedent("""\
         return f"Message sent: {msg}"
 """)
 
-# Mirrors LocalExecutor._split_code_for_last_expr — duplicated because this runs
+# Mirrors LocalExecutor._split_code_for_last_expr - duplicated because this runs
 # as a string template inside the sandboxed subprocess (can't import from parent).
 _SPLIT_CODE_FN = textwrap.dedent("""\
     def _split_code_for_last_expr(code):
@@ -258,7 +258,7 @@ def _build_local_tool_stub(name: str, module_path: str, param_names: list, sensi
 class SubprocessExecutor:
     """Execute code in a subprocess with IPC for parent-only tools.
 
-    Same interface as LocalExecutor — returns ExecutionResult.
+    Same interface as LocalExecutor - returns ExecutionResult.
     State persists between turns via JSON serialization.
     """
 
@@ -320,7 +320,7 @@ class SubprocessExecutor:
         Looks up each tool in the tsugite registry to get the real parent_only
         flag and importable module path. Tool objects passed in are wrappers
         from create_tool_from_tsugite() whose __module__ is tsugite.core.tools
-        and which don't carry _parent_only — so we can't rely on the wrapper.
+        and which don't carry _parent_only - so we can't rely on the wrapper.
         """
         if event_bus:
             self.event_bus = event_bus
@@ -343,7 +343,7 @@ class SubprocessExecutor:
             if registry_info and (registry_info.parent_only or registry_info.require_daemon):
                 # require_daemon tools need the daemon runtime (pty manager, jobs
                 # orchestrator, scheduler, session store) which only exists in the
-                # parent process — so they must run there, not in the sandboxed child.
+                # parent process - so they must run there, not in the sandboxed child.
                 self._parent_only_tools.add(t.name)
             elif registry_info:
                 # Built-in and plugin tools run in the (sandboxed) child as long as
@@ -355,7 +355,7 @@ class SubprocessExecutor:
                 else:
                     self._parent_only_tools.add(t.name)
             else:
-                # Not in registry (custom function) — route via IPC
+                # Not in registry (custom function) - route via IPC
                 self._parent_only_tools.add(t.name)
 
     def _build_harness(self, code: str) -> str:
@@ -366,7 +366,6 @@ class SubprocessExecutor:
         req_fifo = os.path.join(self._tmpdir, "req.fifo")
         resp_fifo = os.path.join(self._tmpdir, "resp.fifo")
 
-        # Build tool stubs
         tool_stubs = []
         for t in self._tools:
             if t.name in EXECUTOR_BUILTIN_TOOLS:
@@ -378,7 +377,6 @@ class SubprocessExecutor:
             elif t.name in self._local_tools:
                 tool_stubs.append(_build_local_tool_stub(t.name, self._local_tools[t.name], params, declared))
 
-        # Escape the user code for embedding
         code_escaped = json.dumps(code)
 
         harness = f"""\
@@ -571,11 +569,10 @@ with open(RESULT_PATH, "w") as f:
         with open(injections_path, "w") as f:
             json.dump(self._sticky_injections, f)
 
-        # Remove stale result file
         if os.path.exists(result_path):
             os.unlink(result_path)
 
-        # Create named FIFOs for IPC (works through bwrap bind mounts)
+        # Named FIFOs rather than sockets: these work through bwrap bind mounts.
         req_fifo = os.path.join(self._tmpdir, "req.fifo")
         resp_fifo = os.path.join(self._tmpdir, "resp.fifo")
         for fifo in (req_fifo, resp_fifo):
@@ -587,7 +584,6 @@ with open(RESULT_PATH, "w") as f:
         env["_TSUGITE_REQ_PATH"] = req_fifo
         env["_TSUGITE_RESP_PATH"] = resp_fifo
 
-        # Build command: either plain python or bwrap-wrapped
         inner_cmd = [sys.executable, harness_path]
         if self.sandbox_config:
             if self._sandbox_cls is None:
@@ -604,7 +600,6 @@ with open(RESULT_PATH, "w") as f:
                     stderr="",
                 )
 
-            # Start proxy on first execution (if network is allowed)
             if not self.sandbox_config.no_network and not self._proxy:
                 await self._start_proxy()
 
@@ -634,7 +629,7 @@ with open(RESULT_PATH, "w") as f:
                 stderr=str(e),
             )
 
-        # Open FIFOs in a thread with timeout — FIFO open() blocks until both ends
+        # Open FIFOs in a thread with timeout - FIFO open() blocks until both ends
         # connect, so if the child crashes before opening its ends we'd block forever.
         loop = asyncio.get_running_loop()
         try:
@@ -698,14 +693,12 @@ with open(RESULT_PATH, "w") as f:
                 tools_called=list(self._tools_called),
             )
 
-        # Wait for process to finish
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
 
-        # Read result
         if os.path.exists(result_path):
             with open(result_path, "r") as f:
                 result_data = json.load(f)

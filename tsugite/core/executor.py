@@ -115,15 +115,7 @@ class ExecutionResult:
     last_statement_type: Optional[str] = None  # "expr" | "statement" | None (unparsed) - history replay metadata
 
     def to_xml(self, duration_ms: int = 0, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> str:
-        """Convert execution result to structured XML format.
-
-        Args:
-            duration_ms: Execution duration in milliseconds
-            max_output_kb: Maximum output size in KB before truncation
-
-        Returns:
-            XML string with execution result
-        """
+        """Render the result as the XML observation replayed to the model."""
         from xml.sax.saxutils import escape
 
         from tsugite.secrets.registry import get_registry
@@ -149,7 +141,6 @@ class ExecutionResult:
 
         if self.error:
             parts.append(f"<error>{escape(_mask(self.error))}</error>")
-            # Include traceback from stderr (last 10 lines)
             if self.stderr:
                 tb_lines = _mask(self.stderr).strip().split("\n")[-10:]
                 parts.append(f"<traceback>{escape(chr(10).join(tb_lines))}</traceback>")
@@ -218,14 +209,7 @@ def _summarize_mapping(items) -> Dict[str, str]:
 
 
 def _summarize_variable(value: Any) -> str:
-    """Summarize a variable's type and size for display.
-
-    Args:
-        value: The variable value to summarize
-
-    Returns:
-        Summary string like "dict(3 keys)" or "list(5 items)"
-    """
+    """Summarize a variable's type and size for display, e.g. "dict(3 keys)"."""
     t = type(value).__name__
     if isinstance(value, dict):
         return f"{t}({len(value)} keys)"
@@ -422,23 +406,13 @@ class LocalExecutor:
         return ns
 
     def _split_code_for_last_expr(self, code: str) -> tuple[str, Optional[str]]:
-        """Split code into setup and last expression if applicable.
-
-        If the last statement is an expression, return (setup, last_expr).
-        Otherwise, return (code, None).
-
-        Args:
-            code: Python code to analyze
-
-        Returns:
-            Tuple of (setup_code, last_expression_or_none)
-        """
+        """Split code into (setup, last_expression) when the last statement is an
+        expression, so it can be eval'd for REPL-style display. Otherwise (code, None)."""
         try:
             tree = ast.parse(code)
             if not tree.body:
                 return (code, None)
 
-            # Check if last statement is an expression
             last_node = tree.body[-1]
             if not isinstance(last_node, ast.Expr):
                 return (code, None)
@@ -474,16 +448,7 @@ class LocalExecutor:
         return "expr" if isinstance(tree.body[-1], ast.Expr) else "statement"
 
     def _format_value(self, value: Any) -> str:
-        """Format a value for display.
-
-        Uses pprint for complex objects, repr for simple ones.
-
-        Args:
-            value: Value to format
-
-        Returns:
-            Formatted string representation
-        """
+        """Format a value for display: pprint for containers, repr for everything else."""
         if isinstance(value, (dict, list, tuple, set)):
             return pprint.pformat(value, width=PPRINT_WIDTH, compact=False)
         return repr(value)
@@ -506,12 +471,6 @@ class LocalExecutor:
         Automatically displays the value of the last expression (REPL-like behavior).
         When a workspace is bound, chdir to it under a process-wide lock so raw
         Python file APIs (os.getcwd, open, Path.cwd) resolve against the workspace.
-
-        Args:
-            code: Python code to execute
-
-        Returns:
-            ExecutionResult with output, error, stdout, stderr, return_value, tools_called, and variables_set
         """
         self._return_value = None
         self._tools_called = []
@@ -723,14 +682,7 @@ class LocalExecutor:
         self.namespace.update(tools)
 
     def register_loaded_skill(self, name: str, content: str):
-        """Register a skill loaded during this execution turn.
-
-        Called by load_skill() tool to track skills for observation embedding.
-
-        Args:
-            name: Skill name
-            content: Rendered skill content
-        """
+        """Register a skill loaded during this turn. Called by the load_skill() tool."""
         self._loaded_skills_for_turn[name] = content
 
     def register_unloaded_skill(self, name: str):

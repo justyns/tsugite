@@ -24,7 +24,7 @@ def _parse_pattern(pattern: str) -> tuple[str, set[int]]:
         "github.com:22"     → ("github.com", {22})
         "*.github.com:8080" → ("*.github.com", {8080})
         "*"                 → ("*", {80, 443})
-        "*:*"               → ("*", wildcard — represented as empty set)
+        "*:*"               → ("*", wildcard - represented as empty set)
     """
     if ":" in pattern:
         domain, port_str = pattern.rsplit(":", 1)
