@@ -32,14 +32,13 @@ SENSITIVE_KEYS = frozenset(
 _AUTH_SCHEMES = ("bearer", "basic", "digest", "token", "negotiate")
 
 
-def redact_value(value: Any, preserve_auth_scheme: bool = True) -> Any:
-    """Redact one value, keeping a recognised auth scheme prefix if asked."""
+def _redact_value(value: Any) -> Any:
+    """Redact one value, keeping a recognised auth scheme prefix."""
     if not isinstance(value, str):
         return REDACTED
-    if preserve_auth_scheme:
-        scheme, _, rest = value.partition(" ")
-        if rest and scheme.lower() in _AUTH_SCHEMES:
-            return f"{scheme} {REDACTED}"
+    scheme, _, rest = value.partition(" ")
+    if rest and scheme.lower() in _AUTH_SCHEMES:
+        return f"{scheme} {REDACTED}"
     return REDACTED
 
 
@@ -49,11 +48,7 @@ def _split_paths(sensitive_paths: Iterable[str] | None) -> list[Sequence[str]]:
     return [tuple(seg.lower() for seg in path.split(".") if seg) for path in sensitive_paths if path]
 
 
-def redact_sensitive_obj(
-    obj: Any,
-    sensitive_paths: Iterable[str] | None = None,
-    preserve_auth_scheme: bool = True,
-) -> Any:
+def redact_sensitive_obj(obj: Any, sensitive_paths: Iterable[str] | None = None) -> Any:
     """Return a copy of `obj` with sensitive values replaced by `***`.
 
     Redacts a dict value when its key is a built-in sensitive key (case-
@@ -65,34 +60,27 @@ def redact_sensitive_obj(
     Args:
         obj: Arbitrary nested structure (dict/list/tuple/scalars).
         sensitive_paths: Extra dotted paths to redact, e.g. a tool's declared ones.
-        preserve_auth_scheme: Keep the `Bearer` / `Basic` prefix on the value.
 
     Returns:
         A redacted copy; the input is never mutated.
     """
-    return _walk(obj, (), _split_paths(sensitive_paths), preserve_auth_scheme)
+    return _walk(obj, (), _split_paths(sensitive_paths))
 
 
-def _is_sensitive(key: str, path: Sequence[str], paths: list[Sequence[str]]) -> bool:
-    if key.lower() in SENSITIVE_KEYS:
-        return True
-    return any(path == p for p in paths)
-
-
-def _walk(obj: Any, path: Sequence[str], paths: list[Sequence[str]], preserve_auth_scheme: bool) -> Any:
+def _walk(obj: Any, path: Sequence[str], paths: list[Sequence[str]]) -> Any:
     if isinstance(obj, dict):
         out = {}
         for key, value in obj.items():
             child = (*path, str(key).lower())
-            if _is_sensitive(str(key), child, paths):
-                out[key] = redact_value(value, preserve_auth_scheme)
+            if child[-1] in SENSITIVE_KEYS or child in paths:
+                out[key] = _redact_value(value)
             else:
-                out[key] = _walk(value, child, paths, preserve_auth_scheme)
+                out[key] = _walk(value, child, paths)
         return out
     if isinstance(obj, list):
         # Lists are transparent: an element sits at its container's path, so a
         # declared `items.token` covers every element without index bookkeeping.
-        return [_walk(v, path, paths, preserve_auth_scheme) for v in obj]
+        return [_walk(v, path, paths) for v in obj]
     if isinstance(obj, tuple):
-        return tuple(_walk(v, path, paths, preserve_auth_scheme) for v in obj)
+        return tuple(_walk(v, path, paths) for v in obj)
     return obj

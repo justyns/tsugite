@@ -760,12 +760,9 @@ function pillState(): string | null {
   return document.querySelector('.t-pill')?.getAttribute('data-st') ?? null;
 }
 
-test('a compaction in flight lights the pill even with no compaction hooks configured', async () => {
-  // No workspace hook means the progress label never contains the word
-  // "compact" - it reads whatever the last mid-turn event said.
-  await page.viewport(1440, 900);
-  const ctrl = controllerWith([{ type: 'user_input', text: 'q', timestamp: 'z' }]);
-  const row = {
+/** A live session row; the two fields the pill tests vary are the arguments. */
+function pillRow(compacting: boolean, statusText: string): SessionRow {
+  return {
     id: 'sess-1',
     status: 'active',
     title: 'c',
@@ -773,14 +770,17 @@ test('a compaction in flight lights the pill even with no compaction hooks confi
     pinned: false,
     is_primary: false,
     busy: true,
-    compacting: true,
-    progress: {
-      turn_count: 3,
-      tool_count: 1,
-      status_text: 'Waiting on LLM...',
-      last_event_time: null,
-    },
+    compacting,
+    progress: { turn_count: 3, tool_count: 1, status_text: statusText, last_event_time: null },
   } as unknown as SessionRow;
+}
+
+test('a compaction in flight lights the pill even with no compaction hooks configured', async () => {
+  // No workspace hook means the progress label never contains the word
+  // "compact" - it reads whatever the last mid-turn event said.
+  await page.viewport(1440, 900);
+  const ctrl = controllerWith([{ type: 'user_input', text: 'q', timestamp: 'z' }]);
+  const row = pillRow(true, 'Waiting on LLM...');
   render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
   await page.screenshot({ path: '__screenshots__/compacting-pill.png' });
   await expect.poll(pillState).toBe('compacting');
@@ -790,22 +790,7 @@ test('a hook message mentioning compaction does not by itself light the pill', a
   // hook_status text is free-form user configuration; it must not be read as a
   // session state signal.
   const ctrl = controllerWith([{ type: 'user_input', text: 'q', timestamp: 'z' }]);
-  const row = {
-    id: 'sess-1',
-    status: 'active',
-    title: 'c',
-    metadata: {},
-    pinned: false,
-    is_primary: false,
-    busy: true,
-    compacting: false,
-    progress: {
-      turn_count: 3,
-      tool_count: 1,
-      status_text: 'pre_compact hook: archiving transcript',
-      last_event_time: null,
-    },
-  } as unknown as SessionRow;
+  const row = pillRow(false, 'pre_compact hook: archiving transcript');
   render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
   await expect.poll(pillState).toBe('busy');
 });

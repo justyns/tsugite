@@ -77,7 +77,7 @@ afterEach(() => {
   location.hash = '';
 });
 
-test('a session filter in the route shows only that chat’s jobs, visibly', async () => {
+test('a session filter in the route shows only the jobs from that chat, visibly', async () => {
   // Arriving from a chat's jobs chip: #jobs?q=session:sess-a.
   await page.viewport(1280, 800);
   router.params = { q: 'session:sess-a' };

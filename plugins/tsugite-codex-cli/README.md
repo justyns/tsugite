@@ -52,8 +52,7 @@ Available models: `codex_cli:gpt-5.6-sol`, `codex_cli:gpt-5.6-terra`,
 `codex_cli:gpt-5.4-mini`. The 5.6 models add a `max` reasoning effort, and
 sol/terra also accept `ultra`. Use `provider.list_models()` to discover what
 your ChatGPT plan currently exposes; the plugin queries the Codex `/models`
-endpoint (skipping entries the backend marks hidden) and falls back to the six
-above if that call fails.
+endpoint and falls back to the list above if that call fails.
 
 ## Token-sink caveat
 

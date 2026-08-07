@@ -279,7 +279,6 @@ class TestRealRegisteredTools:
                 return any(is_container(a) for a in typing.get_args(annotation))
             return False
 
-        checked = 0
         for module in _tool_modules():
             for name, fn in vars(module).items():
                 declared = getattr(fn, "_sensitive_args", ()) if callable(fn) else ()
@@ -287,7 +286,6 @@ class TestRealRegisteredTools:
                     continue
                 params = inspect.signature(fn).parameters
                 for path in declared:
-                    checked += 1
                     if "." in path:
                         continue
                     param = params.get(path)
@@ -295,7 +293,6 @@ class TestRealRegisteredTools:
                         f"{name} declares '{path}', which names a whole container argument; "
                         "declare the leaf paths inside it instead"
                     )
-        assert checked >= 0  # a shipped-declaration audit, vacuous only when none exist
 
 
 def _tool_modules():
