@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tsugite.core import proxy as proxy_module
 from tsugite.core.proxy import ConnectProxy, _domain_matches, _is_ip_address
 
 
@@ -143,6 +144,44 @@ class TestProxyLifecycle:
                 await writer.drain()
                 response = await asyncio.wait_for(reader.read(4096), timeout=5)
                 assert b"403 Forbidden" in response
+            finally:
+                writer.close()
+                await proxy.stop()
+
+    @pytest.mark.asyncio
+    async def test_stalled_headers_rejected(self, monkeypatch):
+        """A client that never ends its headers is dropped instead of parking a coroutine."""
+        monkeypatch.setattr(proxy_module, "_REQUEST_READ_TIMEOUT", 0.2)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = Path(tmpdir) / "proxy.sock"
+            proxy = ConnectProxy(socket_path=sock_path, allowed_domains=["allowed.com"])
+            await proxy.start()
+            try:
+                reader, writer = await asyncio.open_unix_connection(str(sock_path))
+                # No blank line, so the headers never terminate.
+                writer.write(b"CONNECT allowed.com:443 HTTP/1.1\r\nHost: allowed.com\r\n")
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(4096), timeout=5)
+                assert b"400 Bad Request" in response
+            finally:
+                writer.close()
+                await proxy.stop()
+
+    @pytest.mark.asyncio
+    async def test_oversized_headers_rejected(self):
+        """Headers past the byte budget are dropped without reading forever."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sock_path = Path(tmpdir) / "proxy.sock"
+            proxy = ConnectProxy(socket_path=sock_path, allowed_domains=["allowed.com"])
+            await proxy.start()
+            try:
+                reader, writer = await asyncio.open_unix_connection(str(sock_path))
+                writer.write(b"CONNECT allowed.com:443 HTTP/1.1\r\n")
+                for i in range(70):
+                    writer.write(b"X-Pad-%d: " % i + b"A" * 1000 + b"\r\n")
+                await writer.drain()
+                response = await asyncio.wait_for(reader.read(4096), timeout=5)
+                assert b"400 Bad Request" in response
             finally:
                 writer.close()
                 await proxy.stop()

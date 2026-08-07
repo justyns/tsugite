@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTS = {80, 443}
 
+# Budgets for reading a request. The client is the sandboxed child, so a request
+# that stalls or never ends must not park a coroutine in the parent forever: the
+# timeout covers the whole read, not each line, or a slow dribble resets it.
+_REQUEST_READ_TIMEOUT = 10
+_MAX_HEADER_BYTES = 64 * 1024
+
 
 def _parse_pattern(pattern: str) -> tuple[str, set[int]]:
     """Parse a domain pattern into (domain_glob, allowed_ports).
@@ -87,7 +93,7 @@ class ConnectProxy:
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle an incoming client connection."""
         try:
-            first_line = await asyncio.wait_for(reader.readline(), timeout=10)
+            first_line = await asyncio.wait_for(reader.readline(), timeout=_REQUEST_READ_TIMEOUT)
             if not first_line:
                 writer.close()
                 await writer.wait_closed()
@@ -150,6 +156,28 @@ class ConnectProxy:
             await self._reject(writer, "502 Bad Gateway", str(e))
             return None
 
+    async def _drain_headers(self, reader: asyncio.StreamReader) -> bool:
+        """Read to the blank line ending the request's headers.
+
+        False when the client blew the time or size budget, or sent a single line
+        longer than the stream's buffer limit (readline raises ValueError then).
+        """
+
+        async def read_to_blank_line() -> bool:
+            total = 0
+            while True:
+                header_line = await reader.readline()
+                if header_line in (b"\r\n", b"\n", b""):
+                    return True
+                total += len(header_line)
+                if total > _MAX_HEADER_BYTES:
+                    return False
+
+        try:
+            return await asyncio.wait_for(read_to_blank_line(), timeout=_REQUEST_READ_TIMEOUT)
+        except (asyncio.TimeoutError, ValueError):
+            return False
+
     async def _handle_connect(self, target: str, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle CONNECT method (HTTPS tunneling)."""
         if ":" in target:
@@ -163,11 +191,10 @@ class ConnectProxy:
             host = target
             port = 443
 
-        # Drain headers before connecting upstream
-        while True:
-            header_line = await reader.readline()
-            if header_line in (b"\r\n", b"\n", b""):
-                break
+        if not await self._drain_headers(reader):
+            await self._reject(writer, "400 Bad Request", "Request headers too large or too slow")
+            logger.info("Dropped %s:%d - client exceeded the header time/size budget", host, port)
+            return
 
         upstream = await self._check_and_connect(host, port, writer)
         if not upstream:
