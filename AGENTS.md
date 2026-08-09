@@ -20,8 +20,8 @@ uv run pytest tests/test_file.py::test_function
 # Run tests with coverage
 uv run pytest --cov=tsugite --cov-report=html
 
-# Lint and format
-uv run black .
+# Lint and format (CI gates on these, repo-wide)
+uv run ruff format .
 uv run ruff check .
 uv run pylint tsugite
 
@@ -504,7 +504,7 @@ Source lives at `plugins/tsugite-daemon/frontend/` (**Svelte 5 runes + TypeScrip
 
 - `mise run web-dev` - Vite dev server on :5173 with HMR, proxying `/api` to a local daemon on 127.0.0.1:8374 (`uv run tsu daemon`).
 - `mise run web-build` - production build into `tsugite_daemon/web/` (gitignored; never committed).
-- `mise run web-check` - svelte-check + vitest + prettier check.
+- `mise run web-check` - svelte-check + vitest unit project + prettier check. It does not run component tests (`*.svelte.test.ts`); those need `npm --prefix plugins/tsugite-daemon/frontend run test:browser`.
 
 ### Theme tokens
 
@@ -513,7 +513,7 @@ Source lives at `plugins/tsugite-daemon/frontend/` (**Svelte 5 runes + TypeScrip
 
 ### Testing
 
-- e2e selectors use `data-testid` values from `frontend/src/lib/testids.ts` (a frozen contract - extend, don't rename). App readiness marker: `[data-testid="app-ready"]`; test hooks hang off `window.__tsugite`.
+- e2e selectors use `data-testid` values from `frontend/src/lib/testids.ts` (a frozen contract - extend, don't rename). App readiness marker: `[data-testid="app-ready"]`. There are no window-global test hooks; drive the real DOM and seed over HTTP.
 - Frontend behavioral logic (stores, SSE replay, parsers/reducers) is vitest-tested (`frontend/src/**/*.test.ts`), failing-test-first.
 - Browser verification on UI changes is mandatory. Daemon spinup + Playwright wiring recipe: project memory `project_daemon_ui_smoketest.md` (its DOM selector list predates the Svelte rebuild - trust the testids contract instead).
 
