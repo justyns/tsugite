@@ -111,12 +111,9 @@ export const galleryView: ViewDef = {
 const builtinViews: ViewDef[] = import.meta.env.DEV ? [...views, galleryView] : views;
 
 /** Rail order: built-ins first, then whatever plugins contributed this session.
- *  A function rather than a constant because the plugin entries arrive after
- *  boot, and callers read it inside reactive scopes.
- *
- *  A plugin nav row is a full view - the plugin page replaces the workspace
- *  region - and its id doubles as the surface kind, so #plugin/<name>/<kind>
- *  deep-links to it and PluginView resolves which surface it is from the route. */
+ *  A function, because the plugin entries arrive after boot and callers read it
+ *  inside reactive scopes. A plugin row's id doubles as its surface kind, which
+ *  is what makes #plugin/<name>/<kind> a deep link. */
 export function allViews(): ViewDef[] {
   const contributed = pluginsMeta.surfaces
     .filter((surface) => surface.nav)
@@ -136,7 +133,6 @@ export function allViews(): ViewDef[] {
 export const DEFAULT_VIEW_ID = views[0]!.id;
 
 export function viewById(id: string): ViewDef {
-  // An unknown id resolves to the default view. views is a non-empty literal and
-  // DEFAULT_VIEW_ID is views[0].id, so this lookup is always defined.
+  // An unknown id resolves to the default view.
   return allViews().find((view) => view.id === id) ?? views[0]!;
 }

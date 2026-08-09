@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import logging.handlers
-import os
 import signal
 import sys
 import threading
@@ -99,19 +98,24 @@ def _render_webhook_body(body_template: str, message: str) -> str:
         return body_template.replace("{message}", message)
 
 
-def normalize_ui_surfaces(plugin_name: str, declared: list) -> list[dict]:
-    """Namespace a plugin's declared UI surfaces and resolve their entry URLs.
+def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Path | None]:
+    """Split a plugin's declared UI surfaces into the web-UI payload and the
+    assets directory to mount, deciding once what a valid descriptor is.
 
     `kind` becomes `plugin/<plugin_name>/<kind>`, the one identifier the web UI
-    uses as the mux tab kind, the nav view id, and the hash route. `entry` is
-    resolved under the plugin's own `/api/plugins/<plugin_name>/` mount. Entries missing
-    `kind` or `entry` are dropped with a warning rather than reaching the UI as
-    an unopenable tab.
+    uses as the mux tab kind, the nav view id, and the hash route, and `entry`
+    resolves under the plugin's own `/api/plugins/<plugin_name>/` mount. A
+    descriptor missing either is dropped with a warning rather than reaching the
+    UI as an unopenable tab, and its `assets` is dropped with it.
 
-    `assets` never reaches the payload: it is a server-side directory, consumed
-    by ui_assets_dir() to decide what to mount.
+    `assets` is served at `/api/plugins/<plugin_name>/ui/`, so an entry of
+    `ui/panel.html` resolves to `panel.html` inside it. One directory per
+    plugin; a second, different one is a mistake worth naming. A path that is
+    not a directory is reported here instead of at StaticFiles construction,
+    which would abort daemon startup over one plugin.
     """
     surfaces = []
+    dirs = []
     for item in declared:
         if not isinstance(item, dict) or not item.get("kind") or not item.get("entry"):
             logger.warning("Plugin '%s': UI surface %r needs both 'kind' and 'entry'; skipping it", plugin_name, item)
@@ -129,36 +133,16 @@ def normalize_ui_surfaces(plugin_name: str, declared: list) -> list[dict]:
                 "params": list(item.get("params") or []),
             }
         )
-    return surfaces
-
-
-def ui_assets_dir(plugin_name: str, declared: list) -> str | None:
-    """The directory a plugin wants served as its UI assets, or None.
-
-    Mounted public at `/api/plugins/<plugin_name>/ui/`, so a surface entry of
-    `ui/panel.html` resolves to `panel.html` inside it. Public because the
-    browser loads a surface as a navigation, which carries no bearer header -
-    the same posture as the daemon's own web bundle. One directory per plugin;
-    a second, different one is a mistake worth naming.
-
-    A path that isn't a directory is reported at startup and not mounted, where
-    the operator can act on it - StaticFiles would otherwise raise per request.
-    """
-    dirs = []
-    for item in declared:
-        assets = item.get("assets") if isinstance(item, dict) else None
-        if assets and str(assets) not in dirs:
-            dirs.append(str(assets))
+        if (assets := item.get("assets")) and Path(assets) not in dirs:
+            dirs.append(Path(assets))
     if not dirs:
-        return None
+        return surfaces, None
     if len(dirs) > 1:
         logger.warning("Plugin '%s' declares %d UI asset dirs; serving only %s", plugin_name, len(dirs), dirs[0])
-    if not os.path.isdir(dirs[0]):
-        logger.warning(
-            "Plugin '%s': UI assets directory %s does not exist; its surfaces will 404", plugin_name, dirs[0]
-        )
-        return None
-    return dirs[0]
+    if not dirs[0].is_dir():
+        logger.warning("Plugin '%s': UI assets path %s is not a directory; its surfaces will 404", plugin_name, dirs[0])
+        return surfaces, None
+    return surfaces, dirs[0]
 
 
 def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
@@ -188,20 +172,20 @@ def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
 
     authed = _collect("get_http_routes")
     public = _collect("get_public_http_routes")
-    declared = _collect("get_ui_surfaces")
-    surfaces = normalize_ui_surfaces(plugin_name, declared)
+    surfaces, assets = _collect_plugin_ui(plugin_name, _collect("get_ui_surfaces"))
     if not authed and not public and not surfaces:
         return
     if http_server is None:
         logger.warning("Plugin '%s' registers HTTP routes or UI surfaces but HTTP is disabled; skipping", plugin_name)
         return
-    if assets := ui_assets_dir(plugin_name, declared):
+    if assets:
         from starlette.routing import Mount
-        from starlette.staticfiles import StaticFiles
 
-        public = [*public, Mount("/ui", app=StaticFiles(directory=assets))]
+        from tsugite_daemon.adapters.http.helpers import _NoCacheStaticFiles
+
+        public = [*public, Mount("/ui", app=_NoCacheStaticFiles(directory=str(assets)))]
     http_server.mount_plugin_routes(plugin_name, authed, public)
-    http_server.register_ui_surfaces(surfaces)
+    http_server.plugin_ui_surfaces.extend(surfaces)
 
 
 def attach_plugin_executors(jobs_orchestrator, plugin_name: str, adapter) -> None:

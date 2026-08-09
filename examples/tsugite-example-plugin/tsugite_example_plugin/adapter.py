@@ -76,9 +76,7 @@ class ExampleAdapter(BaseAdapter):
 
     def get_ui_surfaces(self) -> list[dict]:
         # `kind` is namespaced to plugin/example/panel by the daemon. `assets` is
-        # served public at /api/plugins/example/ui/ - the browser frames a surface
-        # as a navigation, which carries no bearer header, so UI files are public
-        # exactly like the daemon's own web bundle. Keep data out of it and read
+        # served public at /api/plugins/example/ui/ - keep data out of it and read
         # it from the authed routes above instead. `params` names the tab params
         # forwarded into the iframe URL; nothing else is.
         return [

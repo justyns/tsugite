@@ -127,7 +127,7 @@ export function buildPaletteItems(data: PaletteData): PaletteItem[] {
       group: 'plugins',
       icon: surface.icon,
       label: surface.label,
-      meta: 'open as tab',
+      meta: 'tab',
       href: `surface:${surface.kind}`,
     });
   }

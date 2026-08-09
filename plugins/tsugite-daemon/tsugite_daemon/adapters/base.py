@@ -323,18 +323,17 @@ class BaseAdapter(ABC):
         """
         return []
 
-    def get_ui_surfaces(self) -> list[dict]:
+    def get_ui_surfaces(self) -> list:
         """UI surfaces this adapter contributes to the web UI, each a dict:
 
             {"kind": "doc", "label": "Document", "icon": "files",
-             "entry": "ui/editor.html", "nav": False, "params": ["path"]}
+             "entry": "ui/editor.html", "assets": Path(__file__).parent / "ui",
+             "nav": False, "params": ["path"]}
 
-        `entry` names a page the plugin serves from its own
-        `/api/plugins/<plugin_name>/` mount, and the web UI renders it in an
-        iframe. It is loaded as a browser navigation, which cannot carry the
-        daemon bearer header, so it must come from `get_public_http_routes`.
-        `nav` adds a nav-rail entry; without it the surface opens from the
-        command palette.
+        `assets` is a directory the daemon serves at
+        `/api/plugins/<plugin_name>/ui/`, and `entry` is the page inside it the
+        web UI frames. Every surface opens from the command palette; `nav` also
+        adds a nav-rail entry. See docs/plugin-adapters.md.
 
         Default: none.
         """

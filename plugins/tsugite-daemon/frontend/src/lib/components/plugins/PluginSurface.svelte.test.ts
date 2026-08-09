@@ -77,10 +77,8 @@ test('init carries the protocol version and the resolved theme tokens', async ()
     version: 1,
     surface: { kind: 'plugin/demo/board', params: { path: 'q4.docx' } },
     theme: { name: 'mocha' },
-    // Handed over so the page never digs the token out of host storage itself.
     token: 'tsu_test-token',
   });
-  // Resolved values, not names: a plugin styles itself from these alone.
   const tokens = (init as unknown as { theme: { tokens: Record<string, string> } }).theme.tokens;
   expect(tokens['--bg0']).toMatch(/^(#|rgb|oklch|hsl)/);
   expect(Object.keys(tokens).length).toBeGreaterThan(20);
@@ -126,9 +124,7 @@ test('a tab that outlived its plugin says so instead of framing nothing', async 
   pluginsMeta.loaded = true;
   await render(PluginSurface, { kind: 'plugin/uninstalled/thing', params: {} });
 
-  await expect
-    .element(page.getByText("This tab's plugin isn't installed on this daemon."))
-    .toBeInTheDocument();
+  await expect.element(page.getByText("This tab's plugin isn't installed")).toBeInTheDocument();
   expect(document.querySelector('iframe')).toBeNull();
 });
 

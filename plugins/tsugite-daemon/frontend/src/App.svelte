@@ -154,27 +154,33 @@
     spaces.pinPreviewInFocusedPane();
   }
 
-  // Deep links - a shared #view URL, a PWA shortcut, browser back/forward - select
-  // that view and open any surface params it carries. Nav clicks route here too
-  // (they set the hash). untrack keeps the store mutations out of the dep set.
+  // Deep links - a shared #view URL, a PWA shortcut, browser back/forward - open
+  // any surface the route names. Nav clicks route here too (they set the hash).
+  // untrack keeps the store mutations out of the dep set.
   $effect(() => {
     const id = router.view;
     const params = router.params;
-    // Read outside untrack: plugin views join the registry after boot, so a deep
-    // link to one only resolves once this re-runs on that arrival.
-    const known = allViews().some((v) => v.id === id);
     untrack(() => {
-      if (!id || !known) return;
-      shellView.activate(id);
       if (id === 'chats' && params.sessionId) openChat(params.sessionId, params.agent);
       else if (id === 'terminals' && params.terminalId) openTerminal(params.terminalId);
       else if (id === 'files' && params.path) openFile(params.agent ?? '', params.path);
     });
   });
 
-  // Plugin metadata at shell scope, because plugin-contributed UI surfaces seed
-  // both the surface registry (a persisted plugin tab needs its entry to render)
-  // and the nav rail, not just the plugins view.
+  // Selecting the route's view is kept apart from opening its surfaces, because
+  // plugin views join the registry after boot: this has to re-run on that arrival,
+  // and re-running the block above would re-open a surface under the user.
+  $effect(() => {
+    const id = router.view;
+    const known = allViews().some((v) => v.id === id);
+    untrack(() => {
+      if (id && known) shellView.activate(id);
+    });
+  });
+
+  // Plugin metadata at shell scope: plugin-contributed UI surfaces seed the
+  // surface registry (a persisted plugin tab needs its entry to render) and the
+  // nav rail, both of which live outside the plugins view.
   $effect(() => {
     if (auth.gated) return;
     void pluginsMeta.load();

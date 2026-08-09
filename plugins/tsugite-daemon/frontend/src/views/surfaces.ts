@@ -4,10 +4,7 @@
  * the pure `shellNav.ts` vocabulary helpers so those stay component-free.
  *
  * Built-ins are compiled in; every plugin surface renders through the one generic
- * PluginSurface, so a plugin ships HTML rather than a Svelte component. The
- * daemon owns the `plugin/` namespace, so the prefix is enough to route a kind
- * there - including a persisted tab whose plugin is now uninstalled, which
- * PluginSurface explains rather than dropping.
+ * PluginSurface, so a plugin ships HTML and never a Svelte component.
  */
 import type { Component } from 'svelte';
 import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
@@ -17,9 +14,9 @@ import FileSurface from './files/Surface.svelte';
 
 export type SurfaceProps = {
   params?: Record<string, string>;
-  /** The tab's surface kind; plugin surfaces resolve their entry URL from it. */
   kind?: string;
-  /** Rename the tab this surface is mounted in. */
+  /** Rename the tab this surface is mounted in; only the host that owns a tab
+   *  supplies it, so a surface can never address another tab. */
   setTitle?: (title: string) => void;
 };
 

@@ -1,14 +1,7 @@
 <script lang="ts">
   // The one component every plugin UI surface renders through: the plugin's page
-  // in a pane-filling iframe, plus the host end of the postMessage bridge (init →
-  // ready handshake, theme pushes, plugin-set tab title).
-  //
-  // The frame is same-origin under /api/plugins/<name>/, which is what lets the
-  // plugin page reach its own routes - and equally what makes the sandbox
-  // defence in depth rather than a boundary. A plugin surface is trusted code
-  // the operator installed; a hostile adapter already has Python-level access to
-  // the daemon. The entry page loads as a browser navigation, which carries no
-  // bearer header, so it has to come from the plugin's public routes.
+  // in a pane-filling iframe, plus the host end of the postMessage bridge.
+  // Threat model and the public-assets rule: docs/plugin-adapters.md.
   import { auth } from '$lib/stores/auth.svelte';
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { theme } from '$lib/stores/theme.svelte';
@@ -22,6 +15,7 @@
     type ThemePayload,
   } from '$lib/plugins/bridge';
   import Button from '$lib/components/buttons/Button.svelte';
+  import Icon from '$lib/components/icon/Icon.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { TESTID } from '$lib/testids';
   import type { SurfaceProps } from '../../../views/surfaces';
@@ -33,11 +27,14 @@
 
   let frame = $state<HTMLIFrameElement | null>(null);
   let phase = $state<'loading' | 'ready' | 'stalled'>('loading');
-  /** Bumped by Reload to tear the frame down and start the handshake over. */
   let attempt = $state(0);
   /** Theme the frame has already been told about, so reaching `ready` doesn't
    *  re-push the one `init` just carried. */
   let sentTheme = theme.current;
+
+  /** A surface the registry has settled on as absent is gone for good; before it
+   *  settles the tab's plugin may still arrive. */
+  const status = $derived(surface ? phase : pluginsMeta.loaded ? 'missing' : 'loading');
 
   function payload(): ThemePayload {
     return { name: theme.current, tokens: readThemeTokens(document.documentElement) };
@@ -68,15 +65,15 @@
     return () => window.removeEventListener('message', onMessage);
   });
 
-  // Give up waiting per attempt: reload() flips phase back, which restarts this.
+  // Armed only once the frame exists, so a slow registry load doesn't spend the
+  // plugin's whole handshake budget before it has been given a chance.
   $effect(() => {
-    if (phase !== 'loading') return;
+    if (status !== 'loading' || !surface) return;
     const timer = setTimeout(() => (phase = 'stalled'), READY_TIMEOUT_MS);
     return () => clearTimeout(timer);
   });
 
-  // A theme switch re-skins a live surface; before the handshake the init
-  // message carries the current tokens anyway.
+  // Before the handshake the init message carries the current tokens anyway.
   $effect(() => {
     const next = theme.current;
     if (next === sentTheme) return;
@@ -85,24 +82,33 @@
   });
 </script>
 
-<div class="plugin-surface" data-testid={TESTID.pluginSurface} data-phase={phase}>
-  {#if surface}
-    {#if phase !== 'ready'}
-      <div class="ps-overlay">
-        {#if phase === 'stalled'}
-          <PaneState kind="error" title="{surface.label} did not finish loading.">
-            {#snippet hint()}<span class="mono">{surface.entry}</span>{/snippet}
-            {#snippet actions()}
-              <Button size="sm" data-testid={TESTID.pluginSurfaceReload} onclick={reload}>
-                Reload
-              </Button>
-            {/snippet}
+<div class="plugin-surface" data-testid={TESTID.pluginSurface} data-phase={status}>
+  {#if status !== 'ready'}
+    <div class="ps-overlay">
+      {#if status === 'stalled'}
+        <PaneState kind="error" title="Couldn't load {surface?.label}">
+          {#snippet icon()}<Icon name="alert" />{/snippet}
+          {#snippet hint()}<span class="mono">{surface?.entry}</span>{/snippet}
+          {#snippet actions()}
+            <Button size="sm" data-testid={TESTID.pluginSurfaceReload} onclick={reload}>
+              {#snippet icon()}<Icon name="retry" />{/snippet}
+              Reload
+            </Button>
+          {/snippet}
+        </PaneState>
+      {:else if status === 'missing'}
+        <div data-testid={TESTID.pluginSurfaceMissing}>
+          <PaneState kind="error" title="This tab's plugin isn't installed">
+            {#snippet icon()}<Icon name="alert" />{/snippet}
+            {#snippet hint()}<span class="mono">{kind}</span>{/snippet}
           </PaneState>
-        {:else}
-          <PaneState kind="loading" lines={3} />
-        {/if}
-      </div>
-    {/if}
+        </div>
+      {:else}
+        <PaneState kind="loading" lines={3} />
+      {/if}
+    </div>
+  {/if}
+  {#if surface}
     {#key attempt}
       <iframe
         bind:this={frame}
@@ -112,22 +118,10 @@
         onload={onLoad}
       ></iframe>
     {/key}
-  {:else if pluginsMeta.loaded}
-    <!-- The tab outlived its plugin. Keep its slot so the user can see what they
-         lost and close it deliberately, rather than the pane going blank. -->
-    <div class="ps-overlay" data-testid={TESTID.pluginSurfaceMissing}>
-      <PaneState kind="error" title="This tab's plugin isn't installed on this daemon.">
-        {#snippet hint()}<span class="mono">{kind}</span>{/snippet}
-      </PaneState>
-    </div>
-  {:else}
-    <div class="ps-overlay"><PaneState kind="loading" lines={3} /></div>
   {/if}
 </div>
 
 <style>
-  /* Fills the pane (unlike the MCP app view's capped card); the overlay covers
-     the frame until the handshake lands so a half-painted page never shows. */
   .plugin-surface {
     position: relative;
     display: grid;
@@ -142,6 +136,7 @@
     border: 0;
     display: block;
   }
+  /* Covers the frame until the handshake lands, so a half-painted page never shows. */
   .ps-overlay {
     position: absolute;
     inset: 0;

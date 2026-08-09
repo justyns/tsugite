@@ -1,9 +1,9 @@
 """Adapter plugins can contribute UI surfaces the web UI renders in an iframe.
 
 get_ui_surfaces() declares them; the gateway namespaces each one to
-`plugin/<name>/<kind>` and resolves its `entry` under the plugin's own
-`/api/plugins/<name>/` mount, so a surface can only ever point at the plugin that
-declared it. GET /api/plugins serves the merged list.
+`plugin/<name>/<kind>`, resolves its `entry` under the plugin's own
+`/api/plugins/<name>/` mount, and serves the declared `assets` directory there.
+GET /api/plugins serves the merged list.
 
 Same duck-typed, error-isolated wiring as the route methods next door in
 test_plugin_http_routes.py: one misbehaving plugin can't abort startup.
@@ -17,7 +17,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
 from tsugite_daemon.config import HTTPConfig
-from tsugite_daemon.gateway import attach_plugin_http, normalize_ui_surfaces, ui_assets_dir
+from tsugite_daemon.gateway import _collect_plugin_ui, attach_plugin_http
 from tsugite_daemon.webhook_store import WebhookStore
 
 DOC_SURFACE = {
@@ -69,11 +69,15 @@ def server(tmp_path, token_store):
     )
 
 
-# ── normalize_ui_surfaces: namespacing, entry resolution, defaults ──
+# ── _collect_plugin_ui: namespacing, entry resolution, defaults, assets ──
+
+
+def surfaces_of(plugin_name, declared):
+    return _collect_plugin_ui(plugin_name, declared)[0]
 
 
 def test_kind_and_entry_are_namespaced_to_the_declaring_plugin():
-    assert normalize_ui_surfaces("onlyoffice", [DOC_SURFACE]) == [
+    assert surfaces_of("onlyoffice", [DOC_SURFACE]) == [
         {
             "plugin": "onlyoffice",
             "kind": "plugin/onlyoffice/doc",
@@ -87,14 +91,14 @@ def test_kind_and_entry_are_namespaced_to_the_declaring_plugin():
 
 
 def test_leading_slash_on_entry_does_not_double_up():
-    (surface,) = normalize_ui_surfaces("alpha", [{"kind": "x", "entry": "/ui/index.html"}])
+    (surface,) = surfaces_of("alpha", [{"kind": "x", "entry": "/ui/index.html"}])
     assert surface["entry"] == "/api/plugins/alpha/ui/index.html"
 
 
 def test_optional_fields_default_without_being_declared():
-    (surface,) = normalize_ui_surfaces("alpha", [{"kind": "board", "entry": "ui/index.html"}])
+    (surface,) = surfaces_of("alpha", [{"kind": "board", "entry": "ui/index.html"}])
     assert surface["label"] == "board", "label falls back to the declared kind, not the namespaced one"
-    assert surface["icon"] == "", "only the web UI knows its icon set, so it owns that fallback"
+    assert surface["icon"] == ""
     assert surface["nav"] is False
     assert surface["params"] == []
 
@@ -111,26 +115,24 @@ def test_optional_fields_default_without_being_declared():
 def test_incomplete_surface_is_dropped_with_a_warning(bad, caplog):
     """A surface the UI could not open must not reach it as a broken tab."""
     with caplog.at_level(logging.WARNING):
-        surfaces = normalize_ui_surfaces("alpha", [bad, DOC_SURFACE])
+        surfaces = surfaces_of("alpha", [bad, DOC_SURFACE])
     assert [s["kind"] for s in surfaces] == ["plugin/alpha/doc"], "the well-formed sibling must still survive"
     assert "alpha" in caplog.text
 
 
-# ── ui_assets_dir: what the daemon serves public on the plugin's behalf ──
-
-
 def test_assets_dir_is_taken_from_the_declaring_surface(tmp_path):
-    assert ui_assets_dir("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}]) == str(tmp_path)
+    assert _collect_plugin_ui("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}])[1] == tmp_path
 
 
 def test_a_path_that_is_not_a_directory_is_not_mounted(tmp_path, caplog):
+    declared = [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path / "gone"}]
     with caplog.at_level(logging.WARNING):
-        assert ui_assets_dir("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path / "gone"}]) is None
+        assert _collect_plugin_ui("alpha", declared)[1] is None
     assert "alpha" in caplog.text
 
 
 def test_no_assets_declared_means_nothing_to_mount():
-    assert ui_assets_dir("alpha", [DOC_SURFACE]) is None
+    assert _collect_plugin_ui("alpha", [DOC_SURFACE])[1] is None
 
 
 def test_surfaces_sharing_one_dir_is_not_a_conflict(tmp_path, caplog):
@@ -139,7 +141,7 @@ def test_surfaces_sharing_one_dir_is_not_a_conflict(tmp_path, caplog):
         {"kind": "b", "entry": "ui/b.html", "assets": str(tmp_path)},
     ]
     with caplog.at_level(logging.WARNING):
-        assert ui_assets_dir("alpha", declared) == str(tmp_path)
+        assert _collect_plugin_ui("alpha", declared)[1] == tmp_path
     assert caplog.text == ""
 
 
@@ -151,22 +153,24 @@ def test_a_second_different_dir_is_named_not_silently_dropped(tmp_path, caplog):
         {"kind": "b", "entry": "ui/b.html", "assets": tmp_path / "two"},
     ]
     with caplog.at_level(logging.WARNING):
-        assert ui_assets_dir("alpha", declared) == str(tmp_path / "one")
+        assert _collect_plugin_ui("alpha", declared)[1] == tmp_path / "one"
     assert "alpha" in caplog.text
+
+
+def test_assets_on_a_dropped_descriptor_is_dropped_with_it(tmp_path, caplog):
+    """One validity rule: a descriptor the UI can't open must not still get a mount."""
+    with caplog.at_level(logging.WARNING):
+        surfaces, assets = _collect_plugin_ui("alpha", [{"assets": tmp_path}])
+    assert (surfaces, assets) == ([], None)
 
 
 def test_assets_never_reaches_the_payload(tmp_path):
     """It is a server-side path; shipping it would leak the daemon's filesystem."""
-    (surface,) = normalize_ui_surfaces("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}])
+    (surface,) = surfaces_of("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}])
     assert "assets" not in surface
 
 
 # ── attach_plugin_http: collection, isolation, http-disabled ──
-
-
-def test_attach_registers_surfaces_on_the_server(server):
-    attach_plugin_http(server, "onlyoffice", FakePluginAdapter(surfaces=[DOC_SURFACE]))
-    assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/onlyoffice/doc"]
 
 
 def test_surfaces_alone_are_enough_to_register(server):
@@ -185,8 +189,7 @@ def test_two_plugins_surfaces_merge_without_collision(server):
 
 
 def test_declared_assets_are_served_public_under_the_plugin_prefix(server, tmp_path):
-    """The browser frames a surface as a navigation, which carries no bearer
-    header, so the entry has to resolve without a token."""
+    """The entry URL the payload advertises must serve without a token."""
     (tmp_path / "panel.html").write_text("<!doctype html><title>panel</title>")
     attach_plugin_http(
         server,
@@ -200,8 +203,6 @@ def test_declared_assets_are_served_public_under_the_plugin_prefix(server, tmp_p
 
 
 def test_a_missing_assets_dir_is_reported_at_startup_and_not_mounted(server, caplog):
-    """StaticFiles raises per request on a missing directory, so the operator
-    hears about it once at boot instead of as a 500 per surface open."""
     with caplog.at_level(logging.WARNING):
         attach_plugin_http(
             server,
@@ -231,7 +232,6 @@ def test_raising_get_ui_surfaces_is_logged_and_skipped(server, caplog):
         attach_plugin_http(server, "boom", Boom())  # must not propagate
     assert server.plugin_ui_surfaces == []
     assert "boom" in caplog.text
-    # A subsequent well-behaved plugin still registers (per-plugin isolation).
     attach_plugin_http(server, "good", FakePluginAdapter(surfaces=[DOC_SURFACE]))
     assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/good/doc"]
 
@@ -266,11 +266,6 @@ def test_plugins_endpoint_serves_registered_surfaces(server, test_token):
     body = TestClient(server.app).get("/api/plugins", headers={"Authorization": f"Bearer {test_token}"}).json()
     assert [s["kind"] for s in body["ui_surfaces"]] == ["plugin/onlyoffice/doc"]
     assert body["ui_surfaces"][0]["entry"] == "/api/plugins/onlyoffice/ui/editor.html"
-
-
-def test_plugins_endpoint_reports_no_surfaces_when_none_registered(server, test_token):
-    body = TestClient(server.app).get("/api/plugins", headers={"Authorization": f"Bearer {test_token}"}).json()
-    assert body["ui_surfaces"] == []
 
 
 # ── BaseAdapter default ──

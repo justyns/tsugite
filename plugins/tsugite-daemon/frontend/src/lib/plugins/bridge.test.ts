@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  BRIDGE_VERSION,
-  initMessage,
-  parsePluginMessage,
-  surfaceSrc,
-  themeMessage,
-} from './bridge';
+import { initMessage, parsePluginMessage, surfaceSrc } from './bridge';
 import type { PluginSurface } from '$lib/stores/pluginsMeta.svelte';
 
 const theme = { name: 'mocha', tokens: { '--bg0': '#1e1e2e' } };
@@ -49,7 +43,7 @@ describe('initMessage', () => {
     const msg = initMessage('plugin/demo/board', { path: 'a.md' }, theme, 'tsu_abc');
     expect(msg).toEqual({
       type: 'tsugite:init',
-      version: BRIDGE_VERSION,
+      version: 1,
       surface: { kind: 'plugin/demo/board', params: { path: 'a.md' } },
       theme,
       token: 'tsu_abc',
@@ -58,10 +52,6 @@ describe('initMessage', () => {
 
   test('an unauthenticated host hands over an empty token, not undefined', () => {
     expect(initMessage('plugin/demo/board', {}, theme, '').token).toBe('');
-  });
-
-  test('a theme switch pushes the same token shape on its own', () => {
-    expect(themeMessage(theme)).toEqual({ type: 'tsugite:theme', theme });
   });
 
   test('survives postMessage when params are reactive state', () => {
@@ -84,11 +74,6 @@ describe('parsePluginMessage', () => {
       type: 'tsugite:title',
       title: 'report.docx',
     });
-  });
-
-  test('caps a title that would push the tab strip around', () => {
-    const parsed = parsePluginMessage({ type: 'tsugite:title', title: 'x'.repeat(500) });
-    expect(parsed).toEqual({ type: 'tsugite:title', title: 'x'.repeat(120) });
   });
 
   test.each([

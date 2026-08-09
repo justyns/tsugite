@@ -84,14 +84,6 @@ class HTTPServer(
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
-    def register_ui_surfaces(self, surfaces: list[dict]) -> None:
-        """Record a plugin's normalized UI surfaces for GET /api/plugins to serve.
-
-        Called after plugin load and before uvicorn starts, same as
-        mount_plugin_routes.
-        """
-        self.plugin_ui_surfaces.extend(surfaces)
-
     def mount_plugin_routes(self, plugin_name: str, authed_routes: list, public_routes: list) -> None:
         """Mount an adapter plugin's routes under `/api/plugins/<plugin_name>`.
 

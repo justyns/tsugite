@@ -20,9 +20,7 @@ export interface PluginInfo {
   error: string | null;
 }
 
-/** A plugin-contributed UI surface, as the daemon normalizes it: `kind` is the
- *  `plugin/<name>/<kind>` identifier used as the mux tab kind, the nav view id,
- *  and the hash route; `entry` is a path under the plugin's own mount. */
+/** A plugin-contributed UI surface, as the daemon normalizes it. */
 export interface PluginSurface {
   plugin: string;
   kind: string;
@@ -52,8 +50,8 @@ export class PluginsMetaStore {
   loading = $state(false);
   error = $state<string | null>(null);
   /** True once a load has settled. Until then an unrecognized surface kind is a
-   *  tab whose plugin may still arrive, so it renders nothing instead of
-   *  flashing the "plugin unavailable" placeholder. */
+   *  tab whose plugin may still arrive, so it shows a loading state instead of
+   *  flashing the "plugin isn't installed" placeholder. */
   loaded = $state(false);
 
   byKind(kind: string): PluginSurface | undefined {

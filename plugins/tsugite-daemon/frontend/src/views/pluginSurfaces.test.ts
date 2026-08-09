@@ -24,7 +24,6 @@ const board: PluginSurface = {
 
 beforeEach(() => {
   pluginsMeta.surfaces = [];
-  pluginsMeta.plugins = [];
   pluginsMeta.loaded = false;
   vi.mocked(api.get).mockReset();
 });
@@ -34,13 +33,8 @@ describe('surfaceComponent', () => {
     expect(surfaceComponent('chat')).toBe(ChatSurface);
   });
 
-  test('a registered plugin kind renders through the generic plugin surface', () => {
-    pluginsMeta.surfaces = [board];
+  test('any plugin kind routes there, installed or not, so a tab can explain itself', () => {
     expect(surfaceComponent('plugin/demo/board')).toBe(PluginSurface_);
-  });
-
-  test('an uninstalled plugin routes there too, so the tab can explain itself', () => {
-    pluginsMeta.loaded = true;
     expect(surfaceComponent('plugin/uninstalled/thing')).toBe(PluginSurface_);
   });
 

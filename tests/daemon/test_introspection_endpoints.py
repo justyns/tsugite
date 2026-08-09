@@ -76,7 +76,6 @@ class TestPluginsEndpoint:
                 {"name": "pty", "group": "tsugite.plugins", "enabled": True, "loaded": False, "error": None},
                 {"name": "broken", "group": "tsugite.tools", "enabled": False, "loaded": False, "error": "boom"},
             ],
-            # Adapter plugins register these at load; none are mounted on this server.
             "ui_surfaces": [],
         }
 

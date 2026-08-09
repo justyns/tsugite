@@ -1,8 +1,7 @@
 <script lang="ts">
-  // Full-view host for a plugin surface that asked for a nav-rail entry. The nav
-  // view id and the surface kind are the same `plugin/<name>/<kind>` string, so
-  // this reads both off the route and hands the hash query through as the
-  // surface's params - which makes #plugin/<name>/<kind>?path=a.md a deep link.
+  // Full-view host for a plugin surface with a nav-rail entry. The nav view id
+  // and the surface kind are one string, so #plugin/<name>/<kind>?path=a.md
+  // deep-links here.
   import { router } from '$lib/router.svelte';
   import PluginSurface from './PluginSurface.svelte';
 </script>

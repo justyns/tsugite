@@ -6,7 +6,8 @@ the tsugite.tools registry (the same surface `tsu plugins list` / `tsu tools
 list` render). Neither mutates state.
 """
 
-from starlette.concurrency import run_in_threadpool
+import asyncio
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -31,10 +32,9 @@ class IntrospectionMixin:
         gateway = self.gateway
         if gateway is not None:
             plugin_config = getattr(getattr(gateway, "config", None), "plugins", None)
-        # discover_plugins() walks every installed distribution's entry points -
-        # hundreds of milliseconds of blocking IO. The web UI reads this on every
-        # boot for its ui_surfaces, so it runs off the event loop.
-        discovered = await run_in_threadpool(discover_plugins, plugin_config)
+        # discover_plugins() walks every installed distribution's entry points,
+        # which is blocking IO the web UI now pays on every boot for its ui_surfaces.
+        discovered = await asyncio.to_thread(discover_plugins, plugin_config)
         return JSONResponse(
             {
                 "plugins": [

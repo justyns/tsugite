@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Example panel</title>
     <style>
-      /* Only host tokens - no hardcoded colors, so all five themes work. */
+      /* Host tokens, with plain fallbacks for the paint before `init` lands. */
       body {
         margin: 0;
         padding: var(--sp-4, 16px);
@@ -37,15 +37,15 @@
         <dt>Theme</dt>
         <dd id="theme">waiting for init…</dd>
         <dt>Params</dt>
-        <dd id="params">–</dd>
+        <dd id="params">none yet</dd>
         <dt>Ping (this plugin's own authenticated route)</dt>
-        <dd id="ping">–</dd>
+        <dd id="ping">not called yet</dd>
       </dl>
     </div>
 
     <script>
       // Copy the host's resolved design tokens onto :root so this page skins
-      // itself like the rest of the UI, in whichever of the five themes is on.
+      // itself like the rest of the UI, in whichever theme is on.
       function applyTheme(theme) {
         for (const [name, value] of Object.entries(theme.tokens)) {
           document.documentElement.style.setProperty(name, value);
@@ -54,10 +54,7 @@
       }
 
       // Daemon auth is a bearer header, not a cookie, so a same-origin fetch is
-      // anonymous until the page supplies the header. `init` hands the token over
-      // for exactly that: a plugin surface is trusted code the operator
-      // installed, and the sandbox is defence in depth rather than a boundary.
-      // Public routes need none of this.
+      // anonymous until the page supplies the header. `init` hands it over.
       function ping(token) {
         fetch('/api/plugins/example/ping', {
           headers: token ? { Authorization: 'Bearer ' + token } : {},
@@ -74,8 +71,6 @@
           applyTheme(msg.theme);
           document.getElementById('params').textContent = JSON.stringify(msg.surface.params);
           ping(msg.token);
-          // Completes the handshake - until this lands the host shows a loading
-          // state, then an error with a Reload button.
           parent.postMessage({ type: 'tsugite:ready' }, '*');
           parent.postMessage({ type: 'tsugite:title', title: 'Example panel' }, '*');
         } else if (msg.type === 'tsugite:theme') {
