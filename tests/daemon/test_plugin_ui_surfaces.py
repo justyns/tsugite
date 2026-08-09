@@ -17,7 +17,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
 from tsugite_daemon.config import HTTPConfig
-from tsugite_daemon.gateway import attach_plugin_http, normalize_ui_surfaces
+from tsugite_daemon.gateway import attach_plugin_http, normalize_ui_surfaces, ui_assets_dir
 from tsugite_daemon.webhook_store import WebhookStore
 
 DOC_SURFACE = {
@@ -116,6 +116,51 @@ def test_incomplete_surface_is_dropped_with_a_warning(bad, caplog):
     assert "alpha" in caplog.text
 
 
+# ── ui_assets_dir: what the daemon serves public on the plugin's behalf ──
+
+
+def test_assets_dir_is_taken_from_the_declaring_surface(tmp_path):
+    assert ui_assets_dir("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}]) == str(tmp_path)
+
+
+def test_a_path_that_is_not_a_directory_is_not_mounted(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        assert ui_assets_dir("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path / "gone"}]) is None
+    assert "alpha" in caplog.text
+
+
+def test_no_assets_declared_means_nothing_to_mount():
+    assert ui_assets_dir("alpha", [DOC_SURFACE]) is None
+
+
+def test_surfaces_sharing_one_dir_is_not_a_conflict(tmp_path, caplog):
+    declared = [
+        {"kind": "a", "entry": "ui/a.html", "assets": tmp_path},
+        {"kind": "b", "entry": "ui/b.html", "assets": str(tmp_path)},
+    ]
+    with caplog.at_level(logging.WARNING):
+        assert ui_assets_dir("alpha", declared) == str(tmp_path)
+    assert caplog.text == ""
+
+
+def test_a_second_different_dir_is_named_not_silently_dropped(tmp_path, caplog):
+    (tmp_path / "one").mkdir()
+    (tmp_path / "two").mkdir()
+    declared = [
+        {"kind": "a", "entry": "ui/a.html", "assets": tmp_path / "one"},
+        {"kind": "b", "entry": "ui/b.html", "assets": tmp_path / "two"},
+    ]
+    with caplog.at_level(logging.WARNING):
+        assert ui_assets_dir("alpha", declared) == str(tmp_path / "one")
+    assert "alpha" in caplog.text
+
+
+def test_assets_never_reaches_the_payload(tmp_path):
+    """It is a server-side path; shipping it would leak the daemon's filesystem."""
+    (surface,) = normalize_ui_surfaces("alpha", [{"kind": "x", "entry": "ui/a.html", "assets": tmp_path}])
+    assert "assets" not in surface
+
+
 # ── attach_plugin_http: collection, isolation, http-disabled ──
 
 
@@ -137,6 +182,34 @@ def test_two_plugins_surfaces_merge_without_collision(server):
     attach_plugin_http(server, "alpha", FakePluginAdapter(surfaces=[{"kind": "doc", "entry": "ui/a.html"}]))
     attach_plugin_http(server, "beta", FakePluginAdapter(surfaces=[{"kind": "doc", "entry": "ui/b.html"}]))
     assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/alpha/doc", "plugin/beta/doc"]
+
+
+def test_declared_assets_are_served_public_under_the_plugin_prefix(server, tmp_path):
+    """The browser frames a surface as a navigation, which carries no bearer
+    header, so the entry has to resolve without a token."""
+    (tmp_path / "panel.html").write_text("<!doctype html><title>panel</title>")
+    attach_plugin_http(
+        server,
+        "alpha",
+        FakePluginAdapter(surfaces=[{"kind": "panel", "entry": "ui/panel.html", "assets": tmp_path}]),
+    )
+    (surface,) = server.plugin_ui_surfaces
+    resp = TestClient(server.app).get(surface["entry"])
+    assert resp.status_code == 200, "the entry URL the payload advertises must actually serve"
+    assert "<title>panel</title>" in resp.text
+
+
+def test_a_missing_assets_dir_is_reported_at_startup_and_not_mounted(server, caplog):
+    """StaticFiles raises per request on a missing directory, so the operator
+    hears about it once at boot instead of as a 500 per surface open."""
+    with caplog.at_level(logging.WARNING):
+        attach_plugin_http(
+            server,
+            "alpha",
+            FakePluginAdapter(surfaces=[{"kind": "panel", "entry": "ui/panel.html", "assets": "/no/such/dir"}]),
+        )
+    assert "alpha" in caplog.text
+    assert TestClient(server.app).get("/api/plugins/alpha/ui/panel.html").status_code == 404
 
 
 def test_adapter_without_the_method_is_skipped(server):

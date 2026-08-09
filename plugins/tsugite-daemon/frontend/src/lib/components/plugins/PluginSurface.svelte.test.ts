@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import PluginSurface from './PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
 import { theme } from '$lib/stores/theme.svelte';
+import { auth } from '$lib/stores/auth.svelte';
 // The bridge ships resolved token values, so the test page needs the real sheet.
 import '../../../styles/tokens.css';
 
@@ -54,6 +55,7 @@ async function handshake(): Promise<void> {
 
 beforeEach(() => {
   theme.set('mocha');
+  auth.token = 'tsu_test-token';
 });
 
 afterEach(() => {
@@ -75,6 +77,8 @@ test('init carries the protocol version and the resolved theme tokens', async ()
     version: 1,
     surface: { kind: 'plugin/demo/board', params: { path: 'q4.docx' } },
     theme: { name: 'mocha' },
+    // Handed over so the page never digs the token out of host storage itself.
+    token: 'tsu_test-token',
   });
   // Resolved values, not names: a plugin styles itself from these alone.
   const tokens = (init as unknown as { theme: { tokens: Record<string, string> } }).theme.tokens;

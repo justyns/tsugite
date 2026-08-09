@@ -29,6 +29,11 @@ export interface InitMessage {
   version: number;
   surface: { kind: string; params: Record<string, string> };
   theme: ThemePayload;
+  /** The daemon bearer token, for calling the plugin's own authed routes. The
+   *  host hands it over rather than leaving the page to dig it out of storage,
+   *  so the plugin stays clear of host internals and a narrower token later is
+   *  a host-side change. */
+  token: string;
 }
 
 export interface ThemeMessage {
@@ -56,6 +61,7 @@ export function initMessage(
   kind: string,
   params: Record<string, string>,
   theme: ThemePayload,
+  token: string,
 ): InitMessage {
   // Copied, not passed through: params arrive as a tab's reactive state, and
   // postMessage's structured clone rejects a proxy outright.
@@ -64,6 +70,7 @@ export function initMessage(
     version: BRIDGE_VERSION,
     surface: { kind, params: { ...params } },
     theme,
+    token,
   };
 }
 

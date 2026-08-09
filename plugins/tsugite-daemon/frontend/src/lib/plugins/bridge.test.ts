@@ -45,14 +45,19 @@ describe('surfaceSrc', () => {
 });
 
 describe('initMessage', () => {
-  test('carries the protocol version, the surface, and the resolved theme', () => {
-    const msg = initMessage('plugin/demo/board', { path: 'a.md' }, theme);
+  test('carries the protocol version, the surface, the theme, and the token', () => {
+    const msg = initMessage('plugin/demo/board', { path: 'a.md' }, theme, 'tsu_abc');
     expect(msg).toEqual({
       type: 'tsugite:init',
       version: BRIDGE_VERSION,
       surface: { kind: 'plugin/demo/board', params: { path: 'a.md' } },
       theme,
+      token: 'tsu_abc',
     });
+  });
+
+  test('an unauthenticated host hands over an empty token, not undefined', () => {
+    expect(initMessage('plugin/demo/board', {}, theme, '').token).toBe('');
   });
 
   test('a theme switch pushes the same token shape on its own', () => {
@@ -63,7 +68,7 @@ describe('initMessage', () => {
     // A tab's params reach here as a Svelte $state proxy, and structured clone
     // rejects a proxy - passing one through makes postMessage throw outright.
     const reactive = new Proxy({ path: 'a.md' }, {});
-    const msg = initMessage('plugin/demo/board', reactive, theme);
+    const msg = initMessage('plugin/demo/board', reactive, theme, 'tsu_abc');
     expect(() => structuredClone(msg)).not.toThrow();
     expect(msg.surface.params).toEqual({ path: 'a.md' });
   });

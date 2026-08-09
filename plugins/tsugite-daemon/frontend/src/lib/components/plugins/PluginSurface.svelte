@@ -9,6 +9,7 @@
   // the operator installed; a hostile adapter already has Python-level access to
   // the daemon. The entry page loads as a browser navigation, which carries no
   // bearer header, so it has to come from the plugin's public routes.
+  import { auth } from '$lib/stores/auth.svelte';
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import {
@@ -44,7 +45,10 @@
 
   function onLoad(): void {
     sentTheme = theme.current;
-    frame?.contentWindow?.postMessage(initMessage(kind, params, payload()), location.origin);
+    frame?.contentWindow?.postMessage(
+      initMessage(kind, params, payload(), auth.token),
+      location.origin,
+    );
   }
 
   function reload(): void {

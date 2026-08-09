@@ -53,12 +53,27 @@
         document.getElementById('theme').textContent = theme.name;
       }
 
+      // Daemon auth is a bearer header, not a cookie, so a same-origin fetch is
+      // anonymous until the page supplies the header. `init` hands the token over
+      // for exactly that: a plugin surface is trusted code the operator
+      // installed, and the sandbox is defence in depth rather than a boundary.
+      // Public routes need none of this.
+      function ping(token) {
+        fetch('/api/plugins/example/ping', {
+          headers: token ? { Authorization: 'Bearer ' + token } : {},
+        })
+          .then((r) => r.json())
+          .then((r) => (document.getElementById('ping').textContent = JSON.stringify(r)))
+          .catch((e) => (document.getElementById('ping').textContent = String(e)));
+      }
+
       addEventListener('message', (event) => {
         const msg = event.data;
         if (!msg || typeof msg !== 'object') return;
         if (msg.type === 'tsugite:init') {
           applyTheme(msg.theme);
           document.getElementById('params').textContent = JSON.stringify(msg.surface.params);
+          ping(msg.token);
           // Completes the handshake - until this lands the host shows a loading
           // state, then an error with a Reload button.
           parent.postMessage({ type: 'tsugite:ready' }, '*');
@@ -67,19 +82,6 @@
           applyTheme(msg.theme);
         }
       });
-
-      // Daemon auth is a bearer header, not a cookie, so a same-origin fetch is
-      // anonymous until the page supplies the header itself. It can, because the
-      // frame shares the host's origin - which is also why a plugin surface is
-      // trusted code the operator installed, and the sandbox is defence in depth
-      // rather than a boundary. Public routes need none of this.
-      const token = localStorage.getItem('tsugite_token');
-      fetch('/api/plugins/example/ping', {
-        headers: token ? { Authorization: 'Bearer ' + token } : {},
-      })
-        .then((r) => r.json())
-        .then((r) => (document.getElementById('ping').textContent = JSON.stringify(r)))
-        .catch((e) => (document.getElementById('ping').textContent = String(e)));
     </script>
   </body>
 </html>

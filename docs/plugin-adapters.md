@@ -98,6 +98,7 @@ def get_ui_surfaces(self):
             "label": "Example panel", # tab + nav-rail label
             "icon": "plug",           # a host icon name; an unknown one falls back to plug
             "entry": "ui/panel.html", # resolved under /api/plugins/<plugin_name>/
+            "assets": Path(__file__).parent / "ui",  # served at /api/plugins/<plugin_name>/ui/
             "nav": True,              # add a nav-rail entry
             "params": ["path"],       # the only tab params forwarded into the iframe URL
         }
@@ -107,18 +108,12 @@ def get_ui_surfaces(self):
 `kind` and `entry` are required; a descriptor missing either is logged and skipped, as is a
 `get_ui_surfaces()` that raises. Surfaces are skipped entirely when HTTP is disabled.
 
-**Serve the entry page from `get_public_http_routes()`.** The browser loads it as a navigation,
-which carries no bearer header, so an auth-wrapped route would 401 before the page ran. A
-`Mount` with `StaticFiles` is the usual shape:
-
-```python
-from pathlib import Path
-from starlette.routing import Mount
-from starlette.staticfiles import StaticFiles
-
-def get_public_http_routes(self):
-    return [Mount("/ui", app=StaticFiles(directory=Path(__file__).parent / "ui"))]
-```
+`assets` is a directory the daemon mounts for you at `/api/plugins/<plugin_name>/ui/`, so
+`entry: "ui/panel.html"` resolves to `panel.html` inside it. One directory per plugin; a second,
+different one is logged and ignored, and a path that isn't a directory is reported at startup
+rather than 500ing per request. A surface whose entry page is generated rather than static can
+skip `assets` and serve `entry` from a route in `get_public_http_routes()` instead - public,
+because the browser loads a surface as a navigation and a navigation carries no bearer header.
 
 ### The bridge
 
@@ -129,7 +124,7 @@ page can skin itself across all five themes without importing anything from the 
 
 | Direction | Message | Payload |
 |---|---|---|
-| host → plugin | `tsugite:init` | `{version, surface: {kind, params}, theme: {name, tokens}}` |
+| host → plugin | `tsugite:init` | `{version, surface: {kind, params}, theme: {name, tokens}, token}` |
 | host → plugin | `tsugite:theme` | `{theme: {name, tokens}}` |
 | plugin → host | `tsugite:ready` | completes the handshake |
 | plugin → host | `tsugite:title` | `{title}` - renames the docked tab |
@@ -156,19 +151,32 @@ page can skin itself across all five themes without importing anything from the 
 </script>
 ```
 
+`init.token` is the daemon bearer token, for calling your own `get_http_routes()` endpoints:
+
+```js
+fetch('/api/plugins/my_plugin/status', { headers: { Authorization: 'Bearer ' + msg.token } });
+```
+
+Read it from `init` rather than from browser storage, so a narrower token later is a host-side
+change and your page keeps working.
+
 Style the page with those tokens (`--bg0..4`, `--tx0..3`, `--bd0..2`, `--acc`, `--st-*`, `--r-*`,
 `--sp-*`, `--fs-*`, `--font-ui`/`--font-mono`, `--t-1..3`, `--ease`) rather than hardcoded colors,
 which would not follow a theme switch.
 
 ### Threat model
 
+**A surface's assets are served without auth**, the same as the daemon's own web bundle (`/`,
+`/sw.js`, `/static/*`, none of which require a token either). Serve only the UI shell from
+`assets`, and read anything worth protecting from your authenticated routes.
+
 The frame is same-origin under `/api/plugins/<plugin_name>/`, sandboxed to
 `allow-scripts allow-forms allow-same-origin`. Sharing the origin is what lets a page reach its own
-authenticated routes - it reads the same bearer token the web UI uses - and it equally means the
-sandbox is defence in depth, not a boundary. **A plugin surface is trusted code the operator
-installed**, gated by the same `plugins.<name>.enabled` flag as the rest of the adapter; a hostile
-adapter already has Python-level access to the daemon. Anything a surface embeds from a third-party
-origin should be loaded from inside the plugin's own page, which keeps the trust boundary at one hop.
+authenticated routes with the token `init` hands it, and it equally means the sandbox is defence in
+depth, not a boundary. **A plugin surface is trusted code the operator installed**, gated by the
+same `plugins.<name>.enabled` flag as the rest of the adapter; a hostile adapter already has
+Python-level access to the daemon. Anything a surface embeds from a third-party origin should be
+loaded from inside the plugin's own page, which keeps the trust boundary at one hop.
 
 A tab whose plugin is later disabled or uninstalled survives a reload and renders a "plugin isn't
 installed" placeholder, so an arranged layout is never silently dropped.
