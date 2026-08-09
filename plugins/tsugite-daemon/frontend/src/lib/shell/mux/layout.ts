@@ -215,6 +215,21 @@ export function retargetOrOpen(layout: Layout, ref: SurfaceRef): Layout {
   return openInPane(layout, ref);
 }
 
+/** Rename a docked tab, wherever it lives. Keyed by tab id alone because the
+ *  caller is the surface mounted in it, which knows its own id but not its
+ *  pane's - and a tab can be dragged to another pane while it's open. */
+export function retitleTab(layout: Layout, tabId: string, title: string): Layout {
+  const next = clone(layout);
+  for (const leaf of collectLeaves(next.root)) {
+    const tab = leaf.tabs.find((t) => t.id === tabId);
+    if (tab) {
+      tab.title = title;
+      return next;
+    }
+  }
+  return next;
+}
+
 export function openInPane(layout: Layout, ref: SurfaceRef, targetPaneId?: string): Layout {
   const target =
     (targetPaneId && findLeaf(layout, targetPaneId)?.id) ||

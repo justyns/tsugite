@@ -79,9 +79,18 @@ class HTTPServer(
         self.pty_manager = None  # Set by Gateway alongside terminal_store
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
+        self.plugin_ui_surfaces: list[dict] = []  # Filled by Gateway from each plugin's get_ui_surfaces()
         self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
+
+    def register_ui_surfaces(self, surfaces: list[dict]) -> None:
+        """Record a plugin's normalized UI surfaces for GET /api/plugins to serve.
+
+        Called after plugin load and before uvicorn starts, same as
+        mount_plugin_routes.
+        """
+        self.plugin_ui_surfaces.extend(surfaces)
 
     def mount_plugin_routes(self, plugin_name: str, authed_routes: list, public_routes: list) -> None:
         """Mount an adapter plugin's routes under `/api/plugins/<plugin_name>`.

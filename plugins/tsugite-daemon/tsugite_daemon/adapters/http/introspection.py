@@ -6,6 +6,7 @@ the tsugite.tools registry (the same surface `tsu plugins list` / `tsu tools
 list` render). Neither mutates state.
 """
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -19,8 +20,9 @@ class IntrospectionMixin:
         ]
 
     async def _api_list_plugins(self, request: Request) -> JSONResponse:
-        """Discovered plugins across every entry-point group. Read-only wrapper
-        over discover_plugins(); no enable/disable mutation."""
+        """Discovered plugins across every entry-point group, plus the UI surfaces
+        the loaded adapter plugins declare. Read-only wrapper over
+        discover_plugins(); no enable/disable mutation."""
         if err := self._check_auth(request):
             return err
         from tsugite.plugins import discover_plugins
@@ -29,6 +31,10 @@ class IntrospectionMixin:
         gateway = self.gateway
         if gateway is not None:
             plugin_config = getattr(getattr(gateway, "config", None), "plugins", None)
+        # discover_plugins() walks every installed distribution's entry points -
+        # hundreds of milliseconds of blocking IO. The web UI reads this on every
+        # boot for its ui_surfaces, so it runs off the event loop.
+        discovered = await run_in_threadpool(discover_plugins, plugin_config)
         return JSONResponse(
             {
                 "plugins": [
@@ -39,8 +45,9 @@ class IntrospectionMixin:
                         "loaded": p.loaded,
                         "error": p.error,
                     }
-                    for p in discover_plugins(plugin_config)
-                ]
+                    for p in discovered
+                ],
+                "ui_surfaces": self.plugin_ui_surfaces,
             }
         )
 

@@ -16,6 +16,7 @@ import {
   openPreview,
   pinTab,
   retargetOrOpen,
+  retitleTab,
   resizeSplit,
   selectTab,
   serializeLayout,
@@ -713,5 +714,37 @@ describe('collectLeaves', () => {
     const rightId = collectLeaves(l.root)[1]!.id;
     l = splitPane(l, rightId, 'col', { kind: 'file' }); // row[chat, col[term, file]]
     expect(collectLeaves(l.root).map((x) => x.tabs[0]!.kind)).toEqual(['chat', 'terminal', 'file']);
+  });
+});
+
+describe('retitleTab', () => {
+  test('renames a tab found by id alone, in whichever pane holds it', () => {
+    const seed = seeded({ kind: 'chat' });
+    const l = splitPane(seed, seed.root.id, 'row', { kind: 'plugin/demo/board' });
+    const target = collectLeaves(l.root)[1]!.tabs[0]!;
+    const next = retitleTab(l, target.id, 'report.docx');
+    expect(collectLeaves(next.root)[1]!.tabs[0]!.title).toBe('report.docx');
+    expect(collectLeaves(next.root)[0]!.tabs[0]!.title).toBeUndefined();
+  });
+
+  test('a tab id nothing holds leaves the layout alone', () => {
+    const l = seeded({ kind: 'chat' });
+    expect(retitleTab(l, 'no-such-tab', 'x')).toEqual(l);
+  });
+});
+
+describe('plugin surfaces', () => {
+  test('a plugin tab round-trips through persistence like any other kind', () => {
+    const l = seeded({ kind: 'plugin/demo/board', params: { path: 'q4.docx' } });
+    const restored = deserializeLayout(serializeLayout(l));
+    expect(restored).toEqual(l);
+  });
+
+  test('a persisted tab whose plugin is gone survives the load', () => {
+    // The registry is a render-time lookup, so deserialize must not police kinds:
+    // dropping the tab would silently lose a pane the user arranged.
+    const l = seeded({ kind: 'plugin/uninstalled/thing' });
+    const restored = deserializeLayout(serializeLayout(l));
+    expect(collectLeaves(restored.root)[0]!.tabs[0]!.kind).toBe('plugin/uninstalled/thing');
   });
 });

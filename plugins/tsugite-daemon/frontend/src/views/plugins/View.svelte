@@ -14,6 +14,8 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import { groupLabel, pluginKey, sortPlugins } from './format';
 
+  // Refetches on open even though the shell loads this at boot: this view owns
+  // the loading / error / retry surface for the registry.
   $effect(() => {
     pluginsMeta.load();
   });

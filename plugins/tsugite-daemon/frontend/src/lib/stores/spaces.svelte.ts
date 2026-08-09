@@ -31,6 +31,7 @@ import {
   pinTab,
   resizeSplit,
   retargetOrOpen,
+  retitleTab,
   selectTab,
   splitPane,
 } from '$lib/shell/mux/layout';
@@ -219,6 +220,16 @@ export class SpacesStore {
    *  tab (the next preview replaces it) unless the surface is already pinned. */
   openPreview(ref: SurfaceRef, targetPaneId?: string): void {
     this.apply((l) => openPreview(l, ref, targetPaneId));
+  }
+  /** Rename a docked tab from the surface mounted in it (a plugin surface titling
+   *  itself over the bridge). A plugin may push a title per internal navigation,
+   *  so a no-op rename must not cost a layout clone and a persist. */
+  retitleTab(tabId: string, title: string): void {
+    const tab = collectLeaves(this.active.layout.root)
+      .flatMap((leaf) => leaf.tabs)
+      .find((t) => t.id === tabId);
+    if (!tab || tab.title === title) return;
+    this.apply((l) => retitleTab(l, tabId, title));
   }
   /** Pin a tab so the next preview opens fresh instead of replacing it. */
   pinTab(paneId: string, tabId: string): void {

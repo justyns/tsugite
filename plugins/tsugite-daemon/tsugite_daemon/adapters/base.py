@@ -323,6 +323,23 @@ class BaseAdapter(ABC):
         """
         return []
 
+    def get_ui_surfaces(self) -> list[dict]:
+        """UI surfaces this adapter contributes to the web UI, each a dict:
+
+            {"kind": "doc", "label": "Document", "icon": "files",
+             "entry": "ui/editor.html", "nav": False, "params": ["path"]}
+
+        `entry` names a page the plugin serves from its own
+        `/api/plugins/<plugin_name>/` mount, and the web UI renders it in an
+        iframe. It is loaded as a browser navigation, which cannot carry the
+        daemon bearer header, so it must come from `get_public_http_routes`.
+        `nav` adds a nav-rail entry; without it the surface opens from the
+        command palette.
+
+        Default: none.
+        """
+        return []
+
     def _get_all_attachments(self):
         """Build all attachments from the agent's front-matter config (for UI display)."""
         attachments = []

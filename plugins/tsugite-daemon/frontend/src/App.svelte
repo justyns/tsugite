@@ -21,6 +21,7 @@
   import { connectEvents, type SSEEvent } from '$lib/api/sse';
   import { routeShellEvent, type ShellEventSink } from '$lib/api/events';
   import { sessions } from '$lib/stores/sessions.svelte';
+  import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
   import { schedules } from '$lib/stores/schedules.svelte';
@@ -92,8 +93,6 @@
     }),
   );
 
-  const knownViewIds = new Set(allViews.map((v) => v.id));
-
   // The surface with focus in the mux, so the context rail can highlight the row
   // it belongs to and read its params.
   const focused = $derived(focusedSurface(spaces.active.layout));
@@ -161,13 +160,24 @@
   $effect(() => {
     const id = router.view;
     const params = router.params;
+    // Read outside untrack: plugin views join the registry after boot, so a deep
+    // link to one only resolves once this re-runs on that arrival.
+    const known = allViews().some((v) => v.id === id);
     untrack(() => {
-      if (!id || !knownViewIds.has(id)) return;
+      if (!id || !known) return;
       shellView.activate(id);
       if (id === 'chats' && params.sessionId) openChat(params.sessionId, params.agent);
       else if (id === 'terminals' && params.terminalId) openTerminal(params.terminalId);
       else if (id === 'files' && params.path) openFile(params.agent ?? '', params.path);
     });
+  });
+
+  // Plugin metadata at shell scope, because plugin-contributed UI surfaces seed
+  // both the surface registry (a persisted plugin tab needs its entry to render)
+  // and the nav rail, not just the plugins view.
+  $effect(() => {
+    if (auth.gated) return;
+    void pluginsMeta.load();
   });
 
   // --- command palette ---
@@ -185,7 +195,8 @@
   });
   const paletteItems = $derived(
     buildPaletteItems({
-      views: allViews.map((v) => ({ id: v.id, label: v.label, icon: v.icon })),
+      views: allViews().map((v) => ({ id: v.id, label: v.label, icon: v.icon })),
+      surfaces: pluginsMeta.surfaces,
       themes: theme.list,
       currentTheme: theme.current,
       spaces: spaces.spaces.map((s) => ({ id: s.id, name: s.name })),
@@ -252,6 +263,7 @@
 
   const paletteCtx: PaletteContext = {
     openView,
+    openSurface: (kind) => openSurface({ kind, title: pluginsMeta.byKind(kind)?.label }),
     setTheme: (t) => theme.set(t),
     setSpace: (id) => spaces.setActive(id),
     openSettings: () => (settingsOpen = true),
@@ -362,7 +374,7 @@
     />
     <div class="app-shell">
       <NavRail
-        views={allViews}
+        views={allViews()}
         activeId={shellView.activeViewId}
         collapsed={shellView.navCollapsed}
         onActivate={openView}
@@ -432,7 +444,13 @@
                   <!-- Key by the tab's identity so two same-kind surfaces (e.g. two
                        chats on different sessions) mount distinct instances. -->
                   {#key tab.id}
-                    {#if Surface}<Surface params={tab.params} />{/if}
+                    {#if Surface}
+                      <Surface
+                        params={tab.params}
+                        kind={tab.kind}
+                        setTitle={(title) => spaces.retitleTab(tab.id, title)}
+                      />
+                    {/if}
                   {/key}
                 {/snippet}
               </Mux>

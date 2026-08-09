@@ -11,10 +11,12 @@ daemon itself loads this module, via the tsugite.adapters entry point:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from tsugite_daemon.adapters.base import BaseAdapter
 
 logger = logging.getLogger(__name__)
@@ -69,7 +71,31 @@ class ExampleAdapter(BaseAdapter):
     def get_public_http_routes(self) -> list:
         # NO auth wrapper - do your own. Here a token-in-path guards it, like an
         # inbound webhook. POST /api/plugins/example/webhook/{token}
-        return [Route("/webhook/{token}", self._webhook, methods=["POST"])]
+        #
+        # The UI surface's assets ride here too: the web UI frames the entry page
+        # as a browser navigation, which carries no bearer header, so an
+        # auth-wrapped route would 401 before the page ever loaded.
+        return [
+            Route("/webhook/{token}", self._webhook, methods=["POST"]),
+            Mount("/ui", app=StaticFiles(directory=Path(__file__).parent / "ui")),
+        ]
+
+    # -- UI surfaces: a page the web UI frames as a tab (and a nav-rail entry) --
+
+    def get_ui_surfaces(self) -> list[dict]:
+        # `kind` is namespaced to plugin/example/panel by the daemon, and `entry`
+        # resolves under this plugin's own mount. `params` names the tab params
+        # forwarded into the iframe URL; nothing else is.
+        return [
+            {
+                "kind": "panel",
+                "label": "Example panel",
+                "icon": "plug",
+                "entry": "ui/panel.html",
+                "nav": True,
+                "params": ["path"],
+            }
+        ]
 
     async def _ping(self, request: Request) -> JSONResponse:
         return JSONResponse({"pong": True, "greeting": self.config.get("greeting", "hello")})

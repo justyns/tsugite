@@ -14,6 +14,7 @@ const data: PaletteData = {
     { id: 'chats', label: 'Chats', icon: 'chat' },
     { id: 'jobs', label: 'Jobs', icon: 'jobs' },
   ],
+  surfaces: [{ kind: 'plugin/demo/board', label: 'Board', icon: 'grid' }],
   themes: ['mocha', 'latte'],
   currentTheme: 'mocha',
   spaces: [
@@ -56,9 +57,9 @@ describe('buildPaletteItems', () => {
     expect(items.find((i) => i.href === 'view:jobs')?.icon).toBe('jobs');
   });
 
-  test('groups in scannable order: views, spaces, theme, actions, commands', () => {
+  test('groups in scannable order: views, plugins, spaces, theme, actions, commands', () => {
     const groups = [...new Set(buildPaletteItems(data).map((i) => i.group))];
-    expect(groups).toEqual(['views', 'spaces', 'theme', 'actions', 'commands']);
+    expect(groups).toEqual(['views', 'plugins', 'spaces', 'theme', 'actions', 'commands']);
   });
 
   test('leads the actions group with a searchable new-chat row', () => {
@@ -227,6 +228,7 @@ describe('runPaletteHref', () => {
     newChat: vi.fn(),
     showHelp: vi.fn(),
     runCommand: vi.fn(),
+    openSurface: vi.fn(),
   });
 
   test('dispatches a view jump', () => {
@@ -263,6 +265,12 @@ describe('runPaletteHref', () => {
     const ctx = makeCtx();
     expect(runPaletteHref('action:shortcuts', ctx)).toBe(true);
     expect(ctx.showHelp).toHaveBeenCalledOnce();
+  });
+
+  test('dispatches a plugin surface open', () => {
+    const ctx = makeCtx();
+    expect(runPaletteHref('surface:plugin/demo/board', ctx)).toBe(true);
+    expect(ctx.openSurface).toHaveBeenCalledWith('plugin/demo/board');
   });
 
   test('dispatches a session jump', () => {

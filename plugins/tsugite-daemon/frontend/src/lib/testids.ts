@@ -79,6 +79,9 @@ export const TESTID = {
   scheduleDrawerRun: 'schedule-drawer-run',
   scheduleDelete: 'schedule-delete',
   // Plugins registry
+  pluginSurface: 'plugin-surface',
+  pluginSurfaceReload: 'plugin-surface-reload',
+  pluginSurfaceMissing: 'plugin-surface-missing',
   pluginsTable: 'plugins-table',
   pluginRow: (key: string) => `plugin-row-${key}`,
   pluginError: (key: string) => `plugin-error-${key}`,

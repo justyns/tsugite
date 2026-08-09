@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Example panel</title>
+    <style>
+      /* Only host tokens - no hardcoded colors, so all five themes work. */
+      body {
+        margin: 0;
+        padding: var(--sp-4, 16px);
+        background: var(--bg1, #fff);
+        color: var(--tx0, #000);
+        font-family: var(--font-ui, system-ui, sans-serif);
+        font-size: var(--fs-md, 14px);
+      }
+      .card {
+        border: 1px solid var(--bd1, #ccc);
+        border-radius: var(--r-lg, 8px);
+        background: var(--bg2, #fafafa);
+        padding: var(--sp-4, 16px);
+      }
+      dt {
+        color: var(--tx2, #666);
+        font-size: var(--fs-sm, 13px);
+      }
+      dd {
+        margin: 0 0 var(--sp-3, 12px);
+        font-family: var(--font-mono, monospace);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Example plugin panel</h1>
+      <dl>
+        <dt>Theme</dt>
+        <dd id="theme">waiting for init…</dd>
+        <dt>Params</dt>
+        <dd id="params">–</dd>
+        <dt>Ping (this plugin's own authenticated route)</dt>
+        <dd id="ping">–</dd>
+      </dl>
+    </div>
+
+    <script>
+      // Copy the host's resolved design tokens onto :root so this page skins
+      // itself like the rest of the UI, in whichever of the five themes is on.
+      function applyTheme(theme) {
+        for (const [name, value] of Object.entries(theme.tokens)) {
+          document.documentElement.style.setProperty(name, value);
+        }
+        document.getElementById('theme').textContent = theme.name;
+      }
+
+      addEventListener('message', (event) => {
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'tsugite:init') {
+          applyTheme(msg.theme);
+          document.getElementById('params').textContent = JSON.stringify(msg.surface.params);
+          // Completes the handshake - until this lands the host shows a loading
+          // state, then an error with a Reload button.
+          parent.postMessage({ type: 'tsugite:ready' }, '*');
+          parent.postMessage({ type: 'tsugite:title', title: 'Example panel' }, '*');
+        } else if (msg.type === 'tsugite:theme') {
+          applyTheme(msg.theme);
+        }
+      });
+
+      // Daemon auth is a bearer header, not a cookie, so a same-origin fetch is
+      // anonymous until the page supplies the header itself. It can, because the
+      // frame shares the host's origin - which is also why a plugin surface is
+      // trusted code the operator installed, and the sandbox is defence in depth
+      // rather than a boundary. Public routes need none of this.
+      const token = localStorage.getItem('tsugite_token');
+      fetch('/api/plugins/example/ping', {
+        headers: token ? { Authorization: 'Bearer ' + token } : {},
+      })
+        .then((r) => r.json())
+        .then((r) => (document.getElementById('ping').textContent = JSON.stringify(r)))
+        .catch((e) => (document.getElementById('ping').textContent = String(e)));
+    </script>
+  </body>
+</html>

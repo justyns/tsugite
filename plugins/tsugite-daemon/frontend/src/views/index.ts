@@ -1,5 +1,6 @@
 import type { Component } from 'svelte';
 import type { IconName } from '$lib/components/icon/icons';
+import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
 
 /**
  * A workspace view (chats/terminals/files) drives the shared context rail + the
@@ -107,7 +108,27 @@ export const galleryView: ViewDef = {
   mode: 'full',
 };
 
-export const allViews: ViewDef[] = import.meta.env.DEV ? [...views, galleryView] : views;
+const builtinViews: ViewDef[] = import.meta.env.DEV ? [...views, galleryView] : views;
+
+/** Rail order: built-ins first, then whatever plugins contributed this session.
+ *  A function rather than a constant because the plugin entries arrive after
+ *  boot, and callers read it inside reactive scopes.
+ *
+ *  A plugin nav row is a full view - the plugin page replaces the workspace
+ *  region - and its id doubles as the surface kind, so #plugin/<name>/<kind>
+ *  deep-links to it and PluginView resolves which surface it is from the route. */
+export function allViews(): ViewDef[] {
+  const contributed = pluginsMeta.surfaces
+    .filter((surface) => surface.nav)
+    .map((surface) => ({
+      id: surface.kind,
+      label: surface.label,
+      icon: surface.icon,
+      mode: 'full' as const,
+      load: () => import('$lib/components/plugins/PluginView.svelte'),
+    }));
+  return [...builtinViews, ...contributed];
+}
 
 // The shell's default surface: the first rail entry. Single source of truth for
 // the fallback view - App's empty-pane rail highlight and viewById's unknown-id
@@ -117,5 +138,5 @@ export const DEFAULT_VIEW_ID = views[0]!.id;
 export function viewById(id: string): ViewDef {
   // An unknown id resolves to the default view. views is a non-empty literal and
   // DEFAULT_VIEW_ID is views[0].id, so this lookup is always defined.
-  return allViews.find((view) => view.id === id) ?? allViews.find((v) => v.id === DEFAULT_VIEW_ID)!;
+  return allViews().find((view) => view.id === id) ?? views[0]!;
 }

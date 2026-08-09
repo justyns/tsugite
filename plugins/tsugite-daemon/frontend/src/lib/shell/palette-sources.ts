@@ -32,6 +32,8 @@ export interface CommandLike {
 
 export interface PaletteData {
   views: { id: string; label: string; icon: IconName }[];
+  /** Plugin-contributed UI surfaces, openable as a mux tab. */
+  surfaces: { kind: string; label: string; icon: IconName }[];
   themes: readonly Theme[];
   currentTheme: Theme;
   spaces: { id: string; name: string }[];
@@ -41,6 +43,7 @@ export interface PaletteData {
 
 export interface PaletteContext {
   openView: (id: string) => void;
+  openSurface: (kind: string) => void;
   setTheme: (theme: Theme) => void;
   setSpace: (id: string) => void;
   openSettings: () => void;
@@ -116,6 +119,16 @@ export function buildPaletteItems(data: PaletteData): PaletteItem[] {
       label: view.label,
       meta: 'view',
       href: `view:${view.id}`,
+    });
+  }
+
+  for (const surface of data.surfaces) {
+    items.push({
+      group: 'plugins',
+      icon: surface.icon,
+      label: surface.label,
+      meta: 'open as tab',
+      href: `surface:${surface.kind}`,
     });
   }
 
@@ -219,6 +232,9 @@ export function runPaletteHref(href: string | undefined, ctx: PaletteContext): b
       return true;
     case 'space':
       ctx.setSpace(arg);
+      return true;
+    case 'surface':
+      ctx.openSurface(arg);
       return true;
     case 'session':
       ctx.openSession(arg);

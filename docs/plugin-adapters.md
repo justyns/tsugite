@@ -83,6 +83,96 @@ class MyAdapter(BaseAdapter):
 When HTTP is disabled but an adapter declares routes, the gateway logs a `WARNING` and skips
 them (not a crash). Route lists that raise while being collected are logged and skipped.
 
+## UI surfaces
+
+An adapter puts a page in the web UI by returning surface descriptors from `get_ui_surfaces()`
+(default `[]`). Each becomes a tab kind in the multiplexer, openable from the command palette;
+`nav: true` also adds a nav-rail entry that opens it as a full view. The plugin ships HTML, and
+the host frames it - a plugin never compiles a Svelte component into the daemon's bundle.
+
+```python
+def get_ui_surfaces(self):
+    return [
+        {
+            "kind": "panel",          # namespaced to plugin/<plugin_name>/panel
+            "label": "Example panel", # tab + nav-rail label
+            "icon": "plug",           # a host icon name; an unknown one falls back to plug
+            "entry": "ui/panel.html", # resolved under /api/plugins/<plugin_name>/
+            "nav": True,              # add a nav-rail entry
+            "params": ["path"],       # the only tab params forwarded into the iframe URL
+        }
+    ]
+```
+
+`kind` and `entry` are required; a descriptor missing either is logged and skipped, as is a
+`get_ui_surfaces()` that raises. Surfaces are skipped entirely when HTTP is disabled.
+
+**Serve the entry page from `get_public_http_routes()`.** The browser loads it as a navigation,
+which carries no bearer header, so an auth-wrapped route would 401 before the page ran. A
+`Mount` with `StaticFiles` is the usual shape:
+
+```python
+from pathlib import Path
+from starlette.routing import Mount
+from starlette.staticfiles import StaticFiles
+
+def get_public_http_routes(self):
+    return [Mount("/ui", app=StaticFiles(directory=Path(__file__).parent / "ui"))]
+```
+
+### The bridge
+
+The host posts `tsugite:init` once the frame loads and waits for `tsugite:ready`; a surface that
+never answers gets an error state with a Reload button after 10 seconds. Both `init` and
+`tsugite:theme` (fired on a theme switch) carry the resolved values of every design token, so a
+page can skin itself across all five themes without importing anything from the host.
+
+| Direction | Message | Payload |
+|---|---|---|
+| host → plugin | `tsugite:init` | `{version, surface: {kind, params}, theme: {name, tokens}}` |
+| host → plugin | `tsugite:theme` | `{theme: {name, tokens}}` |
+| plugin → host | `tsugite:ready` | completes the handshake |
+| plugin → host | `tsugite:title` | `{title}` - renames the docked tab |
+
+```html
+<script>
+  function applyTheme(theme) {
+    for (const [name, value] of Object.entries(theme.tokens)) {
+      document.documentElement.style.setProperty(name, value);
+    }
+  }
+
+  addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'tsugite:init') {
+      applyTheme(msg.theme);
+      parent.postMessage({ type: 'tsugite:ready' }, '*');
+      parent.postMessage({ type: 'tsugite:title', title: 'My panel' }, '*');
+    } else if (msg.type === 'tsugite:theme') {
+      applyTheme(msg.theme);
+    }
+  });
+</script>
+```
+
+Style the page with those tokens (`--bg0..4`, `--tx0..3`, `--bd0..2`, `--acc`, `--st-*`, `--r-*`,
+`--sp-*`, `--fs-*`, `--font-ui`/`--font-mono`, `--t-1..3`, `--ease`) rather than hardcoded colors,
+which would not follow a theme switch.
+
+### Threat model
+
+The frame is same-origin under `/api/plugins/<plugin_name>/`, sandboxed to
+`allow-scripts allow-forms allow-same-origin`. Sharing the origin is what lets a page reach its own
+authenticated routes - it reads the same bearer token the web UI uses - and it equally means the
+sandbox is defence in depth, not a boundary. **A plugin surface is trusted code the operator
+installed**, gated by the same `plugins.<name>.enabled` flag as the rest of the adapter; a hostile
+adapter already has Python-level access to the daemon. Anything a surface embeds from a third-party
+origin should be loaded from inside the plugin's own page, which keeps the trust boundary at one hop.
+
+A tab whose plugin is later disabled or uninstalled survives a reload and renders a "plugin isn't
+installed" placeholder, so an arranged layout is never silently dropped.
+
 ## Job executors
 
 An adapter supplies non-agent job executors by returning `{name: executor}` from

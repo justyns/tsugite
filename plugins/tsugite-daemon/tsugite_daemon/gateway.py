@@ -98,13 +98,44 @@ def _render_webhook_body(body_template: str, message: str) -> str:
         return body_template.replace("{message}", message)
 
 
+def normalize_ui_surfaces(plugin_name: str, declared: list) -> list[dict]:
+    """Namespace a plugin's declared UI surfaces and resolve their entry URLs.
+
+    `kind` becomes `plugin/<plugin_name>/<kind>`, the one identifier the web UI
+    uses as the mux tab kind, the nav view id, and the hash route. `entry` is
+    resolved under the plugin's own `/api/plugins/<plugin_name>/` mount. Entries missing
+    `kind` or `entry` are dropped with a warning rather than reaching the UI as
+    an unopenable tab.
+    """
+    surfaces = []
+    for item in declared:
+        if not isinstance(item, dict) or not item.get("kind") or not item.get("entry"):
+            logger.warning("Plugin '%s': UI surface %r needs both 'kind' and 'entry'; skipping it", plugin_name, item)
+            continue
+        kind = item["kind"]
+        surfaces.append(
+            {
+                "plugin": plugin_name,
+                "kind": f"plugin/{plugin_name}/{kind}",
+                "label": item.get("label") or kind,
+                # Only the web UI knows which icon names it ships, so it owns the fallback.
+                "icon": item.get("icon", ""),
+                "entry": f"/api/plugins/{plugin_name}/{item['entry'].lstrip('/')}",
+                "nav": bool(item.get("nav")),
+                "params": list(item.get("params") or []),
+            }
+        )
+    return surfaces
+
+
 def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
     """Wire a loaded adapter plugin's HTTP surface into the daemon's Starlette app.
 
     Sets the shared SSE bus on the adapter (so it can broadcast events), then
     mounts its `get_http_routes()` (auth-wrapped) and `get_public_http_routes()`
-    (no auth) under `/api/plugins/<plugin_name>`. A plugin that lacks the methods
-    is skipped, and one that raises while producing its routes is logged and skipped.
+    (no auth) under `/api/plugins/<plugin_name>`, and registers its
+    `get_ui_surfaces()` for the web UI. A plugin that lacks the methods is
+    skipped, and one that raises while producing them is logged and skipped.
     """
     if http_server is not None:
         try:
@@ -119,17 +150,19 @@ def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
         try:
             return list(method() or [])
         except Exception:
-            logger.warning("Plugin '%s' %s() raised; skipping those routes", plugin_name, method_name, exc_info=True)
+            logger.warning("Plugin '%s' %s() raised; skipping those entries", plugin_name, method_name, exc_info=True)
             return []
 
     authed = _collect("get_http_routes")
     public = _collect("get_public_http_routes")
-    if not authed and not public:
+    surfaces = normalize_ui_surfaces(plugin_name, _collect("get_ui_surfaces"))
+    if not authed and not public and not surfaces:
         return
     if http_server is None:
-        logger.warning("Plugin '%s' registers HTTP routes but HTTP is disabled; skipping", plugin_name)
+        logger.warning("Plugin '%s' registers HTTP routes or UI surfaces but HTTP is disabled; skipping", plugin_name)
         return
     http_server.mount_plugin_routes(plugin_name, authed, public)
+    http_server.register_ui_surfaces(surfaces)
 
 
 def attach_plugin_executors(jobs_orchestrator, plugin_name: str, adapter) -> None:
