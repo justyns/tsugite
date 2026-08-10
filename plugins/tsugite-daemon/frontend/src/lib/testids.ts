@@ -115,6 +115,8 @@ export const TESTID = {
   chatReadonly: 'chat-readonly',
   chatSessionMenuTrigger: 'chat-session-menu-trigger',
   chatSessionMenu: 'chat-session-menu',
+  chatMetaLink: 'chat-meta-link',
+  chatRawMetadata: 'chat-raw-metadata',
   chatCompactionBanner: 'chat-compaction-banner',
   chatLoadEarlier: 'chat-load-earlier',
   chatEmpty: 'chat-empty',

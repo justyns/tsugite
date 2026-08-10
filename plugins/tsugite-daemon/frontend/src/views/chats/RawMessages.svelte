@@ -1,14 +1,10 @@
 <script lang="ts">
   // Debug overlay: the raw request messages the model saw and its raw response,
-  // per turn, reconstructed on demand from the persisted event log. Rides the
-  // shared Scrim (backdrop + click-away); Esc + focus trap live here. Wide, since
-  // raw messages dwarf the context-meter popover this is reached from. Each block
+  // per turn, reconstructed on demand from the persisted event log. Wide, since raw
+  // messages dwarf the context-meter popover this is reached from. Each block
   // scrolls inside its own frame and long tokens wrap, so nothing widens the page.
   import { onMount } from 'svelte';
-  import Scrim from '$lib/components/overlays/Scrim.svelte';
-  import Icon from '$lib/components/icon/Icon.svelte';
-  import Button from '$lib/components/buttons/Button.svelte';
-  import { trapFocus } from '$lib/actions/trapFocus';
+  import RawOverlay from './RawOverlay.svelte';
   import { auth } from '$lib/stores/auth.svelte';
   import { fetchRawMessages, type RawMessage, type RawMessages, type RawTurn } from './rawMessages';
 
@@ -28,14 +24,8 @@
     openTurns = openTurns.map(() => next);
   }
 
-  let dialogEl = $state<HTMLElement | null>(null);
-  let restoreTo: HTMLElement | null = null;
-
   onMount(() => {
-    restoreTo = document.activeElement as HTMLElement | null;
-    dialogEl?.focus();
     void load();
-    return () => restoreTo?.focus();
   });
 
   async function load(): Promise<void> {
@@ -79,13 +69,6 @@
       // Clipboard unavailable (insecure context / denied): the view still reads.
     }
   }
-
-  function onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      onClose();
-    }
-  }
 </script>
 
 {#snippet copyBtn(text: string, key: string)}
@@ -94,154 +77,97 @@
   </button>
 {/snippet}
 
-<Scrim open onclose={onClose}>
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div
-    class="raw"
-    role="dialog"
-    aria-modal="true"
-    aria-label="raw messages"
-    tabindex="-1"
-    bind:this={dialogEl}
-    onkeydown={onKeydown}
-    use:trapFocus
-  >
-    <div class="raw-hd">
-      <h3>raw messages</h3>
-      <div class="raw-hd-r">
-        {#if data && data.turns.length > 0}
-          <button type="button" class="raw-copy" onclick={toggleAll}>
-            {anyOpen ? 'collapse all' : 'expand all'}
-          </button>
-        {/if}
-        <Button variant="ghost" size="sm" iconOnly aria-label="Close" onclick={onClose}>
-          {#snippet icon()}<Icon name="x" />{/snippet}
-        </Button>
+<RawOverlay title="raw messages" {onClose}>
+  {#snippet actions()}
+    {#if data && data.turns.length > 0}
+      <button type="button" class="raw-copy" onclick={toggleAll}>
+        {anyOpen ? 'collapse all' : 'expand all'}
+      </button>
+    {/if}
+  {/snippet}
+
+  {#if loading}
+    <p class="raw-note">loading…</p>
+  {:else if error}
+    <p class="raw-note">couldn't load raw messages: {error}</p>
+  {:else if data}
+    <section class="raw-sec">
+      <div class="raw-sec-hd">
+        <span>system prompt</span>
+        {#if data.system_prompt}{@render copyBtn(data.system_prompt, 'sys')}{/if}
       </div>
-    </div>
+      {#if data.system_prompt}
+        <div class="raw-block"><pre>{data.system_prompt}</pre></div>
+      {:else}
+        <p class="raw-note">system prompt not shown</p>
+      {/if}
+    </section>
 
-    <div class="raw-bd">
-      {#if loading}
-        <p class="raw-note">loading…</p>
-      {:else if error}
-        <p class="raw-note">couldn't load raw messages: {error}</p>
-      {:else if data}
-        <section class="raw-sec">
+    {#if data.turns.length === 0}
+      <p class="raw-note">no model turns recorded yet</p>
+    {:else}
+      <p class="raw-note raw-intro">
+        Each entry is one model call, newest last. Its request is the whole conversation the model
+        saw at that point; by default only what the call added is shown, with the full prompt one
+        click away.
+      </p>
+    {/if}
+
+    {#each data.turns as t, i (i)}
+      <details class="raw-turn" bind:open={openTurns[i]}>
+        <summary
+          >call {t.index}{t.provider ? ` · ${t.provider}` : ''}{t.model
+            ? ` · ${t.model}`
+            : ''}</summary
+        >
+        <div class="raw-sub">
           <div class="raw-sec-hd">
-            <span>system prompt</span>
-            {#if data.system_prompt}{@render copyBtn(data.system_prompt, 'sys')}{/if}
+            <span>{reqLabel(t)}</span>
+            {@render copyBtn(requestText(t.request), `req-${i}`)}
           </div>
-          {#if data.system_prompt}
-            <div class="raw-block"><pre>{data.system_prompt}</pre></div>
-          {:else}
-            <p class="raw-note">system prompt not shown</p>
+          {#if t.reset_before}
+            <p class="raw-note">
+              context was compacted just before this call; the prompt reset to the summary below.
+            </p>
           {/if}
-        </section>
-
-        {#if data.turns.length === 0}
-          <p class="raw-note">no model turns recorded yet</p>
-        {:else}
-          <p class="raw-note raw-intro">
-            Each entry is one model call, newest last. Its request is the whole conversation the
-            model saw at that point; by default only what the call added is shown, with the full
-            prompt one click away.
-          </p>
-        {/if}
-
-        {#each data.turns as t, i (i)}
-          <details class="raw-turn" bind:open={openTurns[i]}>
-            <summary
-              >call {t.index}{t.provider ? ` · ${t.provider}` : ''}{t.model
-                ? ` · ${t.model}`
-                : ''}</summary
-            >
-            <div class="raw-sub">
-              <div class="raw-sec-hd">
-                <span>{reqLabel(t)}</span>
-                {@render copyBtn(requestText(t.request), `req-${i}`)}
-              </div>
-              {#if t.reset_before}
-                <p class="raw-note">
-                  context was compacted just before this call; the prompt reset to the summary
-                  below.
-                </p>
-              {/if}
-              {#if shownMessages(t).length === 0}
-                <p class="raw-note">no new messages (identical prompt to the previous call)</p>
-              {/if}
-              {#each shownMessages(t) as m, j (j)}
+          {#if shownMessages(t).length === 0}
+            <p class="raw-note">no new messages (identical prompt to the previous call)</p>
+          {/if}
+          {#each shownMessages(t) as m, j (j)}
+            <div class="raw-msg">
+              <span class="raw-role">{m.role}</span>
+              <div class="raw-block"><pre>{contentText(m.content)}</pre></div>
+            </div>
+          {/each}
+          {#if hasHiddenPrefix(t)}
+            <details class="raw-full">
+              <summary>full prompt · {t.request.length} messages</summary>
+              {#each t.request as m, j (j)}
                 <div class="raw-msg">
                   <span class="raw-role">{m.role}</span>
                   <div class="raw-block"><pre>{contentText(m.content)}</pre></div>
                 </div>
               {/each}
-              {#if hasHiddenPrefix(t)}
-                <details class="raw-full">
-                  <summary>full prompt · {t.request.length} messages</summary>
-                  {#each t.request as m, j (j)}
-                    <div class="raw-msg">
-                      <span class="raw-role">{m.role}</span>
-                      <div class="raw-block"><pre>{contentText(m.content)}</pre></div>
-                    </div>
-                  {/each}
-                </details>
-              {/if}
-            </div>
-            <div class="raw-sub">
-              <div class="raw-sec-hd">
-                <span>response</span>
-                {#if t.response}{@render copyBtn(t.response.raw_content, `res-${i}`)}{/if}
-              </div>
-              {#if t.response}
-                <div class="raw-block"><pre>{t.response.raw_content}</pre></div>
-              {:else}
-                <p class="raw-note">no response recorded</p>
-              {/if}
-            </div>
-          </details>
-        {/each}
-      {/if}
-    </div>
-  </div>
-</Scrim>
+            </details>
+          {/if}
+        </div>
+        <div class="raw-sub">
+          <div class="raw-sec-hd">
+            <span>response</span>
+            {#if t.response}{@render copyBtn(t.response.raw_content, `res-${i}`)}{/if}
+          </div>
+          {#if t.response}
+            <div class="raw-block"><pre>{t.response.raw_content}</pre></div>
+          {:else}
+            <p class="raw-note">no response recorded</p>
+          {/if}
+        </div>
+      </details>
+    {/each}
+  {/if}
+</RawOverlay>
 
 <style>
-  .raw {
-    width: min(920px, 100%);
-    max-height: min(86vh, 900px);
-    display: flex;
-    flex-direction: column;
-    background: var(--bg2);
-    border: 1px solid var(--bd1);
-    border-radius: var(--r-lg);
-    box-shadow: var(--sh-3);
-    overflow: hidden;
-  }
-  .raw-hd {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 9px;
-    padding: 11px 14px;
-    border-bottom: 1px solid var(--bd0);
-    flex: none;
-  }
-  .raw-hd h3 {
-    margin: 0;
-    font: 600 var(--fs-lg) / 1.3 var(--font-ui);
-  }
-  .raw-hd-r {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .raw-bd {
-    overflow-y: auto;
-    padding: 13px 14px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
   .raw-note {
     margin: 0;
     color: var(--tx3);
@@ -323,24 +249,5 @@
     color: var(--tx1);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-  }
-  .raw-copy {
-    flex: none;
-    background: none;
-    border: 1px solid var(--bd1);
-    border-radius: var(--r-sm);
-    color: var(--tx2);
-    font: 500 var(--fs-2xs) var(--font-mono);
-    padding: 2px 7px;
-    cursor: pointer;
-  }
-  .raw-copy:hover {
-    background: var(--bg3);
-    color: var(--tx0);
-  }
-  @media (max-width: 640px) {
-    .raw {
-      max-height: 92vh;
-    }
   }
 </style>

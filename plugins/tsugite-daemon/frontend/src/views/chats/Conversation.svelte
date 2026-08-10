@@ -34,6 +34,8 @@
   import Attachments from './Attachments.svelte';
   import PromptInspector, { type TokenBreakdown } from './PromptInspector.svelte';
   import RawMessages from './RawMessages.svelte';
+  import RawSessionMetadata from './RawSessionMetadata.svelte';
+  import { metaLinks } from './metaLinks';
   import PhoneBack from '$lib/shell/PhoneBack.svelte';
 
   let {
@@ -85,6 +87,7 @@
   let editing = $state<'title' | 'topic' | null>(null);
   let editDraft = $state('');
   let rawOpen = $state(false);
+  let rawMetadataOpen = $state(false);
 
   const timeline = $derived(ctrl.timeline);
   const title = $derived(row?.title ?? 'New chat');
@@ -101,6 +104,8 @@
   const jobsHref = $derived(
     ctrl.sessionId ? buildHash('jobs', { q: `session:${ctrl.sessionId}` }) : '#jobs',
   );
+
+  const links = $derived(metaLinks(row?.metadata));
 
   // The most recent user prompt, re-sent by the retry affordance on the last turn.
   const lastUserText = $derived.by(() => {
@@ -379,6 +384,18 @@
 
     <div class="grow"></div>
 
+    {#each links as link (link.key)}
+      <a
+        class="hd-chip"
+        href={link.href}
+        target="_blank"
+        rel="noreferrer"
+        title="{link.key}: {link.href}"
+        data-testid={TESTID.chatMetaLink}
+      >
+        <Icon name="link" size={11} />{link.label}<Icon name="out" size={9} />
+      </a>
+    {/each}
     {#if jobCount > 0}
       <a class="hd-chip" href={jobsHref} title="{jobCount} job(s) spawned from this session">
         <Icon name="jobs" size={11} />{jobCount} job{jobCount === 1 ? '' : 's'}
@@ -410,6 +427,7 @@
         {onUnpin}
         {onSetPrimary}
         {onCopyId}
+        onViewMetadata={() => (rawMetadataOpen = true)}
         {onComplete}
         {onCancel}
         {onRestart}
@@ -698,6 +716,9 @@
 
   {#if rawOpen && ctrl.sessionId}
     <RawMessages agent={ctrl.agent} sessionId={ctrl.sessionId} onClose={() => (rawOpen = false)} />
+  {/if}
+  {#if rawMetadataOpen && row}
+    <RawSessionMetadata metadata={row.metadata} {links} onClose={() => (rawMetadataOpen = false)} />
   {/if}
 </section>
 

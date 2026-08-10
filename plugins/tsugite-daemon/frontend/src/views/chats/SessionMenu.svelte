@@ -31,6 +31,7 @@
     onUnpin,
     onSetPrimary,
     onCopyId,
+    onViewMetadata,
     onComplete,
     onCancel,
     onRestart,
@@ -49,6 +50,8 @@
     onSetPrimary: () => void;
     /** Copy the session id to the clipboard. */
     onCopyId: () => void;
+    /** Open a read-only raw JSON view of session.metadata. */
+    onViewMetadata: () => void;
     onComplete: () => void;
     onCancel: () => void;
     onRestart: () => void;
@@ -62,6 +65,7 @@
     { id: 'rename', label: 'Rename', icon: 'edit', run: onRename },
     { id: 'topic', label: 'Edit topic', icon: 'link', run: onEditTopic },
     { id: 'copyid', label: 'Copy session id', icon: 'copy', run: onCopyId },
+    { id: 'metadata', label: 'View metadata', icon: 'file', run: onViewMetadata },
     pinned
       ? { id: 'unpin', label: 'Unpin', icon: 'pin', run: onUnpin }
       : { id: 'pin', label: 'Pin', icon: 'pin', run: onPin },

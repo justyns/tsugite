@@ -795,6 +795,71 @@ test('a hook message mentioning compaction does not by itself light the pill', a
   await expect.poll(pillState).toBe('busy');
 });
 
+function metadataRow(metadata: Record<string, unknown>): SessionRow {
+  return { ...pillRow(false, ''), metadata } as unknown as SessionRow;
+}
+
+test('url-valued session metadata renders as header chips, labelled by key or label', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'review', timestamp: '2026-08-09T10:00:00Z' },
+  ]);
+  const row = metadataRow({
+    pr: { url: 'https://forge.example/justyns/tsugite/pulls/608', label: 'PR #608' },
+    task: 'https://vikunja.example/tasks/42',
+  });
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+  const pr = page.getByRole('link', { name: 'PR #608' });
+  await expect
+    .element(pr)
+    .toHaveAttribute('href', 'https://forge.example/justyns/tsugite/pulls/608');
+
+  // No `label`, so the key names the chip.
+  const task = page.getByRole('link', { name: 'task' });
+  await expect.element(task).toHaveAttribute('href', 'https://vikunja.example/tasks/42');
+});
+
+test('metadata that is not an http(s) url gets no chip', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'review', timestamp: '2026-08-09T10:00:00Z' },
+  ]);
+  const row = metadataRow({
+    pr: '608',
+    notes: 'ready for review',
+    evil: 'javascript:alert(1)',
+    sneaky: '  javascript:alert(1)',
+    type: { url: 42 },
+  });
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+  expect(document.querySelectorAll(`[data-testid="${TESTID.chatMetaLink}"]`)).toHaveLength(0);
+});
+
+test('session menu shows raw session metadata, with the links reachable from it', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'review', timestamp: '2026-08-09T10:00:00Z' },
+  ]);
+  const row = metadataRow({
+    pr: 'https://forge.example/justyns/tsugite/pulls/608',
+    status_text: 'review posted',
+  });
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await page.getByRole('menuitem', { name: /view metadata/i }).click();
+
+  const dialog = page.getByTestId(TESTID.chatRawMetadata);
+  await expect.element(dialog).toBeInTheDocument();
+  await expect.element(dialog).toHaveTextContent('"status_text"');
+  await expect.element(dialog).toHaveTextContent('https://forge.example/justyns/tsugite/pulls/608');
+
+  // Narrow screens hide the header chips, so the dialog carries the only link a
+  // phone can reach.
+  await expect
+    .element(dialog.getByRole('link', { name: 'pr' }))
+    .toHaveAttribute('href', 'https://forge.example/justyns/tsugite/pulls/608');
+});
+
 test('the jobs chip links to the jobs board filtered to this session', async () => {
   // The chip is a shortcut to "the jobs this chat spawned" - landing on the
   // unfiltered board makes the user re-find them by hand.
