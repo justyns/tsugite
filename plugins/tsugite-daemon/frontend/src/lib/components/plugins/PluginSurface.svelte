@@ -7,6 +7,7 @@
   import { theme } from '$lib/stores/theme.svelte';
   import {
     READY_TIMEOUT_MS,
+    eventMessage,
     initMessage,
     parsePluginMessage,
     readThemeTokens,
@@ -20,7 +21,7 @@
   import { TESTID } from '$lib/testids';
   import type { SurfaceProps } from '../../../views/surfaces';
 
-  let { params = {}, kind = '', setTitle }: SurfaceProps = $props();
+  let { params = {}, kind = '', setTitle, focusPane }: SurfaceProps = $props();
 
   const surface = $derived(pluginsMeta.byKind(kind));
   const src = $derived(surface ? surfaceSrc(surface, params) : '');
@@ -43,7 +44,7 @@
   function onLoad(): void {
     sentTheme = theme.current;
     frame?.contentWindow?.postMessage(
-      initMessage(kind, params, payload(), auth.token),
+      initMessage(kind, params, payload(), auth.token, auth.userId),
       location.origin,
     );
   }
@@ -60,9 +61,22 @@
       if (!message) return;
       if (message.type === 'tsugite:ready') phase = 'ready';
       else if (message.type === 'tsugite:title') setTitle?.(message.title);
+      else if (message.type === 'tsugite:focus') focusPane?.();
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
+  });
+
+  // The other half of the claim, for a surface whose own content is a further
+  // frame it does not own (a document editor): the click reaches neither the
+  // pane wrapper nor the plugin page, and the only thing anyone sees is this
+  // window losing focus to the frame element.
+  $effect(() => {
+    function onBlur(): void {
+      if (frame && document.activeElement === frame) focusPane?.();
+    }
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
   });
 
   // Armed only once the frame exists, so a slow registry load doesn't spend the
@@ -72,6 +86,14 @@
     const timer = setTimeout(() => (phase = 'stalled'), READY_TIMEOUT_MS);
     return () => clearTimeout(timer);
   });
+
+  // Daemon events the surface asked for. The store forwards only the declared
+  // types, so a surface is never a window onto the daemon feed.
+  $effect(() =>
+    pluginsMeta.bindEvents(surface?.events ?? [], (event) => {
+      frame?.contentWindow?.postMessage(eventMessage(event), location.origin);
+    }),
+  );
 
   // Before the handshake the init message carries the current tokens anyway.
   $effect(() => {

@@ -39,6 +39,8 @@ function seed(entry: string, over: Partial<SurfaceDef> = {}): SurfaceDef {
     entry,
     nav: false,
     params: [],
+    events: [],
+    mode: 'full',
     ...over,
   };
   pluginsMeta.surfaces = [surface];
@@ -56,12 +58,23 @@ async function handshake(): Promise<void> {
 beforeEach(() => {
   theme.set('mocha');
   auth.token = 'tsu_test-token';
+  auth.userId = 'desk-viewer';
 });
 
 afterEach(() => {
   pluginsMeta.surfaces = [];
   pluginsMeta.loaded = false;
   for (const url of urls.splice(0)) URL.revokeObjectURL(url);
+});
+
+test('init carries the viewing user, so a surface can attribute what the human does', async () => {
+  seed(pluginPage(RECORD_AND_READY));
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+  await handshake();
+
+  const frame = document.querySelector('iframe')!;
+  const init = (frame.contentWindow as unknown as { received: { user?: string }[] }).received[0];
+  expect(init?.user).toBe('desk-viewer');
 });
 
 test('init carries the protocol version and the resolved theme tokens', async () => {
@@ -117,6 +130,99 @@ test('a plugin can set its own tab title', async () => {
 
   await expect.poll(() => setTitle.mock.calls.length).toBeGreaterThan(0);
   expect(setTitle).toHaveBeenCalledWith('q4-report.docx');
+});
+
+test('a click inside the frame claims pane focus for the surface', async () => {
+  seed(
+    pluginPage(`
+      addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'tsugite:init') {
+          parent.postMessage({ type: 'tsugite:ready' }, '*');
+          parent.postMessage({ type: 'tsugite:focus' }, '*');
+        }
+      });
+    `),
+  );
+  const focusPane = vi.fn();
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {}, focusPane });
+  await handshake();
+
+  await expect.poll(() => focusPane.mock.calls.length).toBeGreaterThan(0);
+});
+
+test('focus landing in a frame the plugin page cannot see still claims the pane', async () => {
+  // A surface whose content is itself a cross-origin frame (a document editor)
+  // never sees the click that lands in it, so it can send nothing. The host sees
+  // its own window blur with focus sitting on the surface's iframe.
+  seed(pluginPage(RECORD_AND_READY));
+  const focusPane = vi.fn();
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {}, focusPane });
+  await handshake();
+
+  document.querySelector('iframe')!.focus();
+  // Whether the harness page itself holds focus is not ours to control, so the
+  // blur a real click into the frame raises is delivered by hand; what is under
+  // test is the host reading it as a claim.
+  window.dispatchEvent(new Event('blur'));
+
+  await expect.poll(() => focusPane.mock.calls.length).toBeGreaterThan(0);
+});
+
+function received(): { type: string; event?: { type: string; data: unknown } }[] {
+  const frame = document.querySelector('iframe')!;
+  return (frame.contentWindow as unknown as { received: { type: string }[] }).received;
+}
+
+/** postMessage delivery to one window is ordered, so a theme push sent after an
+ *  event push settles the question of absence: once the theme lands, anything
+ *  posted before it has landed too. */
+async function afterATheme(): Promise<void> {
+  theme.set('latte');
+  await expect.poll(() => received().filter((m) => m.type === 'tsugite:theme').length).toBe(1);
+}
+
+const eventsSeen = () => received().filter((m) => m.type === 'tsugite:event');
+
+test('a surface receives the daemon events its descriptor declared', async () => {
+  seed(pluginPage(RECORD_AND_READY), { events: ['onlyoffice_document_update'] });
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+  await handshake();
+
+  pluginsMeta.applyPluginEvent({
+    type: 'onlyoffice_document_update',
+    seq: 4,
+    data: { path: 'q4.docx' },
+  });
+
+  await expect.poll(() => eventsSeen().length).toBe(1);
+  expect(eventsSeen()[0]?.event).toEqual({
+    type: 'onlyoffice_document_update',
+    data: { path: 'q4.docx' },
+  });
+});
+
+test('an event type the surface did not declare never reaches it', async () => {
+  seed(pluginPage(RECORD_AND_READY), { events: ['onlyoffice_document_update'] });
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+  await handshake();
+
+  // Deliberately a type with no shell route of its own, so the descriptor is the
+  // only thing that could have stopped it.
+  pluginsMeta.applyPluginEvent({ type: 'other_plugin_update', data: { id: 'x1' } });
+  await afterATheme();
+
+  expect(eventsSeen()).toEqual([]);
+});
+
+test('a surface that declared no events is not a window onto the daemon feed', async () => {
+  seed(pluginPage(RECORD_AND_READY));
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+  await handshake();
+
+  pluginsMeta.applyPluginEvent({ type: 'onlyoffice_document_update', data: { path: 'q4.docx' } });
+  await afterATheme();
+
+  expect(eventsSeen()).toEqual([]);
 });
 
 test('a tab that outlived its plugin says so instead of framing nothing', async () => {

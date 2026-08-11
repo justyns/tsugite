@@ -29,7 +29,7 @@
   import { usage } from '$lib/stores/usage.svelte';
   import { formatTokensCompact, formatUsd } from './views/usage/format';
   import { isEditableTarget } from '$lib/dom';
-  import { allViews, viewById } from './views';
+  import { allViews, dockedSurface, viewById } from './views';
   import { surfaceComponent } from './views/surfaces';
   import { workspacePhoneScreen } from '$lib/shell/phoneNav';
   import { focusedSurface } from '$lib/shell/shellNav';
@@ -65,7 +65,9 @@
   let helpOpen = $state(false);
 
   const activeView = $derived(viewById(shellView.activeViewId));
-  const mode = $derived(shellView.mode);
+  // The view registry owns which region an id gets, so a plugin surface can ask
+  // for the workspace the same way the built-in chats/terminals/files views do.
+  const mode = $derived(activeView.mode);
   const railCollapsed = $derived(shellView.isRailCollapsed());
 
   // Narrow (phone) shell. Every workspace view (chats/terminals/files) drills down:
@@ -176,6 +178,16 @@
     untrack(() => {
       if (id && known) shellView.activate(id);
     });
+  });
+
+  // A plugin surface that declared workspace mode docks into the mux like a rail
+  // pick instead of taking the region. Kept out of the deep-link effect above
+  // because a surface's mode arrives with the registry, after boot.
+  $effect(() => {
+    const surface = dockedSurface(router.view);
+    const params = router.params;
+    if (!surface) return;
+    untrack(() => openSurface({ kind: surface.kind, params, title: surface.label }));
   });
 
   // Plugin metadata at shell scope: plugin-contributed UI surfaces seed the
@@ -320,8 +332,14 @@
     onTerminalState: (data) => terminals.applyTerminalState(data),
   };
 
+  // The shell holds the origin's one event stream for everyone on it, and the
+  // shell's own handlers and the open plugin surfaces are independent consumers:
+  // a surface hears every type its descriptor declared, whether or not a shell
+  // handler acts on it too. Handing a frame to only one of the two would make a
+  // plugin's reachable set depend on the shell's routing table.
   function onShellEvent(event: SSEEvent) {
     routeShellEvent(event, shellEventSink);
+    pluginsMeta.applyPluginEvent(event);
   }
 
   // Keystrip "today" cost/tokens: a real since-UTC-midnight fetch, kicked off once
@@ -445,7 +463,7 @@
                   openPalette();
                 }}
               >
-                {#snippet content(tab)}
+                {#snippet content(tab, focusPane)}
                   {@const Surface = surfaceComponent(tab.kind)}
                   <!-- Key by the tab's identity so two same-kind surfaces (e.g. two
                        chats on different sessions) mount distinct instances. -->
@@ -455,6 +473,7 @@
                         params={tab.params}
                         kind={tab.kind}
                         setTitle={(title) => spaces.retitleTab(tab.id, title)}
+                        {focusPane}
                       />
                     {/if}
                   {/key}

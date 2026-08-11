@@ -18,6 +18,9 @@ export type SurfaceProps = {
   /** Rename the tab this surface is mounted in; only the host that owns a tab
    *  supplies it, so a surface can never address another tab. */
   setTitle?: (title: string) => void;
+  /** Make this surface's pane the focused one. Absent in a full view, which has
+   *  no pane to claim. */
+  focusPane?: () => void;
 };
 
 const SURFACES: Record<string, Component<SurfaceProps>> = {

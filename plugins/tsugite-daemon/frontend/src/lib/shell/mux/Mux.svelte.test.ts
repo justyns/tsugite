@@ -2,10 +2,14 @@
 import { page, userEvent } from '@vitest/browser/context';
 import { render, cleanup } from 'vitest-browser-svelte';
 import { afterEach, expect, test, vi } from 'vitest';
+import { type Snippet, createRawSnippet, mount, unmount } from 'svelte';
 import Mux from './Mux.svelte';
+import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
+import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
 import { writeSurfaceDrag } from './drag';
 import {
   type Layout,
+  type PaneTabModel,
   type SplitDir,
   type SurfaceRef,
   closeTab,
@@ -27,14 +31,14 @@ function seeded(ref: SurfaceRef = { kind: 'chat' }): Layout {
 
 // Wire Mux to the real reducers so an interaction exercises the whole loop:
 // event -> Mux callback -> layout op -> rerender. Mirrors the chrome's wiring.
-async function mountMux(initial: Layout) {
+async function mountMux(initial: Layout, content?: Snippet<[PaneTabModel, () => void]>) {
   let layout = initial;
   let rerender!: (props: Record<string, unknown>) => Promise<void>;
   // Force the desktop split tree; the test viewport is narrow enough to trip the
   // <=700px single-pane mode otherwise.
   const apply = (next: Layout) => {
     layout = next;
-    void rerender({ layout, narrow: false, ...handlers });
+    void rerender({ layout, narrow: false, content, ...handlers });
   };
   const handlers = {
     onSplit: (p: string, d: SplitDir, ref: SurfaceRef, pos: 'before' | 'after') =>
@@ -45,7 +49,7 @@ async function mountMux(initial: Layout) {
     onFocusPane: (p: string) => apply(focusPane(layout, p)),
     onResize: (s: string, i: number, d: number) => apply(resizeSplit(layout, s, i, d)),
   };
-  const screen = await render(Mux, { layout, narrow: false, ...handlers });
+  const screen = await render(Mux, { layout, narrow: false, content, ...handlers });
   rerender = screen.rerender;
   const panes = () => [
     ...screen.container.querySelectorAll<HTMLElement>('[data-testid="mux-pane"]'),
@@ -141,6 +145,28 @@ test('an empty pane offers a real open-a-surface action, not the impossible drag
   expect(onNewTab).toHaveBeenCalledWith(layout.root.id);
 });
 
+test('a surface can claim pane focus itself, the same as a click on the pane', async () => {
+  // A surface that swallows its own pointer events (a plugin iframe) never lets
+  // PaneView's pointerdown see the click, so the mux hands every rendered surface
+  // the same focus call that wrapper makes.
+  const focusers = new Map<string, (() => void) | undefined>();
+  const content = createRawSnippet<[PaneTabModel, () => void]>((tab, focusPane) => {
+    focusers.set(tab().kind, focusPane?.());
+    return { render: () => '<div></div>' };
+  });
+  const base = seeded({ kind: 'chat' });
+  const split = splitPane(base, base.root.id, 'row', { kind: 'terminal' });
+  const mux = await mountMux(split, content);
+  const chatPane = collectLeaves(mux.layout.root).find((l) =>
+    l.tabs.some((t) => t.kind === 'chat'),
+  )!;
+  expect(mux.layout.focusedPaneId).not.toBe(chatPane.id);
+
+  focusers.get('chat')?.();
+
+  await expect.poll(() => mux.layout.focusedPaneId).toBe(chatPane.id);
+});
+
 test('a pane grows to fill its slot rather than collapsing to content height', async () => {
   // `.mux-pane` carries no flex-grow, so PaneView's wrapper must set it -
   // otherwise every pane sits at content height with dead space below it.
@@ -207,4 +233,118 @@ test('closing the active tab (the pane survives) also keeps focus in the workspa
     '[data-testid="mux-pane"][data-focused="true"]',
   );
   expect(focused!.contains(document.activeElement)).toBe(true);
+});
+
+// ── focus recovery vs a surface whose content is a frame of its own ──
+//
+// A document editor's shape: a plugin page framing a document it does not own. A
+// data: URL carries an opaque origin, so the inner frame below is as unreadable
+// to the page holding it as the real one is, and the click that lands in it
+// reaches neither that page nor the host.
+const INNER_DOCUMENT = encodeURIComponent(
+  '<body style="margin:0"><input id="t" style="width:100%;height:100%">' +
+    '<script>' +
+    "var t = document.getElementById('t');" +
+    "addEventListener('pointerdown', function () { t.focus(); });" +
+    "addEventListener('message', function (e) {" +
+    "  if (e.data && e.data.type === 'harness:ask')" +
+    "    parent.postMessage({ type: 'harness:typed', value: t.value }, '*');" +
+    '});' +
+    '<\/script></body>',
+  // encodeURIComponent leaves apostrophes, which would close the string
+  // literal this URL is built into on the page below.
+).replace(/'/g, '%27');
+
+const FRAMING_PLUGIN_PAGE = `
+  document.body.style.margin = '0';
+  const inner = document.createElement('iframe');
+  inner.style.cssText = 'width:100%;height:100%;border:0;display:block';
+  inner.src = 'data:text/html,${INNER_DOCUMENT}';
+  document.body.append(inner);
+  addEventListener('message', (e) => {
+    if (e.source === inner.contentWindow) return parent.postMessage(e.data, '*');
+    if (!e.data || typeof e.data !== 'object') return;
+    if (e.data.type === 'tsugite:init') parent.postMessage({ type: 'tsugite:ready' }, '*');
+    if (e.data.type === 'harness:ask') inner.contentWindow.postMessage(e.data, '*');
+  });
+`;
+
+const blobUrls: string[] = [];
+
+function seedFramingSurface(): void {
+  const url = URL.createObjectURL(
+    new Blob(
+      [`<!doctype html><meta charset="utf-8"><body><script>${FRAMING_PLUGIN_PAGE}<\/script>`],
+      {
+        type: 'text/html',
+      },
+    ),
+  );
+  blobUrls.push(url);
+  const surface: SurfaceDef = {
+    plugin: 'demo',
+    kind: 'plugin/demo/doc',
+    label: 'Document',
+    icon: 'files',
+    entry: url,
+    nav: false,
+    params: [],
+    events: [],
+    mode: 'workspace',
+  };
+  pluginsMeta.surfaces = [surface];
+  pluginsMeta.loaded = true;
+}
+
+afterEach(() => {
+  pluginsMeta.surfaces = [];
+  pluginsMeta.loaded = false;
+  for (const url of blobUrls.splice(0)) URL.revokeObjectURL(url);
+});
+
+test('clicking into a plugin surface claims the pane without taking focus off the frame', async () => {
+  // The claim the click raises runs a layout op, which re-runs Mux's recovery
+  // effect. Recovering here would move focus onto the pane wrapper, and an editor
+  // two frames down would go on drawing a caret while every keystroke landed
+  // nowhere, so typing is what this asserts on.
+  seedFramingSurface();
+  const content = createRawSnippet<[PaneTabModel, () => void]>((tab, focusPane) => ({
+    render: () => '<div style="height:100%"></div>',
+    setup: (node: Element) => {
+      if (tab().kind !== 'plugin/demo/doc') return;
+      const app = mount(PluginSurface, {
+        target: node,
+        props: { kind: tab().kind, params: {}, focusPane: focusPane?.() },
+      });
+      return () => void unmount(app);
+    },
+  }));
+
+  const base = seeded({ kind: 'chat' });
+  const split = splitPane(base, base.root.id, 'row', { kind: 'plugin/demo/doc' });
+  const mux = await mountMux(split, content);
+  await expect
+    .poll(() => document.querySelector('[data-phase]')?.getAttribute('data-phase'), {
+      timeout: 8000,
+    })
+    .toBe('ready');
+
+  // Start with the other pane holding focus, so the click has a claim to make.
+  const [chatPane, docPane] = mux.panes();
+  chatPane!.focus();
+  await expect.poll(() => chatPane!.dataset.focused).toBe('true');
+
+  const frame = document.querySelector('iframe')!;
+  await userEvent.click(frame);
+  await expect.poll(() => docPane!.dataset.focused).toBe('true');
+  expect(document.activeElement).toBe(frame);
+
+  await userEvent.keyboard('typed');
+  let typed: string | undefined;
+  window.addEventListener('message', (e) => {
+    const data = e.data as { type?: string; value?: string };
+    if (data?.type === 'harness:typed') typed = data.value;
+  });
+  frame.contentWindow!.postMessage({ type: 'harness:ask' }, '*');
+  await expect.poll(() => typed).toBe('typed');
 });

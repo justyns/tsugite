@@ -2,6 +2,7 @@
  * Host↔plugin postMessage protocol for plugin UI surfaces. See the bridge
  * section of docs/plugin-adapters.md for the wire contract.
  */
+import type { SSEEvent } from '$lib/api/sse';
 import type { PluginSurface } from '$lib/stores/pluginsMeta.svelte';
 
 export const BRIDGE_VERSION = 1;
@@ -21,6 +22,9 @@ interface InitMessage {
   theme: ThemePayload;
   /** The daemon bearer token, for calling the plugin's own authed routes. */
   token: string;
+  /** Who is viewing, so a surface can attribute what the human does in it apart
+   *  from what an agent does through the plugin's tools. */
+  user: string;
 }
 
 interface ThemeMessage {
@@ -28,7 +32,13 @@ interface ThemeMessage {
   theme: ThemePayload;
 }
 
-type PluginMessage = { type: 'tsugite:ready' } | { type: 'tsugite:title'; title: string };
+interface EventMessage {
+  type: 'tsugite:event';
+  event: { type: string; data: Record<string, unknown> };
+}
+
+type PluginMessage =
+  { type: 'tsugite:ready' } | { type: 'tsugite:title'; title: string } | { type: 'tsugite:focus' };
 
 /** Enumerated, so a token added to tokens.css reaches plugins with no edit here. */
 export function readThemeTokens(el: Element): Record<string, string> {
@@ -45,6 +55,7 @@ export function initMessage(
   params: Record<string, string>,
   theme: ThemePayload,
   token: string,
+  user: string,
 ): InitMessage {
   // Copied, not passed through: params arrive as a tab's reactive state, and
   // postMessage's structured clone rejects a proxy outright.
@@ -54,11 +65,19 @@ export function initMessage(
     surface: { kind, params: { ...params } },
     theme,
     token,
+    user,
   };
 }
 
 export function themeMessage(theme: ThemePayload): ThemeMessage {
   return { type: 'tsugite:theme', theme };
+}
+
+/** One daemon broadcast frame, on its way into a surface that declared its type.
+ *  `seq` stays behind: the host owns the stream's cursor, and a page that never
+ *  reconnects has nothing to do with one. */
+export function eventMessage(event: SSEEvent): EventMessage {
+  return { type: 'tsugite:event', event: { type: event.type, data: event.data ?? {} } };
 }
 
 /** A message from the iframe, or null for anything this version doesn't speak.
@@ -68,6 +87,7 @@ export function parsePluginMessage(data: unknown): PluginMessage | null {
   const { type, title } = data as { type?: unknown; title?: unknown };
   if (type === 'tsugite:ready') return { type };
   if (type === 'tsugite:title' && typeof title === 'string') return { type, title: title.trim() };
+  if (type === 'tsugite:focus') return { type };
   return null;
 }
 

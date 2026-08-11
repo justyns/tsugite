@@ -8,9 +8,15 @@
  * The same payload carries the UI surfaces adapter plugins declare, which feed
  * the surface registry (views/surfaces.ts) and the nav rail (views/index.ts). The
  * shell loads this at boot so a persisted plugin tab resolves on the first frame.
+ *
+ * It is also where the shell hands off the broadcast frames it reads, so an open
+ * surface hears a daemon event over its bridge instead of opening a second
+ * /api/events stream to the same origin.
  */
 import { api, type ApiError } from '$lib/api/client';
+import type { SSEEvent } from '$lib/api/sse';
 import { ICONS, type IconName } from '$lib/components/icon/icons';
+import type { ViewMode } from '../../views';
 
 export interface PluginInfo {
   name: string;
@@ -29,6 +35,13 @@ export interface PluginSurface {
   entry: string;
   nav: boolean;
   params: string[];
+  /** Broadcast types this surface asked to be forwarded into its frame. The
+   *  browser holds one /api/events stream for the whole origin, so a surface
+   *  names what it wants instead of opening a second one. */
+  events: string[];
+  /** What its nav-rail row does: replace the workspace region, or dock beside
+   *  whatever is already open there. */
+  mode: ViewMode;
 }
 
 interface RawSurface extends Omit<PluginSurface, 'icon'> {
@@ -54,8 +67,27 @@ export class PluginsMetaStore {
    *  flashing the "plugin isn't installed" placeholder. */
   loaded = $state(false);
 
+  // Open plugin surfaces subscribed to the broadcast (many surfaces can watch,
+  // and two can be the same kind).
+  private eventSinks = new Set<{ types: readonly string[]; sink: (event: SSEEvent) => void }>();
+
   byKind(kind: string): PluginSurface | undefined {
     return this.surfaces.find((s) => s.kind === kind);
+  }
+
+  /** Offer one broadcast frame to the open plugin surfaces that asked for its
+   *  type. A surface hears everything its own descriptor declared and nothing
+   *  else, including types the shell acts on itself. */
+  applyPluginEvent(event: SSEEvent): void {
+    for (const { types, sink } of this.eventSinks) if (types.includes(event.type)) sink(event);
+  }
+
+  /** Subscribe an open plugin surface to the frame types it declared. Returns an
+   *  unbind fn. */
+  bindEvents(types: readonly string[], sink: (event: SSEEvent) => void): () => void {
+    const entry = { types, sink };
+    this.eventSinks.add(entry);
+    return () => this.eventSinks.delete(entry);
   }
 
   async load(): Promise<void> {

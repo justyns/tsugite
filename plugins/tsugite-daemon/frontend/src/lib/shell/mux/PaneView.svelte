@@ -142,7 +142,7 @@
     {/snippet}
     {#if activeTab}
       {#if content}
-        {@render content(activeTab)}
+        {@render content(activeTab, () => handlers.onFocusPane?.(pane.id))}
       {/if}
     {:else}
       <div class="mux-empty">

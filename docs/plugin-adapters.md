@@ -87,8 +87,8 @@ them (not a crash). Route lists that raise while being collected are logged and 
 
 An adapter puts a page in the web UI by returning surface descriptors from `get_ui_surfaces()`
 (default `[]`). Each becomes a tab kind in the multiplexer, openable from the command palette;
-`nav: true` also adds a nav-rail entry that opens it as a full view. The plugin ships HTML, and
-the host frames it - a plugin never compiles a Svelte component into the daemon's bundle.
+`nav: true` also adds a nav-rail entry, and `mode` decides what clicking it does. The plugin ships
+HTML, and the host frames it - a plugin never compiles a Svelte component into the daemon's bundle.
 
 ```python
 def get_ui_surfaces(self):
@@ -100,7 +100,9 @@ def get_ui_surfaces(self):
             "entry": "ui/panel.html", # resolved under /api/plugins/<plugin_name>/
             "assets": Path(__file__).parent / "ui",  # served at /api/plugins/<plugin_name>/ui/
             "nav": True,
+            "mode": "workspace",      # what its nav-rail row does; "full" is the default
             "params": ["path"],       # the only tab params forwarded into the iframe URL
+            "events": ["my_thing_update"],  # the only daemon events forwarded into the frame
         }
     ]
 ```
@@ -123,10 +125,12 @@ page can skin itself across all five themes without importing anything from the 
 
 | Direction | Message | Payload |
 |---|---|---|
-| host → plugin | `tsugite:init` | `{version, surface: {kind, params}, theme: {name, tokens}, token}` |
+| host → plugin | `tsugite:init` | `{version, surface: {kind, params}, theme: {name, tokens}, token, user}` |
 | host → plugin | `tsugite:theme` | `{theme: {name, tokens}}` |
+| host → plugin | `tsugite:event` | `{event: {type, data}}` - one daemon broadcast the surface declared |
 | plugin → host | `tsugite:ready` | completes the handshake |
 | plugin → host | `tsugite:title` | `{title}` - renames the docked tab |
+| plugin → host | `tsugite:focus` | makes the surface's pane the focused one |
 
 ```html
 <script>
@@ -141,14 +145,17 @@ page can skin itself across all five themes without importing anything from the 
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'tsugite:init') {
       applyTheme(msg.theme);
-      parent.postMessage({ type: 'tsugite:ready' }, '*');
-      parent.postMessage({ type: 'tsugite:title', title: 'My panel' }, '*');
+      parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+      parent.postMessage({ type: 'tsugite:title', title: 'My panel' }, location.origin);
     } else if (msg.type === 'tsugite:theme') {
       applyTheme(msg.theme);
     }
   });
 </script>
 ```
+
+Reply to `location.origin` rather than `'*'`: the frame is same-origin with the host, and a wildcard
+reply goes to whatever page framed the surface.
 
 `init.token` is the daemon bearer token, for calling your own `get_http_routes()` endpoints:
 
@@ -157,6 +164,38 @@ fetch('/api/plugins/my_plugin/status', { headers: { Authorization: 'Bearer ' + m
 ```
 
 Read it from `init` rather than from browser storage; the host owns where the token comes from.
+
+`init.user` is the id of the human viewing the surface, so a page can tell their actions apart from
+an agent's.
+
+`tsugite:event` carries the daemon broadcasts named in the descriptor's `events` list, and only those:
+
+```js
+if (msg.type === 'tsugite:event' && msg.event.type === 'my_thing_update') {
+  refresh(msg.event.data);
+}
+```
+
+Read the shell's stream over the bridge rather than opening your own `/api/events`, which behind a
+reverse proxy leaves a second long-lived request to the origin pending forever. A surface that
+declares no `events` is sent none.
+
+`mode` decides what a nav-rail click does: `full` (the default) hands the surface the whole workspace
+region, `workspace` docks it as a tab beside the surfaces already open there. An unknown value warns
+and falls back to `full`.
+
+Send `tsugite:focus` on `pointerdown` and `focusin`, so a click inside the surface moves workspace
+pane focus with it. A browser delivers neither event outside the frame, so the host cannot see the
+click on its own:
+
+```js
+const claimFocus = () => parent.postMessage({ type: 'tsugite:focus' }, location.origin);
+addEventListener('pointerdown', claimFocus);
+addEventListener('focusin', claimFocus);
+```
+
+A surface framing something it does not own needs nothing extra: the host reads focus arriving at the
+surface's own iframe as the same claim.
 
 `examples/tsugite-example-plugin/` ships a working surface: the adapter declaration and the page
 that answers this handshake.

@@ -64,6 +64,12 @@
           .catch((e) => (document.getElementById('ping').textContent = String(e)));
       }
 
+      // A pointer event inside a frame never reaches the host's pane wrapper, so
+      // the page reports the click and the host focuses the pane it landed in.
+      const claimFocus = () => parent.postMessage({ type: 'tsugite:focus' }, location.origin);
+      addEventListener('pointerdown', claimFocus);
+      addEventListener('focusin', claimFocus);
+
       addEventListener('message', (event) => {
         const msg = event.data;
         if (!msg || typeof msg !== 'object') return;
@@ -71,8 +77,8 @@
           applyTheme(msg.theme);
           document.getElementById('params').textContent = JSON.stringify(msg.surface.params);
           ping(msg.token);
-          parent.postMessage({ type: 'tsugite:ready' }, '*');
-          parent.postMessage({ type: 'tsugite:title', title: 'Example panel' }, '*');
+          parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+          parent.postMessage({ type: 'tsugite:title', title: 'Example panel' }, location.origin);
         } else if (msg.type === 'tsugite:theme') {
           applyTheme(msg.theme);
         }

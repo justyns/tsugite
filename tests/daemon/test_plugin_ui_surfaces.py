@@ -86,6 +86,8 @@ def test_kind_and_entry_are_namespaced_to_the_declaring_plugin():
             "entry": "/api/plugins/onlyoffice/ui/editor.html",
             "nav": True,
             "params": ["path"],
+            "events": [],
+            "mode": "full",
         }
     ]
 
@@ -101,6 +103,27 @@ def test_optional_fields_default_without_being_declared():
     assert surface["icon"] == ""
     assert surface["nav"] is False
     assert surface["params"] == []
+    assert surface["events"] == [], "a surface that asks for no daemon events is forwarded none"
+    assert surface["mode"] == "full", "an undeclared mode keeps the whole-region rail behaviour"
+
+
+def test_a_surface_declares_which_daemon_events_it_wants():
+    """The host holds the one event stream and forwards a surface only the types it named,
+    so a plugin page never sees the rest of the daemon's traffic."""
+    (surface,) = surfaces_of("alpha", [{**DOC_SURFACE, "events": ["onlyoffice_document_update"]}])
+    assert surface["events"] == ["onlyoffice_document_update"]
+
+
+def test_a_surface_can_declare_that_it_docks_beside_the_workspace():
+    (surface,) = surfaces_of("alpha", [{**DOC_SURFACE, "mode": "workspace"}])
+    assert surface["mode"] == "workspace"
+
+
+def test_an_unknown_mode_is_named_and_falls_back_to_full(caplog):
+    with caplog.at_level(logging.WARNING):
+        (surface,) = surfaces_of("alpha", [{**DOC_SURFACE, "mode": "sidebar"}])
+    assert surface["mode"] == "full"
+    assert "alpha" in caplog.text
 
 
 @pytest.mark.parametrize(

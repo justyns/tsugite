@@ -108,6 +108,15 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
     descriptor missing either is dropped with a warning rather than reaching the
     UI as an unopenable tab, and its `assets` is dropped with it.
 
+    `mode` decides what a nav-rail click does: `full` (the default) hands the
+    surface the whole workspace region, `workspace` docks it as a tab beside the
+    surfaces already open there.
+
+    `events` names the broadcast types the web UI forwards into the surface's
+    frame over its bridge. The browser holds one `/api/events` stream for the
+    whole origin, so a surface names what it wants rather than opening a second
+    one, and a surface that names nothing is never shown the daemon's traffic.
+
     `assets` is served at `/api/plugins/<plugin_name>/ui/`, so an entry of
     `ui/panel.html` resolves to `panel.html` inside it. One directory per
     plugin; a second, different one is a mistake worth naming. A path that is
@@ -121,6 +130,12 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
             logger.warning("Plugin '%s': UI surface %r needs both 'kind' and 'entry'; skipping it", plugin_name, item)
             continue
         kind = item["kind"]
+        mode = item.get("mode", "full")
+        if mode not in ("full", "workspace"):
+            logger.warning(
+                "Plugin '%s': UI surface '%s' declares unknown mode %r; using 'full'", plugin_name, kind, mode
+            )
+            mode = "full"
         surfaces.append(
             {
                 "plugin": plugin_name,
@@ -131,6 +146,8 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
                 "entry": f"/api/plugins/{plugin_name}/{item['entry'].lstrip('/')}",
                 "nav": bool(item.get("nav")),
                 "params": list(item.get("params") or []),
+                "events": list(item.get("events") or []),
+                "mode": mode,
             }
         )
         if (assets := item.get("assets")) and Path(assets) not in dirs:

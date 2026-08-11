@@ -1,6 +1,6 @@
 import type { Component } from 'svelte';
 import type { IconName } from '$lib/components/icon/icons';
-import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
+import { pluginsMeta, type PluginSurface } from '$lib/stores/pluginsMeta.svelte';
 
 /**
  * A workspace view (chats/terminals/files) drives the shared context rail + the
@@ -117,14 +117,25 @@ const builtinViews: ViewDef[] = import.meta.env.DEV ? [...views, galleryView] : 
 export function allViews(): ViewDef[] {
   const contributed = pluginsMeta.surfaces
     .filter((surface) => surface.nav)
-    .map((surface) => ({
-      id: surface.kind,
-      label: surface.label,
-      icon: surface.icon,
-      mode: 'full' as const,
-      load: () => import('$lib/components/plugins/PluginView.svelte'),
-    }));
+    .map((surface): ViewDef => {
+      const row = {
+        id: surface.kind,
+        label: surface.label,
+        icon: surface.icon,
+        mode: surface.mode,
+      };
+      if (surface.mode === 'workspace') return row;
+      return { ...row, load: () => import('$lib/components/plugins/PluginView.svelte') };
+    });
   return [...builtinViews, ...contributed];
+}
+
+/** The surface a nav view opens into the mux instead of replacing the region, or
+ *  null when the view owns the whole region. Only a plugin surface that declared
+ *  workspace mode docks; a built-in workspace view opens its own tabs from the rail. */
+export function dockedSurface(viewId: string): PluginSurface | null {
+  const surface = pluginsMeta.byKind(viewId);
+  return surface?.mode === 'workspace' ? surface : null;
 }
 
 // The shell's default surface: the first rail entry. Single source of truth for

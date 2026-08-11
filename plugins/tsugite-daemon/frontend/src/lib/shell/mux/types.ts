@@ -25,5 +25,7 @@ export interface MuxHandlers {
   onResize?: (splitId: string, dividerIndex: number, deltaFraction: number) => void;
 }
 
-/** Renders a docked surface by its {kind, params}; supplied by the view host. */
-export type MuxContent = Snippet<[PaneTabModel]>;
+/** Renders a docked surface by its {kind, params}; supplied by the view host.
+ *  The second argument focuses the pane the surface is docked in, for a surface
+ *  whose own content swallows the pointerdown `PaneView` would otherwise see. */
+export type MuxContent = Snippet<[PaneTabModel, () => void]>;
