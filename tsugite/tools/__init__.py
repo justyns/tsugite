@@ -260,7 +260,17 @@ def get_tools_by_category(category: str) -> List[str]:
     return sorted(category_tools)
 
 
-_OPTIONAL_CATEGORIES = {"schedule", "notify", "scratchpad", "sessions", "jobs", "secrets", "tmux", "terminal"}
+_OPTIONAL_CATEGORIES = {
+    "schedule",
+    "notify",
+    "scratchpad",
+    "sessions",
+    "jobs",
+    "secrets",
+    "tmux",
+    "terminal",
+    "onlyoffice",
+}
 
 
 def _expand_single_spec(spec: str, strict: bool = True) -> List[str]:

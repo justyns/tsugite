@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document</title>
+    <style>
+      /* Host tokens, with plain fallbacks for the paint before `init` lands. */
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg1, #fff);
+        color: var(--tx0, #000);
+        font-family: var(--font-ui, system-ui, sans-serif);
+        font-size: var(--fs-md, 14px);
+      }
+      /* The editor iframe sizes itself to this placeholder, so it needs a real height. */
+      #editor {
+        flex: 1;
+        min-height: 0;
+      }
+      #editor:empty {
+        display: none;
+      }
+      .pane {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: var(--sp-4, 16px);
+      }
+      .pane[hidden] {
+        display: none;
+      }
+      h1 {
+        margin: 0 0 var(--sp-3, 12px);
+        font-size: var(--fs-lg, 16px);
+      }
+      p {
+        margin: 0 0 var(--sp-3, 12px);
+        color: var(--tx2, #666);
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2, 8px);
+      }
+      button.doc {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--sp-4, 16px);
+        width: 100%;
+        padding: var(--sp-3, 12px);
+        border: 1px solid var(--bd1, #ccc);
+        border-radius: var(--r-lg, 8px);
+        background: var(--bg2, #fafafa);
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      button.doc:hover {
+        border-color: var(--bd2, #999);
+      }
+      .meta {
+        color: var(--tx2, #666);
+        font-family: var(--font-mono, monospace);
+        font-size: var(--fs-sm, 13px);
+        white-space: nowrap;
+      }
+      #error {
+        border: 1px solid var(--st-err, #b3261e);
+        border-radius: var(--r-lg, 8px);
+        padding: var(--sp-4, 16px);
+      }
+      #error pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: var(--font-mono, monospace);
+        font-size: var(--fs-sm, 13px);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="picker" class="pane" hidden>
+      <h1>Open a document</h1>
+      <p id="picker-note">Loading…</p>
+      <ul id="doc-list"></ul>
+    </div>
+
+    <div id="error" class="pane" hidden>
+      <h1>Could not open this document</h1>
+      <pre id="error-detail"></pre>
+    </div>
+
+    <div id="editor"></div>
+
+    <script>
+      const PREFIX = '/api/plugins/onlyoffice';
+      const DOCUMENT_EVENT = 'onlyoffice_document_update';
+
+      let token = null;
+      let viewer = null;
+      let themeName = null;
+      let currentPath = null;
+      let docEditor = null;
+      let liveEvents = null;
+      let recovering = false;
+
+      const el = (id) => document.getElementById(id);
+
+      // Copy the host's resolved design tokens onto :root so this page skins
+      // itself like the rest of the UI, in whichever theme is on. The name goes to
+      // /config, which signs a matching uiTheme into the editor config. An editor
+      // already open keeps the theme it opened in: DocsAPI exposes no way to change
+      // uiTheme on a live instance, and only a reload would pick a new one up.
+      function applyTheme(theme) {
+        themeName = (theme && theme.name) || null;
+        for (const [name, value] of Object.entries((theme && theme.tokens) || {})) {
+          document.documentElement.style.setProperty(name, value);
+        }
+      }
+
+      function setTitle(title) {
+        document.title = title;
+        parent.postMessage({ type: 'tsugite:title', title }, location.origin);
+      }
+
+      function show(pane) {
+        for (const id of ['picker', 'error']) el(id).hidden = id !== pane;
+      }
+
+      async function fail(error) {
+        el('error-detail').textContent = String((error && error.message) || error);
+        show('error');
+        // Something that never connected says nothing about what to change, and
+        // /health does. A refusal that came back with a reason is its own answer.
+        if (!error || !error.diagnose) return;
+        try {
+          const health = await api('/health');
+          if (health.message) el('error-detail').textContent += '\n\n' + health.message;
+        } catch (ignored) {
+          // The daemon itself is out of reach, so the error above is the whole story.
+        }
+      }
+
+      function unreachable(message) {
+        return Object.assign(new Error(message), { diagnose: true });
+      }
+
+      // Daemon auth is a bearer header, not a cookie, so a same-origin fetch is
+      // anonymous until the page supplies the header. `init` hands it over.
+      async function api(path) {
+        let response;
+        try {
+          response = await fetch(PREFIX + path, {
+            headers: { Authorization: 'Bearer ' + token },
+          });
+        } catch (error) {
+          throw unreachable('GET ' + path + ' could not be sent: ' + error.message);
+        }
+        if (response.ok) return response.json();
+        const body = await response.json().catch(() => null);
+        const detail = (body && body.error) || response.status + ' ' + response.statusText;
+        throw new Error(detail);
+      }
+
+      function formatSize(bytes) {
+        return bytes < 1024 ? bytes + ' B' : Math.round(bytes / 1024) + ' KB';
+      }
+
+      // The command palette opens a surface by kind alone, with no parameters, so
+      // the page offers the choice itself. A nav-rail deep link
+      // (#plugin/onlyoffice/doc?path=Notes.docx) does carry one, which is what the
+      // query string in `start` reads.
+      async function showPicker() {
+        setTitle('Document');
+        show('picker');
+        let documents;
+        try {
+          documents = (await api('/docs')).documents;
+        } catch (error) {
+          return fail(error);
+        }
+        el('picker-note').textContent = documents.length
+          ? ''
+          : 'No .docx documents found in the configured directory.';
+        const list = el('doc-list');
+        list.textContent = '';
+        for (const doc of documents) {
+          const button = document.createElement('button');
+          button.className = 'doc';
+          button.type = 'button';
+          const name = document.createElement('span');
+          name.textContent = doc.path;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = formatSize(doc.size) + ' · ' + doc.modified.slice(0, 10);
+          button.append(name, meta);
+          button.addEventListener('click', () => openDocument(doc.path));
+          const item = document.createElement('li');
+          item.append(button);
+          list.append(item);
+        }
+      }
+
+      function loadDocsApi(serverUrl) {
+        if (window.DocsAPI) return Promise.resolve();
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = serverUrl.replace(/\/$/, '') + '/web-apps/apps/api/documents/api.js';
+          script.onload = resolve;
+          script.onerror = () =>
+            reject(unreachable('Could not load the document server API from ' + serverUrl));
+          document.head.append(script);
+        });
+      }
+
+      // The viewer travels with every config, refreshes included: it is what the
+      // editor writes as the author of anything the human types or comments.
+      function fetchConfig(path) {
+        const query = new URLSearchParams({ path });
+        if (viewer) query.set('user', viewer);
+        if (themeName) query.set('theme', themeName);
+        return api('/config?' + query);
+      }
+
+      // The document server caches by document.key, so new bytes on disk stay
+      // invisible until something hands the editor a config carrying a new one.
+      async function refreshFile() {
+        const payload = await fetchConfig(currentPath);
+        docEditor.refreshFile(payload.config);
+      }
+
+      // Build a fresh editor on the config's key. Whatever instance was here goes
+      // first: an instance the document server has failed cannot be revived, and
+      // two of them would fight over the same placeholder.
+      function replaceEditor(config) {
+        const stale = docEditor;
+        docEditor = null;
+        if (stale) stale.destroyEditor();
+        docEditor = new DocsAPI.DocEditor('editor', config);
+      }
+
+      // Handlers belong to the instance they were built for: destroying one can
+      // report an error of its own, and that error is not about its replacement.
+      function editorEvents() {
+        const events = {
+          onDocumentReady: () => {
+            if (events === liveEvents) recovering = false;
+          },
+          onError: (event) => {
+            if (events === liveEvents) editorFailed(event);
+          },
+          // The document server asks for a refresh on its own initiative too, not
+          // only when an agent edit lands.
+          onRequestRefreshFile: refreshFile,
+        };
+        liveEvents = events;
+        return events;
+      }
+
+      function editorFailed(event) {
+        const detail = (event && event.data && event.data.errorDescription) || 'the editor reported no detail';
+        // One reopen per failure: an instance that failed again without ever
+        // reporting itself ready is not going to come back on the next try.
+        if (recovering) return fail(new Error('The editor could not be re-opened: ' + detail));
+        recovering = true;
+        openDocument(currentPath);
+      }
+
+      async function openDocument(path) {
+        currentPath = path;
+        try {
+          const payload = await fetchConfig(path);
+          // The daemon reduces a path to one spelling and signs everything for
+          // that one, announces edits under it, and answers a refresh keyed on
+          // it, so what it handed back replaces whatever the tab opened with.
+          currentPath = payload.path;
+          await loadDocsApi(payload.server_url);
+          show(null);
+          setTitle(payload.config.document.title);
+          // Events are attached after signing on purpose: they are functions, so
+          // they never travel to the document server and never break the token.
+          payload.config.events = editorEvents();
+          replaceEditor(payload.config);
+        } catch (error) {
+          return fail(error);
+        }
+      }
+
+      // An agent edit rotates the document key on the daemon side and says so on
+      // the daemon's event stream, which the host holds and forwards from.
+      function handleDocumentEvent(data) {
+        // This event is the whole mechanism by which an open tab learns an agent
+        // touched its document, and it is the one step in that chain nothing else
+        // observes, so log what arrived and whether it was for us.
+        console.log('onlyoffice: document event', data, 'open:', currentPath);
+        if (!data || data.path !== currentPath) return;
+        // The editing session survives the turn, so the live instance takes the
+        // version swap in place and keeps the cursor and the undo history with it.
+        // Rebuilding is the fallback, because a refusal here would otherwise leave
+        // the tab on retired bytes. Nothing above catches, so a throw between the
+        // frame arriving and the swap would leave it stale with no trace of why.
+        refreshFile().catch((error) => {
+          console.error('onlyoffice: in-place refresh failed, rebuilding', error);
+          openDocument(currentPath).catch((e) => {
+            console.error('onlyoffice: rebuild after a failed refresh also failed', e);
+          });
+        });
+      }
+
+      function start() {
+        const path = new URLSearchParams(location.search).get('path');
+        if (path) openDocument(path);
+        else showPicker();
+      }
+
+      // A pointer event inside a frame never reaches the pane wrapper the host
+      // listens on, so the page reports the click and the host focuses the pane
+      // it landed in. Clicks that land in the editor's own frame are invisible
+      // here too; the host notices those itself.
+      function claimFocus() {
+        parent.postMessage({ type: 'tsugite:focus' }, location.origin);
+      }
+
+      addEventListener('pointerdown', claimFocus);
+      addEventListener('focusin', claimFocus);
+
+      addEventListener('message', (event) => {
+        // Only the host frame speaks this protocol; anything else reaching here
+        // is a page that framed this one, driving `init` on its own terms.
+        if (event.source !== parent) return;
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'tsugite:init') {
+          applyTheme(msg.theme);
+          token = msg.token;
+          viewer = msg.user;
+          parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+          start();
+        } else if (msg.type === 'tsugite:theme') {
+          applyTheme(msg.theme);
+        } else if (msg.type === 'tsugite:event' && msg.event.type === DOCUMENT_EVENT) {
+          handleDocumentEvent(msg.event.data);
+        }
+      });
+    </script>
+  </body>
+</html>

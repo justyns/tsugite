@@ -93,6 +93,7 @@ tsugite-pty = { workspace = true }
 tsugite-daemon = { workspace = true }
 tsugite-discord = { workspace = true }
 tsugite-cc-driver = { workspace = true }
+tsugite-onlyoffice = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
@@ -170,6 +171,7 @@ paths = [
   "plugins/tsugite-codex-cli/tsugite_codex_cli",
   "plugins/tsugite-daemon/tsugite_daemon",
   "plugins/tsugite-discord/tsugite_discord",
+  "plugins/tsugite-onlyoffice/tsugite_onlyoffice",
   "plugins/tsugite-pty/tsugite_pty",
   "plugins/tsugite-sandbox/tsugite_sandbox",
   "plugins/tsugite-tmux/tsugite_tmux",
@@ -268,4 +270,5 @@ dev = [
   "tsugite-daemon",
   "tsugite-discord",
   "tsugite-cc-driver",
+  "tsugite-onlyoffice",
 ]
