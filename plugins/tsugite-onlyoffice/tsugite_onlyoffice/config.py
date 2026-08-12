@@ -1,7 +1,5 @@
 """Configuration model for the `plugins.onlyoffice` block of daemon.yaml."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -36,9 +34,6 @@ class OnlyOfficeConfig(BaseModel):
         """Resolve the shared JWT secret from the secrets backend.
 
         Called after `configure_from_daemon()` has set the backend up.
-
-        Returns:
-            The secret value.
 
         Raises:
             RuntimeError: The secret is not present in the backend.

@@ -33,9 +33,6 @@
         overflow: auto;
         padding: var(--sp-4, 16px);
       }
-      .pane[hidden] {
-        display: none;
-      }
       h1 {
         margin: 0 0 var(--sp-3, 12px);
         font-size: var(--fs-lg, 16px);
@@ -123,8 +120,8 @@
       // already open keeps the theme it opened in: DocsAPI exposes no way to change
       // uiTheme on a live instance, and only a reload would pick a new one up.
       function applyTheme(theme) {
-        themeName = (theme && theme.name) || null;
-        for (const [name, value] of Object.entries((theme && theme.tokens) || {})) {
+        themeName = theme?.name || null;
+        for (const [name, value] of Object.entries(theme?.tokens || {})) {
           document.documentElement.style.setProperty(name, value);
         }
       }
@@ -139,7 +136,7 @@
       }
 
       async function fail(error) {
-        el('error-detail').textContent = String((error && error.message) || error);
+        el('error-detail').textContent = String(error?.message || error);
         show('error');
         // Something that never connected says nothing about what to change, and
         // /health does. A refusal that came back with a reason is its own answer.
@@ -147,7 +144,7 @@
         try {
           const health = await api('/health');
           if (health.message) el('error-detail').textContent += '\n\n' + health.message;
-        } catch (ignored) {
+        } catch {
           // The daemon itself is out of reach, so the error above is the whole story.
         }
       }
@@ -169,12 +166,16 @@
         }
         if (response.ok) return response.json();
         const body = await response.json().catch(() => null);
-        const detail = (body && body.error) || response.status + ' ' + response.statusText;
+        const detail = body?.error || response.status + ' ' + response.statusText;
         throw new Error(detail);
       }
 
+      // Mirrors the shell's formatSize (frontend wiki view); the iframe boundary
+      // keeps this page from importing it.
       function formatSize(bytes) {
-        return bytes < 1024 ? bytes + ' B' : Math.round(bytes / 1024) + ' KB';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
       }
 
       // The command palette opens a surface by kind alone, with no parameters, so
@@ -269,7 +270,7 @@
       }
 
       function editorFailed(event) {
-        const detail = (event && event.data && event.data.errorDescription) || 'the editor reported no detail';
+        const detail = event?.data?.errorDescription || 'the editor reported no detail';
         // One reopen per failure: an instance that failed again without ever
         // reporting itself ready is not going to come back on the next try.
         if (recovering) return fail(new Error('The editor could not be re-opened: ' + detail));

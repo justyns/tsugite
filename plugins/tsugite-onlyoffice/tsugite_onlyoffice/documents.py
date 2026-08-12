@@ -60,7 +60,7 @@ def resolve(documents_dir: Path, relative: str) -> Path:
         OutsideDocumentsError: The path resolves outside the documents directory.
         NotADocumentError: The path names something other than a document.
     """
-    root = Path(documents_dir).resolve()
+    root = documents_dir.resolve()
     target = (root / relative).resolve()
     if not target.is_relative_to(root):
         raise OutsideDocumentsError(f"path {relative!r} escapes the documents directory")
@@ -83,6 +83,7 @@ def resolve_existing(documents_dir: Path, relative: str) -> Path:
 
     Raises:
         OutsideDocumentsError: The path resolves outside the documents directory.
+        NotADocumentError: The path names something other than a document.
         NoSuchDocumentError: Nothing is at that path.
     """
     path = resolve(documents_dir, relative)
@@ -104,12 +105,13 @@ def canonical(documents_dir: Path, relative: str) -> str:
 
     Raises:
         OutsideDocumentsError: The path resolves outside the documents directory.
+        NotADocumentError: The path names something other than a document.
     """
-    root = Path(documents_dir).resolve()
+    root = documents_dir.resolve()
     return resolve(root, relative).relative_to(root).as_posix()
 
 
-def document_key(relative: str, path: Path, generation: int = 0) -> str:
+def document_key(relative: str, path: Path, generation: int) -> str:
     """Derive the document server's cache key for a file's current contents.
 
     The server caches by key, so the key has to rotate whenever the bytes change.
@@ -138,7 +140,7 @@ def list_documents(documents_dir: Path) -> list[dict]:
     Returns:
         One `{"path", "size", "modified"}` entry per document, sorted by path.
     """
-    root = Path(documents_dir).resolve()
+    root = documents_dir.resolve()
     if not root.is_dir():
         return []
     documents = []
@@ -184,12 +186,8 @@ def replacing(path: Path):
     handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     os.close(handle)
     tmp = Path(name)
-    try:
-        yield tmp
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    yield tmp
+    os.replace(tmp, path)
 
 
 def write_atomic(path: Path, content: bytes) -> None:

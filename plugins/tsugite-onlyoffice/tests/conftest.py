@@ -137,7 +137,7 @@ def point_comment_docx(tmp_path):
 
 @pytest.fixture
 def shuffled_comment_docx(tmp_path):
-    """A package whose `word/comments.xml` order is not the order they are anchored in."""
+    """A package whose comments are stored in a different order than they are anchored in."""
     return build_docx(tmp_path / "shuffled.docx", SHUFFLED_COMMENT_DOCUMENT, {"word/comments.xml": SHUFFLED_COMMENTS})
 
 

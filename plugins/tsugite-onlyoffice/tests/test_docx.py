@@ -6,10 +6,9 @@ strips `w14`, `w15` and `mc:Ignorable` off a Word document. Hence the
 byte-identity assertion on every entry.
 """
 
-from __future__ import annotations
-
 from onlyoffice_helpers import zip_entries as entries
 from onlyoffice_helpers import zip_part as part
+from tsugite_onlyoffice.documents import replacing
 from tsugite_onlyoffice.docx import Document, XmlPart
 
 # ── round tripping ──
@@ -65,8 +64,6 @@ def test_text_leaves_out_tracked_deletions(styled_docx):
 def test_two_writers_on_one_document_do_not_share_a_temp_file(tmp_path):
     """A save from the document server does not hold the turn's lock, so two writes to
     one document overlap. A temp name they share means one renames the other's file away."""
-    from tsugite_onlyoffice.documents import replacing
-
     target = tmp_path / "notes.docx"
     target.write_bytes(b"before")
     with replacing(target) as first, replacing(target) as second:

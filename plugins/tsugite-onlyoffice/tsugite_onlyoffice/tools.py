@@ -3,7 +3,7 @@
 This module is the `tsugite.plugins` entry point, so every process that lists
 tools imports it, sandboxed subprocess executors included. Keeping tsugite_daemon
 and starlette out of it at module scope keeps those processes off the daemon half
-of the plugin, and keeps the import one-directional: the adapter imports the
+of the plugin, and the import stays one-directional: the adapter imports the
 tools, never the other way. It gets its configuration from adapter-set module
 state because `load_tool_plugins()` is called with no config argument.
 

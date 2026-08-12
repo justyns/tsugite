@@ -4,6 +4,8 @@ Nothing here talks to a document server: the CommandService side is an httpx
 mock transport, and the callback it would send arrives through the app itself.
 """
 
+import json
+
 import httpx
 import pytest
 from onlyoffice_helpers import (
@@ -16,25 +18,22 @@ from onlyoffice_helpers import (
     post_callback,
     serve_downloads,
 )
+from tsugite_onlyoffice import jwt
+from tsugite_onlyoffice.command_service import CommandClient, CommandServiceError
 
 DOCUMENT = "notes.docx"
-COMMAND_URL = f"{SERVER_URL}/coauthoring/CommandService.ashx"
 
 
 def command_client(handler):
     """A real CommandClient whose requests land in `handler` instead of the network."""
-    from tsugite_onlyoffice.command_service import CommandClient
-
     return CommandClient(SERVER_URL, JWT_SECRET, httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
 def recorder(answer=None):
-    """A mock transport handler that records every request body it is given."""
+    """A mock transport handler that records each request's headers and body."""
     sent = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        import json
-
         sent.append({"headers": request.headers, "body": json.loads(request.content)})
         return httpx.Response(200, json=answer if answer is not None else {"error": 0})
 
@@ -83,13 +82,11 @@ async def test_the_command_goes_to_the_command_service_endpoint():
         return httpx.Response(200, json={"error": 0})
 
     await command_client(handle).forcesave("abc123")
-    assert requests == [COMMAND_URL]
+    assert requests == [f"{SERVER_URL}/coauthoring/CommandService.ashx"]
 
 
 @pytest.mark.asyncio
 async def test_the_body_token_signs_the_body_it_travels_in():
-    from tsugite_onlyoffice import jwt
-
     sent, handle = recorder()
     await command_client(handle).forcesave("abc123")
     (call,) = sent
@@ -99,8 +96,6 @@ async def test_the_body_token_signs_the_body_it_travels_in():
 
 @pytest.mark.asyncio
 async def test_the_header_token_wraps_the_same_body_one_level_deeper():
-    from tsugite_onlyoffice import jwt
-
     sent, handle = recorder()
     await command_client(handle).forcesave("abc123")
     (call,) = sent
@@ -110,8 +105,6 @@ async def test_the_header_token_wraps_the_same_body_one_level_deeper():
 
 @pytest.mark.asyncio
 async def test_a_non_zero_error_from_the_command_service_raises_with_the_code():
-    from tsugite_onlyoffice.command_service import CommandServiceError
-
     _sent, handle = recorder({"error": -6})
     with pytest.raises(CommandServiceError) as raised:
         await command_client(handle).forcesave("abc123")
@@ -123,7 +116,7 @@ async def test_a_non_zero_error_from_the_command_service_raises_with_the_code():
 
 
 @pytest.fixture
-def live(adapter, http_server, documents_dir, typed_bytes):
+def live(adapter, http_server, typed_bytes):
     """Wire the adapter to a fake CommandService whose forcesave answers itself.
 
     The forcesave posts the status-6 callback the document server would post,

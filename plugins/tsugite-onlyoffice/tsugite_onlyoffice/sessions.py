@@ -14,7 +14,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from tsugite.tools import call_on_loop
 from tsugite_onlyoffice.config import OnlyOfficeConfig
@@ -106,7 +106,7 @@ class DocumentSessions:
     def _state(self, relative: str) -> _DocumentState:
         """The state for a document, created on first mention and kept afterwards.
 
-        Canonicalised here, which is the one seam every caller's path passes
+        Canonicalized here, which is the one seam every caller's path passes
         through, so two spellings of one file cannot end up with a lock and a
         liveness record each.
 
@@ -313,7 +313,7 @@ class DocumentSessions:
         """
         return state.key or document_key(state.relative, path, state.generation)
 
-    async def _await_save(self, relative: str, state: _DocumentState, command) -> None:
+    async def _await_save(self, relative: str, state: _DocumentState, command: Awaitable[bool]) -> None:
         """Issue a command and park until the save it triggers reaches the callback.
 
         Raises:

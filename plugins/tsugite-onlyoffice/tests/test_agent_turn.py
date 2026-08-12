@@ -9,7 +9,10 @@ the order is the whole contract.
 import asyncio
 import json
 
+import httpx
 import pytest
+import pytest_asyncio
+import tsugite_onlyoffice.sessions as sessions_module
 from onlyoffice_helpers import (
     DOWNLOAD_URL,
     PLAIN_DOCUMENT,
@@ -19,6 +22,10 @@ from onlyoffice_helpers import (
     post_callback,
     serve_downloads,
 )
+from tsugite_onlyoffice import tools
+from tsugite_onlyoffice.command_service import NO_SUCH_SESSION, NOTHING_TO_SAVE
+from tsugite_onlyoffice.documents import OutsideDocumentsError, document_key
+from tsugite_onlyoffice.docx import Document
 
 DOCUMENT = "review.docx"
 # The same document as DOCUMENT, spelled the way an agent that has just listed a
@@ -71,7 +78,6 @@ def recording_work(recorded, label="edit", text="Reviewed."):
     def work(document):
         recorded.append((label, document.path.name))
         document.insert(1, f" {text}")
-        return label
 
     return work
 
@@ -86,8 +92,6 @@ def command_service(recorded, *codes):
     The real `CommandClient` runs over this, rather than `FakeCommands`, for the
     tests where the code the document server spends is the thing under test.
     """
-    import httpx
-
     answers = iter(codes)
 
     def handle(request):
@@ -103,8 +107,6 @@ async def announced(recorded, timeout=2.0):
     A test that read `recorded` straight after its turn would see the run of edits
     still in progress rather than the one swap it settles into.
     """
-    import tsugite_onlyoffice.sessions as sessions_module
-
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while not any(step == "event" for step, _detail in recorded):
@@ -123,8 +125,6 @@ def fast_announce(monkeypatch):
     Still an order of magnitude longer than a turn on these documents takes, or a
     run of edits would outrun the timer it is supposed to be re-arming.
     """
-    import tsugite_onlyoffice.sessions as sessions_module
-
     monkeypatch.setattr(sessions_module, "ANNOUNCE_DEBOUNCE", 0.05)
 
 
@@ -137,7 +137,6 @@ def turn(adapter, documents_dir, http_server):
     fake bus if it ran second.
     """
     build_docx(documents_dir / DOCUMENT, PLAIN_DOCUMENT)
-    build_docx(documents_dir / OTHER, PLAIN_DOCUMENT)
     recorded = []
     adapter.commands = FakeCommands(calls=recorded, answer=delivering(adapter))
     adapter.event_bus = FakeEventBus(recorded)
@@ -152,8 +151,6 @@ async def test_the_turn_edits_what_was_typed_and_not_what_was_on_disk(
     turn, adapter, http_server, documents_dir, typed_bytes
 ):
     """Editing bytes the session has not handed back yet is how keystrokes get lost."""
-    from tsugite_onlyoffice.docx import Document
-
     make_live(adapter, DOCUMENT, LIVE_KEY)
 
     serve_downloads(adapter, typed_bytes)
@@ -174,8 +171,6 @@ async def test_a_session_that_closes_with_nothing_to_save_releases_the_parked_tu
     payload to fetch, and a turn that only treats a written-back save as the end of
     the wait stalls until it times out.
     """
-    from tsugite_onlyoffice.docx import Document
-
     make_live(adapter, DOCUMENT, LIVE_KEY)
     adapter.commands.answer = answering(turn, http_server, DOCUMENT, 4, url=None)
 
@@ -191,9 +186,6 @@ async def test_a_turn_whose_session_is_already_gone_still_edits(turn, adapter, d
     or a missed callback leaves that belief behind. The force-save then reports no such
     session, which leaves the file on disk already current, so it is an answer and not a
     failure."""
-    import tsugite_onlyoffice.sessions as sessions_module
-    from tsugite_onlyoffice.docx import Document
-
     monkeypatch.setattr(sessions_module, "SAVE_TIMEOUT", 0.05)
     make_live(adapter, DOCUMENT, LIVE_KEY)
     adapter.commands = FakeCommands(calls=turn, nothing_to_do={"forcesave"})
@@ -204,7 +196,7 @@ async def test_a_turn_whose_session_is_already_gone_still_edits(turn, adapter, d
 
 @pytest.mark.asyncio
 async def test_a_turn_on_a_document_nobody_has_open_just_edits_it(turn, adapter):
-    """No session means nothing to end, nothing to wait for, and nothing to refresh."""
+    """No session means nothing to end, wait for, or refresh."""
     await adapter.sessions.agent_turn(DOCUMENT, recording_work(turn))
     assert steps(turn, without=()) == ["edit"]
 
@@ -216,8 +208,6 @@ async def test_a_turn_on_a_document_nobody_has_open_just_edits_it(turn, adapter)
 async def test_the_key_rotates_off_the_one_the_live_session_is_holding(turn, adapter, documents_dir):
     """The document server caches by key, so the new bytes need a key of their own before the
     page can be sent to them. The live session stays on the one it opened with."""
-    from tsugite_onlyoffice.documents import document_key
-
     make_live(adapter, DOCUMENT, LIVE_KEY)
     await adapter.sessions.agent_turn(DOCUMENT, recording_work(turn))
 
@@ -256,8 +246,6 @@ async def test_a_run_of_edits_announces_one_swap_and_not_one_per_edit(turn, adap
 @pytest.mark.asyncio
 async def test_stopping_the_adapter_drops_an_announce_that_has_not_fired_yet(turn, adapter, fast_announce):
     """A timer that outlives the adapter swaps the page onto a key nothing is left to serve."""
-    import tsugite_onlyoffice.sessions as sessions_module
-
     await adapter.start()
     make_live(adapter, DOCUMENT, LIVE_KEY)
     await adapter.sessions.agent_turn(DOCUMENT, recording_work(turn))
@@ -275,9 +263,6 @@ async def test_a_second_edit_after_the_key_rotated_is_not_a_failure(turn, adapte
     """The first turn rotates the key; the live editor is still on the one before it. The second
     turn's force-save therefore names a key no session is on, which the document server spends an
     error code on and which holds nothing the file on disk does not already have."""
-    from tsugite_onlyoffice.command_service import NO_SUCH_SESSION, NOTHING_TO_SAVE
-    from tsugite_onlyoffice.docx import Document
-
     make_live(adapter, DOCUMENT, LIVE_KEY)
     # The real CommandClient, so the error codes go through the client that reads them.
     adapter.commands = None
@@ -335,9 +320,6 @@ async def test_a_download_already_in_flight_cannot_land_on_top_of_the_turn_that_
     finishes, so a handler that decides once, on the way in, whether those bytes are
     still current writes the pre-edit ones back over the edit.
     """
-    import httpx
-    from tsugite_onlyoffice.docx import Document
-
     make_live(adapter, DOCUMENT, LIVE_KEY)
     fetching, release = asyncio.Event(), asyncio.Event()
 
@@ -403,15 +385,13 @@ async def test_a_turn_whose_session_named_no_key_force_saves_the_one_it_can_re_d
     Deriving the key from the file reproduces what the session opened with, as long
     as nobody saved in between and the tab opened at the generation on record.
     """
-    from tsugite_onlyoffice.documents import document_key
-
     adapter.sessions.session_started(DOCUMENT, None)
     assert adapter.sessions._state(DOCUMENT).key is None
     # What the session opened on, before the turn's own edit moves it.
-    opened_on = document_key(DOCUMENT, documents_dir / DOCUMENT)
+    opened_on = document_key(DOCUMENT, documents_dir / DOCUMENT, 0)
 
-    # `delivering` finds the document by the key on record, which is the thing
-    # this document does not have one of.
+    # `delivering` finds the document by the key on record, which this document
+    # does not have.
     async def answer(_command, _key):
         adapter.sessions.deliver(DOCUMENT)
 
@@ -546,8 +526,6 @@ def test_two_spellings_of_one_document_open_on_one_key(adapter, documents_dir):
 
 def test_a_path_that_escapes_the_documents_dir_gets_no_session_state(adapter):
     """Reading a path as one document rather than three must not read it out of the jail."""
-    from tsugite_onlyoffice.documents import OutsideDocumentsError
-
     with pytest.raises(OutsideDocumentsError):
         adapter.sessions._state("../outside.docx")
 
@@ -557,8 +535,6 @@ def test_a_path_that_escapes_the_documents_dir_gets_no_session_state(adapter):
 
 @pytest.mark.asyncio
 async def test_a_save_that_never_arrives_times_out_and_changes_nothing(turn, adapter, documents_dir, monkeypatch):
-    import tsugite_onlyoffice.sessions as sessions_module
-
     monkeypatch.setattr(sessions_module, "SAVE_TIMEOUT", 0.05)
     make_live(adapter, DOCUMENT, LIVE_KEY)
     adapter.commands.answer = None
@@ -576,69 +552,53 @@ async def test_a_save_that_never_arrives_times_out_and_changes_nothing(turn, ada
 # ── the tools ──
 
 
-@pytest.mark.asyncio
-async def test_a_tool_edit_on_an_open_document_goes_through_a_turn(turn, adapter, fast_announce):
-    from tsugite_onlyoffice import tools
-
+@pytest_asyncio.fixture
+async def started(adapter):
     await adapter.start()
+    yield
+    await adapter.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_tool_edit_on_an_open_document_goes_through_a_turn(turn, adapter, fast_announce, started):
     make_live(adapter, DOCUMENT, LIVE_KEY)
-    try:
-        result = await asyncio.to_thread(tools.doc_replace, path=DOCUMENT, target="Costs", replacement="Expenses")
-        await announced(turn)
-    finally:
-        await adapter.stop()
+    result = await asyncio.to_thread(tools.doc_replace, path=DOCUMENT, target="Costs", replacement="Expenses")
+    await announced(turn)
 
     assert result["replaced"] == 1
     assert steps(turn, without=()) == ["forcesave", "event"]
 
 
 @pytest.mark.asyncio
-async def test_a_tool_read_of_an_open_document_takes_the_live_bytes(turn, adapter, http_server, typed_bytes):
+async def test_a_tool_read_of_an_open_document_takes_the_live_bytes(turn, adapter, http_server, typed_bytes, started):
     """Reading the file on disk would miss everything typed since the last save."""
-    from tsugite_onlyoffice import tools
-
-    await adapter.start()
     make_live(adapter, DOCUMENT, LIVE_KEY)
 
     serve_downloads(adapter, typed_bytes)
     adapter.commands.answer = answering(turn, http_server, DOCUMENT, 6)
-    try:
-        result = await asyncio.to_thread(tools.doc_read, path=DOCUMENT)
-    finally:
-        await adapter.stop()
+    result = await asyncio.to_thread(tools.doc_read, path=DOCUMENT)
 
     assert "typed while the session was open" in result["text"]
     assert steps(turn, without=()) == ["forcesave", "callback"]
 
 
 @pytest.mark.asyncio
-async def test_a_tool_read_of_a_document_nobody_has_open_asks_for_nothing(turn, adapter):
-    from tsugite_onlyoffice import tools
-
-    await adapter.start()
-    try:
-        result = await asyncio.to_thread(tools.doc_read, path=DOCUMENT)
-    finally:
-        await adapter.stop()
+async def test_a_tool_read_of_a_document_nobody_has_open_asks_for_nothing(turn, adapter, started):
+    result = await asyncio.to_thread(tools.doc_read, path=DOCUMENT)
 
     assert "Quarterly review" in result["text"]
     assert steps(turn, without=()) == []
 
 
 @pytest.mark.asyncio
-async def test_a_tool_edit_a_live_session_never_answers_tells_the_agent_what_to_check(turn, adapter, monkeypatch):
+async def test_a_tool_edit_a_live_session_never_answers_tells_the_agent_what_to_check(
+    turn, adapter, monkeypatch, started
+):
     """That message is the agent's whole diagnostic when a session stops answering."""
-    import tsugite_onlyoffice.sessions as sessions_module
-    from tsugite_onlyoffice import tools
-
     monkeypatch.setattr(sessions_module, "SAVE_TIMEOUT", 0.05)
-    await adapter.start()
     make_live(adapter, DOCUMENT, LIVE_KEY)
     adapter.commands.answer = None
-    try:
-        result = await asyncio.to_thread(tools.doc_replace, path=DOCUMENT, target="Costs", replacement="Expenses")
-    finally:
-        await adapter.stop()
+    result = await asyncio.to_thread(tools.doc_replace, path=DOCUMENT, target="Costs", replacement="Expenses")
 
     assert DOCUMENT in result["error"]
     assert "/health" in result["error"]
@@ -646,8 +606,6 @@ async def test_a_tool_edit_a_live_session_never_answers_tells_the_agent_what_to_
 
 def test_a_tool_edit_before_the_adapter_started_refuses_rather_than_writing(turn, adapter, documents_dir):
     """Writing without the turn coordination is how a live session's keystrokes get lost."""
-    from tsugite_onlyoffice import tools
-
     before = (documents_dir / DOCUMENT).read_bytes()
     tools.set_onlyoffice_runtime(adapter.sessions)
     try:

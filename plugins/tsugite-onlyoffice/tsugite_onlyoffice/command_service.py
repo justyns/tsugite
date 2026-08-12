@@ -4,8 +4,6 @@ Nothing here touches documents. `forcesave` asks the document server to hand bac
 what a live session currently holds, and `version` is a liveness probe.
 """
 
-from __future__ import annotations
-
 import httpx
 
 from tsugite_onlyoffice import jwt
@@ -14,7 +12,7 @@ COMMAND_PATH = "/coauthoring/CommandService.ashx"
 TIMEOUT = 10.0
 
 # Codes that report there was nothing for the command to do. The document server
-# spends them like errors, but each one describes the state the caller was asking
+# sends them like errors, but each one describes the state the caller was asking
 # for, so raising would turn a completed request into a failure.
 NO_SUCH_SESSION = 1
 NOTHING_TO_SAVE = 4
@@ -25,7 +23,6 @@ class CommandServiceError(RuntimeError):
 
     def __init__(self, command: str, code: int) -> None:
         super().__init__(f"onlyoffice CommandService rejected {command!r} with error {code}")
-        self.command = command
         self.code = code
 
 

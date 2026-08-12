@@ -441,7 +441,7 @@ class Document:
         self._dirty: set[str] = set()
 
     @classmethod
-    def open(cls, path: Path | str) -> Document:
+    def open(cls, path: Path) -> Document:
         """Read a docx package off disk.
 
         Callers that took the path from HTTP or from a tool argument resolve it
@@ -453,7 +453,7 @@ class Document:
             for info in archive.infolist():
                 entries[info.filename] = archive.read(info)
                 infos[info.filename] = info
-        return cls(Path(path), entries, infos)
+        return cls(path, entries, infos)
 
     # ── parts ──
 
@@ -483,7 +483,6 @@ class Document:
         info.compress_type = zipfile.ZIP_DEFLATED
         self._infos[name] = info
         self._entries[name] = data
-        self._parsed.pop(name, None)
         return self._edit(name)
 
     # ── reading ──

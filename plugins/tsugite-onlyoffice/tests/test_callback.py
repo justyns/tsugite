@@ -7,8 +7,10 @@ checked for the answer it gives as well as for what it wrote.
 
 import logging
 
+import httpx
 import pytest
 from onlyoffice_helpers import DOWNLOAD_URL, JWT_SECRET, callback_url, serve_downloads
+from tsugite_onlyoffice import jwt
 
 CALLBACK_URL = "/api/plugins/onlyoffice/callback/notes.docx"
 LIVE_KEY = "5f2c9a1b"
@@ -26,17 +28,12 @@ def untouched(documents_dir):
     return (documents_dir / "notes.docx").read_bytes()
 
 
-def body_for(status, url=DOWNLOAD_URL, key=LIVE_KEY):
-    return {"key": key, "status": status, "url": url, "users": ["tsugite"]}
+def body_for(status, key=LIVE_KEY):
+    return {"key": key, "status": status, "url": DOWNLOAD_URL, "users": ["tsugite"]}
 
 
-def post(client, body, *, document="notes.docx", secret=JWT_SECRET, in_header=False, signs=None):
-    from tsugite_onlyoffice import jwt
-
+def post(client, body, *, document="notes.docx", secret=JWT_SECRET, signs=None):
     url = callback_url(document, signs)
-    if in_header:
-        # The header form signs one wrapper level more than the body form does.
-        return client.post(url, json=body, headers={"Authorization": "Bearer " + jwt.sign({"payload": body}, secret)})
     return client.post(url, json={**body, "token": jwt.sign(body, secret)})
 
 
@@ -93,9 +90,6 @@ def test_save_error_statuses_are_acknowledged_and_logged(client, documents_dir, 
 
 
 def test_a_failing_download_reports_an_error_and_leaves_the_file_alone(client, documents_dir, adapter, untouched):
-    """A zero here would tell the document server the save landed, and it would drop the edit."""
-    import httpx
-
     serve_downloads(adapter, lambda request: httpx.Response(502))
     resp = post(client, body_for(2))
     assert resp.status_code == 200, resp.text
@@ -186,8 +180,6 @@ def test_an_unsigned_callback_is_rejected(client, documents_dir, downloads, unto
 
 def test_a_callback_with_no_doc_token_is_rejected(client, documents_dir, downloads, untouched):
     """The body's own token names no document, so a signed body alone is not enough."""
-    from tsugite_onlyoffice import jwt
-
     signed = body_for(2)
     resp = client.post(CALLBACK_URL, json={**signed, "token": jwt.sign(signed, JWT_SECRET)})
     assert resp.status_code == 401, resp.text
@@ -217,8 +209,6 @@ def test_a_callback_signed_with_another_secret_is_rejected(client, documents_dir
 )
 def test_a_token_cannot_be_replayed_over_a_body_it_did_not_sign(client, documents_dir, downloads, untouched, tampered):
     """Every field the handler acts on has to be signed, or one observed token retargets the save."""
-    from tsugite_onlyoffice import jwt
-
     signed = body_for(2)
     resp = client.post(callback_url("notes.docx"), json={**signed, **tampered, "token": jwt.sign(signed, JWT_SECRET)})
     assert resp.status_code == 401, resp.text
@@ -228,8 +218,6 @@ def test_a_token_cannot_be_replayed_over_a_body_it_did_not_sign(client, document
 
 def test_a_file_url_token_is_not_a_callback_token(client, documents_dir, downloads, untouched):
     """It signs no status, and a field-by-field check would match that against a body carrying none."""
-    from tsugite_onlyoffice import jwt
-
     resp = client.post(callback_url("notes.docx"), json={"token": jwt.sign({"document": "notes.docx"}, JWT_SECRET)})
     assert resp.status_code == 401, resp.text
     assert (documents_dir / "notes.docx").read_bytes() == untouched
@@ -238,8 +226,6 @@ def test_a_file_url_token_is_not_a_callback_token(client, documents_dir, downloa
 
 def test_the_file_urls_token_is_not_a_doc_token(client, headers, documents_dir, downloads, untouched):
     """The two are minted from one claim set, so each route was accepting the other's token."""
-    from tsugite_onlyoffice import jwt
-
     config = client.get("/api/plugins/onlyoffice/config?path=notes.docx", headers=headers).json()["config"]
     lifted = config["document"]["url"].partition("?token=")[2]
     signed = body_for(2, key=config["document"]["key"])
@@ -250,7 +236,13 @@ def test_the_file_urls_token_is_not_a_doc_token(client, headers, documents_dir, 
 
 
 def test_the_header_form_of_the_token_is_accepted(client, documents_dir, downloads, typed_bytes):
-    resp = post(client, body_for(2), in_header=True)
+    # The header form signs one wrapper level more than the body form does.
+    body = body_for(2)
+    resp = client.post(
+        callback_url("notes.docx"),
+        json=body,
+        headers={"Authorization": "Bearer " + jwt.sign({"payload": body}, JWT_SECRET)},
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"error": 0}
     assert (documents_dir / "notes.docx").read_bytes() == typed_bytes

@@ -6,13 +6,16 @@ collected first. This module's name is the plugin's own, so it resolves to this
 file whatever else is being collected alongside it.
 """
 
-from __future__ import annotations
-
 import asyncio
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from urllib.parse import unquote
+
+import httpx
+from tsugite_onlyoffice import jwt
+from tsugite_onlyoffice.adapter import USE_CALLBACK
+from tsugite_onlyoffice.docx import DOCUMENT_PART, w
 
 JWT_SECRET = "onlyoffice-test-secret"
 SECRET_NAME = "onlyoffice-jwt-secret"
@@ -34,8 +37,8 @@ class StubSecretBackend:
 def serve_downloads(adapter, respond):
     """Answer the adapter's outbound traffic from a mock transport, recording the URLs.
 
-    The adapter's own download still runs this way, which swapping a method out
-    would skip.
+    The adapter's own download code still runs this way; swapping a method out
+    would skip it.
 
     Args:
         adapter: The adapter whose shared client to replace.
@@ -45,8 +48,6 @@ def serve_downloads(adapter, respond):
     Returns:
         The list every requested URL is appended to.
     """
-    import httpx
-
     fetched = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -62,38 +63,30 @@ def asgi_client(http_server):
 
     A live read parks on a future the callback resolves, so the two halves have
     to share one loop. TestClient runs the app on a loop of its own in another
-    thread, which is exactly the arrangement that cannot resolve that future.
+    thread, which is the arrangement that cannot resolve that future.
     """
-    import httpx
-
     transport = httpx.ASGITransport(app=http_server.app)
     return httpx.AsyncClient(transport=transport, base_url=PUBLIC_BASE_URL)
 
 
-def callback_body(status, key, url=DOWNLOAD_URL, secret=JWT_SECRET):
+def callback_body(status, key, url=DOWNLOAD_URL):
     """A signed callback body, shaped the way the document server POSTs one.
 
-    `url=None` is the shape of a status the document server parked nothing for:
-    the field is absent rather than null, which is what a handler reaching for it
-    has to survive.
+    `url=None` mimics a status the document server parked nothing for: the field
+    is absent rather than null, and a handler reaching for it has to survive that.
     """
-    from tsugite_onlyoffice import jwt
-
     body = {"key": key, "status": status, "users": ["tsugite"]}
     if url is not None:
         body["url"] = url
-    return {**body, "token": jwt.sign(body, secret)}
+    return {**body, "token": jwt.sign(body, JWT_SECRET)}
 
 
 def callback_url(relative, signs=None):
     """The callback URL the editor config mints, path-bound token and all.
 
-    `signs` binds the token to some other document than the one in the path,
-    which is the shape of a callback replayed at somebody else's document.
+    `signs` binds the token to some other document than the one in the path:
+    a callback replayed at somebody else's document.
     """
-    from tsugite_onlyoffice import jwt
-    from tsugite_onlyoffice.adapter import USE_CALLBACK
-
     claims = {"document": unquote(relative) if signs is None else signs, "use": USE_CALLBACK}
     doc_token = jwt.sign(claims, JWT_SECRET, expires_in=0)
     return f"/api/plugins/onlyoffice/callback/{relative}?doc_token={doc_token}"
@@ -104,7 +97,6 @@ async def post_callback(http_server, relative, body):
     async with asgi_client(http_server) as client:
         response = await client.post(callback_url(relative), json=body)
     assert response.json() == {"error": 0}, response.text
-    return response
 
 
 class FakeCommands:
@@ -123,16 +115,13 @@ class FakeCommands:
         self.nothing_to_do = set(nothing_to_do)
 
     async def forcesave(self, key):
-        return await self._issue("forcesave", key)
-
-    async def _issue(self, command, key):
-        self.calls.append((command, key))
+        self.calls.append(("forcesave", key))
         # The yield is where two turns that were not serialized would interleave.
         await asyncio.sleep(0)
-        if command in self.nothing_to_do:
+        if "forcesave" in self.nothing_to_do:
             return False
         if self.answer is not None:
-            await self.answer(command, key)
+            await self.answer("forcesave", key)
         return True
 
 
@@ -260,7 +249,7 @@ POINT_COMMENTS = DECLARATION + (
 )
 
 # Two comments the document server stored in the opposite order to the one they
-# are anchored in, which is the order a reader of the document meets them in.
+# are anchored in; a reader of the document meets them in anchor order.
 SHUFFLED_COMMENT_DOCUMENT = DECLARATION + (
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
     '<w:p><w:commentRangeStart w:id="2"/><w:r><w:t>Quarterly review</w:t></w:r>'
@@ -355,8 +344,6 @@ def zip_part(path, name):
 
 def runs(path, number):
     """The text and the formatting marks of every run in one saved paragraph."""
-    from tsugite_onlyoffice.docx import DOCUMENT_PART, w
-
     paragraph = list(ET.fromstring(zip_part(path, DOCUMENT_PART)).iter(w("p")))[number - 1]
     out = []
     for run in paragraph.iter(w("r")):

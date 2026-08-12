@@ -3,11 +3,8 @@
 Text that reads as one sentence is often several `w:r` elements with different
 `w:rPr` on each, so an edit that lands mid-run has to split the run and carry the
 formatting onto both halves. These tests read the runs back out of the saved
-package rather than trusting the rendering, because the rendering is exactly what
-cannot see formatting.
+package rather than trusting the rendering, which cannot see formatting.
 """
-
-from __future__ import annotations
 
 import pytest
 from onlyoffice_helpers import runs
@@ -128,10 +125,8 @@ def test_an_edit_rewrites_the_document_part_and_nothing_else(styled_docx):
 
     after = entries(styled_docx)
     assert list(after) == list(before)
-    assert {name: e for name, e in after.items() if name != DOCUMENT_PART} == {
-        name: e for name, e in before.items() if name != DOCUMENT_PART
-    }
-    assert after[DOCUMENT_PART] != before[DOCUMENT_PART]
+    rewritten = {name for name in before if after[name] != before[name]}
+    assert rewritten == {DOCUMENT_PART}
 
 
 def test_the_rewritten_document_part_keeps_its_namespace_declarations(styled_docx):

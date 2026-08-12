@@ -4,8 +4,6 @@ The document server speaks one algorithm with one shared secret, and this side
 has to refuse every other one, so the whole thing fits in the stdlib.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac

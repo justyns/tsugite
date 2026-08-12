@@ -11,6 +11,11 @@ import threading
 
 import pytest
 from onlyoffice_helpers import PLAIN_DOCUMENT, build_docx
+from tsugite_onlyoffice import tools
+from tsugite_onlyoffice.docx import Document
+
+import tsugite.tools as registry
+from tsugite.tools import expand_tool_specs
 
 TOOL_NAMES = ["doc_comment", "doc_insert", "doc_read", "doc_replace", "doc_reply", "doc_resolve"]
 DOCUMENT = "review.docx"
@@ -29,8 +34,6 @@ def call(tools, name, **overrides):
 @pytest.fixture
 def daemon_tools():
     """Register the daemon-only tools, and put the registry back afterwards."""
-    import tsugite.tools as registry
-
     registry.set_daemon_mode(True)
     try:
         yield registry
@@ -46,8 +49,6 @@ def wired(adapter, documents_dir):
     the fixture puts a loop in a thread of its own and starts the adapter on it.
     That is the only arrangement the tools support, and it is the daemon's.
     """
-    from tsugite_onlyoffice import tools
-
     build_docx(documents_dir / DOCUMENT, PLAIN_DOCUMENT)
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
@@ -71,22 +72,15 @@ def test_the_tools_register_under_the_onlyoffice_category(daemon_tools):
 
 def test_the_tools_are_daemon_only():
     """Outside the daemon there is no runtime to reach, so they must not be offered."""
-    import tsugite.tools as registry
-
-    registry._ensure_tools_loaded()
     assert not set(TOOL_NAMES) & set(registry.list_tools())
 
 
 def test_a_strict_agent_may_reference_the_category_where_the_plugin_is_absent():
     """@onlyoffice expands to nothing rather than raising when nothing registered it."""
-    from tsugite.tools import expand_tool_specs
-
     assert expand_tool_specs(["@onlyoffice"], strict=True) == []
 
 
 def test_the_adapter_wires_the_runtime_on_start_and_drops_it_on_stop(adapter):
-    from tsugite_onlyoffice import tools
-
     assert not tools.runtime_available()
     asyncio.run(adapter.start())
     try:
@@ -101,8 +95,6 @@ def test_the_adapter_wires_the_runtime_on_start_and_drops_it_on_stop(adapter):
 
 @pytest.mark.parametrize("name", TOOL_NAMES)
 def test_a_tool_called_outside_daemon_mode_says_so(name):
-    from tsugite_onlyoffice import tools
-
     assert "not available" in call(tools, name, path=DOCUMENT)["error"]
 
 
@@ -152,8 +144,6 @@ def test_doc_replace_reports_how_many_occurrences_it_changed(wired):
 
 def test_an_edit_is_on_disk_for_the_next_reader(wired, documents_dir):
     """The document server reads the file, not this process, so the save has to have happened."""
-    from tsugite_onlyoffice.docx import Document
-
     wired.doc_replace(path=DOCUMENT, target="Costs held flat.", replacement="Costs rose slightly.")
     assert "Costs rose slightly." in Document.open(documents_dir / DOCUMENT).text()
 

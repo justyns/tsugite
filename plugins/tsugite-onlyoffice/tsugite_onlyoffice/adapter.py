@@ -6,8 +6,6 @@ via the tsugite.adapters entry point. The turn protocol the routes and the tools
 meet over lives in sessions.py.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 from pathlib import Path
@@ -52,7 +50,7 @@ DOWNLOAD_TIMEOUT = 60.0
 # Broadcast when an agent edit lands, so an open editor can swap to the new file.
 DOCUMENT_EVENT = "onlyoffice_document_update"
 
-# The document server declines a request it will not make with this and no
+# The document server answers a request it will not attempt with this and no
 # detail, which reads as a fetch failure but is not one.
 ERROR_NOT_ATTEMPTED = -4
 
@@ -77,6 +75,11 @@ def _bearer(request: Request) -> str | None:
 def _refused(exc: ValueError) -> JSONResponse:
     """Turn a documents-policy refusal into the status code it is owed."""
     return JSONResponse({"error": str(exc)}, status_code=403 if isinstance(exc, OutsideDocumentsError) else 404)
+
+
+def _callback_refusal(message: str, status: int = 401) -> JSONResponse:
+    """A callback answer the document server reads as a refusal it should retry."""
+    return JSONResponse({"error": 1, "message": message}, status_code=status)
 
 
 class OnlyOfficeAdapter(BaseAdapter):
@@ -134,40 +137,6 @@ class OnlyOfficeAdapter(BaseAdapter):
             self.commands = CommandClient(self.config.server_url, self.jwt_secret(), self.http)
         return self.commands
 
-    async def health(self) -> dict:
-        """Ask the document server for its version and report what came back.
-
-        Returns:
-            Dict with `ok`, the configured `server_url` and `public_base_url`, the
-            reported `version` when there is one, and a `message` saying what to
-            fix when there is not.
-        """
-        report = {"server_url": self.config.server_url, "public_base_url": self.config.public_base_url}
-        try:
-            version = await self._command_client().version()
-        except CommandServiceError as exc:
-            return {**report, "ok": False, "command_error": exc.code, "message": self._rejection_message(exc.code)}
-        except Exception as exc:  # noqa: BLE001 -- a diagnostic reports the failure rather than raising it
-            return {
-                **report,
-                "ok": False,
-                "message": (
-                    f"Could not reach the document server at {self.config.server_url}: {exc!s} "
-                    f"({type(exc).__name__}). Check plugins.onlyoffice.server_url and that this daemon can "
-                    "open a connection to it."
-                ),
-            }
-        return {
-            **report,
-            "ok": True,
-            "version": version,
-            "message": (
-                f"The document server at {self.config.server_url} answered, version {version}. It fetches "
-                f"plugins.onlyoffice.public_base_url ({self.config.public_base_url}) itself, so that address "
-                "has to be reachable from the document server and not only from this browser."
-            ),
-        }
-
     def _rejection_message(self, code: int) -> str:
         """Say what a non-zero CommandService code means for this deployment."""
         public = self.config.public_base_url
@@ -217,7 +186,43 @@ class OnlyOfficeAdapter(BaseAdapter):
         ]
 
     async def _health(self, request: Request) -> JSONResponse:
-        return JSONResponse(await self.health())
+        """Ask the document server for its version and report what came back.
+
+        The report carries `ok`, the configured `server_url` and
+        `public_base_url`, the reported `version` when there is one, and a
+        `message` saying what to fix when there is not.
+        """
+        report = {"server_url": self.config.server_url, "public_base_url": self.config.public_base_url}
+        try:
+            version = await self._command_client().version()
+        except CommandServiceError as exc:
+            return JSONResponse(
+                {**report, "ok": False, "command_error": exc.code, "message": self._rejection_message(exc.code)}
+            )
+        except Exception as exc:  # noqa: BLE001 -- a diagnostic reports the failure rather than raising it
+            return JSONResponse(
+                {
+                    **report,
+                    "ok": False,
+                    "message": (
+                        f"Could not reach the document server at {self.config.server_url}: {exc!s} "
+                        f"({type(exc).__name__}). Check plugins.onlyoffice.server_url and that this daemon can "
+                        "open a connection to it."
+                    ),
+                }
+            )
+        return JSONResponse(
+            {
+                **report,
+                "ok": True,
+                "version": version,
+                "message": (
+                    f"The document server at {self.config.server_url} answered, version {version}. It fetches "
+                    f"plugins.onlyoffice.public_base_url ({self.config.public_base_url}) itself, so that address "
+                    "has to be reachable from the document server and not only from this browser."
+                ),
+            }
+        )
 
     async def _list_documents(self, request: Request) -> JSONResponse:
         documents = await asyncio.to_thread(list_documents, self.config.documents_dir)
@@ -272,14 +277,14 @@ class OnlyOfficeAdapter(BaseAdapter):
         except ValueError:
             body = None
         if not isinstance(body, dict):
-            return JSONResponse({"error": 1, "message": "callback body is not a JSON object"}, status_code=400)
+            return _callback_refusal("callback body is not a JSON object", 400)
         if (rejection := self._verify_callback(request, body)) is not None:
             return rejection
         try:
             path = resolve(self.config.documents_dir, relative)
         except ValueError as exc:
             logger.warning("onlyoffice callback for %s refused: %s", relative, exc)
-            return JSONResponse({"error": 1, "message": "the callback path was refused"}, status_code=403)
+            return _callback_refusal("the callback path was refused", 403)
 
         status = body.get("status")
         key = body.get("key")
@@ -305,7 +310,7 @@ class OnlyOfficeAdapter(BaseAdapter):
             try:
                 download = await self.http.get(body["url"])
                 download.raise_for_status()
-                # The download runs for up to DOWNLOAD_TIMEOUT and holds nothing,
+                # The download runs for up to DOWNLOAD_TIMEOUT and holds no lock,
                 # so a whole agent turn fits between the check above and this one,
                 # and these bytes are then the ones it replaced.
                 if not self.sessions.is_current_key(relative, key):
@@ -313,13 +318,13 @@ class OnlyOfficeAdapter(BaseAdapter):
                 await asyncio.to_thread(write_atomic, path, download.content)
             except Exception as exc:  # noqa: BLE001 -- any failure here has to reach the document server as a retry
                 logger.warning("onlyoffice save for %s failed: %s", relative, exc)
-                return JSONResponse({"error": 1, "message": "the save could not be written"})
+                return _callback_refusal("the save could not be written", 200)
             logger.info("onlyoffice saved %s (status %s)", relative, status)
             self.sessions.deliver(relative)
         elif status == STATUS_CLOSED_UNCHANGED:
             # A session that closed with nothing typed since its last save parks
             # no payload, and the file on disk is already what it held. That is
-            # still the answer a turn parked on a save asked for.
+            # still the answer for a turn parked on a save.
             logger.info("onlyoffice closed %s with nothing to save", relative)
             self.sessions.deliver(relative)
         return JSONResponse({"error": 0})
@@ -360,9 +365,9 @@ class OnlyOfficeAdapter(BaseAdapter):
             A 401 response, or None when the path checks out.
         """
         if not (token := request.query_params.get("doc_token")):
-            return JSONResponse({"error": 1, "message": "missing doc_token"}, status_code=401)
+            return _callback_refusal("missing doc_token")
         if (refusal := self._token_refusal(token, relative, USE_CALLBACK)) is not None:
-            return JSONResponse({"error": 1, "message": refusal}, status_code=401)
+            return _callback_refusal(refusal)
         return None
 
     def _verify_callback(self, request: Request, body: dict) -> JSONResponse | None:
@@ -380,18 +385,18 @@ class OnlyOfficeAdapter(BaseAdapter):
             token = _bearer(request)
             wrapped = True
         if not token:
-            return JSONResponse({"error": 1, "message": "missing token"}, status_code=401)
+            return _callback_refusal("missing token")
         try:
             claims = jwt.verify(token, self.jwt_secret())
         except ValueError as exc:
-            return JSONResponse({"error": 1, "message": str(exc)}, status_code=401)
+            return _callback_refusal(str(exc))
         signed = claims.get("payload") if wrapped else claims
         # Field-by-field alone matches absence with absence, so a token signing
         # none of them would authenticate a body carrying none of them.
         if not isinstance(signed, dict) or "status" not in signed:
-            return JSONResponse({"error": 1, "message": "token does not sign a callback"}, status_code=401)
+            return _callback_refusal("token does not sign a callback")
         if any(signed.get(f) != body.get(f) for f in ("status", "url", "key")):
-            return JSONResponse({"error": 1, "message": "token does not sign this callback body"}, status_code=401)
+            return _callback_refusal("token does not sign this callback body")
         return None
 
     # ── config building ──
@@ -472,7 +477,6 @@ def create_adapter(*, config, agents_config, session_store, identity_map):
     Raises:
         ValidationError: The block is enabled and the model cannot read it.
     """
-    config = config or {}
     if not config.get("enabled"):
         logger.info("onlyoffice plugin installed but disabled (set plugins.onlyoffice.enabled: true to activate)")
         return None

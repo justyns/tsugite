@@ -8,8 +8,6 @@ deleted can still ship `word/_rels/comments.xml.rels` with nothing behind it, so
 the relationship file proves nothing about the part.
 """
 
-from __future__ import annotations
-
 import re
 import xml.etree.ElementTree as ET
 import zipfile
@@ -33,11 +31,6 @@ from tsugite_onlyoffice.docx import (
 )
 
 AUTHOR = "Review Agent"
-
-
-def names(path):
-    with zipfile.ZipFile(path) as archive:
-        return archive.namelist()
 
 
 def commented(path, *operations):
@@ -90,9 +83,9 @@ def _resequenced_para_ids(document_xml, comments_xml):
 def rewrite(path, change):
     """Rebuild a package in place, passing every part through `change(name, data)`."""
     with zipfile.ZipFile(path) as archive:
-        entries = [(info, archive.read(info)) for info in archive.infolist()]
+        parts = [(info, archive.read(info)) for info in archive.infolist()]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for info, data in entries:
+        for info, data in parts:
             archive.writestr(info, change(info.filename, data))
 
 
@@ -134,7 +127,7 @@ def edit_comment_text(path, before, after):
 def test_the_first_comment_creates_the_comments_part(plain_docx):
     commented(plain_docx, lambda d: d.comment("Quarterly review", "Is this the final title?", AUTHOR))
 
-    assert COMMENTS_PART in names(plain_docx)
+    assert COMMENTS_PART in entries(plain_docx)
 
 
 def test_the_first_comment_registers_its_content_type(plain_docx):
@@ -156,11 +149,11 @@ def test_the_first_comment_registers_its_relationship(plain_docx):
 
 
 def test_comment_rels_without_a_comments_part_still_gets_one(orphan_comment_rels_docx):
-    assert COMMENTS_PART not in names(orphan_comment_rels_docx)
+    assert COMMENTS_PART not in entries(orphan_comment_rels_docx)
 
     document = commented(orphan_comment_rels_docx, lambda d: d.comment(1, "First note.", AUTHOR))
 
-    assert COMMENTS_PART in names(orphan_comment_rels_docx)
+    assert COMMENTS_PART in entries(orphan_comment_rels_docx)
     assert [entry["text"] for entry in document.comments()] == ["First note."]
 
 

@@ -17,6 +17,8 @@ from onlyoffice_helpers import (
     callback_body,
     callback_url,
 )
+from tsugite_onlyoffice import jwt
+from tsugite_onlyoffice.adapter import USE_FILE
 
 CONFIG_URL = "/api/plugins/onlyoffice/config?path=notes.docx"
 FILE_URL = "/api/plugins/onlyoffice/file/"
@@ -42,9 +44,6 @@ def ui_theme(client, headers, theme):
 
 
 def file_token(document, secret=JWT_SECRET):
-    from tsugite_onlyoffice import jwt
-    from tsugite_onlyoffice.adapter import USE_FILE
-
     return jwt.sign({"document": document, "use": USE_FILE}, secret)
 
 
@@ -138,7 +137,7 @@ def test_config_urls_are_absolute_and_use_the_public_base_url(client, headers):
 
 
 def test_config_hands_back_the_one_spelling_it_signed_everything_for(client, headers):
-    """Both URLs travel to the document server, and any normalising client or proxy
+    """Both URLs travel to the document server, and any normalizing client or proxy
     fetches `/file/notes.docx`, which a token minted for `./notes.docx` refuses. The
     announce carries the canonical spelling too, so a page holding the caller's own
     never matches one."""
@@ -150,16 +149,12 @@ def test_config_hands_back_the_one_spelling_it_signed_everything_for(client, hea
 
 
 def test_config_token_signs_the_config_it_travels_with(client, headers):
-    from tsugite_onlyoffice import jwt
-
     config = config_of(client, headers)
     claims = jwt.verify(config["token"], JWT_SECRET)
     assert {k: v for k, v in claims.items() if k != "exp"} == {k: v for k, v in config.items() if k != "token"}
 
 
 def test_file_url_token_names_the_document_it_was_minted_for(client, headers):
-    from tsugite_onlyoffice import jwt
-
     config = config_of(client, headers, "reports/q1.docx")
     token = config["document"]["url"].partition("?token=")[2]
     assert jwt.verify(token, JWT_SECRET)["document"] == "reports/q1.docx"
@@ -167,8 +162,6 @@ def test_file_url_token_names_the_document_it_was_minted_for(client, headers):
 
 def test_callback_url_token_names_the_document_and_does_not_expire(client, headers):
     """A callback arrives whenever the editor closes, so an expiry here would fail a real save."""
-    from tsugite_onlyoffice import jwt
-
     config = config_of(client, headers, "reports/q1.docx")
     token = config["editorConfig"]["callbackUrl"].partition("?doc_token=")[2]
     claims = jwt.verify(token, JWT_SECRET)

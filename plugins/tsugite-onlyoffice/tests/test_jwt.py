@@ -22,9 +22,7 @@ def test_round_trip():
 
 def test_tampered_payload_does_not_verify():
     """Re-base64 the body of a genuine token and keep its signature."""
-    parts = jwt.sign({"role": "reader"}, SECRET, expires_in=0).split(".")
-    assert len(parts) == 3
-    header, _claims, signature = parts
+    header, _claims, signature = jwt.sign({"role": "reader"}, SECRET, expires_in=0).split(".")
     with pytest.raises(ValueError):
         jwt.verify(f"{header}.{_seg({'role': 'admin'})}.{signature}", SECRET)
 
