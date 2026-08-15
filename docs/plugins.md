@@ -63,7 +63,7 @@ tsugite/
 
 ## Plugin config
 
-Each plugin can receive a config dict from the daemon's `~/.tsugite/daemon.yaml` under `plugins:`:
+Each plugin can receive a config dict from `plugins:` in the daemon's `~/.tsugite/daemon.yaml`, or from `plugins` in `config.json` for everything outside the daemon's adapters:
 
 ```yaml
 plugins:
@@ -73,6 +73,25 @@ plugins:
 ```
 
 The `register_*` callable receives this dict as its sole argument. `enabled: false` skips loading entirely.
+
+## Single-file plugins
+
+A `path` entry names one Python file instead of an installed package. Importing it registers its `@tool`, `@hook`, and `@subscribe` decorators, as a module-only entry point does:
+
+```json
+{
+  "plugins": {
+    "dashboard": {"path": "~/ws/.tsugite/plugins/dashboard.py"}
+  }
+}
+```
+
+Runnable example: [examples/local_plugin.py](../examples/local_plugin.py).
+
+- Relative paths resolve against the config file's directory, not the working directory.
+- An installed plugin of the same name wins; the local file is skipped with a warning.
+- The file runs with the same privileges as an installed plugin.
+- Adapters, providers, sandboxes, and history/secret backends need a package. That includes web UI pages, which come from an adapter's `get_ui_surfaces()`.
 
 ## Inspecting plugins
 

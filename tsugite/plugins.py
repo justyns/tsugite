@@ -1,9 +1,12 @@
 """Plugin discovery and loading via Python entry points."""
 
 import importlib.metadata
+import importlib.util
 import inspect
 import logging
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from tsugite.events.bus import Subscription
 
@@ -59,13 +62,57 @@ class PluginInfo:
         return cls(name=ep.name, group=group, entry_point=ep.value, **kwargs)
 
 
-def _iter_plugins(group: str, plugin_config: dict | None = None):
+@dataclass(frozen=True)
+class LocalPluginEntryPoint:
+    """A configured .py file standing in for an entry point. Importing it registers,
+    so the loaders treat it as module-only."""
+
+    name: str
+    value: str
+
+    def load(self):
+        spec = importlib.util.spec_from_file_location(f"tsugite_local_plugins.{self.name}", self.value)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"Not an importable Python file: {self.value}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+
+def _resolve_plugin_config(plugin_config: dict | None) -> dict:
+    """Merge a caller's plugin map over the core config's, so every path sees the
+    same plugins. The daemon passes its own daemon.yaml map for adapters."""
+    from tsugite.config import load_config
+
+    return {**load_config().plugins, **(plugin_config or {})}
+
+
+def _local_entry_points(group: str, plugin_config: dict, installed: set[str]):
+    """Yield a stand-in entry point per configured local plugin file. Only the
+    decorator group takes them, since a local file registers by being imported."""
+    if group != GROUP_PLUGINS:
+        return
+    from tsugite.config import get_config_path
+
+    # Config-relative, so the same config names the same file from any cwd.
+    config_dir = get_config_path().parent
+    for name, cfg in plugin_config.items():
+        if not cfg.get("path"):
+            continue
+        if name in installed:
+            logger.warning("Local plugin '%s' has the name of an installed plugin, skipping the local file", name)
+            continue
+        yield LocalPluginEntryPoint(name, str(config_dir / Path(cfg["path"]).expanduser()))
+
+
+def _iter_plugins(group: str, plugin_config: dict):
     """Yield (entry_point, config_dict, enabled) for each plugin in a group."""
-    plugin_config = plugin_config or {}
-    for ep in importlib.metadata.entry_points(group=group):
+    installed = list(importlib.metadata.entry_points(group=group))
+    names = {ep.name for ep in installed}
+    for ep in [*installed, *_local_entry_points(group, plugin_config, names)]:
         cfg = plugin_config.get(ep.name, {})
-        enabled = cfg.get("enabled", True)
-        yield ep, cfg, enabled
+        yield ep, cfg, cfg.get("enabled", True)
 
 
 def load_backend_entry_point(group: str, name: str):
@@ -83,6 +130,7 @@ def load_backend_entry_point(group: str, name: str):
 
 def discover_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     """Scan entry points for all plugin groups."""
+    plugin_config = _resolve_plugin_config(plugin_config)
     plugins = []
     for group in PLUGIN_GROUPS:
         for ep, _cfg, enabled in _iter_plugins(group, plugin_config):
@@ -96,7 +144,7 @@ def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[
     `summarize(payload) -> str` adds detail to the success log line.
     """
     results = []
-    for ep, cfg, enabled in _iter_plugins(group, plugin_config):
+    for ep, cfg, enabled in _iter_plugins(group, _resolve_plugin_config(plugin_config)):
         if not enabled:
             results.append(PluginInfo.from_entry_point(ep, group, enabled=False))
             logger.debug("Plugin '%s' (%s) disabled, skipping", ep.name, group)
@@ -228,7 +276,7 @@ def load_adapter_plugins(
     (config, agents_config, session_store, identity_map) and returns a BaseAdapter instance.
     """
     results = []
-    for ep, cfg, enabled in _iter_plugins(GROUP_ADAPTERS, plugin_config):
+    for ep, cfg, enabled in _iter_plugins(GROUP_ADAPTERS, _resolve_plugin_config(plugin_config)):
         if not enabled:
             results.append((PluginInfo.from_entry_point(ep, GROUP_ADAPTERS, enabled=False), None))
             logger.debug("Adapter plugin '%s' disabled, skipping", ep.name)

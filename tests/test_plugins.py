@@ -2,15 +2,19 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tsugite.events import EventBus, TaskStartEvent
 from tsugite.events.bus import Subscription
 from tsugite.hooks import HookRule
 from tsugite.plugins import (
+    GROUP_PLUGINS,
     discover_plugins,
     get_plugin_subscriptions,
     load_adapter_plugins,
     load_event_subscriber_plugins,
     load_hook_plugins,
+    load_module_only_plugins,
     load_tool_plugins,
 )
 
@@ -487,3 +491,78 @@ def test_all_group_constants_are_enumerated():
     group_consts = {v for k, v in vars(plugins_mod).items() if k.startswith("GROUP_") and isinstance(v, str)}
     missing = group_consts - set(plugins_mod.PLUGIN_GROUPS)
     assert not missing, f"GROUP_* constants missing from PLUGIN_GROUPS: {sorted(missing)}"
+
+
+class TestLocalFilePlugins:
+    """A `path` entry in the plugin config points at a single trusted .py file that
+    registers the same way an installed decorator plugin does."""
+
+    @pytest.fixture(autouse=True)
+    def _no_installed_plugins(self):
+        """Local files are the only plugins in play unless a test says otherwise."""
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[]):
+            yield
+
+    def _write_plugin(self, tmp_path, body="MARKER = 'loaded'\n"):
+        plugin_file = tmp_path / "dashboard.py"
+        plugin_file.write_text(body)
+        return plugin_file
+
+    def test_discovered_with_its_path_as_the_entry_point(self, tmp_path):
+        plugin_file = self._write_plugin(tmp_path)
+        result = discover_plugins({"dashboard": {"path": str(plugin_file)}})
+
+        assert [(p.name, p.group, p.entry_point) for p in result] == [
+            ("dashboard", "tsugite.plugins", str(plugin_file))
+        ]
+
+    def test_loading_imports_the_file(self, tmp_path):
+        ran = tmp_path / "ran"
+        plugin_file = self._write_plugin(tmp_path, f"open({str(ran)!r}, 'w').close()\n")
+
+        results = load_module_only_plugins(GROUP_PLUGINS, {"dashboard": {"path": str(plugin_file)}})
+
+        assert ran.exists()
+        assert results[0].loaded is True
+
+    def test_disabled_file_is_not_imported(self, tmp_path):
+        plugin_file = self._write_plugin(tmp_path, "raise AssertionError('must not be imported')\n")
+        config = {"dashboard": {"path": str(plugin_file), "enabled": False}}
+
+        results = load_module_only_plugins(GROUP_PLUGINS, config)
+
+        assert [(r.name, r.enabled, r.loaded) for r in results] == [("dashboard", False, False)]
+
+    def test_import_error_is_isolated_and_reported(self, tmp_path):
+        broken = tmp_path / "broken.py"
+        broken.write_text("raise RuntimeError('boom')\n")
+        working = self._write_plugin(tmp_path)
+        config = {"broken": {"path": str(broken)}, "dashboard": {"path": str(working)}}
+
+        results = load_module_only_plugins(GROUP_PLUGINS, config)
+
+        assert [(r.name, r.loaded, "boom" in (r.error or "")) for r in results] == [
+            ("broken", False, True),
+            ("dashboard", True, False),
+        ]
+
+    def test_relative_path_resolves_against_the_config_dir(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / "cfg"
+        config_dir.mkdir()
+        plugin_file = config_dir / "dashboard.py"
+        plugin_file.write_text("MARKER = 'loaded'\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("tsugite.config.get_config_path", lambda: config_dir / "config.json")
+
+        result = discover_plugins({"dashboard": {"path": "dashboard.py"}})
+
+        assert [p.entry_point for p in result] == [str(plugin_file)]
+
+    def test_installed_plugin_of_the_same_name_wins(self, tmp_path):
+        plugin_file = self._write_plugin(tmp_path)
+        ep = _make_entry_point("dashboard", "tsugite_dashboard", "tsugite.plugins")
+
+        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
+            result = discover_plugins({"dashboard": {"path": str(plugin_file)}})
+
+        assert [p.entry_point for p in result] == ["tsugite_dashboard"]

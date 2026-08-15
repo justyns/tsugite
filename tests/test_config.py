@@ -111,6 +111,7 @@ def test_config_with_empty_values(tmp_path):
         "skill_paths": [],
         "agent_paths": [],
         "skill_ttl_default": 10,
+        "plugins": {},
     }
 
 
@@ -177,6 +178,7 @@ def test_agent_paths_default_empty(tmp_path):
     config_path = tmp_path / "config.json"
     config = load_config(config_path)
     assert config.agent_paths == []
+
 
 def test_config_path_never_escapes_the_test_sandbox(xdg_config_file):
     """Guards the isolate_config_files fixture: a test that writes config must never

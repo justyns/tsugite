@@ -1,5 +1,6 @@
 """Basic smoke tests for CLI subcommands."""
 
+import json
 import tempfile
 from unittest.mock import MagicMock, patch
 
@@ -157,3 +158,17 @@ class TestChatCommand:
                 # Built-in default agent exists and can be used for chat
                 assert result.exit_code == 0
                 mock_run.assert_called_once()
+
+
+class TestPluginSubcommands:
+    """Test plugin CLI subcommands."""
+
+    def test_plugin_list_shows_a_configured_local_file(self, tmp_path, xdg_config_file):
+        plugin_file = tmp_path / "dashboard.py"
+        plugin_file.write_text("MARKER = 'loaded'\n")
+        xdg_config_file.write_text(json.dumps({"plugins": {"dashboard": {"path": str(plugin_file)}}}))
+
+        result = runner.invoke(app, ["plugin", "list"])
+
+        assert result.exit_code == 0
+        assert "dashboard" in result.stdout

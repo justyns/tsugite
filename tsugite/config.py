@@ -3,7 +3,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -149,6 +149,7 @@ class Config(BaseModel):
     skill_paths: List[str] = Field(default_factory=list)
     agent_paths: List[str] = Field(default_factory=list)
     skill_ttl_default: int = 10
+    plugins: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     secrets: Optional[SecretsConfig] = None
     history: Optional[HistoryConfig] = None
     sandbox: Optional[SandboxSettings] = None
