@@ -302,15 +302,18 @@ def get_ui_handler(custom_logger: Optional[Any]) -> Optional[Any]:
 def set_multistep_ui_context(custom_logger: Optional[Any], step_number: int, step_name: str, total_steps: int) -> None:
     """Set multistep context in UI handler if available.
 
+    Only a handler that renders a live progress display tracks this, and the handler
+    contract is `handle_event` alone - a plugin may ship one subclassing nothing.
+
     Args:
         custom_logger: Custom logger instance (may be None)
         step_number: Current step number
         step_name: Name of current step
         total_steps: Total number of steps
     """
-    ui_handler = get_ui_handler(custom_logger)
-    if ui_handler:
-        ui_handler.set_multistep_context(step_number, step_name, total_steps)
+    setter = getattr(get_ui_handler(custom_logger), "set_multistep_context", None)
+    if setter:
+        setter(step_number, step_name, total_steps)
 
 
 def clear_multistep_ui_context(custom_logger: Optional[Any]) -> None:
@@ -319,9 +322,9 @@ def clear_multistep_ui_context(custom_logger: Optional[Any]) -> None:
     Args:
         custom_logger: Custom logger instance (may be None)
     """
-    ui_handler = get_ui_handler(custom_logger)
-    if ui_handler:
-        ui_handler.clear_multistep_context()
+    clearer = getattr(get_ui_handler(custom_logger), "clear_multistep_context", None)
+    if clearer:
+        clearer()
 
 
 def print_step_progress(

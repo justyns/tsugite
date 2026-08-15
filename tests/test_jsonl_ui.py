@@ -1,7 +1,12 @@
 """Tests for JSONL UI handler."""
 
 import json
+from io import StringIO
+from types import SimpleNamespace
 
+from rich.console import Console
+
+from tsugite.agent_runner.helpers import clear_multistep_ui_context, set_multistep_ui_context
 from tsugite.events import (
     CodeExecutionEvent,
     ErrorEvent,
@@ -251,3 +256,34 @@ def test_jsonl_stream_chunk_and_complete(capsys):
     lines = [json.loads(line) for line in capsys.readouterr().out.strip().split("\n")]
     assert [e["type"] for e in lines] == ["stream_chunk", "stream_chunk", "stream_complete"]
     assert [e.get("chunk") for e in lines[:2]] == ["Hel", "lo"]
+
+
+def test_multistep_context_is_skipped_on_handlers_that_do_not_track_it():
+    """The runner calls set/clear_multistep_context on whatever handler is wired up,
+    and only the Rich console handler defines them.
+
+    The bare `object()` is the case that matters: the built-in handlers share a base
+    class, so testing those alone would also pass if the methods were added to that
+    base, leaving the daemon's CompositeUIHandler and plugin handlers crashing.
+    """
+    from tsugite.ui.repl_handler import ReplUIHandler
+
+    for handler in (JSONLUIHandler(), ReplUIHandler(Console(file=StringIO())), object()):
+        custom_logger = SimpleNamespace(ui_handler=handler)
+        set_multistep_ui_context(custom_logger, 1, "research", 3)
+        clear_multistep_ui_context(custom_logger)
+
+
+def test_multistep_context_still_reaches_the_handler_that_tracks_it():
+    """The guard must skip only what is absent - the console handler's real
+    implementation has to keep being called."""
+    from tsugite.ui.base import CustomUIHandler
+
+    handler = CustomUIHandler(Console(file=StringIO()))
+    custom_logger = SimpleNamespace(ui_handler=handler)
+
+    set_multistep_ui_context(custom_logger, 2, "research", 4)
+    assert handler.state.multistep_context == {"step_number": 2, "step_name": "research", "total_steps": 4}
+
+    clear_multistep_ui_context(custom_logger)
+    assert handler.state.multistep_context is None
