@@ -33,6 +33,7 @@
     sessionTopic,
   } from './sessionModel';
   import { attachRecordToChat, copyReference } from './attachRecord';
+  import { chatRouteParams } from './chatLink';
 
   let {
     rows,
@@ -73,6 +74,13 @@
     event.preventDefault();
     menu = { x: event.clientX, y: event.clientY, row };
   }
+  function openInNewTab(row: Row) {
+    spaces.open({
+      kind: 'chat',
+      params: chatRouteParams(row.id, agent),
+      title: row.title ?? 'Chat',
+    });
+  }
   async function copyId(id: string) {
     try {
       await navigator.clipboard?.writeText(id);
@@ -98,12 +106,7 @@
     return [
       {
         label: 'Open in new tab',
-        run: () =>
-          spaces.open({
-            kind: 'chat',
-            params: { sessionId: row.id, agent },
-            title: row.title ?? 'Chat',
-          }),
+        run: () => openInNewTab(row),
       },
       row.pinned
         ? { label: 'Unpin', run: () => void sessions.unpin(row.id) }
@@ -267,6 +270,7 @@
         isPinned={row.pinned}
         isUnread={row.unread}
         onSelect={() => onSelect(row.id)}
+        onOpenNewTab={() => openInNewTab(row)}
       />
     </div>
   {/snippet}

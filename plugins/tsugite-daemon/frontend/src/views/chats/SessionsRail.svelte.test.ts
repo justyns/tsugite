@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser/context" />
 import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import SessionsRail from './SessionsRail.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
 import { collectLeaves } from '$lib/shell/mux/layout';
@@ -11,6 +11,7 @@ import type { SessionRow } from '$lib/stores/sessions.svelte';
 // The ended section persists its open/closed choice; reset it so each test
 // starts from the collapsed default.
 beforeEach(() => localStorage.removeItem('tsugite_rail_ended_open'));
+afterEach(() => vi.restoreAllMocks());
 
 function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -129,4 +130,17 @@ test('a status: filter surfaces finished sessions even though ended is collapsed
   await page.getByLabelText('Filter sessions').fill('status:completed');
   await expect.element(page.getByText('wrapped up sync')).toBeInTheDocument();
   await expect.element(page.getByText('live draft')).not.toBeInTheDocument();
+});
+
+test('double-clicking a session row docks it as a fresh chat tab', async () => {
+  render(SessionsRail, { ...base, rows: [row('s3', { title: 'reconnect backoff' })] });
+  const before = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs).length;
+
+  await userEvent.dblClick(page.getByRole('button', { name: /reconnect backoff/ }));
+
+  const tabs = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs);
+  expect(tabs.length).toBe(before + 1);
+  const docked = tabs[tabs.length - 1]!;
+  expect(docked.kind).toBe('chat');
+  expect(docked.params).toEqual({ sessionId: 's3', agent: 'smokeagent' });
 });

@@ -45,6 +45,7 @@
   import { api } from '$lib/api/client';
   import { isFinishedSession, formatWhen, sessionTopic } from './views/chats/sessionModel';
   import { neighborSession } from './views/chats/chatNav';
+  import { chatRouteParams } from './views/chats/chatLink';
   import { resolveDefaultSession } from './views/chats/defaultSession';
   import { composerPrefill } from './views/chats/composerPrefill.svelte';
   import { modelPickerRequest } from './views/chats/modelPickerSignal.svelte';
@@ -120,7 +121,7 @@
   }
   function openChat(sessionId: string, agent?: string): void {
     const title = sessions.ordered.find((r) => r.id === sessionId)?.title ?? 'Chat';
-    openSurface({ kind: 'chat', params: { sessionId, ...(agent ? { agent } : {}) }, title });
+    openSurface({ kind: 'chat', params: chatRouteParams(sessionId, agent), title });
   }
   function openTerminal(terminalId: string): void {
     const title = terminals.list.find((t) => t.id === terminalId)?.cmd ?? 'Terminal';
@@ -141,7 +142,7 @@
   // pick is a history entry - browser back/forward walks conversations,
   // terminals, and files again. The router effect below does the actual open.
   function selectChat(sessionId: string, agent?: string): void {
-    navigate('chats', { sessionId, ...(agent ? { agent } : {}) });
+    navigate('chats', chatRouteParams(sessionId, agent));
   }
   function selectTerminal(terminalId: string): void {
     navigate('terminals', { terminalId });

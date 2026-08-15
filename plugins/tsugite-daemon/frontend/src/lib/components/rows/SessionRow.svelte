@@ -20,6 +20,7 @@
     isUnread = false,
     activeJobCount = 0,
     onSelect,
+    onOpenNewTab,
   }: {
     title: string;
     when: string;
@@ -32,6 +33,7 @@
     isUnread?: boolean;
     activeJobCount?: number;
     onSelect?: () => void;
+    onOpenNewTab?: () => void;
   } = $props();
 
   const meta = $derived(sessionStateMeta(state));
@@ -64,6 +66,7 @@
   aria-current={isActive ? 'true' : undefined}
   aria-label={ariaLabel}
   onclick={() => onSelect?.()}
+  ondblclick={() => onOpenNewTab?.()}
   onkeydown={handleKeydown}
 >
   <span class="ind">
