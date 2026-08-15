@@ -295,12 +295,18 @@ def reset_attachment_handlers_fixture():
 def isolate_config_files(tmp_path, monkeypatch):
     """Isolate config files for each test to prevent cross-test contamination.
 
-    Uses XDG_CONFIG_HOME instead of HOME because Path.home() doesn't respect
-    the HOME environment variable on Unix systems (it reads from password database).
+    HOME is what makes this airtight. get_xdg_config_path() returns the first path
+    that exists, and XDG_CONFIG_HOME only covers a filename this fixture creates
+    there - every other one (custom_tools.yaml, attachments.json, daemon.yaml) falls
+    through to ~/.config/tsugite/, which a test that writes config then overwrites
+    for real.
     """
-    test_config = tmp_path / "config"
-    test_config.mkdir(exist_ok=True)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(test_config))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    config_file = tmp_path / "config" / "tsugite" / "config.json"
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text("{}")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_file.parent.parent))
 
     # Isolate the data dir too so history (now read/written through the backend, which
     # resolves get_history_dir()) never touches real user data or leaks between tests.
@@ -308,7 +314,13 @@ def isolate_config_files(tmp_path, monkeypatch):
     test_data.mkdir(exist_ok=True)
     monkeypatch.setenv("XDG_DATA_HOME", str(test_data))
 
-    yield
+    yield config_file
+
+
+@pytest.fixture
+def xdg_config_file(isolate_config_files):
+    """The isolated config.json a test may write, for tests that drive config loading."""
+    return isolate_config_files
 
 
 @pytest.fixture

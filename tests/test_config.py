@@ -2,9 +2,13 @@
 
 import json
 
+import pytest
+
 from tsugite.config import (
     Config,
+    get_config_path,
     get_model_alias,
+    get_xdg_config_path,
     load_config,
     remove_model_alias,
     save_config,
@@ -173,3 +177,15 @@ def test_agent_paths_default_empty(tmp_path):
     config_path = tmp_path / "config.json"
     config = load_config(config_path)
     assert config.agent_paths == []
+
+def test_config_path_never_escapes_the_test_sandbox(xdg_config_file):
+    """Guards the isolate_config_files fixture: a test that writes config must never
+    reach the real ~/.config/tsugite/config.json."""
+    assert get_config_path() == xdg_config_file
+
+
+@pytest.mark.parametrize("filename", ["config.json", "custom_tools.yaml", "attachments.json", "daemon.yaml"])
+def test_every_config_filename_stays_in_the_test_sandbox(filename, tmp_path):
+    """XDG_CONFIG_HOME only covers filenames the fixture creates there; the rest
+    resolve under HOME, which is why the fixture overrides that too."""
+    assert tmp_path in get_xdg_config_path(filename).parents
