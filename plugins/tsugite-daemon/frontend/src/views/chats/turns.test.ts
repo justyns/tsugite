@@ -1489,3 +1489,108 @@ describe('buildTimeline (windowed suffix)', () => {
     expect(t.turns.map((x) => x.role)).toEqual(['ai', 'user', 'ai']);
   });
 });
+
+describe('buildTimeline (tsu_group execution groups)', () => {
+  it('replay: groups carry their calls, and ungrouped calls stay loose', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      {
+        type: 'code_execution',
+        code: 'read_file(path="a")\nwith tsu_group("read the configs"):\n    read_file(path="b")',
+        groups: [
+          {
+            group_id: 'g1',
+            title: 'read the configs',
+            parent_group_id: null,
+            success: true,
+            duration_ms: 40,
+          },
+        ],
+        tool_calls: [
+          { tool: 'read_file', arguments: { path: 'a' }, success: true },
+          { tool: 'read_file', arguments: { path: 'b' }, success: true, group_id: 'g1' },
+        ],
+        id: 2,
+      },
+    ]);
+    const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+    expect(code.groups).toEqual([
+      { id: 'g1', title: 'read the configs', success: true, meta: '40ms' },
+    ]);
+    expect(code.calls.map((c) => c.groupId)).toEqual([undefined, 'g1']);
+  });
+
+  it('live: group_start opens a group the following tool calls belong to', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'code', content: 'x', id: 2 },
+      { type: 'tool_call', tool: 'read_file', id: 3 },
+      { type: 'group_start', group_id: 'g1', title: 'read the configs', id: 4 },
+      { type: 'tool_call', tool: 'read_file', group_id: 'g1', id: 5 },
+      { type: 'group_end', group_id: 'g1', success: false, duration_ms: 12, error: 'boom', id: 6 },
+    ]);
+    const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+    expect(code.groups).toEqual([
+      { id: 'g1', title: 'read the configs', success: false, meta: '12ms', error: 'boom' },
+    ]);
+    expect(code.calls.map((c) => c.groupId)).toEqual([undefined, 'g1']);
+  });
+
+  it('ignores a group_end whose start never arrived', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'code', content: 'x', id: 2 },
+      { type: 'group_end', group_id: 'ghost', success: true, id: 3 },
+    ]);
+    const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+    expect(code.groups).toBeUndefined();
+  });
+
+  it('drops a redelivered group_start instead of duplicating the section', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'code', content: 'x', id: 2 },
+      { type: 'group_start', group_id: 'g1', title: 'once', id: 3 },
+      { type: 'group_start', group_id: 'g1', title: 'once', id: 4 },
+    ]);
+    const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+    expect(code.groups).toHaveLength(1);
+  });
+
+  it('a stray group frame after the turn closed does not open a phantom turn', () => {
+    const closed = [
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'code', content: 'x', id: 2 },
+      { type: 'final_result', result: 'done', id: 3 },
+      { type: 'session_end', id: 4 },
+    ];
+    const before = buildTimeline(closed).turns.length;
+    const after = buildTimeline([
+      ...closed,
+      { type: 'group_start', group_id: 'g9', title: 'stray', id: 5 },
+    ]).turns.length;
+    expect(after).toBe(before);
+  });
+
+  it('a group_end with no success leaves the group unresolved, as replay does', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'code', content: 'x', id: 2 },
+      { type: 'group_start', group_id: 'g1', title: 'g', id: 3 },
+      { type: 'group_end', group_id: 'g1', duration_ms: 4, id: 4 },
+    ]);
+    const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+    expect(code.groups![0]!.success).toBeUndefined();
+  });
+
+  it('malformed persisted groups are ignored, not thrown on', () => {
+    for (const groups of [null, 'x', [{}], [{ group_id: 42 }]]) {
+      const t = buildTimeline([
+        { type: 'user_input', text: 'go', id: 1 },
+        { type: 'code_execution', code: 'x', groups, tool_calls: [], id: 2 },
+      ]);
+      const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
+      expect(code.groups).toBeUndefined();
+    }
+  });
+});

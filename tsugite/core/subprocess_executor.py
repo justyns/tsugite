@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Helpers re-exported so the harness can import them without duplicating code
 _HARNESS_IMPORTS = textwrap.dedent("""\
     import ast
+    import contextlib
     import io
     import json
     import os
@@ -38,6 +39,7 @@ _HARNESS_IMPORTS = textwrap.dedent("""\
     import sys
     import time
     import traceback
+    import uuid
 """)
 
 _IPC_HELPER = textwrap.dedent("""\
@@ -80,7 +82,7 @@ _IPC_HELPER = textwrap.dedent("""\
         return resp.get("result")
 
     def _ipc_audit(event, tool, **kwargs):
-        _ipc_call("audit", event=event, tool=tool, **kwargs)
+        _ipc_call("audit", event=event, tool=tool, group_id=_current_group(), **kwargs)
 """)
 
 _RETURN_VALUE_STUB = textwrap.dedent("""\
@@ -108,6 +110,45 @@ _SEND_MESSAGE_STUB = textwrap.dedent("""\
             msg = ""
         _ipc_call("tool_call", name="send_message", kwargs={"message": str(msg)})
         return f"Message sent: {msg}"
+""")
+
+# Mirrors LocalExecutor._tsu_group; the two copies must stay behaviourally identical.
+_TSU_GROUP_STUB = textwrap.dedent("""\
+    _group_stack = []
+    _groups = []
+
+    def _current_group():
+        return _group_stack[-1] if _group_stack else None
+
+    @contextlib.contextmanager
+    def tsu_group(title):
+        record = {
+            "group_id": uuid.uuid4().hex[:12],
+            "title": _cap_call_text(str(title), 200),
+            "parent_group_id": _current_group(),
+        }
+        _groups.append(record)
+        _ipc_call("audit", event="group_start", **record)
+        _group_stack.append(record["group_id"])
+        t0 = time.perf_counter()
+        try:
+            yield
+            record["success"] = True
+        except BaseException as exc:
+            record["success"] = False
+            record["error"] = _cap_call_text(f"{type(exc).__name__}: {exc}", 500)
+            raise
+        finally:
+            _group_stack.pop()
+            record["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+            _ipc_call(
+                "audit",
+                event="group_end",
+                group_id=record["group_id"],
+                success=record.get("success", False),
+                duration_ms=record["duration_ms"],
+                error=record.get("error"),
+            )
 """)
 
 # Mirrors LocalExecutor._split_code_for_last_expr - duplicated because this runs
@@ -143,7 +184,10 @@ _TIMED_AUDIT_WRAPPER = textwrap.dedent("""\
     def _timed_audit_call(tool_name, fn, kwargs, sensitive_paths=()):
         _tools_called.append(tool_name)
         _audit_args = redact_sensitive_obj(kwargs, sensitive_paths)
+        _group = _current_group()
         _record = {"tool": tool_name, "arguments": _jsonable_call_args(_audit_args)}
+        if _group:
+            _record["group_id"] = _group
         _tool_calls.append(_record)
         _ipc_audit("tool_call", tool_name, args=_record["arguments"])
         t0 = time.time()
@@ -388,6 +432,7 @@ os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
 {_SEND_MESSAGE_STUB}
+{_TSU_GROUP_STUB}
 {_SPLIT_CODE_FN}
 
 PPRINT_WIDTH = 100
@@ -402,6 +447,7 @@ namespace = {{}}
 namespace["return_value"] = return_value
 namespace["final_answer"] = return_value  # backward-compat alias
 namespace["send_message"] = send_message
+namespace["tsu_group"] = tsu_group
 def _blocked_open(*args, **kwargs):
     raise RuntimeError(
         "open() is not available. Use the provided tools instead:\\n"
@@ -528,6 +574,7 @@ result = {{
     "return_value": _return_value if exec_error is None else None,
     "tools_called": _tools_called[:],
     "tool_calls": _tool_calls[:],
+    "groups": _groups[:],
     "variables_set": variables_set,
     "state_keys": state_keys,
 }}
@@ -722,6 +769,7 @@ with open(RESULT_PATH, "w") as f:
                 return_value=result_data.get("return_value"),
                 tools_called=result_data.get("tools_called", []),
                 tool_calls=result_data.get("tool_calls", []),
+                groups=result_data.get("groups", []),
                 variables_set=result_data.get("variables_set", {}),
                 state_keys=result_data.get("state_keys", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
@@ -833,13 +881,36 @@ with open(RESULT_PATH, "w") as f:
         if not self.event_bus:
             return
 
-        from tsugite.events import ToolCallEvent, ToolResultEvent
+        from tsugite.events import (
+            ExecutionGroupEndEvent,
+            ExecutionGroupStartEvent,
+            ToolCallEvent,
+            ToolResultEvent,
+        )
 
         event_type = msg.get("event")
         tool_name = msg.get("tool", "")
+        group_id = msg.get("group_id")
 
         if event_type == "tool_call":
-            self.event_bus.emit(ToolCallEvent(tool_name=tool_name, arguments=msg.get("args", {})))
+            self.event_bus.emit(ToolCallEvent(tool_name=tool_name, arguments=msg.get("args", {}), group_id=group_id))
+        elif event_type == "group_start":
+            self.event_bus.emit(
+                ExecutionGroupStartEvent(
+                    group_id=group_id,
+                    title=msg.get("title", ""),
+                    parent_group_id=msg.get("parent_group_id"),
+                )
+            )
+        elif event_type == "group_end":
+            self.event_bus.emit(
+                ExecutionGroupEndEvent(
+                    group_id=group_id,
+                    success=msg.get("success", True),
+                    duration_ms=msg.get("duration_ms"),
+                    error=msg.get("error"),
+                )
+            )
         elif event_type == "tool_result":
             self.event_bus.emit(
                 ToolResultEvent(

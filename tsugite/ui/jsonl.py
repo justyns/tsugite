@@ -7,6 +7,8 @@ from tsugite.events import (
     CodeExecutionEvent,
     ContentBlockEvent,
     ErrorEvent,
+    ExecutionGroupEndEvent,
+    ExecutionGroupStartEvent,
     FileReadEvent,
     FileWriteEvent,
     FinalAnswerEvent,
@@ -61,6 +63,8 @@ class JSONLUIHandler(EventDispatchMixin):
     - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
     - SkillUnloadedEvent  → {"type": "skill_unloaded", "name": str}
     - SecretAccessEvent   → {"type": "secret_access", "name": str}
+    - ExecutionGroupStartEvent → {"type": "group_start", "group_id": str, "title": str, "parent_group_id": str|null}
+    - ExecutionGroupEndEvent   → {"type": "group_end", "group_id": str, "success": bool, "duration_ms": int|null, "error": str|null}
 
     Success/Failure Patterns:
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
@@ -187,6 +191,25 @@ class JSONLUIHandler(EventDispatchMixin):
                 "duration_ms": event.duration_ms,
                 "summary": event.result_summary,
                 "step": event.step,
+            },
+        )
+
+    @handles(ExecutionGroupStartEvent)
+    def _handle_group_start(self, event: ExecutionGroupStartEvent) -> None:
+        self._emit(
+            "group_start",
+            {"group_id": event.group_id, "title": event.title, "parent_group_id": event.parent_group_id},
+        )
+
+    @handles(ExecutionGroupEndEvent)
+    def _handle_group_end(self, event: ExecutionGroupEndEvent) -> None:
+        self._emit(
+            "group_end",
+            {
+                "group_id": event.group_id,
+                "success": event.success,
+                "duration_ms": event.duration_ms,
+                "error": event.error,
             },
         )
 

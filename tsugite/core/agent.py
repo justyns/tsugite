@@ -685,6 +685,7 @@ class TsugiteAgent:
             duration_ms=duration_ms,
             tools_called=list(exec_result.tools_called) if exec_result.tools_called else None,
             tool_calls=tool_calls,
+            groups=[{k: _mask_str(v) for k, v in g.items()} for g in exec_result.groups] or None,
             last_statement_type=exec_result.last_statement_type,
             return_value_repr=return_value_repr,
             return_value_type=return_value_type,
@@ -1438,6 +1439,14 @@ config = read_file("config.yaml")
 print(config)
 ```
 
+When a block does several calls toward one goal, label them with `tsu_group`:
+
+```python-exec
+with tsu_group("read the config files"):
+    for name in ("config.yaml", "defaults.yaml"):
+        print(name, len(read_file(name)))
+```
+
 Only ```python-exec blocks are executed. A plain ```python block is treated as
 illustration — it is shown to the user but NOT run — so you can quote or explain
 Python without executing it.
@@ -1477,6 +1486,8 @@ the real result next turn.
   Only JSON-serializable values.
 - For a structured (non-string) return: `return_value({{"status": "ok"}})` — ends the run
   and returns the value as-is. For a plain text answer, just stop using code blocks.
+- Group per phase of work, not per call: one `tsu_group` around several related calls,
+  and none at all for a block that does one thing.
 {tools_section}
 ## Rules
 

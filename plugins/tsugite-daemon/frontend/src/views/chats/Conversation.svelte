@@ -581,6 +581,7 @@
                 collapsed={block.status !== 'running'}
                 output={block.output}
                 calls={block.calls}
+                groups={block.groups}
                 returnValue={block.returnValue}
                 meta={block.meta}
               />

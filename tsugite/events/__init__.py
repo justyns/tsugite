@@ -9,6 +9,8 @@ from .events import (
     CustomEvent,
     DebugMessageEvent,
     ErrorEvent,
+    ExecutionGroupEndEvent,
+    ExecutionGroupStartEvent,
     FileReadEvent,
     FileWriteEvent,
     FinalAnswerEvent,
@@ -68,6 +70,8 @@ __all__ = [
     # Debug/Inspection
     "PromptSnapshotEvent",
     # Audit
+    "ExecutionGroupEndEvent",
+    "ExecutionGroupStartEvent",
     "ToolCallEvent",
     "ToolResultEvent",
     # Skills

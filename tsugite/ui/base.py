@@ -16,6 +16,7 @@ from tsugite.events import (
     CostSummaryEvent,
     DebugMessageEvent,
     ErrorEvent,
+    ExecutionGroupStartEvent,
     FileReadEvent,
     FileWriteEvent,
     FinalAnswerEvent,
@@ -521,6 +522,11 @@ class CustomUIHandler(EventDispatchMixin):
         if message:
             prefix = self._get_display_prefix()
             self._print(f"[cyan]{prefix}{message}[/cyan]")
+
+    @handles(ExecutionGroupStartEvent)
+    def _handle_group_start(self, event: ExecutionGroupStartEvent) -> None:
+        """Handle the opening of a named execution group."""
+        self._print(f"[dim]{self._get_display_prefix()}▸ {event.title}[/dim]")
 
     @staticmethod
     def _format_file_event(verb: str, event) -> str:

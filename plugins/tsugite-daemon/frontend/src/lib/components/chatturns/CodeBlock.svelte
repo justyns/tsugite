@@ -3,6 +3,7 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import Spin from '$lib/components/feedback/Spin.svelte';
   import ExecBlock from './ExecBlock.svelte';
+  import { codeRows } from './codeRows';
 
   interface CodeCallRow {
     tool: string;
@@ -10,6 +11,15 @@
     args?: Record<string, unknown>;
     output?: string;
     meta?: string;
+    groupId?: string;
+  }
+
+  interface CodeGroupRow {
+    id: string;
+    title: string;
+    success?: boolean;
+    meta?: string;
+    error?: string;
   }
 
   let {
@@ -22,6 +32,7 @@
     collapsed = false,
     output,
     calls = [],
+    groups = [],
     returnValue,
     meta,
     children,
@@ -46,6 +57,8 @@
     output?: string;
     // Individual tool calls of this execution, rendered as exec rows.
     calls?: CodeCallRow[];
+    // `tsu_group` sections; a call carrying a group id renders under that heading.
+    groups?: CodeGroupRow[];
     returnValue?: string;
     // Run duration for the header ("0.4s").
     meta?: string;
@@ -55,9 +68,28 @@
     onCopy?: (text: string) => void;
   } = $props();
 
+  // A finished block folds to its header so the conversation reads as a
+  // conversation; a failure stays open, since that is the block worth reading.
+  const failed = $derived(
+    calls.some((c) => c.status === 'error') || groups.some((g) => g.success === false),
+  );
+  const foldable = $derived(collapsed && !failed);
+
   let userOverride = $state<{ prop: boolean; value: boolean } | null>(null);
-  const isCollapsed = $derived(userOverride?.prop === collapsed ? userOverride.value : collapsed);
-  let codeEl: HTMLElement | undefined;
+  const isCollapsed = $derived(userOverride?.prop === foldable ? userOverride.value : foldable);
+  // Conditionally rendered now (the summary replaces it), so the binding is reactive.
+  let codeEl = $state<HTMLElement | undefined>(undefined);
+
+  const rows = $derived(codeRows(calls, groups));
+  // Folded, the group titles are what the agent said it was doing; without any,
+  // the tool names are the next best account of it. Repeats collapse, since three
+  // read_file rows say nothing three times. A block that called nothing keeps its
+  // code peek, which is then the only thing left to show.
+  const summary = $derived.by(() => {
+    if (!isCollapsed) return '';
+    const labels = groups.length > 0 ? groups.map((g) => g.title) : calls.map((c) => c.tool);
+    return [...new Set(labels)].join(' · ');
+  });
 
   // The result (combined output) section expands on click like the code does:
   // capped + masked by default, full height once opened. The affordance only
@@ -80,7 +112,7 @@
   });
 
   function toggleCollapsed() {
-    userOverride = { prop: collapsed, value: !isCollapsed };
+    userOverride = { prop: foldable, value: !isCollapsed };
   }
 
   // Count newlines without allocating a split array (code can be large + stream).
@@ -120,6 +152,9 @@
       >
     {/if}
     <div class="grow"></div>
+    {#if isCollapsed && calls.length > 0}
+      <span>{calls.length} {calls.length === 1 ? 'tool' : 'tools'}</span>
+    {/if}
     {#if meta}<span class="meta">{meta}</span>{/if}
     {#if lineCount > 0}<span>{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>{/if}
     <button type="button" class="t-iconbtn" onclick={copy} aria-label="Copy code">
@@ -137,32 +172,58 @@
       </button>
     {/if}
   </div>
-  <div class="pre-wrap">
-    <pre><code bind:this={codeEl}
-        >{#if children}{@render children()}{:else}{code}{/if}</code
-      ></pre>
-    {#if isCollapsed && collapsible}
-      <!-- Pointer-only click target over the collapsed peek (same pattern as the
-           mux tab-close glyph); the header button is the keyboard/AT control. -->
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <span class="pre-expand" aria-hidden="true" onclick={toggleCollapsed}></span>
-    {/if}
-  </div>
-  {#if calls.length > 0}
+  {#if summary}
+    <!-- Folded with groups: the agent's own labels say more than a line of code.
+         Pointer-only, like .pre-expand below; the header button is the keyboard control. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="t-code-summary" onclick={toggleCollapsed}>{summary}</div>
+  {:else}
+    <div class="pre-wrap">
+      <pre><code bind:this={codeEl}
+          >{#if children}{@render children()}{:else}{code}{/if}</code
+        ></pre>
+      {#if isCollapsed && collapsible}
+        <!-- Pointer-only click target over the collapsed peek (same pattern as the
+             mux tab-close glyph); the header button is the keyboard/AT control. -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="pre-expand" aria-hidden="true" onclick={toggleCollapsed}></span>
+      {/if}
+    </div>
+  {/if}
+  {#snippet callRow(call: CodeCallRow)}
+    <!-- Running rows stay CLOSED (the header spinner carries the signal):
+         auto-opening each call while a block streams many of them makes the
+         timeline flap open/shut. Only failures open themselves. -->
+    <ExecBlock
+      command={call.tool}
+      status={call.status}
+      args={call.args}
+      output={call.output}
+      meta={call.meta}
+      open={call.status === 'error'}
+    />
+  {/snippet}
+
+  {#if rows.length > 0}
     <div class="t-code-calls">
-      {#each calls as call, i (i)}
-        <!-- Running rows stay CLOSED (the header spinner carries the signal):
-             auto-opening each call while a block streams many of them makes the
-             timeline flap open/shut. Only failures open themselves. -->
-        <ExecBlock
-          command={call.tool}
-          status={call.status}
-          args={call.args}
-          output={call.output}
-          meta={call.meta}
-          open={call.status === 'error'}
-        />
+      {#each rows as row, i (i)}
+        {#if row.kind === 'call'}
+          {@render callRow(row.call)}
+        {:else}
+          <div class="t-code-group" class:is-err={row.group.success === false}>
+            <div class="grp-hd">
+              <span class="grp-title">{row.group.title}</span>
+              {#if row.group.meta}<span class="grp-meta">{row.group.meta}</span>{/if}
+              {#if row.group.success === false}<span class="grp-flag">failed</span>{/if}
+            </div>
+            {#each row.calls as call, j (j)}
+              {@render callRow(call)}
+            {/each}
+            {#if row.group.error}<div class="grp-err">{row.group.error}</div>{/if}
+          </div>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -229,10 +290,23 @@
   .pre-wrap {
     position: relative;
   }
-  .t-code.is-collapsed pre {
-    max-height: 60px;
+  .t-code-summary {
+    padding: 9px 11px;
+    font: 400 var(--fs-sm) / 1.65 var(--font-ui);
+    color: var(--tx2);
+    cursor: pointer;
     overflow: hidden;
-    mask-image: linear-gradient(#000 20%, transparent);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* One line of peek: enough to say what ran, short enough that a finished turn
+     reads as a line of conversation. */
+  .t-code.is-collapsed pre {
+    /* One line plus the pre's own 9px vertical padding (border-box). */
+    max-height: calc(1lh + 18px);
+    overflow: hidden;
+    mask-image: linear-gradient(#000 55%, transparent);
   }
   .pre-expand {
     position: absolute;
@@ -316,6 +390,46 @@
     border-top: 1px solid var(--bd0);
     background: var(--bg0);
   }
+  /* Indents a tsu_group's calls under its label so a long execution reads as
+     named steps. */
+  .t-code-group {
+    display: grid;
+    gap: 6px;
+    padding-left: 8px;
+    border-left: 2px solid var(--bd1);
+  }
+  .t-code-group.is-err {
+    border-left-color: var(--st-err);
+  }
+  .t-code-group .grp-hd {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .t-code-group .grp-title {
+    font: 600 var(--fs-xs) / 1.4 var(--font-mono);
+    color: var(--tx2);
+  }
+  .t-code-group .grp-meta {
+    font: 500 var(--fs-2xs) / 1.4 var(--font-mono);
+    color: var(--tx3);
+  }
+  /* Failure is a word, not just the red rail (state is never color alone). */
+  .t-code-group .grp-flag {
+    font: 600 var(--fs-2xs) / 1.4 var(--font-mono);
+    color: var(--st-err);
+  }
+  .t-code-group .grp-err {
+    font: 500 var(--fs-2xs) / 1.4 var(--font-mono);
+    color: var(--st-err);
+  }
+
+  /* Folded: only the header stays, carrying the tool count and duration. */
+  .t-code.is-collapsed .t-code-calls,
+  .t-code.is-collapsed .t-code-out {
+    display: none;
+  }
+
   .t-code-out {
     position: relative;
   }

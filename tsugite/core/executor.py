@@ -16,6 +16,8 @@ import pprint
 import sys
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runtime_checkable
@@ -74,6 +76,8 @@ MAX_EXECUTION_OUTPUT_KB = 50
 # not model input, so they stay small.
 TOOL_CALL_ARG_MAX = 500
 TOOL_CALL_OUTPUT_MAX = 2000
+# Titles are LLM-authored and nothing else bounds them before history.
+GROUP_TITLE_MAX = 200
 
 
 def _cap_text(text: str, limit: int) -> str:
@@ -106,6 +110,9 @@ class ExecutionResult:
     # Per-call records ({tool, arguments, success, duration_ms, output|error}),
     # capped via TOOL_CALL_ARG_MAX / TOOL_CALL_OUTPUT_MAX.
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    # Named `tsu_group` sections opened this turn, in the order they opened:
+    # {group_id, title, parent_group_id, success, duration_ms, error?}.
+    groups: List[Dict[str, Any]] = field(default_factory=list)
     variables_set: Dict[str, str] = field(default_factory=dict)  # name -> "type(size)"
     state_keys: Dict[str, str] = field(default_factory=dict)  # persisted state: name -> "type(size)"
     loaded_skills: Dict[str, str] = field(default_factory=dict)  # name -> content
@@ -328,6 +335,8 @@ class LocalExecutor:
         self._return_value = None
         self._tools_called = []
         self._tool_calls: List[Dict[str, Any]] = []
+        self._group_stack: List[str] = []
+        self._groups: List[Dict[str, Any]] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
         self._unloaded_skills_for_turn: List[str] = []
         self.workspace_dir = workspace_dir
@@ -377,6 +386,7 @@ class LocalExecutor:
             return f"Message sent: {msg}"
 
         ns["send_message"] = send_message
+        ns["tsu_group"] = self._tsu_group
 
         def _blocked_open(*args, **kwargs):
             raise RuntimeError(
@@ -475,6 +485,8 @@ class LocalExecutor:
         self._return_value = None
         self._tools_called = []
         self._tool_calls = []
+        self._group_stack = []
+        self._groups = []
         self._loaded_skills_for_turn = {}
         self._unloaded_skills_for_turn = []
 
@@ -565,6 +577,7 @@ class LocalExecutor:
             return_value=None if exec_error else self._return_value,
             tools_called=self._tools_called.copy(),
             tool_calls=[dict(c) for c in self._tool_calls],
+            groups=[dict(g) for g in self._groups],
             variables_set=variables_set,
             state_keys=state_keys,
             loaded_skills=self._loaded_skills_for_turn.copy(),
@@ -619,6 +632,50 @@ class LocalExecutor:
         wrappers = {t.name: self._make_tool_wrapper(t) for t in tools if t.name not in EXECUTOR_BUILTIN_TOOLS}
         self.register_tools(wrappers)
 
+    @contextmanager
+    def _tsu_group(self, title: str):
+        """Bracket the block as a named group on the event stream and the execution result."""
+        from tsugite.events import ExecutionGroupEndEvent, ExecutionGroupStartEvent
+
+        record: Dict[str, Any] = {
+            "group_id": uuid.uuid4().hex[:12],
+            "title": _cap_text(str(title), GROUP_TITLE_MAX),
+            "parent_group_id": self._current_group(),
+        }
+        self._groups.append(record)
+        if self.event_bus:
+            self.event_bus.emit(
+                ExecutionGroupStartEvent(
+                    group_id=record["group_id"],
+                    title=record["title"],
+                    parent_group_id=record["parent_group_id"],
+                )
+            )
+        self._group_stack.append(record["group_id"])
+        t0 = time.perf_counter()
+        try:
+            yield
+            record["success"] = True
+        except BaseException as exc:
+            record["success"] = False
+            record["error"] = _cap_text(f"{type(exc).__name__}: {exc}", TOOL_CALL_ARG_MAX)
+            raise
+        finally:
+            self._group_stack.pop()
+            record["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+            if self.event_bus:
+                self.event_bus.emit(
+                    ExecutionGroupEndEvent(
+                        group_id=record["group_id"],
+                        success=record.get("success", False),
+                        duration_ms=record["duration_ms"],
+                        error=record.get("error"),
+                    )
+                )
+
+    def _current_group(self) -> Optional[str]:
+        return self._group_stack[-1] if self._group_stack else None
+
     def _make_tool_wrapper(self, tool_obj):
         """Build the sync namespace wrapper that calls a tool's async execute()."""
         from tsugite.events import ToolCallEvent, ToolResultEvent
@@ -630,10 +687,15 @@ class LocalExecutor:
             # capped repr() strings, and a token baked into one of those is no
             # longer reachable by key or path.
             audit_args = redact_sensitive_obj(kwargs, getattr(tool_obj, "sensitive_paths", ()))
+            group = self._current_group()
             record: Dict[str, Any] = {"tool": tool_obj.name, "arguments": _jsonable_call_args(audit_args)}
+            if group:
+                record["group_id"] = group
             self._tool_calls.append(record)
             if self.event_bus:
-                self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=audit_args))
+                self.event_bus.emit(
+                    ToolCallEvent(tool_name=tool_obj.name, arguments=audit_args, group_id=self._current_group())
+                )
             t0 = time.perf_counter()
             try:
                 result = run_async_in_sync_context(tool_obj.execute(**kwargs))

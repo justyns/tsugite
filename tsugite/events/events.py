@@ -331,6 +331,7 @@ class ToolCallEvent(BaseEvent):
     tool_name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
     step: Optional[int] = Field(default=None, ge=1)
+    group_id: Optional[str] = None
 
     @field_validator("arguments", mode="before")
     @classmethod
@@ -355,6 +356,36 @@ class ToolResultEvent(BaseEvent):
     @classmethod
     def _mask_summary(cls, v):
         # mode="before" sees raw input; non-str passes through to Pydantic coercion.
+        return get_registry().mask(v) if isinstance(v, str) else v
+
+
+class ExecutionGroupStartEvent(BaseEvent):
+    """An agent opened a named section of its code execution with `tsu_group`."""
+
+    event_type: EventType = Field(default=EventType.EXECUTION_GROUP_START, frozen=True)
+    group_id: str
+    title: str
+    parent_group_id: Optional[str] = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _mask_title(cls, v):
+        return get_registry().mask(v) if isinstance(v, str) else v
+
+
+class ExecutionGroupEndEvent(BaseEvent):
+    """A named execution section closed, successfully or on an exception."""
+
+    event_type: EventType = Field(default=EventType.EXECUTION_GROUP_END, frozen=True)
+    group_id: str
+    success: bool = True
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+    error: Optional[str] = None
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def _mask_error(cls, v):
+        # Exception text from arbitrary code in the block, so it can carry a token.
         return get_registry().mask(v) if isinstance(v, str) else v
 
 

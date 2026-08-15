@@ -41,6 +41,8 @@ class EventType(IntEnum):
     # Audit events
     TOOL_CALL = 25
     TOOL_RESULT = 26
+    EXECUTION_GROUP_START = 35
+    EXECUTION_GROUP_END = 36
 
     # Content events
     CONTENT_BLOCK = 28

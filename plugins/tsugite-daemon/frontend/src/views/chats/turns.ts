@@ -55,6 +55,17 @@ export interface CodeCall {
   args?: Record<string, unknown>;
   output?: string;
   meta?: string;
+  /** The `tsu_group` this call ran inside, if any. */
+  groupId?: string;
+}
+
+/** A `tsu_group` section opened during a code execution. */
+export interface CodeGroup {
+  id: string;
+  title: string;
+  success?: boolean;
+  meta?: string;
+  error?: string;
 }
 export interface CodeBlock {
   kind: 'code';
@@ -65,6 +76,8 @@ export interface CodeBlock {
    *  on (next block / turn end) or for replayed bundles. */
   status: 'running' | 'done';
   calls: CodeCall[];
+  /** Named sections opened this execution, in the order they opened. */
+  groups?: CodeGroup[];
   /** Persisted code_execution replay carries the combined run output inline
    *  (the live path streams per-call results instead). */
   output?: string;
@@ -241,9 +254,31 @@ function parseToolCalls(v: unknown): CodeCall[] | undefined {
       ...(rec(r.arguments) ? { args: rec(r.arguments) } : {}),
       ...(output != null ? { output } : {}),
       ...(dur != null ? { meta: formatMs(dur) } : {}),
+      ...(str(r.group_id) != null ? { groupId: str(r.group_id) } : {}),
     });
   }
   return calls;
+}
+
+/** Persisted group records ({group_id, title, success, duration_ms, error})
+ *  -> CodeGroup rows; undefined when the event carries none. */
+function parseGroups(v: unknown): CodeGroup[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const groups: CodeGroup[] = [];
+  for (const item of v) {
+    const r = rec(item);
+    const id = r && str(r.group_id);
+    if (!id) continue;
+    const dur = num(r.duration_ms);
+    groups.push({
+      id,
+      title: str(r.title) ?? '',
+      ...(typeof r.success === 'boolean' ? { success: r.success } : {}),
+      ...(dur != null ? { meta: formatMs(dur) } : {}),
+      ...(str(r.error) != null ? { error: str(r.error) } : {}),
+    });
+  }
+  return groups.length ? groups : undefined;
 }
 
 function namedCalls(names: string[] | undefined): CodeCall[] {
@@ -684,6 +719,7 @@ class Builder {
             tool: str(e.tool) ?? str(e.name) ?? 'tool',
             status: 'running',
             args: rec(e.arguments),
+            ...(str(e.group_id) != null ? { groupId: str(e.group_id) } : {}),
           });
           return;
         }
@@ -776,6 +812,7 @@ class Builder {
           filename: str(e.filename) ?? str(e.path),
           status: type === 'code_execution' ? 'done' : 'running',
           calls: parseToolCalls(e.tool_calls) ?? namedCalls(strArr(e.tools_called)),
+          groups: parseGroups(e.groups),
           output: str(e.output) || undefined,
           returnValue,
           meta: dur != null ? formatMs(dur) : undefined,
@@ -804,6 +841,31 @@ class Builder {
           : undefined;
         if (existing) existing.job = job;
         else turn.blocks.push({ kind: 'job', job });
+        return;
+      }
+      // Group frames only mean anything inside a running code block. Never
+      // ensureAi() here: a stray frame after the turn closed would spawn an
+      // empty AI bubble, the same hazard reasoning_content guards against.
+      case 'group_start': {
+        const code = this.ai && this.openCode(this.ai);
+        const id = str(e.group_id);
+        if (!code || !id) return;
+        const groups = (code.groups ??= []);
+        // A broadcast echo can redeliver a frame the per-chat stream already
+        // applied, and a duplicate key throws inside the {#each}.
+        if (groups.some((g) => g.id === id)) return;
+        groups.push({ id, title: str(e.title) ?? '' });
+        return;
+      }
+      case 'group_end': {
+        const code = this.ai && this.openCode(this.ai);
+        const group = code?.groups?.find((g) => g.id === str(e.group_id));
+        if (!group) return;
+        // Absent success stays unknown, matching what replay reads off the record.
+        if (typeof e.success === 'boolean') group.success = e.success;
+        const dur = num(e.duration_ms);
+        if (dur != null) group.meta = formatMs(dur);
+        if (str(e.error) != null) group.error = str(e.error);
         return;
       }
       case 'final_result': {
