@@ -135,6 +135,94 @@ describe('computeRollup', () => {
   });
 });
 
+describe('space management', () => {
+  function firstPane(store: SpacesStore): string {
+    return collectLeaves(store.active.layout.root)[0]!.id;
+  }
+  function surfaceKinds(store: SpacesStore, spaceId: string): string[] {
+    const space = store.spaces.find((s) => s.id === spaceId)!;
+    return collectLeaves(space.layout.root).flatMap((leaf) => leaf.tabs.map((t) => t.kind));
+  }
+
+  test('a new space starts on its own default layout and becomes active', () => {
+    const store = new SpacesStore();
+    const first = store.activeSpaceId;
+    const second = store.addSpace('Notes');
+    expect(store.spaces).toHaveLength(2);
+    expect(store.activeSpaceId).toBe(second);
+    expect(store.active.name).toBe('Notes');
+    expect(collectLeaves(store.active.layout.root)).toHaveLength(1);
+    expect(second).not.toBe(first);
+  });
+
+  // One space holds a chat+file split, another a single chat; switching restores each.
+  test('each space keeps its own layout across a switch', () => {
+    const store = new SpacesStore();
+    const split = store.activeSpaceId;
+    store.split(firstPane(store), 'row', { kind: 'file', params: { path: 'note.md' } });
+    expect(collectLeaves(store.active.layout.root)).toHaveLength(2);
+    expect(surfaceKinds(store, split)).toEqual(['chat', 'file']);
+
+    const single = store.addSpace('Second');
+    expect(collectLeaves(store.active.layout.root)).toHaveLength(1);
+    expect(surfaceKinds(store, single)).toEqual(['chat']);
+    // Splitting the second space leaves the first alone.
+    expect(surfaceKinds(store, split)).toEqual(['chat', 'file']);
+
+    store.setActive(split);
+    expect(collectLeaves(store.active.layout.root)).toHaveLength(2);
+    expect(surfaceKinds(store, split)).toEqual(['chat', 'file']);
+
+    store.setActive(single);
+    expect(collectLeaves(store.active.layout.root)).toHaveLength(1);
+  });
+
+  test('closing a tab in one space does not touch another', () => {
+    const store = new SpacesStore();
+    const a = store.activeSpaceId;
+    store.split(firstPane(store), 'row', { kind: 'file', params: { path: 'note.md' } });
+    const b = store.addSpace('Second');
+    store.split(firstPane(store), 'row', { kind: 'terminal', params: {} });
+
+    store.setActive(a);
+    const pane = collectLeaves(store.active.layout.root)[0]!;
+    store.closeTab(pane.id, pane.tabs[0]!.id);
+    expect(surfaceKinds(store, a)).toEqual(['file']);
+    expect(surfaceKinds(store, b)).toEqual(['chat', 'terminal']);
+  });
+
+  test('setActive ignores an id no space owns', () => {
+    const store = new SpacesStore();
+    const only = store.activeSpaceId;
+    store.setActive('nope');
+    expect(store.activeSpaceId).toBe(only);
+  });
+
+  test('renameSpace renames in place and leaves the layout alone', () => {
+    const store = new SpacesStore();
+    const id = store.activeSpaceId;
+    const layout = store.active.layout;
+    store.renameSpace(id, 'Planning');
+    expect(store.active.name).toBe('Planning');
+    expect(store.active.layout).toBe(layout);
+  });
+
+  test('removeSpace drops it and falls back to the neighbour', () => {
+    const store = new SpacesStore();
+    const first = store.activeSpaceId;
+    const second = store.addSpace('Second');
+    store.removeSpace(second);
+    expect(store.spaces).toHaveLength(1);
+    expect(store.activeSpaceId).toBe(first);
+  });
+
+  test('the last space is never removed - the shell always has somewhere to dock', () => {
+    const store = new SpacesStore();
+    store.removeSpace(store.activeSpaceId);
+    expect(store.spaces).toHaveLength(1);
+  });
+});
+
 describe('persist debounce', () => {
   beforeEach(() => {
     vi.useFakeTimers();

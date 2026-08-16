@@ -1,12 +1,16 @@
 <script lang="ts">
   // Top bar (.appbar).
-  // Brand + optional subtitle, theme control, command-palette trigger, and (on
-  // narrow viewports, where the rail footer is hidden) the connection chip.
+  // Brand + optional subtitle, the spaces switcher, theme control, command-palette
+  // trigger, and (on narrow viewports, where the rail footer is hidden) the
+  // connection chip.
   import type { Snippet } from 'svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Conn from '$lib/components/connstates/Conn.svelte';
+  import SpaceBar from './SpaceBar.svelte';
   import { conn } from '$lib/stores/conn.svelte';
+  import { spaces } from '$lib/stores/spaces.svelte';
+  import { nextSpaceName } from './spaceName';
   import { toConnDisplay } from './connDisplay';
   import { TESTID } from '$lib/testids';
 
@@ -40,6 +44,18 @@
     tsugite
     {#if subtitle}<span class="ver">{@render subtitle()}</span>{/if}
   </div>
+
+  <!-- Spaces are global chrome (a space owns the whole workspace layout), so the
+       switcher rides the appbar and reads the store directly, as the conn chip
+       does. -->
+  <SpaceBar
+    spaces={spaces.spaces}
+    activeId={spaces.activeSpaceId}
+    onSelect={(id) => spaces.setActive(id)}
+    onAdd={() => spaces.addSpace(nextSpaceName(spaces.spaces.map((s) => s.name)))}
+    onRename={(id, name) => spaces.renameSpace(id, name)}
+    onClose={(id) => spaces.removeSpace(id)}
+  />
 
   <span class="conn-mobile">
     <Conn state={toConnDisplay(conn.status)} />

@@ -16,6 +16,8 @@ export const TESTID = {
   themeSwitch: 'theme-switch',
   paletteTrigger: 'palette-trigger',
   keystrip: 'keystrip',
+  /** Spaces switcher in the top bar; its chips are selected by accessible name. */
+  spaceBar: 'space-bar',
   settingsTrigger: 'settings-trigger',
   settingsDrawer: 'settings-drawer',
   /** Per-provider auto-attach toggle in Settings → Context (keyed by provider). */

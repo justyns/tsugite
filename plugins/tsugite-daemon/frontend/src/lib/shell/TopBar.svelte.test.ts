@@ -3,6 +3,7 @@ import { page } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { expect, test, vi } from 'vitest';
 import TopBar from './TopBar.svelte';
+import { spaces } from '$lib/stores/spaces.svelte';
 
 test('the palette trigger fires its callback', async () => {
   const onOpenPalette = vi.fn();
@@ -28,4 +29,19 @@ test('the settings trigger fires its callback', async () => {
 test('renders the brand wordmark', async () => {
   await render(TopBar, { onOpenPalette: () => {} });
   await expect.element(page.getByText('tsugite')).toBeInTheDocument();
+});
+
+// Read-only on purpose: the store is a singleton over real localStorage in the
+// browser runner, so a mutation here would leak into other tests.
+test('the top bar mounts the spaces switcher, naming the active space', async () => {
+  await render(TopBar, { onOpenPalette: () => {} });
+  await expect.element(page.getByRole('group', { name: 'Spaces' })).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('button', { name: spaces.active.name, exact: true }))
+    .toBeInTheDocument();
+});
+
+test('the top bar offers a control for creating a space', async () => {
+  await render(TopBar, { onOpenPalette: () => {} });
+  await expect.element(page.getByRole('button', { name: 'New space' })).toBeInTheDocument();
 });
