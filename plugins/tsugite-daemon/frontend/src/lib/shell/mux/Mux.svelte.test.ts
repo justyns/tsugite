@@ -14,6 +14,7 @@ import {
   type SurfaceRef,
   closeTab,
   collectLeaves,
+  moveTab,
   defaultLayout,
   dockAsTab,
   focusPane,
@@ -48,6 +49,8 @@ async function mountMux(initial: Layout, content?: Snippet<[PaneTabModel, () => 
     onSelectTab: (p: string, t: string) => apply(selectTab(layout, p, t)),
     onFocusPane: (p: string) => apply(focusPane(layout, p)),
     onResize: (s: string, i: number, d: number) => apply(resizeSplit(layout, s, i, d)),
+    onMoveTab: (f: string, t: string, to: string, pos?: 'before' | 'after' | number) =>
+      apply(moveTab(layout, f, t, to, pos)),
   };
   const screen = await render(Mux, { layout, narrow: false, content, ...handlers });
   rerender = screen.rerender;
@@ -347,4 +350,46 @@ test('clicking into a plugin surface claims the pane without taking focus off th
   });
   frame.contentWindow!.postMessage({ type: 'harness:ask' }, '*');
   await expect.poll(() => typed).toBe('typed');
+});
+
+// Starts on the real tab element so PaneView's dragstart writes the payload.
+function dragTabToPane(tabEl: HTMLElement, target: HTMLElement, fracX: number) {
+  const dataTransfer = new DataTransfer();
+  tabEl.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+  const r = target.getBoundingClientRect();
+  const clientX = r.left + r.width * fracX;
+  const clientY = r.top + r.height * 0.5;
+  for (const type of ['dragover', 'drop']) {
+    target.dispatchEvent(
+      new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, clientX, clientY }),
+    );
+  }
+}
+
+test('dragging a tab onto another pane moves it there rather than leaving a copy', async () => {
+  const mux = await mountMux(seeded({ kind: 'chat' }));
+  dropSurface(mux.panes()[0]!, { kind: 'terminal' }, 0.9);
+  await expect.poll(() => mux.panes().length).toBe(2);
+
+  const panes = mux.panes();
+  const chatTab = panes[0]!.querySelector<HTMLElement>('[data-tab-id]')!;
+  dragTabToPane(chatTab, panes[1]!, 0.5);
+
+  await expect.poll(() => mux.panes().length).toBe(1);
+  const kinds = collectLeaves(mux.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+  expect([...kinds].sort()).toEqual(['chat', 'terminal']);
+});
+
+test('reordering tabs inside a pane does not also split that pane', async () => {
+  // Found in a browser: without stopPropagation the reorder also split the pane.
+  const mux = await mountMux(seeded({ kind: 'chat' }));
+  dropSurface(mux.panes()[0]!, { kind: 'terminal' }, 0.5);
+  await expect.poll(() => mux.panes()[0]!.querySelectorAll('[data-tab-id]').length).toBe(2);
+
+  const tabs = [...mux.panes()[0]!.querySelectorAll<HTMLElement>('[data-tab-id]')];
+  dragTabToPane(tabs[1]!, tabs[0]!, 0.2);
+
+  await expect.poll(() => collectLeaves(mux.layout.root).length).toBe(1);
+  const kinds = collectLeaves(mux.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+  expect(kinds).toEqual(['terminal', 'chat']);
 });

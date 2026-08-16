@@ -419,6 +419,14 @@ describe('moveTab', () => {
     l = moveTab(l, leaf.id, cId, leaf.id, 0); // move c to front
     expect(asLeaf(l.root).tabs.map((t) => t.params.id)).toEqual(['c', 'a', 'b']);
   });
+
+  test('a forward move lands where the insertion index points', () => {
+    let l = seeded({ kind: 'chat', params: { id: 'a' } });
+    for (const id of ['b', 'c', 'd']) l = dockAsTab(l, l.root.id, { kind: 'chat', params: { id } });
+    const leaf = asLeaf(l.root);
+    l = moveTab(l, leaf.id, leaf.tabs[0]!.id, leaf.id, 2);
+    expect(asLeaf(l.root).tabs.map((t) => t.params.id)).toEqual(['b', 'a', 'c', 'd']);
+  });
 });
 
 describe('resizeSplit', () => {

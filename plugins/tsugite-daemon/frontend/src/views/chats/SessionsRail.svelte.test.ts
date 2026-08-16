@@ -145,8 +145,6 @@ test('double-clicking a session row docks it as a fresh chat tab', async () => {
   expect(docked.params).toEqual({ sessionId: 's3', agent: 'smokeagent' });
 });
 
-// Drag-reorder of the pinned bucket. `sessions.reorderPins` owns the optimistic
-// update and the POST; the rail's only job is to hand it the new id order.
 function dragRowOnto(from: HTMLElement, to: HTMLElement, half: 'top' | 'bottom') {
   const dataTransfer = new DataTransfer();
   from.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));

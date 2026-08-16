@@ -456,6 +456,8 @@
                 layout={spaces.active.layout}
                 onDock={(paneId, ref) => spaces.dock(paneId, ref)}
                 onSplit={(paneId, dir, ref, position) => spaces.split(paneId, dir, ref, position)}
+                onMoveTab={(fromPaneId, tabId, toPaneId, position) =>
+                  spaces.moveTab(fromPaneId, tabId, toPaneId, position)}
                 onCloseTab={(paneId, tabId) => spaces.closeTab(paneId, tabId)}
                 onCloseOtherTabs={(paneId, tabId) => spaces.closeOtherTabs(paneId, tabId)}
                 onCloseAllTabs={(paneId) => spaces.closeAllTabs(paneId)}

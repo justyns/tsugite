@@ -143,3 +143,45 @@ test('middle-click closes a tab (but not an unclosable one)', async () => {
   await page.getByRole('tab', { name: /pinned home/ }).click({ button: 'middle' });
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+function dragTabOnto(from: HTMLElement, to: HTMLElement, half: 'left' | 'right') {
+  const dataTransfer = new DataTransfer();
+  from.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));
+  const r = to.getBoundingClientRect();
+  const clientX = half === 'left' ? r.left + r.width * 0.25 : r.left + r.width * 0.75;
+  for (const type of ['dragover', 'drop']) {
+    to.dispatchEvent(new DragEvent(type, { dataTransfer, bubbles: true, clientX }));
+  }
+}
+
+async function tabEl(name: RegExp): Promise<HTMLElement> {
+  return (await page.getByRole('tab', { name }).element()) as HTMLElement;
+}
+
+test('dragging a tab onto the left half of an earlier tab reorders it there', async () => {
+  const onReorder = vi.fn();
+  render(TabStrip, { tabs, activeId: 'a', onReorder });
+
+  dragTabOnto(await tabEl(/nightly term/), await tabEl(/sse backoff/), 'left');
+
+  expect(onReorder).toHaveBeenCalledWith('c', 0);
+});
+
+test('dragging onto the right half of a tab lands after it', async () => {
+  const onReorder = vi.fn();
+  render(TabStrip, { tabs, activeId: 'a', onReorder });
+
+  dragTabOnto(await tabEl(/sse backoff/), await tabEl(/backup prune/), 'right');
+
+  expect(onReorder).toHaveBeenCalledWith('a', 2);
+});
+
+test('dropping a tab back onto itself reorders nothing', async () => {
+  const onReorder = vi.fn();
+  render(TabStrip, { tabs, activeId: 'a', onReorder });
+
+  const el = await tabEl(/backup prune/);
+  dragTabOnto(el, el, 'left');
+
+  expect(onReorder).not.toHaveBeenCalled();
+});

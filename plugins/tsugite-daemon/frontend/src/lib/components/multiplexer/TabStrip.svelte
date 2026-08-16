@@ -50,6 +50,8 @@
     onCloseAll,
     onNew,
     onSplit,
+    onReorder,
+    onDragTab,
     label = 'Pane sessions',
     newLabel = 'New tab',
     panelId,
@@ -66,6 +68,9 @@
     onNew?: () => void;
     /** Split affordance at the strip's end (was the pane header's). */
     onSplit?: () => void;
+    /** Omitting this leaves tabs undraggable. */
+    onReorder?: (tabId: string, insertAt: number) => void;
+    onDragTab?: (tabId: string, dataTransfer: DataTransfer) => void;
     label?: string;
     newLabel?: string;
     /** DOM id of the tabpanel these tabs control (WAI-ARIA tabs pattern).
@@ -143,6 +148,42 @@
     ];
   });
 
+  // `dragover` exposes the payload's types but not its contents.
+  let dragging = $state<string | null>(null);
+  let dropAt = $state<number | null>(null);
+
+  function endDrag() {
+    dragging = null;
+    dropAt = null;
+  }
+
+  function onTabDragStart(event: DragEvent, tab: PaneTab) {
+    dragging = tab.id;
+    if (event.dataTransfer) onDragTab?.(tab.id, event.dataTransfer);
+  }
+
+  // A tab from another pane leaves `dragging` unset and falls through to the
+  // pane's drop handler. Ours must stop propagation or the pane splits itself.
+  function onTabDragOver(event: DragEvent, tab: PaneTab) {
+    if (!dragging || !onReorder) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const r = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    dropAt =
+      tabs.findIndex((t) => t.id === tab.id) + (event.clientX < r.left + r.width / 2 ? 0 : 1);
+  }
+
+  function onTabDrop(event: DragEvent) {
+    if (!dragging || dropAt === null || !onReorder) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const from = tabs.findIndex((t) => t.id === dragging);
+    const id = dragging;
+    const insertAt = dropAt;
+    endDrag();
+    if (insertAt !== from && insertAt !== from + 1) onReorder(id, insertAt);
+  }
+
   // Middle-click closes a tab (the mousedown preventDefault suppresses the
   // browser's autoscroll widget; auxclick carries the actual close).
   function onTabAuxclick(event: MouseEvent, tab: PaneTab) {
@@ -164,12 +205,20 @@
      original single-row flex layout. -->
 <div class="mux-tabs" bind:this={listEl}>
   <div class="mux-tablist" role="tablist" aria-orientation="horizontal" aria-label={label}>
-    {#each tabs as tab (tab.id)}
+    {#each tabs as tab, i (tab.id)}
       <div
         class="mux-tab"
         class:is-active={tab.id === activeId}
         class:is-preview={tab.ephemeral}
+        class:is-dragging={dragging === tab.id}
+        class:drop-before={dropAt === i}
+        class:drop-after={dropAt === i + 1 && i === tabs.length - 1}
         role="tab"
+        draggable={onReorder ? 'true' : undefined}
+        ondragstart={(event) => onTabDragStart(event, tab)}
+        ondragend={endDrag}
+        ondragover={(event) => onTabDragOver(event, tab)}
+        ondrop={onTabDrop}
         id={panelId ? `${panelId}-tab-${tab.id}` : undefined}
         aria-controls={panelId}
         data-tab-id={tab.id}
@@ -255,6 +304,15 @@
     padding: 5px 6px 0;
     background: var(--bg1);
     border-bottom: 1px solid var(--bd0);
+  }
+  .mux-tab.is-dragging {
+    opacity: 0.4;
+  }
+  .mux-tab.drop-before {
+    box-shadow: inset 2px 0 0 0 var(--acc);
+  }
+  .mux-tab.drop-after {
+    box-shadow: inset -2px 0 0 0 var(--acc);
   }
   .mux-tab {
     display: inline-flex;

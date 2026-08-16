@@ -4,7 +4,13 @@
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import type { LeafNode, PaneTabModel, SurfaceRef } from './layout';
-  import { hasSurfaceDrag, readSurfaceDrag } from './drag';
+  import {
+    hasSurfaceDrag,
+    readSurfaceDrag,
+    readTabDrag,
+    writeSurfaceDrag,
+    writeTabDrag,
+  } from './drag';
   import { type DropZone, dropIntent, dropZoneAt } from './dropzone';
   import type { MuxContent, MuxHandlers } from './types';
   import { TESTID } from '$lib/testids';
@@ -81,12 +87,26 @@
     if (!hasSurfaceDrag(e.dataTransfer)) return;
     e.preventDefault();
     const ref = readSurfaceDrag(e.dataTransfer);
+    const origin = readTabDrag(e.dataTransfer);
     const zone = dropZone;
     dropZone = null;
     if (!ref || !zone) return;
     const intent = dropIntent(zone);
+    // Same-pane reorders never reach here; TabStrip stops them at the strip.
+    // moveTab collapses the source pane if the move emptied it.
+    if (intent.action === 'dock' && origin && origin.paneId !== pane.id) {
+      handlers.onMoveTab?.(origin.paneId, origin.tabId, pane.id);
+      return;
+    }
     if (intent.action === 'dock') handlers.onDock?.(pane.id, ref);
     else handlers.onSplit?.(pane.id, intent.dir, ref, intent.position);
+  }
+
+  function onDragTab(tabId: string, dt: DataTransfer) {
+    const tab = pane.tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    writeSurfaceDrag(dt, refOf(tab));
+    writeTabDrag(dt, { paneId: pane.id, tabId });
   }
 
   function splitHere() {
@@ -137,6 +157,10 @@
             : undefined}
           onNew={handlers.onNewTab ? () => handlers.onNewTab?.(pane.id) : undefined}
           onSplit={narrow || !activeTab ? undefined : splitHere}
+          onReorder={handlers.onMoveTab
+            ? (id, at) => handlers.onMoveTab?.(pane.id, id, pane.id, at)
+            : undefined}
+          {onDragTab}
         />
       {/if}
     {/snippet}

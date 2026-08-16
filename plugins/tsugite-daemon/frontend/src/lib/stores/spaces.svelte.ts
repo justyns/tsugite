@@ -267,8 +267,6 @@ export class SpacesStore {
   focusPane(paneId: string): void {
     this.apply((l) => focusPane(l, paneId));
   }
-  // This method and its reducer are pre-built for a tab drag/reorder gesture; the
-  // pointer affordance isn't shipped yet, so callers are keyboard/programmatic only.
   moveTab(
     fromPaneId: string,
     tabId: string,

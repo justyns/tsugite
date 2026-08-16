@@ -22,6 +22,13 @@ export interface MuxHandlers {
   // chrome can forward it directly.
   onSplit?: (paneId: string, dir: SplitDir, ref: SurfaceRef, position: 'before' | 'after') => void;
   onDock?: (paneId: string, ref: SurfaceRef) => void;
+  // Arg order mirrors the `moveTab` reducer. `from === to` is a reorder.
+  onMoveTab?: (
+    fromPaneId: string,
+    tabId: string,
+    toPaneId: string,
+    position?: 'before' | 'after' | number,
+  ) => void;
   onResize?: (splitId: string, dividerIndex: number, deltaFraction: number) => void;
 }
 

@@ -15,6 +15,8 @@
  *  - `focusedPaneId` names an existing leaf.
  */
 
+import { moveItem } from '$lib/reorder';
+
 export const LAYOUT_SCHEMA_VERSION = 1;
 
 /** row = children side by side (a left/right split); col = stacked (top/bottom). */
@@ -441,19 +443,15 @@ export function moveTab(
   if (!tab) return clone(layout);
 
   if (fromPaneId === toPaneId) {
-    // Reorder within the pane.
+    // `position` is an index into the current order; `moveItem` owns the
+    // off-by-one that removing the tab first introduces.
     const next = clone(layout);
     const leaf = findLeafIn(next.root, toPaneId)!;
     const from = leaf.tabs.findIndex((t) => t.id === tabId);
-    const [moved] = leaf.tabs.splice(from, 1);
-    const to =
-      typeof position === 'number'
-        ? Math.max(0, Math.min(leaf.tabs.length, position))
-        : position === 'before'
-          ? Math.max(0, from - 1)
-          : Math.min(leaf.tabs.length, from + 1);
-    leaf.tabs.splice(to, 0, moved!);
-    leaf.activeTabId = moved!.id;
+    const insertAt =
+      typeof position === 'number' ? position : position === 'before' ? from - 1 : from + 2;
+    leaf.tabs = moveItem(leaf.tabs, from, insertAt);
+    leaf.activeTabId = tabId;
     return next;
   }
 

@@ -194,8 +194,7 @@
     if (row.pinned) draggingPinned = row.id;
   }
 
-  // Reorder within the pinned bucket. The dragged id is held locally because
-  // `dragover` can read the payload's types but not its contents.
+  // `dragover` exposes the payload's types but not its contents.
   let draggingPinned = $state<string | null>(null);
   let dropAt = $state<number | null>(null);
   const pinnedIds = $derived(groups.pinned.map((p) => p.id));
@@ -473,8 +472,6 @@
   .srow-drag {
     cursor: grab;
   }
-  /* Drop marker for a pinned reorder. Drawn as an inset box-shadow so it costs
-     no layout and never nudges the rows under the pointer. */
   .srow-drag.is-dragging {
     opacity: 0.4;
   }

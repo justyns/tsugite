@@ -20,6 +20,33 @@ export function hasSurfaceDrag(dt: DataTransfer | null): boolean {
   return !!dt && Array.from(dt.types).includes(MUX_SURFACE_MIME);
 }
 
+// Carried alongside the surface ref so a receiving pane can move the tab
+// rather than dock a second copy.
+export const MUX_TAB_MIME = 'application/x-tsugite-tab';
+
+export interface TabOrigin {
+  paneId: string;
+  tabId: string;
+}
+
+export function writeTabDrag(dt: DataTransfer, origin: TabOrigin): void {
+  dt.setData(MUX_TAB_MIME, JSON.stringify(origin));
+}
+
+export function readTabDrag(dt: DataTransfer | null): TabOrigin | null {
+  if (!dt) return null;
+  const raw = dt.getData(MUX_TAB_MIME);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const o = parsed as TabOrigin;
+    if (o && typeof o.paneId === 'string' && typeof o.tabId === 'string') return o;
+  } catch {
+    // malformed payload -> treat as a plain surface drag
+  }
+  return null;
+}
+
 export function readSurfaceDrag(dt: DataTransfer | null): SurfaceRef | null {
   if (!dt) return null;
   const raw = dt.getData(MUX_SURFACE_MIME);
