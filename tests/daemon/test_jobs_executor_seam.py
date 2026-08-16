@@ -498,6 +498,47 @@ async def test_stuck_job_tears_down_executor_but_keeps_worktree(store, runner, o
     assert seq == ["cancel"], "STUCK keeps the worktree for inspection - no prune"
 
 
+# ── a retry whose executor fails to start must not come back RUNNING ──
+
+
+class FailOnStartExecutor:
+    """Reports a synchronous startup failure the way the real executors do: call
+    fail_worker() and return normally from start(), never raise. That is what a
+    missing binary / missing workspace / missing PTY runtime does."""
+
+    def __init__(self, orchestrator, reason: str = "claude binary not found on PATH"):
+        self.orchestrator = orchestrator
+        self.reason = reason
+        self.starts: list[tuple[str, str | None]] = []
+
+    async def start(self, job, followup=None):
+        self.starts.append((job.id, followup))
+        await self.orchestrator.fail_worker(job.id, self.reason)
+
+    async def cancel(self, job):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_retry_startup_failure_leaves_the_job_failed_not_running(store, runner, orchestrator):
+    """The executor reports the retry never started, so the job must carry that
+    failure - not sit in RUNNING with no worker behind it."""
+    ex = FailOnStartExecutor(orchestrator)
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+    await orchestrator.fail_worker(job.id, "first attempt died")
+    await _drain(orchestrator)
+    assert store.get(job.id).state == JobState.ERRORED.value
+
+    await orchestrator.retry_with_hint(job.id, "install claude first")
+    await _drain(orchestrator)
+
+    assert [j for j, _ in ex.starts] == [job.id], "the retry must have reached the executor"
+    fresh = store.get(job.id)
+    assert fresh.state != JobState.RUNNING.value, "a retry the executor never started must not report as running"
+    assert "claude binary not found" in (fresh.error or ""), "the job must carry the executor's startup failure"
+
+
 # ── payload carries the new fields ──
 
 

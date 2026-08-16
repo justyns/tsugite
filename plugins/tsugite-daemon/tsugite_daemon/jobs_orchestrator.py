@@ -710,6 +710,13 @@ class JobsOrchestrator:
                 self._jobs.update(job_id, verify_attempts=0)
                 job = self._jobs.get(job_id)
 
+            # fail_worker() acts only on a live job, so leave the parked state before
+            # the executor starts, or its startup failure is dropped and the job is
+            # activated on top of a worker that never ran.
+            activate_first = job.executor != "agent"
+            if activate_first:
+                self._activate_worker(job_id, None, kind="hint", timeout_minutes=job.timeout_minutes, clear_error=True)
+
             try:
                 hint_prompt = _build_hint_prompt(job, hint)
                 started = await self._spawn_worker(
@@ -722,13 +729,14 @@ class JobsOrchestrator:
             except Exception as e:
                 logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
                 raise ValueError(f"failed to spawn retry worker: {e}") from e
-            self._activate_worker(
-                job_id,
-                started.id if started else None,
-                kind="hint",
-                timeout_minutes=job.timeout_minutes,
-                clear_error=True,
-            )
+            if not activate_first:
+                self._activate_worker(
+                    job_id,
+                    started.id if started else None,
+                    kind="hint",
+                    timeout_minutes=job.timeout_minutes,
+                    clear_error=True,
+                )
             return self._jobs.get(job_id)
 
     async def on_session_complete(self, session: Session, result_str: str) -> None:
