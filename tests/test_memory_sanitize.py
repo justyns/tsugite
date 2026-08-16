@@ -12,6 +12,8 @@ bloat the summary input:
 The sanitizer elides scaffolding and truncates oversized tool outputs.
 """
 
+import pytest
+from tsugite_daemon import memory
 from tsugite_daemon.memory import COMBINE_SYSTEM_PROMPT, SUMMARIZE_SYSTEM_PROMPT, sanitize_for_summary
 
 MODEL = "openai:gpt-4o-mini"
@@ -286,3 +288,85 @@ class TestSummarizerPromptDirective:
     def test_combine_prompt_mentions_attachments(self):
         assert "auto-attached" in COMBINE_SYSTEM_PROMPT.lower() or "attached" in COMBINE_SYSTEM_PROMPT.lower()
         assert "MEMORY.md" in COMBINE_SYSTEM_PROMPT or "AGENTS.md" in COMBINE_SYSTEM_PROMPT
+
+
+# Spelled out rather than derived from _SUMMARY_FORMAT: a test that reads its
+# expectations out of the prompt it checks cannot fail. SECTIONS is every heading;
+# SECTION_REQUIREMENTS is the wording a section needs beyond its title.
+SECTIONS = [
+    "## Goal",
+    "## Current Task",
+    "## Key Decisions",
+    "## Facts & Preferences",
+    "## Files & Resources",
+    "## Work Progress",
+    "## Open Questions",
+    "## Action Items",
+]
+
+SECTION_REQUIREMENTS = [
+    ("## Goal", ("ultimately", "overall")),
+    ("## Current Task", ("right now",)),
+    ("## Key Decisions", ("why", "reason")),
+    ("## Files & Resources", ("url",)),
+]
+
+
+def _section_body(prompt: str, heading: str) -> str:
+    _, _, rest = prompt.partition(heading)
+    return rest.split("\n##", 1)[0]
+
+
+BOTH_PROMPTS = pytest.mark.parametrize(
+    "prompt", [SUMMARIZE_SYSTEM_PROMPT, COMBINE_SYSTEM_PROMPT], ids=["summarize", "combine"]
+)
+
+
+class TestSummarizerHandoffBriefing:
+    """The summary a compaction produces is a handoff briefing for the next
+    session, so both prompts must name every section and frame the job that way.
+    """
+
+    @BOTH_PROMPTS
+    def test_prompt_requests_every_section(self, prompt):
+        for heading in SECTIONS:
+            assert heading in prompt
+
+    @BOTH_PROMPTS
+    def test_prompt_frames_the_job_as_a_handoff(self, prompt):
+        assert "summarization assistant" in prompt.lower()
+        assert "handoff" in prompt.lower()
+
+    def test_each_section_states_what_sets_it_apart(self):
+        """A heading alone does not carry the contract."""
+        for heading, wanted in SECTION_REQUIREMENTS:
+            body = _section_body(SUMMARIZE_SYSTEM_PROMPT, heading).lower()
+            assert any(word in body for word in wanted), heading
+
+    @pytest.mark.asyncio
+    async def test_user_focus_hint_does_not_displace_the_section_spec(self, monkeypatch):
+        """A `/compact <message>` hint rides a user message; the structure the
+        summary must take lives in the system prompt and survives it."""
+        captured = {}
+
+        async def fake_complete(system_prompt, user_content, model):
+            captured["system"] = system_prompt
+            captured["user"] = user_content
+            return "summary"
+
+        monkeypatch.setattr(memory, "_llm_complete", fake_complete)
+        await memory.summarize_session(
+            [
+                {"role": "user", "content": "port the parser"},
+                {"role": "assistant", "content": "done"},
+                {
+                    "role": "user",
+                    "content": "<compaction_instructions>only the parser work</compaction_instructions>",
+                },
+            ],
+            model=MODEL,
+        )
+
+        assert "only the parser work" in captured["user"]
+        for heading in SECTIONS:
+            assert heading in captured["system"]

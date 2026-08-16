@@ -26,17 +26,21 @@ logger = logging.getLogger(__name__)
 _FILE_PATH_PATTERN = re.compile(r'(?:file_path|path|filename)["\s:=]+["\'`]?(/[^\s"\'`\],}]+)', re.IGNORECASE)
 
 _SUMMARY_FORMAT = """\
+## Goal
+What the user is ultimately trying to achieve, beyond the step in progress.
+
 ## Current Task
 What is actively being worked on or discussed right now.
 
 ## Key Decisions
-Important decisions made during the conversation.
+Decisions made during the conversation, each with the reason behind it.
 
 ## Facts & Preferences
 Facts learned about the user, project, or environment. User preferences and conventions.
 
-## Files Accessed
-Files that were read, written, or modified during the conversation. Include full paths.
+## Files & Resources
+Files read, written, or modified, with full paths. Include URLs, issue numbers, and other
+identifiers the work referred to.
 
 ## Work Progress
 What was completed, what was attempted and failed, what is partially done.
@@ -54,16 +58,26 @@ _ATTACHMENT_DIRECTIVE = (
     "and produces a stale snapshot if those files change."
 )
 
+_HANDOFF_FRAMING = (
+    "You are a context summarization assistant. Produce a handoff briefing for the agent that "
+    "picks this conversation up next: keep what that agent still needs, drop what has been "
+    "resolved or superseded."
+)
+
+# The imperative naming the job stays, even though the framing above implies it:
+# without it the model dropped the Files & Resources section in half of test runs.
 SUMMARIZE_SYSTEM_PROMPT = (
-    "Summarize this conversation using the structured format below.\n"
+    f"{_HANDOFF_FRAMING}\n"
+    "Summarize the conversation below using the structure that follows.\n"
     f"{_ATTACHMENT_DIRECTIVE}\n"
     "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
     f"{_SUMMARY_FORMAT}"
 )
 
 COMBINE_SYSTEM_PROMPT = (
+    f"{_HANDOFF_FRAMING}\n"
     "You are given multiple summaries of consecutive conversation chunks.\n"
-    "Combine them into a single coherent summary using the structured format below.\n"
+    "Combine them into a single coherent briefing using the structure that follows.\n"
     f"{_ATTACHMENT_DIRECTIVE}\n"
     "Keep the total summary under 800 words. Omit any section that has no content.\n\n"
     f"{_SUMMARY_FORMAT}"
