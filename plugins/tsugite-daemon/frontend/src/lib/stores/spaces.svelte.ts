@@ -326,7 +326,7 @@ export class SpacesStore {
     this.persist();
   }
 
-  /** `insertAt` is an index in the current order, as a drop between two chips reports. */
+  /** `insertAt` is an index in the current order. */
   moveSpace(id: string, insertAt: number): void {
     const from = this.spaces.findIndex((s) => s.id === id);
     if (from === -1) return;

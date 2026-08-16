@@ -115,3 +115,52 @@ test('right-click opens a menu offering rename and close', async () => {
   await page.getByRole('menuitem', { name: 'Close' }).click();
   expect(p.onClose).toHaveBeenCalledWith('s2');
 });
+
+function dragChip(from: HTMLElement, to: HTMLElement, half: 'left' | 'right') {
+  const dataTransfer = new DataTransfer();
+  from.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));
+  const r = to.getBoundingClientRect();
+  const clientX = half === 'left' ? r.left + r.width * 0.25 : r.left + r.width * 0.75;
+  for (const type of ['dragover', 'drop']) {
+    to.dispatchEvent(new DragEvent(type, { dataTransfer, bubbles: true, clientX }));
+  }
+}
+
+test('dragging a chip onto the left half of an earlier one reorders it there', async () => {
+  const onReorder = vi.fn();
+  const { container } = await render(SpaceBar, {
+    spaces: [
+      { id: 'a', name: 'Main' },
+      { id: 'b', name: 'Ops' },
+      { id: 'c', name: 'Notes' },
+    ],
+    activeId: 'a',
+    onSelect: () => {},
+    onAdd: () => {},
+    onRename: () => {},
+    onClose: () => {},
+    onReorder,
+  });
+  const chips = [...container.querySelectorAll<HTMLElement>('.sp')];
+  dragChip(chips[2]!, chips[0]!, 'left');
+  expect(onReorder).toHaveBeenCalledWith('c', 0);
+});
+
+test('dropping a chip back on itself reorders nothing', async () => {
+  const onReorder = vi.fn();
+  const { container } = await render(SpaceBar, {
+    spaces: [
+      { id: 'a', name: 'Main' },
+      { id: 'b', name: 'Ops' },
+    ],
+    activeId: 'a',
+    onSelect: () => {},
+    onAdd: () => {},
+    onRename: () => {},
+    onClose: () => {},
+    onReorder,
+  });
+  const chips = [...container.querySelectorAll<HTMLElement>('.sp')];
+  dragChip(chips[1]!, chips[1]!, 'left');
+  expect(onReorder).not.toHaveBeenCalled();
+});

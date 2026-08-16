@@ -65,6 +65,7 @@
     onAdd={() => spaces.addSpace(nextSpaceName(spaces.spaces.map((s) => s.name)))}
     onRename={(id, name) => spaces.renameSpace(id, name)}
     onClose={closeSpace}
+    onReorder={(id, insertAt) => spaces.moveSpace(id, insertAt)}
   />
 
   <span class="conn-mobile">

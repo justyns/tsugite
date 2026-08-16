@@ -20,6 +20,7 @@
     onAdd,
     onRename,
     onClose,
+    onReorder,
   }: {
     spaces: SpaceItem[];
     activeId: string;
@@ -28,7 +29,35 @@
     onRename: (id: string, name: string) => void;
     /** The store refuses to drop below one space, so withhold rather than no-op. */
     onClose: (id: string) => void;
+    /** Drag-reorder; `insertAt` is an index in the current order. */
+    onReorder?: (id: string, insertAt: number) => void;
   } = $props();
+
+  // `dragover` exposes the payload's types but not its contents.
+  let dragging = $state<string | null>(null);
+  let dropAt = $state<number | null>(null);
+
+  function endDrag() {
+    dragging = null;
+    dropAt = null;
+  }
+
+  function onChipDragOver(event: DragEvent, id: string) {
+    if (!dragging || !onReorder) return;
+    event.preventDefault();
+    const r = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    dropAt = spaces.findIndex((s) => s.id === id) + (event.clientX < r.left + r.width / 2 ? 0 : 1);
+  }
+
+  function onChipDrop(event: DragEvent) {
+    if (!dragging || dropAt === null || !onReorder) return;
+    event.preventDefault();
+    const from = spaces.findIndex((s) => s.id === dragging);
+    const id = dragging;
+    const insertAt = dropAt;
+    endDrag();
+    if (insertAt !== from && insertAt !== from + 1) onReorder(id, insertAt);
+  }
 
   const closable = $derived(spaces.length > 1);
 
@@ -80,8 +109,20 @@
 </script>
 
 <div class="spacebar" role="group" aria-label="Spaces" data-testid={TESTID.spaceBar}>
-  {#each spaces as space (space.id)}
-    <span class="sp" class:is-active={space.id === activeId}>
+  {#each spaces as space, i (space.id)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span
+      class="sp"
+      class:is-active={space.id === activeId}
+      class:is-dragging={dragging === space.id}
+      class:drop-before={dropAt === i}
+      class:drop-after={dropAt === i + 1 && i === spaces.length - 1}
+      draggable={onReorder && editingId !== space.id ? 'true' : undefined}
+      ondragstart={() => (dragging = space.id)}
+      ondragend={endDrag}
+      ondragover={(event) => onChipDragOver(event, space.id)}
+      ondrop={onChipDrop}
+    >
       {#if editingId === space.id}
         <!-- svelte-ignore a11y_autofocus -->
         <input
@@ -163,6 +204,15 @@
   }
   .sp:hover {
     background: var(--bg3);
+  }
+  .sp.is-dragging {
+    opacity: 0.4;
+  }
+  .sp.drop-before {
+    box-shadow: inset 2px 0 0 0 var(--acc);
+  }
+  .sp.drop-after {
+    box-shadow: inset -2px 0 0 0 var(--acc);
   }
   .sp.is-active {
     background: var(--bg4);
