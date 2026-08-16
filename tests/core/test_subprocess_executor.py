@@ -486,3 +486,41 @@ async def test_sandboxed_executor_binds_workspace_and_isolates_fs(tmp_path, shel
         assert any(s in shadow.output for s in ("No such file", "Permission denied", "can't open"))
     finally:
         executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_file_events_cross_the_subprocess_boundary(tmp_path):
+    """write_file/read_file run inside the child under the production executor, so
+    their events have to be forwarded to the parent's bus - a bus lives only in the
+    parent, and an event that never leaves the child reaches no subscriber."""
+    from pathlib import Path
+
+    from tsugite.core.tools import create_tool_from_tsugite
+    from tsugite.events import FileReadEvent, FileWriteEvent
+    from tsugite.tools import tool
+    from tsugite.tools.fs import read_file, write_file
+
+    # The autouse reset empties the registry and the cached import stops
+    # _ensure_tools_loaded() re-running the decorators, so re-register here.
+    tool(write_file)
+    tool(read_file)
+
+    events = []
+    event_bus = EventBus()
+    event_bus.subscribe(lambda e: events.append(e))
+
+    target = tmp_path / "note.txt"
+    executor = SubprocessExecutor(workspace_dir=Path(tmp_path), event_bus=event_bus)
+    executor.set_tools([create_tool_from_tsugite("write_file"), create_tool_from_tsugite("read_file")], event_bus)
+    try:
+        result = await executor.execute(f"write_file({str(target)!r}, 'hello\\nthere\\n')\nread_file({str(target)!r})")
+        assert result.error is None, result.error
+
+        writes = [e for e in events if isinstance(e, FileWriteEvent)]
+        reads = [e for e in events if isinstance(e, FileReadEvent)]
+        assert [e.path for e in writes] == [str(target)], "the write must surface on the parent's bus"
+        assert writes[0].line_count == 2
+        assert writes[0].operation == "tool_call"
+        assert [e.path for e in reads] == [str(target)], "the read must surface on the parent's bus"
+    finally:
+        executor.cleanup()

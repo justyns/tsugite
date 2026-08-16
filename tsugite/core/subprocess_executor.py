@@ -85,6 +85,18 @@ _IPC_HELPER = textwrap.dedent("""\
         _ipc_call("audit", event=event, tool=tool, group_id=_current_group(), **kwargs)
 """)
 
+# The child's tsugite.ui_context holds no bus - the real one is in the parent.
+# This proxy ships each event over IPC so child tools reach the same subscribers.
+_EVENT_BUS_STUB = textwrap.dedent("""\
+    class _IpcEventBus:
+        def emit(self, event):
+            _ipc_call("audit", event="ui_event", name=type(event).__name__, fields=event.model_dump(mode="json"))
+
+    from tsugite.ui_context import set_ui_context as _set_ui_context
+
+    _set_ui_context(event_bus=_IpcEventBus())
+""")
+
 _RETURN_VALUE_STUB = textwrap.dedent("""\
     _return_value = None
 
@@ -428,6 +440,7 @@ class SubprocessExecutor:
 os.environ.setdefault("_TSUGITE_REQ_PATH", {json.dumps(req_fifo)})
 os.environ.setdefault("_TSUGITE_RESP_PATH", {json.dumps(resp_fifo)})
 {_IPC_HELPER}
+{_EVENT_BUS_STUB}
 {_REDACTION_IMPORT}
 {_TIMED_AUDIT_WRAPPER}
 {_RETURN_VALUE_STUB}
@@ -920,6 +933,19 @@ with open(RESULT_PATH, "w") as f:
                     duration_ms=msg.get("duration_ms"),
                 )
             )
+        elif event_type == "ui_event":
+            self._emit_forwarded_event(msg)
+
+    def _emit_forwarded_event(self, msg: dict) -> None:
+        """Re-emit an event a tool emitted inside the child, rebuilt from the fields
+        the child shipped over IPC."""
+        import tsugite.events as events
+
+        event_cls = getattr(events, msg.get("name") or "", None)
+        if event_cls is None:
+            logger.warning("IPC: unknown event %r from child", msg.get("name"))
+            return
+        self.event_bus.emit(event_cls.model_validate(msg.get("fields") or {}))
 
     async def _start_proxy(self):
         """Start the HTTP CONNECT proxy for sandbox network access."""
