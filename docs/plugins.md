@@ -56,9 +56,9 @@ tsugite/
 
 ## Lifecycle
 
-1. **Discovery**: at first tool access, `tsugite.tools._ensure_tools_loaded()` calls `load_tool_plugins()`, `load_hook_plugins()`, `load_event_subscriber_plugins()` (see `tsugite/plugins.py`).
+1. **Discovery**: at first tool access, `tsugite.tools._ensure_tools_loaded()` loads the `tsugite.plugins` group and the attachment handlers (see `tsugite/plugins.py`).
 2. **Loading**: each entry point is loaded; if it resolves to a callable, it's invoked with the per-plugin config dict; if it resolves to a module, the import alone is treated as registration (decorators register tools).
-3. **Registration**: tools land in the global registry, hooks in `_plugin_hooks`, event subscriptions in `_plugin_subscriptions`. New `EventBus` instances auto-attach plugin subscriptions in their `__init__`.
+3. **Registration**: tools land in the global registry, hooks in `_plugin_hooks`, event subscriptions in `_plugin_subscriptions`, UI pages in the surface registry. New `EventBus` instances auto-attach plugin subscriptions in their `__init__`.
 4. **Errors**: any plugin that fails to load is recorded in `PluginInfo.error` and logged at `WARNING`; other plugins are unaffected.
 
 ## Plugin config
@@ -72,7 +72,7 @@ plugins:
     bot_token: "..."
 ```
 
-The `register_*` callable receives this dict as its sole argument. `enabled: false` skips loading entirely.
+An entry point that resolves to a factory (an adapter, an attachment handler, a backend) receives this dict as its sole argument. `enabled: false` skips loading entirely.
 
 ## Single-file plugins
 
@@ -153,17 +153,6 @@ my_plugin = "tsugite_my_plugin"
 ```
 
 `event_name` matches against `event.event_name` (e.g. `"tool_call"`, `"task_start"`); `None` (the default) receives all events. `predicate` is an optional `(event) -> bool` gate. Plugins can also emit cross-plugin signals via `CustomEvent(custom_name="my_plugin.something_happened", payload={...})` and other plugins filter on the same string.
-
-For config-driven registration, use the function form via `tsugite.event_subscribers`:
-
-```python
-def register_event_subscribers(config):
-    from tsugite.events.bus import Subscription
-    subs = [Subscription(handler=on_tool_call, event_name="tool_call")]
-    if config.get("debug"):
-        subs.append(Subscription(handler=debug_logger))
-    return subs
-```
 
 ## Command plugins
 

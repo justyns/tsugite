@@ -11,7 +11,7 @@ Declare in your plugin's `pyproject.toml`. The unified `tsugite.plugins` group i
 my_plugin = "tsugite_my_plugin"
 ```
 
-No `register_hooks()` function is needed. The dedicated `tsugite.hooks` group is still supported for the function form (see "Advanced" below).
+No `register_hooks()` function is needed.
 
 ## Defining hooks
 
@@ -115,29 +115,3 @@ def add_cache_breakpoint(context):
 - Async callables are awaited; sync callables are run in a thread.
 - Non-capturing phases run as background tasks.
 - Hooks are loaded lazily on first tool access.
-
-## Advanced: function-form entry point
-
-For config-driven registration (e.g. only register a hook when an API key is set), use the function form:
-
-```toml
-[project.entry-points."tsugite.hooks"]
-my_plugin = "tsugite_my_plugin:register_hooks"
-```
-
-The callable receives the per-plugin config dict from the daemon's `~/.tsugite/daemon.yaml` and returns `dict[str, list[HookRule]]`:
-
-```python
-from tsugite.hooks import HookRule
-
-
-def register_hooks(config: dict) -> dict:
-    rules = {"pre_message": [HookRule(type="python", hook_callable=base_hook, name="base")]}
-    if config.get("premium"):
-        rules.setdefault("post_response", []).append(
-            HookRule(type="python", hook_callable=premium_hook, name="premium")
-        )
-    return rules
-```
-
-Most plugins should prefer the `@hook` decorator above; reach for this form only when registration depends on runtime config.

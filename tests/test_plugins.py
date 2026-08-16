@@ -4,18 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tsugite.events import EventBus, TaskStartEvent
-from tsugite.events.bus import Subscription
-from tsugite.hooks import HookRule
 from tsugite.plugins import (
     GROUP_PLUGINS,
     discover_plugins,
-    get_plugin_subscriptions,
     load_adapter_plugins,
-    load_event_subscriber_plugins,
-    load_hook_plugins,
     load_module_only_plugins,
-    load_tool_plugins,
 )
 from tsugite.ui_surfaces import registered_ui_surfaces
 
@@ -43,13 +36,13 @@ class TestDiscoverPlugins:
             result = discover_plugins()
         assert result == []
 
-    def test_discovers_tool_plugin(self):
-        ep = _make_entry_point("weather", "tsugite_weather:register_tools", "tsugite.tools")
+    def test_discovers_decorator_plugin(self):
+        ep = _make_entry_point("weather", "tsugite_weather", "tsugite.plugins")
         with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
             result = discover_plugins()
         assert len(result) == 1
         assert result[0].name == "weather"
-        assert result[0].group == "tsugite.tools"
+        assert result[0].group == "tsugite.plugins"
         assert result[0].enabled is True
 
     def test_discovers_adapter_plugin(self):
@@ -60,70 +53,17 @@ class TestDiscoverPlugins:
         assert result[0].group == "tsugite.adapters"
 
     def test_respects_enabled_false(self):
-        ep = _make_entry_point("weather", "tsugite_weather:register_tools", "tsugite.tools")
+        ep = _make_entry_point("weather", "tsugite_weather", "tsugite.plugins")
         config = {"weather": {"enabled": False}}
         with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
             result = discover_plugins(plugin_config=config)
         assert result[0].enabled is False
 
     def test_enabled_by_default(self):
-        ep = _make_entry_point("weather", "tsugite_weather:register_tools", "tsugite.tools")
+        ep = _make_entry_point("weather", "tsugite_weather", "tsugite.plugins")
         with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
             result = discover_plugins(plugin_config={})
         assert result[0].enabled is True
-
-
-class TestLoadToolPlugins:
-    def test_registers_tools(self):
-        def my_tool(x: str) -> str:
-            """A test tool."""
-            return x
-
-        register_fn = MagicMock(return_value=[my_tool])
-        ep = _make_entry_point("test-plugin", "test_plugin:register", "tsugite.tools")
-        ep.load.return_value = register_fn
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            with patch("tsugite.tools._register_tool") as mock_register:
-                results = load_tool_plugins()
-
-        register_fn.assert_called_once_with({})
-        mock_register.assert_called_once_with(my_tool)
-        assert len(results) == 1
-        assert results[0].loaded is True
-
-    def test_skips_disabled(self):
-        ep = _make_entry_point("test-plugin", "test_plugin:register", "tsugite.tools")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_tool_plugins(plugin_config={"test-plugin": {"enabled": False}})
-
-        ep.load.assert_not_called()
-        assert results[0].enabled is False
-        assert results[0].loaded is False
-
-    def test_graceful_failure(self):
-        ep = _make_entry_point("bad-plugin", "bad_plugin:register", "tsugite.tools")
-        ep.load.side_effect = ImportError("no such module")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_tool_plugins()
-
-        assert len(results) == 1
-        assert results[0].loaded is False
-        assert "no such module" in results[0].error
-
-    def test_passes_config_to_register_fn(self):
-        register_fn = MagicMock(return_value=[])
-        ep = _make_entry_point("weather", "tsugite_weather:register", "tsugite.tools")
-        ep.load.return_value = register_fn
-
-        config = {"weather": {"api_key": "abc123"}}
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            with patch("tsugite.tools._register_tool"):
-                load_tool_plugins(plugin_config=config)
-
-        register_fn.assert_called_once_with({"api_key": "abc123"})
 
 
 class TestLoadAdapterPlugins:
@@ -187,194 +127,6 @@ class TestLoadAdapterPlugins:
         info, adapter = results[0]
         assert adapter is None
         assert "connection failed" in info.error
-
-
-class TestLoadHookPlugins:
-    def setup_method(self):
-        """Reset plugin hooks state between tests."""
-        import tsugite.plugins
-
-        tsugite.plugins._plugin_hooks = {}
-
-    def test_registers_hooks(self):
-        async def my_hook(ctx):
-            return "hello"
-
-        rules = {"pre_context_build": [HookRule(type="python", hook_callable=my_hook, name="test")]}
-        register_fn = MagicMock(return_value=rules)
-        ep = _make_entry_point("test-hooks", "test_hooks:register", "tsugite.hooks")
-        ep.load.return_value = register_fn
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_hook_plugins()
-
-        register_fn.assert_called_once_with({})
-        assert len(results) == 1
-        assert results[0].loaded is True
-
-        from tsugite.plugins import get_plugin_hooks
-
-        hooks = get_plugin_hooks()
-        assert "pre_context_build" in hooks
-        assert len(hooks["pre_context_build"]) == 1
-
-    def test_skips_disabled(self):
-        ep = _make_entry_point("test-hooks", "test_hooks:register", "tsugite.hooks")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_hook_plugins(plugin_config={"test-hooks": {"enabled": False}})
-
-        ep.load.assert_not_called()
-        assert results[0].enabled is False
-
-    def test_graceful_failure(self):
-        ep = _make_entry_point("bad-hooks", "bad_hooks:register", "tsugite.hooks")
-        ep.load.side_effect = ImportError("no such module")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_hook_plugins()
-
-        assert results[0].loaded is False
-        assert "no such module" in results[0].error
-
-    def test_passes_config(self):
-        register_fn = MagicMock(return_value={})
-        ep = _make_entry_point("uridx", "uridx:register_hooks", "tsugite.hooks")
-        ep.load.return_value = register_fn
-
-        config = {"uridx": {"api_url": "http://localhost:8080"}}
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            load_hook_plugins(plugin_config=config)
-
-        register_fn.assert_called_once_with({"api_url": "http://localhost:8080"})
-
-    def test_multiple_plugins_merged(self):
-        async def hook_a(ctx):
-            pass
-
-        async def hook_b(ctx):
-            pass
-
-        register_a = MagicMock(
-            return_value={
-                "pre_context_build": [HookRule(type="python", hook_callable=hook_a, name="a")],
-            }
-        )
-        register_b = MagicMock(
-            return_value={
-                "pre_context_build": [HookRule(type="python", hook_callable=hook_b, name="b")],
-                "session_end": [HookRule(type="python", hook_callable=hook_b, name="b-end")],
-            }
-        )
-
-        ep_a = _make_entry_point("plugin-a", "a:register", "tsugite.hooks")
-        ep_a.load.return_value = register_a
-        ep_b = _make_entry_point("plugin-b", "b:register", "tsugite.hooks")
-        ep_b.load.return_value = register_b
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep_a, ep_b]):
-            load_hook_plugins()
-
-        from tsugite.plugins import get_plugin_hooks
-
-        hooks = get_plugin_hooks()
-        assert len(hooks["pre_context_build"]) == 2
-        assert len(hooks["session_end"]) == 1
-
-    def test_discovers_hook_plugins(self):
-        ep = _make_entry_point("uridx", "uridx:register_hooks", "tsugite.hooks")
-        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
-            result = discover_plugins()
-        assert any(p.group == "tsugite.hooks" for p in result)
-
-
-class TestLoadEventSubscriberPlugins:
-    def setup_method(self):
-        import tsugite.plugins
-
-        tsugite.plugins._plugin_subscriptions = []
-
-    def teardown_method(self):
-        import tsugite.plugins
-
-        tsugite.plugins._plugin_subscriptions = []
-
-    def test_registers_subscriptions(self):
-        def my_handler(event):
-            pass
-
-        register_fn = MagicMock(
-            return_value=[Subscription(handler=my_handler, event_name="task_start", predicate=None)]
-        )
-        ep = _make_entry_point("test-events", "test_events:register", "tsugite.event_subscribers")
-        ep.load.return_value = register_fn
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_event_subscriber_plugins()
-
-        register_fn.assert_called_once_with({})
-        assert len(results) == 1
-        assert results[0].loaded is True
-
-        subs = get_plugin_subscriptions()
-        assert len(subs) == 1
-        assert subs[0].event_name == "task_start"
-
-    def test_skips_disabled(self):
-        ep = _make_entry_point("test-events", "test_events:register", "tsugite.event_subscribers")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_event_subscriber_plugins(plugin_config={"test-events": {"enabled": False}})
-
-        ep.load.assert_not_called()
-        assert results[0].enabled is False
-        assert results[0].loaded is False
-        assert get_plugin_subscriptions() == []
-
-    def test_graceful_failure(self):
-        ep = _make_entry_point("bad-events", "bad_events:register", "tsugite.event_subscribers")
-        ep.load.side_effect = ImportError("no such module")
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            results = load_event_subscriber_plugins()
-
-        assert results[0].loaded is False
-        assert "no such module" in results[0].error
-        assert get_plugin_subscriptions() == []
-
-    def test_passes_config(self):
-        register_fn = MagicMock(return_value=[])
-        ep = _make_entry_point("pii", "pii:register", "tsugite.event_subscribers")
-        ep.load.return_value = register_fn
-
-        config = {"pii": {"redact_pattern": r"\d{3}-\d{2}-\d{4}"}}
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            load_event_subscriber_plugins(plugin_config=config)
-
-        register_fn.assert_called_once_with({"redact_pattern": r"\d{3}-\d{2}-\d{4}"})
-
-    def test_event_bus_picks_up_loaded_subscriptions(self):
-        received = []
-        register_fn = MagicMock(
-            return_value=[Subscription(handler=received.append, event_name="task_start", predicate=None)]
-        )
-        ep = _make_entry_point("listener", "listener:register", "tsugite.event_subscribers")
-        ep.load.return_value = register_fn
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            load_event_subscriber_plugins()
-
-        bus = EventBus()
-        bus.emit(TaskStartEvent(task="x", model="y"))
-
-        assert len(received) == 1
-        assert received[0].event_name == "task_start"
-
-    def test_discovers_event_subscriber_plugins(self):
-        ep = _make_entry_point("listener", "listener:register", "tsugite.event_subscribers")
-        with patch("tsugite.plugins.importlib.metadata.entry_points", side_effect=_mock_entry_points([ep])):
-            result = discover_plugins()
-        assert any(p.group == "tsugite.event_subscribers" for p in result)
 
 
 class TestUnifiedPluginsGroup:
@@ -447,28 +199,6 @@ class TestLoadCommandPlugins:
 
         ep.load.assert_not_called()
         assert results[0].enabled is False
-
-
-class TestModuleOnlyEntryPoint:
-    """Plugins may declare a module-only entry point (no :attr).
-
-    Importing the module is the registration (decorators do the work). The
-    loader treats this case as a successful load with no extra payload.
-    """
-
-    def test_module_only_tool_entry_point(self):
-        import types
-
-        fake_module = types.ModuleType("fake_tool_plugin")
-        ep = _make_entry_point("decorator-plugin", "fake_tool_plugin", "tsugite.tools")
-        ep.load.return_value = fake_module
-
-        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
-            with patch("tsugite.tools._register_tool") as mock_register:
-                results = load_tool_plugins()
-
-        assert results[0].loaded is True
-        mock_register.assert_not_called()
 
 
 def test_all_group_constants_are_enumerated():

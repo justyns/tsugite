@@ -11,7 +11,7 @@ Declare in your plugin's `pyproject.toml`. The unified `tsugite.plugins` group i
 my_plugin = "tsugite_my_plugin"
 ```
 
-No `register_tools()` function is needed. The dedicated `tsugite.tools` group is still supported for the function form (see "Advanced" below).
+No `register_tools()` function is needed.
 
 ## Defining tools
 
@@ -55,32 +55,6 @@ The function name becomes the tool name (`my_plugin_search`). The first line of 
 Module-only plugins read config at tool-call time via their own mechanism (environment variables, on-disk config, etc.) since the import has no config parameter. For most cases this is fine.
 
 If you need config to drive *which* tools register (e.g. only register a tool when an API key is present), use the function form below.
-
-## Advanced: function-form entry point
-
-```toml
-[project.entry-points."tsugite.tools"]
-my_plugin = "tsugite_my_plugin:register_tools"
-```
-
-```python
-def register_tools(config: dict) -> list:
-    tools = [my_plugin_search]
-    if config.get("api_key"):
-        tools.append(my_plugin_premium_fetch)
-    return tools
-```
-
-The callable receives the per-plugin config dict from the daemon's `~/.tsugite/daemon.yaml`:
-
-```yaml
-plugins:
-  my_plugin:
-    enabled: true
-    api_key: "..."
-```
-
-`enabled: false` skips loading entirely. The returned tool functions are registered into the same global registry as `@tool`-decorated tools.
 
 ## Calling other tools
 

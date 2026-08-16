@@ -11,7 +11,7 @@ Declare in your plugin's `pyproject.toml`. The unified `tsugite.plugins` group i
 my_plugin = "tsugite_my_plugin"
 ```
 
-No `register_event_subscribers()` function is needed. The dedicated `tsugite.event_subscribers` group is still supported for the function form (see "Advanced" below).
+No `register_event_subscribers()` function is needed.
 
 ## Defining subscribers
 
@@ -106,25 +106,3 @@ from tsugite.plugins import get_plugin_subscriptions
 for sub in get_plugin_subscriptions():
     print(f"{sub.event_name or '*':30s} -> {sub.handler.__module__}.{sub.handler.__name__}")
 ```
-
-## Advanced: function-form entry point
-
-For config-driven registration (e.g. only subscribe when a feature flag is set), use the function form:
-
-```toml
-[project.entry-points."tsugite.event_subscribers"]
-my_plugin = "tsugite_my_plugin:register_event_subscribers"
-```
-
-```python
-from tsugite.events.bus import Subscription
-
-
-def register_event_subscribers(config: dict) -> list[Subscription]:
-    subs = [Subscription(handler=on_tool_call, event_name="tool_call")]
-    if config.get("debug"):
-        subs.append(Subscription(handler=debug_logger))  # event_name=None - all events
-    return subs
-```
-
-The callable receives the per-plugin config dict from the daemon's `~/.tsugite/daemon.yaml`. `enabled: false` skips loading entirely. Most plugins should prefer `@subscribe` above; reach for this form only when subscriptions depend on runtime config.

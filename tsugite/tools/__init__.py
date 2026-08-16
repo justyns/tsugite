@@ -457,16 +457,10 @@ def _ensure_tools_loaded():
     from tsugite.plugins import (
         GROUP_PLUGINS,
         load_attachment_plugins,
-        load_event_subscriber_plugins,
-        load_hook_plugins,
         load_module_only_plugins,
-        load_tool_plugins,
     )
 
     load_module_only_plugins(GROUP_PLUGINS)
-    load_tool_plugins()
-    load_hook_plugins()
-    load_event_subscriber_plugins()
     load_attachment_plugins()
 
     _tools_loaded = True

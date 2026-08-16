@@ -14,12 +14,9 @@ from tsugite.ui_surfaces import attributing_to
 logger = logging.getLogger(__name__)
 
 GROUP_PLUGINS = "tsugite.plugins"
-GROUP_TOOLS = "tsugite.tools"
 GROUP_ADAPTERS = "tsugite.adapters"
 GROUP_PROVIDERS = "tsugite.providers"
 GROUP_SECRETS = "tsugite.secrets"
-GROUP_HOOKS = "tsugite.hooks"
-GROUP_EVENT_SUBSCRIBERS = "tsugite.event_subscribers"
 GROUP_HISTORY = "tsugite.history"
 GROUP_ATTACHMENTS = "tsugite.attachments"
 GROUP_SANDBOX = "tsugite.sandbox"
@@ -28,12 +25,9 @@ GROUP_COMMANDS = "tsugite.commands"
 GROUP_CONTEXT_PROVIDERS = "tsugite.context_providers"
 PLUGIN_GROUPS = (
     GROUP_PLUGINS,
-    GROUP_TOOLS,
     GROUP_ADAPTERS,
     GROUP_PROVIDERS,
     GROUP_SECRETS,
-    GROUP_HOOKS,
-    GROUP_EVENT_SUBSCRIBERS,
     GROUP_HISTORY,
     GROUP_ATTACHMENTS,
     GROUP_SANDBOX,
@@ -169,57 +163,9 @@ def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[
     return results
 
 
-def load_tool_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and register tool plugins.
-
-    Each entry point should resolve to a callable that returns a list of tool functions.
-    """
-    from tsugite.tools import _register_tool
-
-    def consume(tools):
-        for func in tools:
-            _register_tool(func)
-
-    return _load_plugin_group(GROUP_TOOLS, plugin_config, consume, summarize=lambda t: f"{len(t)} tools")
-
-
-def load_hook_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and register hook plugins.
-
-    Each entry point should resolve to a callable that returns
-    dict[str, list[HookRule]] mapping phase names to hook rules.
-    """
-
-    def consume(hooks):
-        for phase, rules in hooks.items():
-            _plugin_hooks.setdefault(phase, []).extend(rules)
-
-    return _load_plugin_group(
-        GROUP_HOOKS,
-        plugin_config,
-        consume,
-        summarize=lambda h: ", ".join(f"{phase}({len(rules)})" for phase, rules in h.items()),
-    )
-
-
 def get_plugin_hooks() -> dict[str, list]:
     """Return all registered plugin hooks, keyed by phase name."""
     return _plugin_hooks
-
-
-def load_event_subscriber_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
-    """Discover and register event subscriber plugins.
-
-    Each entry point should resolve to a callable that returns
-    list[Subscription]. Subscriptions are picked up by every EventBus
-    instance constructed afterwards.
-    """
-    return _load_plugin_group(
-        GROUP_EVENT_SUBSCRIBERS,
-        plugin_config,
-        _plugin_subscriptions.extend,
-        summarize=lambda subs: f"{len(subs)} subscriptions",
-    )
 
 
 def get_plugin_subscriptions() -> list[Subscription]:
