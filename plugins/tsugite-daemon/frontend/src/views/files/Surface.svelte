@@ -527,7 +527,9 @@
 <style>
   .wk-shell {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 208px;
+    /* The column carries its own width, so the track collapses when it hides.
+       A fixed track would stay reserved and leave dead space in a narrow pane. */
+    grid-template-columns: minmax(0, 1fr) auto;
     flex: 1;
     min-height: 0;
     min-width: 0;
@@ -872,6 +874,7 @@
   .wk-meta {
     display: flex;
     flex-direction: column;
+    width: 208px;
     border-left: 1px solid var(--bd0);
     background: var(--bg1);
     overflow-y: auto;
@@ -940,9 +943,6 @@
     font-family: var(--font-mono);
   }
   @container (max-width: 720px) {
-    .wk-shell {
-      grid-template-columns: minmax(0, 1fr);
-    }
     .wk-meta {
       display: none;
     }
