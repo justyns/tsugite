@@ -152,6 +152,16 @@ def _has_bare_python_fence(cleaned: str) -> bool:
     return _BARE_PYTHON_FENCE.search(cleaned) is not None
 
 
+# Tool-call envelopes a model may emit as text instead of a ```python-exec
+# block. Nothing here executes them, so such a reply did no work.
+_TOOL_CALL_MARKUP = re.compile(r"<(?:[a-z]+:)?(?:function_calls|invoke|tool_call|tool_use)\b", re.IGNORECASE)
+
+
+def _has_tool_call_markup(content: str) -> bool:
+    """True if the text contains a native tool-call envelope."""
+    return bool(content) and _TOOL_CALL_MARKUP.search(content) is not None
+
+
 # Tags the runtime injects into the model's NEXT user message after executing
 # its code (the execution result, multi-block warning, and budget hints). A
 # well-behaved model never writes these itself; one that does is impersonating
@@ -195,6 +205,20 @@ def _build_spoofed_runtime_tag_warning() -> str:
         "They were neutralized; only the real execution result below is authoritative. "
         "Reply with prose or exactly one ```python-exec block."
         "</tsugite_runtime_tag_notice>"
+    )
+
+
+def _build_unexecuted_tool_call_notice_xml() -> str:
+    """Model-visible correction when a no-code response was built out of native
+    tool-call markup. Nothing in it ran, so its completion summary describes work
+    that never happened; this hands the turn back pointing at the fence that
+    actually executes."""
+    return (
+        "\n<tsugite_unexecuted_tool_call_notice>"
+        "Your response contained native tool-call markup. This runtime does not execute it - "
+        "nothing ran, and any result or count your response reported is not real. "
+        "Call the tools from Python instead: re-emit the work as exactly one ```python-exec block."
+        "</tsugite_unexecuted_tool_call_notice>"
     )
 
 
@@ -409,6 +433,8 @@ class TsugiteAgent:
         last_response_text: str = ""
         turn_num = 0
         cancelled = False
+        corrected_tool_call_markup = False
+        unexecuted_tool_call_run = False
 
         try:
             for turn_num in range(self.max_turns):
@@ -469,7 +495,6 @@ class TsugiteAgent:
 
                 # No code = the model is done. Its raw text is the answer.
                 if not code or not code.strip():
-                    final_value = last_response_text
                     trailing_notice = ""
                     if multi_block_count:
                         trailing_notice += _build_multi_block_warning_xml(multi_block_count)
@@ -479,6 +504,10 @@ class TsugiteAgent:
                     # it wasn't executed. Nudge it toward the exec fence for next turn.
                     if turn.has_bare_python:
                         trailing_notice += _build_bare_python_notice_xml()
+                    # Correct the model once rather than accept a fabricated summary.
+                    unexecuted_tool_call = _has_tool_call_markup(last_response_text)
+                    if unexecuted_tool_call:
+                        trailing_notice += _build_unexecuted_tool_call_notice_xml()
                     self.memory.add_step(
                         thought=thought,
                         code="",
@@ -488,6 +517,22 @@ class TsugiteAgent:
                         raw_content=last_response_text,
                         xml_observation=trailing_notice or None,
                     )
+                    if unexecuted_tool_call and not corrected_tool_call_markup:
+                        corrected_tool_call_markup = True
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                WarningEvent(
+                                    message=(
+                                        "Response used tool-call markup, which is not executed; "
+                                        "asking the model to re-emit it as a python-exec block."
+                                    ),
+                                    category="unexecuted_tool_call",
+                                    step=turn_num + 1,
+                                )
+                            )
+                        continue
+                    unexecuted_tool_call_run = unexecuted_tool_call
+                    final_value = last_response_text
                     break
 
                 # Cooperative cancel checkpoint (before running a tool/code block):
@@ -573,6 +618,13 @@ class TsugiteAgent:
                 final_value = last_response_text
                 status = "interrupted"
                 error_message = f"max_turns ({self.max_turns}) reached"
+                if self.event_bus:
+                    self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
+            # The model answered with tool-call markup again after being corrected,
+            # so the run finished having executed nothing it claimed to do.
+            elif unexecuted_tool_call_run:
+                status = "error"
+                error_message = "model answered with unexecuted tool-call markup; no code ran"
                 if self.event_bus:
                     self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             else:
