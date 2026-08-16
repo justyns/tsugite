@@ -14,6 +14,7 @@
   import { spaces } from '$lib/stores/spaces.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { writeSurfaceDrag } from '$lib/shell/mux/drag';
+  import { moveItem } from '$lib/reorder';
   import { readLocal, writeLocal } from '$lib/storage';
   import type { SessionRow as Row } from '$lib/stores/sessions.svelte';
   import { TESTID } from '$lib/testids';
@@ -190,6 +191,34 @@
       params: { sessionId: row.id },
       title: row.title ?? 'chat',
     });
+    if (row.pinned) draggingPinned = row.id;
+  }
+
+  // Reorder within the pinned bucket. The dragged id is held locally because
+  // `dragover` can read the payload's types but not its contents.
+  let draggingPinned = $state<string | null>(null);
+  let dropAt = $state<number | null>(null);
+  const pinnedIds = $derived(groups.pinned.map((p) => p.id));
+
+  function endPinnedDrag() {
+    draggingPinned = null;
+    dropAt = null;
+  }
+
+  function onPinnedDragOver(e: DragEvent, row: Row) {
+    if (!draggingPinned || !row.pinned) return;
+    e.preventDefault();
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    dropAt = pinnedIds.indexOf(row.id) + (e.clientY < r.top + r.height / 2 ? 0 : 1);
+  }
+
+  function onPinnedDrop(e: DragEvent, row: Row) {
+    if (!draggingPinned || !row.pinned || dropAt === null) return;
+    e.preventDefault();
+    const next = moveItem(pinnedIds, pinnedIds.indexOf(draggingPinned), dropAt);
+    const changed = next.join() !== pinnedIds.join();
+    endPinnedDrag();
+    if (changed) void sessions.reorderPins(next);
   }
 </script>
 
@@ -252,12 +281,18 @@
     </button>
   </div>
 
-  {#snippet rowItem(row: Row)}
+  {#snippet rowItem(row: Row, index = 0)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="srow-drag"
+      class:is-dragging={draggingPinned === row.id}
+      class:drop-above={row.pinned && dropAt === index}
+      class:drop-below={row.pinned && dropAt === index + 1 && index === pinnedIds.length - 1}
       draggable="true"
       ondragstart={(e) => onRowDragStart(e, row)}
+      ondragend={endPinnedDrag}
+      ondragover={(e) => onPinnedDragOver(e, row)}
+      ondrop={(e) => onPinnedDrop(e, row)}
       oncontextmenu={(e) => openRowMenu(e, row)}
     >
       <SessionRow
@@ -286,8 +321,8 @@
       {#each GROUP_LABELS as [key, label] (key)}
         {#if groups[key].length > 0}
           <div class="sb-group">{label}</div>
-          {#each groups[key] as row (row.id)}
-            {@render rowItem(row)}
+          {#each groups[key] as row, i (row.id)}
+            {@render rowItem(row, i)}
           {/each}
         {/if}
       {/each}
@@ -437,6 +472,17 @@
   }
   .srow-drag {
     cursor: grab;
+  }
+  /* Drop marker for a pinned reorder. Drawn as an inset box-shadow so it costs
+     no layout and never nudges the rows under the pointer. */
+  .srow-drag.is-dragging {
+    opacity: 0.4;
+  }
+  .srow-drag.drop-above {
+    box-shadow: inset 0 2px 0 0 var(--acc);
+  }
+  .srow-drag.drop-below {
+    box-shadow: inset 0 -2px 0 0 var(--acc);
   }
   .rail-note {
     padding: 18px 14px;

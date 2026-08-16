@@ -6,7 +6,7 @@ import SessionsRail from './SessionsRail.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
 import { collectLeaves } from '$lib/shell/mux/layout';
 import { TESTID } from '$lib/testids';
-import type { SessionRow } from '$lib/stores/sessions.svelte';
+import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
 
 // The ended section persists its open/closed choice; reset it so each test
 // starts from the collapsed default.
@@ -143,4 +143,50 @@ test('double-clicking a session row docks it as a fresh chat tab', async () => {
   const docked = tabs[tabs.length - 1]!;
   expect(docked.kind).toBe('chat');
   expect(docked.params).toEqual({ sessionId: 's3', agent: 'smokeagent' });
+});
+
+// Drag-reorder of the pinned bucket. `sessions.reorderPins` owns the optimistic
+// update and the POST; the rail's only job is to hand it the new id order.
+function dragRowOnto(from: HTMLElement, to: HTMLElement, half: 'top' | 'bottom') {
+  const dataTransfer = new DataTransfer();
+  from.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));
+  const r = to.getBoundingClientRect();
+  const clientY = half === 'top' ? r.top + r.height * 0.25 : r.top + r.height * 0.75;
+  for (const type of ['dragover', 'drop']) {
+    to.dispatchEvent(new DragEvent(type, { dataTransfer, bubbles: true, clientY }));
+  }
+}
+
+test('dragging a pinned row above another sends the new pinned order', async () => {
+  const reorder = vi.spyOn(sessions, 'reorderPins').mockResolvedValue(undefined);
+  render(SessionsRail, {
+    ...base,
+    rows: [
+      row('p1', { title: 'alpha pin', pinned: true, pin_position: 0 }),
+      row('p2', { title: 'beta pin', pinned: true, pin_position: 1 }),
+    ],
+  });
+
+  const first = (await page.getByText('alpha pin').element()).closest('.srow-drag') as HTMLElement;
+  const second = (await page.getByText('beta pin').element()).closest('.srow-drag') as HTMLElement;
+  dragRowOnto(second, first, 'top');
+
+  expect(reorder).toHaveBeenCalledWith(['p2', 'p1']);
+});
+
+test('an unpinned row is not a reorder drop target', async () => {
+  const reorder = vi.spyOn(sessions, 'reorderPins').mockResolvedValue(undefined);
+  render(SessionsRail, {
+    ...base,
+    rows: [
+      row('p1', { title: 'alpha pin', pinned: true, pin_position: 0 }),
+      row('u1', { title: 'loose one' }),
+    ],
+  });
+
+  const pinned = (await page.getByText('alpha pin').element()).closest('.srow-drag') as HTMLElement;
+  const loose = (await page.getByText('loose one').element()).closest('.srow-drag') as HTMLElement;
+  dragRowOnto(pinned, loose, 'top');
+
+  expect(reorder).not.toHaveBeenCalled();
 });
