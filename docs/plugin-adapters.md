@@ -85,36 +85,55 @@ them (not a crash). Route lists that raise while being collected are logged and 
 
 ## UI surfaces
 
-An adapter puts a page in the web UI by returning surface descriptors from `get_ui_surfaces()`
-(default `[]`). Each becomes a tab kind in the multiplexer, openable from the command palette;
-`nav: true` also adds a nav-rail entry, and `mode` decides what clicking it does. The plugin ships
-HTML, and the host frames it - a plugin never compiles a Svelte component into the daemon's bundle.
+A page comes from a plugin's `tsugite.plugins` module, not from its adapter, so a plugin needs an
+adapter only when it also wants routes, job executors, or a lifecycle. Each surface becomes a tab
+kind in the multiplexer, openable from the command palette; `nav=True` also adds a nav-rail entry,
+and `mode` decides what clicking it does. The plugin ships HTML and the host frames it.
 
 ```python
-def get_ui_surfaces(self):
-    return [
-        {
-            "kind": "panel",          # namespaced to plugin/<plugin_name>/panel
-            "label": "Example panel", # tab + nav-rail label
-            "icon": "plug",           # a host icon name; an unknown one falls back to plug
-            "entry": "ui/panel.html", # resolved under /api/plugins/<plugin_name>/
-            "assets": Path(__file__).parent / "ui",  # served at /api/plugins/<plugin_name>/ui/
-            "nav": True,
-            "mode": "workspace",      # what its nav-rail row does; "full" is the default
-            "params": ["path"],       # the only tab params forwarded into the iframe URL
-            "events": ["my_thing_update"],  # the only daemon events forwarded into the frame
-        }
-    ]
+from tsugite.ui_surfaces import register_ui_surface
+
+register_ui_surface(
+    kind="panel",           # namespaced to plugin/<plugin_name>/panel
+    label="Example panel",  # tab + nav-rail label
+    icon="plug",            # a host icon name; an unknown one falls back to plug
+    entry="ui/panel.html",  # resolved under /api/plugins/<plugin_name>/
+    assets=Path(__file__).parent / "ui",  # served at /api/plugins/<plugin_name>/ui/
+    nav=True,
+    mode="workspace",       # what its nav-rail row does; "full" is the default
+    params=["path"],        # the only tab params forwarded into the iframe URL
+    events=["my_thing_update"],  # the only daemon events forwarded into the frame
+)
 ```
 
-`kind` and `entry` are required; a descriptor missing either is logged and skipped, as is a
-`get_ui_surfaces()` that raises. Surfaces are skipped entirely when HTTP is disabled.
+A page that is generated rather than static needs no `assets` directory. Decorate the
+function that returns it, and the daemon serves it as the surface's `entry`:
+
+```python
+from tsugite.ui_surfaces import ui_surface
+
+@ui_surface(kind="dash", label="Homelab", nav=True)
+def dashboard_page() -> str:
+    return """<!doctype html><meta charset=utf-8><title>Homelab</title><h1>ok</h1>
+<script>
+  addEventListener('message', (e) => {
+    if (e.data?.type === 'tsugite:init') parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+  });
+</script>"""
+```
+
+A page function must complete the `tsugite:ready` handshake below, the same as a static `entry`.
+
+A page is served **unauthenticated**, because the browser loads a surface as a navigation and a
+navigation carries no bearer header. Return an HTML shell and fetch anything private from the
+adapter's `get_http_routes()`.
+
+`kind` is required, and so is one of `entry` or `page`; a descriptor missing either is logged and
+skipped. A plugin whose import fails registers nothing. Surfaces are skipped entirely when HTTP is
+disabled.
 
 One `assets` directory per plugin; a second, different one is logged and ignored, and a path that
-isn't a directory is reported at startup. A surface whose entry page is generated rather than
-static can skip `assets` and serve `entry` from a route in `get_public_http_routes()` instead:
-public, because the browser loads a surface as a navigation and a navigation carries no bearer
-header.
+isn't a directory is reported at startup.
 
 ### The bridge
 

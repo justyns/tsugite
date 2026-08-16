@@ -93,7 +93,11 @@ def http_server(adapter, token_store, tmp_path):
         agent_configs={},
         token_store=token_store,
     )
-    attach_plugin_http(server, "onlyoffice", adapter)
+    # tools.py registers this at import; the gateway reads the registry and passes
+    # the same descriptor.
+    from tsugite_onlyoffice.tools import DOC_SURFACE
+
+    attach_plugin_http(server, "onlyoffice", adapter, [DOC_SURFACE])
     return server
 
 

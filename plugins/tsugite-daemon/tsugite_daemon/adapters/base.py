@@ -323,22 +323,6 @@ class BaseAdapter(ABC):
         """
         return []
 
-    def get_ui_surfaces(self) -> list:
-        """UI surfaces this adapter contributes to the web UI, each a dict:
-
-            {"kind": "doc", "label": "Document", "icon": "files",
-             "entry": "ui/editor.html", "assets": Path(__file__).parent / "ui",
-             "nav": False, "params": ["path"]}
-
-        `assets` is a directory the daemon serves at
-        `/api/plugins/<plugin_name>/ui/`, and `entry` is the page inside it the
-        web UI frames. Every surface opens from the command palette; `nav` also
-        adds a nav-rail entry. See docs/plugin-adapters.md.
-
-        Default: none.
-        """
-        return []
-
     def _get_all_attachments(self):
         """Build all attachments from the agent's front-matter config (for UI display)."""
         attachments = []

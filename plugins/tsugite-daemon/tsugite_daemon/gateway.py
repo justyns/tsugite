@@ -1,6 +1,7 @@
 """Main daemon gateway coordinating all adapters."""
 
 import asyncio
+import inspect
 import logging
 import logging.handlers
 import signal
@@ -126,10 +127,13 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
     surfaces = []
     dirs = []
     for item in declared:
-        if not isinstance(item, dict) or not item.get("kind") or not item.get("entry"):
-            logger.warning("Plugin '%s': UI surface %r needs both 'kind' and 'entry'; skipping it", plugin_name, item)
+        kind = item.get("kind")
+        entry = item.get("entry") or (f"page/{kind}" if item.get("page") else None)
+        if not kind or not entry:
+            logger.warning(
+                "Plugin '%s': UI surface %r needs 'kind' and one of 'entry' or 'page'; skipping it", plugin_name, item
+            )
             continue
-        kind = item["kind"]
         mode = item.get("mode", "full")
         if mode not in ("full", "workspace"):
             logger.warning(
@@ -143,7 +147,7 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
                 "label": item.get("label") or kind,
                 # Only the web UI knows which icon names it ships, so it owns the fallback.
                 "icon": item.get("icon", ""),
-                "entry": f"/api/plugins/{plugin_name}/{item['entry'].lstrip('/')}",
+                "entry": f"/api/plugins/{plugin_name}/{entry.lstrip('/')}",
                 "nav": bool(item.get("nav")),
                 "params": list(item.get("params") or []),
                 "events": list(item.get("events") or []),
@@ -162,16 +166,54 @@ def _collect_plugin_ui(plugin_name: str, declared: list) -> tuple[list[dict], Pa
     return surfaces, dirs[0]
 
 
-def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
-    """Wire a loaded adapter plugin's HTTP surface into the daemon's Starlette app.
+def _page_endpoint(plugin_name: str, kind: str, page):
+    from starlette.responses import HTMLResponse
+
+    is_async = inspect.iscoroutinefunction(page)
+
+    async def endpoint(request):
+        try:
+            html = await page() if is_async else await asyncio.to_thread(page)
+            # Generated per request, so nothing here is safe to cache.
+            return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+        except Exception:
+            logger.warning("Plugin '%s': page for UI surface '%s' raised", plugin_name, kind, exc_info=True)
+            return HTMLResponse("<!doctype html><title>Plugin page failed</title>", status_code=500)
+
+    return endpoint
+
+
+def _page_routes(plugin_name: str, declared: list) -> list:
+    """Serve each `page` callable as a public route, which `_collect_plugin_ui`
+    points the surface's `entry` at.
+
+    Public because the browser loads a surface as a navigation, which carries no
+    bearer header. The `/page/` prefix keeps these clear of the `/ui/` assets mount,
+    which matches on prefix.
+    """
+    from starlette.routing import Route
+
+    return [
+        Route(f"/page/{item['kind']}", _page_endpoint(plugin_name, item["kind"], item["page"]), methods=["GET"])
+        for item in declared
+        if item.get("page") and item.get("kind")
+    ]
+
+
+def attach_plugin_http(http_server, plugin_name: str, adapter, declared_surfaces: list | None = None) -> None:
+    """Wire a plugin's HTTP surface into the daemon's Starlette app.
 
     Sets the shared SSE bus on the adapter (so it can broadcast events), then
     mounts its `get_http_routes()` (auth-wrapped) and `get_public_http_routes()`
-    (no auth) under `/api/plugins/<plugin_name>`, and registers its
-    `get_ui_surfaces()` for the web UI. A plugin that lacks the methods is
-    skipped, and one that raises while producing them is logged and skipped.
+    (no auth) under `/api/plugins/<plugin_name>`, and registers `declared_surfaces`
+    for the web UI. A plugin that lacks the route methods is skipped, and one that
+    raises while producing them is logged and skipped.
+
+    Surfaces arrive as an argument, so a plugin that only registered a page needs no
+    adapter: pass `adapter=None`. Routes and surfaces mount together because they share
+    one Starlette Mount, which matches on prefix.
     """
-    if http_server is not None:
+    if http_server is not None and adapter is not None:
         try:
             adapter.event_bus = http_server.event_bus
         except Exception:  # noqa: BLE001 -- a read-only/exotic adapter shouldn't abort startup
@@ -187,9 +229,10 @@ def attach_plugin_http(http_server, plugin_name: str, adapter) -> None:
             logger.warning("Plugin '%s' %s() raised; skipping those entries", plugin_name, method_name, exc_info=True)
             return []
 
+    declared = declared_surfaces or []
     authed = _collect("get_http_routes")
-    public = _collect("get_public_http_routes")
-    surfaces, assets = _collect_plugin_ui(plugin_name, _collect("get_ui_surfaces"))
+    public = [*_collect("get_public_http_routes"), *_page_routes(plugin_name, declared)]
+    surfaces, assets = _collect_plugin_ui(plugin_name, declared)
     if not authed and not public and not surfaces:
         return
     if http_server is None:
@@ -572,6 +615,12 @@ class Gateway:
 
         # Load adapter plugins
         from tsugite.plugins import load_adapter_plugins
+        from tsugite.ui_surfaces import registered_ui_surfaces
+
+        # Pages registered when `set_daemon_mode(True)` above imported the plugin modules.
+        pages = registered_ui_surfaces()
+        for descriptor in pages.pop("", []):
+            logger.warning("UI surface %r was registered outside a plugin load; skipping it", descriptor.get("kind"))
 
         plugin_results = load_adapter_plugins(
             plugin_config=self.config.plugins,
@@ -580,11 +629,16 @@ class Gateway:
             agents_config=self.config.agents,
         )
         for info, adapter in plugin_results:
+            # A plugin whose adapter is disabled or failed loses its page too: it
+            # would open onto routes that never mounted.
+            declared = pages.pop(info.name, [])
             if adapter:
                 self.adapters.append(adapter)
-                attach_plugin_http(self._http_server, info.name, adapter)
+                attach_plugin_http(self._http_server, info.name, adapter, declared)
                 attach_plugin_executors(self._jobs_orchestrator, info.name, adapter)
                 tasks.append(adapter.start())
+        for name, declared in pages.items():
+            attach_plugin_http(self._http_server, name, None, declared)
 
         # Set up notification callback if channels are configured
         if self.config.notification_channels:

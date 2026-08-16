@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tsugite.events.bus import Subscription
+from tsugite.ui_surfaces import attributing_to
 
 logger = logging.getLogger(__name__)
 
@@ -150,15 +151,16 @@ def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[
             logger.debug("Plugin '%s' (%s) disabled, skipping", ep.name, group)
             continue
         try:
-            target = ep.load()
-            if inspect.ismodule(target):
-                # Module-only entry point: import did the registration via decorators.
-                payload = None
-                extra = " (module-only)"
-            else:
-                payload = target(cfg)
-                on_loaded(payload)
-                extra = f": {summarize(payload)}" if summarize else ""
+            with attributing_to(ep.name):
+                target = ep.load()
+                if inspect.ismodule(target):
+                    # Module-only entry point: import did the registration via decorators.
+                    payload = None
+                    extra = " (module-only)"
+                else:
+                    payload = target(cfg)
+                    on_loaded(payload)
+                    extra = f": {summarize(payload)}" if summarize else ""
             results.append(PluginInfo.from_entry_point(ep, group, loaded=True))
             logger.info("Loaded %s plugin '%s'%s", group, ep.name, extra)
         except Exception as e:

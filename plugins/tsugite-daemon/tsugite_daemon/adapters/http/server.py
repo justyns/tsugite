@@ -79,7 +79,7 @@ class HTTPServer(
         self.pty_manager = None  # Set by Gateway alongside terminal_store
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
-        self.plugin_ui_surfaces: list[dict] = []  # Filled by Gateway from each plugin's get_ui_surfaces()
+        self.plugin_ui_surfaces: list[dict] = []  # Filled by Gateway from the plugin UI surface registry
         self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()

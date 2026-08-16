@@ -292,6 +292,16 @@ def reset_attachment_handlers_fixture():
 
 
 @pytest.fixture(autouse=True)
+def reset_ui_surfaces_fixture():
+    """Clear registered UI surfaces, so one test's plugin never contributes a page to another's."""
+    from tsugite.ui_surfaces import reset_ui_surfaces
+
+    reset_ui_surfaces()
+    yield
+    reset_ui_surfaces()
+
+
+@pytest.fixture(autouse=True)
 def isolate_config_files(tmp_path, monkeypatch):
     """Isolate config files for each test to prevent cross-test contamination.
 

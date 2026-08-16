@@ -17,6 +17,7 @@ from tsugite.plugins import (
     load_module_only_plugins,
     load_tool_plugins,
 )
+from tsugite.ui_surfaces import registered_ui_surfaces
 
 
 def _make_entry_point(name, value, group):
@@ -380,18 +381,6 @@ class TestUnifiedPluginsGroup:
     """Plugins can declare a single tsugite.plugins entry point and rely on
     @tool / @hook / @subscribe decorators to register themselves at import."""
 
-    def setup_method(self):
-        import tsugite.plugins
-
-        tsugite.plugins._plugin_hooks = {}
-        tsugite.plugins._plugin_subscriptions = []
-
-    def teardown_method(self):
-        import tsugite.plugins
-
-        tsugite.plugins._plugin_hooks = {}
-        tsugite.plugins._plugin_subscriptions = []
-
     def test_imports_module_via_unified_entry_point(self):
         import types
 
@@ -566,3 +555,58 @@ class TestLocalFilePlugins:
             result = discover_plugins({"dashboard": {"path": str(plugin_file)}})
 
         assert [p.entry_point for p in result] == ["tsugite_dashboard"]
+
+
+_REGISTERS_A_PAGE = """\
+from tsugite.ui_surfaces import ui_surface
+
+@ui_surface(kind="dash", label="Homelab", nav=True)
+def page():
+    return "<h1>ok</h1>"
+"""
+
+
+class TestUISurfaceAttribution:
+    """A surface registers at import time and cannot know its own entry point, so the
+    loader stamps the plugin name the config gave it."""
+
+    @pytest.fixture(autouse=True)
+    def _no_installed_plugins(self):
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[]):
+            yield
+
+    def _write_plugin(self, tmp_path, name, body=_REGISTERS_A_PAGE):
+        plugin_file = tmp_path / f"{name}.py"
+        plugin_file.write_text(body)
+        return plugin_file
+
+    def test_stamped_with_the_configured_plugin_name(self, tmp_path):
+        plugin_file = self._write_plugin(tmp_path, "dashboard")
+
+        load_module_only_plugins(GROUP_PLUGINS, {"dashboard": {"path": str(plugin_file)}})
+
+        assert {name: [d["kind"] for d in ds] for name, ds in registered_ui_surfaces().items()} == {
+            "dashboard": ["dash"]
+        }
+
+    def test_two_plugins_do_not_cross_attribute(self, tmp_path):
+        first = self._write_plugin(tmp_path, "alpha")
+        second = self._write_plugin(tmp_path, "beta", _REGISTERS_A_PAGE.replace("dash", "beta_dash"))
+        config = {"alpha": {"path": str(first)}, "beta": {"path": str(second)}}
+
+        load_module_only_plugins(GROUP_PLUGINS, config)
+
+        assert {name: [d["kind"] for d in ds] for name, ds in registered_ui_surfaces().items()} == {
+            "alpha": ["dash"],
+            "beta": ["beta_dash"],
+        }
+
+    def test_a_plugin_that_raises_after_registering_gets_no_page(self, tmp_path):
+        broken = self._write_plugin(tmp_path, "broken", _REGISTERS_A_PAGE + "\nraise RuntimeError('boom')\n")
+        working = self._write_plugin(tmp_path, "dashboard")
+        config = {"broken": {"path": str(broken)}, "dashboard": {"path": str(working)}}
+
+        results = load_module_only_plugins(GROUP_PLUGINS, config)
+
+        assert [(r.name, r.loaded) for r in results] == [("broken", False), ("dashboard", True)]
+        assert list(registered_ui_surfaces()) == ["dashboard"]

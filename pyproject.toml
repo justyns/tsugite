@@ -200,7 +200,6 @@ ignore_names = [
   "create_handler",
   "get_public_http_routes",
   "get_http_routes",
-  "get_ui_surfaces",
   "install_signal_handlers",  # uvicorn.Config attributes, set by name
   "should_exit",
   "force_exit",

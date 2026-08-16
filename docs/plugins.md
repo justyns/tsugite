@@ -1,6 +1,6 @@
 # Plugins
 
-Most plugins need only one entry point, `tsugite.plugins`. Importing the module triggers `@tool`, `@hook`, and `@subscribe` decorators.
+Most plugins need only one entry point, `tsugite.plugins`. Importing the module triggers `@tool`, `@hook`, `@subscribe`, and `@ui_surface` decorators.
 
 ```toml
 [project.entry-points."tsugite.plugins"]
@@ -76,7 +76,7 @@ The `register_*` callable receives this dict as its sole argument. `enabled: fal
 
 ## Single-file plugins
 
-A `path` entry names one Python file instead of an installed package. Importing it registers its `@tool`, `@hook`, and `@subscribe` decorators, as a module-only entry point does:
+A `path` entry names one Python file instead of an installed package. Importing it registers its `@tool`, `@hook`, `@subscribe`, and `@ui_surface` decorators, as a module-only entry point does:
 
 ```json
 {
@@ -91,7 +91,31 @@ Runnable example: [examples/local_plugin.py](../examples/local_plugin.py).
 - Relative paths resolve against the config file's directory, not the working directory.
 - An installed plugin of the same name wins; the local file is skipped with a warning.
 - The file runs with the same privileges as an installed plugin.
-- Adapters, providers, sandboxes, and history/secret backends need a package. That includes web UI pages, which come from an adapter's `get_ui_surfaces()`.
+- Adapters, providers, sandboxes, and history/secret backends need a package.
+
+## Web UI pages
+
+Any plugin can add a page to the web UI. Decorate the function that returns its HTML:
+
+```python
+from tsugite.ui_surfaces import ui_surface
+
+
+@ui_surface(kind="dash", label="Homelab", icon="plug", nav=True)
+def dashboard_page() -> str:
+    return """<!doctype html><meta charset=utf-8><title>Homelab</title><h1>ok</h1>
+<script>
+  addEventListener('message', (e) => {
+    if (e.data?.type === 'tsugite:init') parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+  });
+</script>"""
+```
+
+The page opens from the command palette, and `nav=True` also gives it a nav-rail row. The host waits
+for `tsugite:ready` before showing it. The page is served unauthenticated, so return an HTML shell
+and fetch anything private from an authenticated route. For a static file, use
+`register_ui_surface(...)` with `entry` and `assets`. Full reference and the bridge protocol:
+[plugin-adapters.md](plugin-adapters.md).
 
 ## Inspecting plugins
 

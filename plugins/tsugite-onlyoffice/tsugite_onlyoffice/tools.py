@@ -5,7 +5,7 @@ tools imports it, sandboxed subprocess executors included. Keeping tsugite_daemo
 and starlette out of it at module scope keeps those processes off the daemon half
 of the plugin, and the import stays one-directional: the adapter imports the
 tools, never the other way. It gets its configuration from adapter-set module
-state because `load_tool_plugins()` is called with no config argument.
+state because the `tsugite.plugins` group is module-only and gets no config.
 
 Every tool takes a `path` relative to the configured documents directory, and
 every one of them goes through the runtime, which is what jails the path and
@@ -14,12 +14,32 @@ coordinates the edit with whatever the document server is doing to the file.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from tsugite.tools import tool
+from tsugite.ui_surfaces import register_ui_surface
 
 if TYPE_CHECKING:
     from tsugite_onlyoffice.docx import Document
+
+# Broadcast when an agent edit lands, so an open editor can swap to the new file.
+# Here rather than in the adapter because the surface below names it.
+DOCUMENT_EVENT = "onlyoffice_document_update"
+
+DOC_SURFACE = {
+    "kind": "doc",
+    "label": "Document",
+    "icon": "files",
+    "entry": "ui/editor.html",
+    "assets": Path(__file__).parent / "ui",
+    "nav": True,
+    "params": ["path"],
+    "events": [DOCUMENT_EVENT],
+    "mode": "workspace",
+}
+
+register_ui_surface(**DOC_SURFACE)
 
 _runtime = None
 

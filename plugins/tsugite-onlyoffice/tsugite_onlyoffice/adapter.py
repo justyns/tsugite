@@ -30,7 +30,7 @@ from tsugite_onlyoffice.documents import (
     write_atomic,
 )
 from tsugite_onlyoffice.sessions import DocumentSessions
-from tsugite_onlyoffice.tools import set_onlyoffice_runtime
+from tsugite_onlyoffice.tools import DOCUMENT_EVENT, set_onlyoffice_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,6 @@ USE_FILE = "file"
 USE_CALLBACK = "callback"
 
 DOWNLOAD_TIMEOUT = 60.0
-
-# Broadcast when an agent edit lands, so an open editor can swap to the new file.
-DOCUMENT_EVENT = "onlyoffice_document_update"
 
 # The document server answers a request it will not attempt with this and no
 # detail, which reads as a fetch failure but is not one.
@@ -168,21 +165,6 @@ class OnlyOfficeAdapter(BaseAdapter):
         return [
             Route("/file/{doc:path}", self._serve_file, methods=["GET"]),
             Route("/callback/{doc:path}", self._save_callback, methods=["POST"]),
-        ]
-
-    def get_ui_surfaces(self) -> list[dict]:
-        return [
-            {
-                "kind": "doc",
-                "label": "Document",
-                "icon": "files",
-                "entry": "ui/editor.html",
-                "assets": Path(__file__).parent / "ui",
-                "nav": True,
-                "params": ["path"],
-                "events": [DOCUMENT_EVENT],
-                "mode": "workspace",
-            }
         ]
 
     async def _health(self, request: Request) -> JSONResponse:

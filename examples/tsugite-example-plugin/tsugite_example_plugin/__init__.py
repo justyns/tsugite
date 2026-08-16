@@ -33,10 +33,12 @@ executors in adapter.py via `get_job_executors()`, despite the similar name).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from tsugite.events.bus import subscribe
 from tsugite.hooks import hook
 from tsugite.tools import tool
+from tsugite.ui_surfaces import register_ui_surface
 
 logger = logging.getLogger(__name__)
 
@@ -76,3 +78,19 @@ def log_tool_use(context: dict) -> None:
 def on_tool_call(event) -> None:
     """Observe every tool invocation on the bus."""
     logger.info("example plugin: bus tool_call %s", event.tool_name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. WEB UI PAGE - a page the web UI frames as a tab, and here a nav-rail entry
+#    too. `assets` is served public, so keep data out of it. Registering here rather
+#    than in adapter.py is what lets a plugin ship a page without a daemon adapter.
+# ─────────────────────────────────────────────────────────────────────────────
+register_ui_surface(
+    kind="panel",
+    label="Example panel",
+    icon="plug",
+    entry="ui/panel.html",
+    assets=Path(__file__).parent / "ui",
+    nav=True,
+    params=["path"],
+)

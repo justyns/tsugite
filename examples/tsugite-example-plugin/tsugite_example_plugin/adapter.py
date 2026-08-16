@@ -11,7 +11,6 @@ daemon itself loads this module, via the tsugite.adapters entry point:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -71,25 +70,6 @@ class ExampleAdapter(BaseAdapter):
         # NO auth wrapper - do your own. Here a token-in-path guards it, like an
         # inbound webhook. POST /api/plugins/example/webhook/{token}
         return [Route("/webhook/{token}", self._webhook, methods=["POST"])]
-
-    # -- UI surfaces: a page the web UI frames as a tab (and a nav-rail entry) --
-
-    def get_ui_surfaces(self) -> list[dict]:
-        # `kind` is namespaced to plugin/example/panel by the daemon. `assets` is
-        # served public at /api/plugins/example/ui/ - keep data out of it and read
-        # it from the authed routes above instead. `params` names the tab params
-        # forwarded into the iframe URL; nothing else is.
-        return [
-            {
-                "kind": "panel",
-                "label": "Example panel",
-                "icon": "plug",
-                "entry": "ui/panel.html",
-                "assets": Path(__file__).parent / "ui",
-                "nav": True,
-                "params": ["path"],
-            }
-        ]
 
     async def _ping(self, request: Request) -> JSONResponse:
         return JSONResponse({"pong": True, "greeting": self.config.get("greeting", "hello")})

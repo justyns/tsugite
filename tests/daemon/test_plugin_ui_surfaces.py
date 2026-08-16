@@ -1,12 +1,12 @@
-"""Adapter plugins can contribute UI surfaces the web UI renders in an iframe.
+"""Plugins can contribute UI surfaces the web UI renders in an iframe.
 
-get_ui_surfaces() declares them; the gateway namespaces each one to
+A plugin registers them at import; the gateway namespaces each one to
 `plugin/<name>/<kind>`, resolves its `entry` under the plugin's own
 `/api/plugins/<name>/` mount, and serves the declared `assets` directory there.
 GET /api/plugins serves the merged list.
 
-Same duck-typed, error-isolated wiring as the route methods next door in
-test_plugin_http_routes.py: one misbehaving plugin can't abort startup.
+Surfaces reach the gateway as an argument, so a plugin with no adapter still gets
+its page, and a page function can replace the assets directory.
 """
 
 import logging
@@ -33,13 +33,9 @@ DOC_SURFACE = {
 class FakePluginAdapter:
     """Duck-typed stand-in for a loaded adapter plugin."""
 
-    def __init__(self, surfaces=None, public=None):
-        self._surfaces = surfaces or []
+    def __init__(self, public=None):
         self._public = public or []
         self.event_bus = None
-
-    def get_ui_surfaces(self):
-        return self._surfaces
 
     def get_public_http_routes(self):
         return self._public
@@ -132,7 +128,7 @@ def test_an_unknown_mode_is_named_and_falls_back_to_full(caplog):
         {"entry": "ui/index.html"},
         {"kind": "x"},
         {"kind": "", "entry": "ui/index.html"},
-        "not-a-dict",
+        {"page": lambda: "<h1>no kind</h1>"},
     ],
 )
 def test_incomplete_surface_is_dropped_with_a_warning(bad, caplog):
@@ -200,14 +196,21 @@ def test_surfaces_alone_are_enough_to_register(server):
     """A plugin can contribute a surface without contributing any HTTP route of
     its own (its assets can come from a Mount, or another plugin's routes)."""
     before = len(server.app.router.routes)
-    attach_plugin_http(server, "alpha", FakePluginAdapter(surfaces=[DOC_SURFACE]))
+    attach_plugin_http(server, "alpha", FakePluginAdapter(), [DOC_SURFACE])
     assert len(server.plugin_ui_surfaces) == 1
     assert len(server.app.router.routes) == before, "no routes declared means no Mount"
 
 
+def test_a_plugin_with_no_adapter_can_mount_a_surface(server):
+    """A surface comes from the registry, so a single-file plugin that never
+    produced an adapter still gets its page."""
+    attach_plugin_http(server, "dashboard", None, [DOC_SURFACE])
+    assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/dashboard/doc"]
+
+
 def test_two_plugins_surfaces_merge_without_collision(server):
-    attach_plugin_http(server, "alpha", FakePluginAdapter(surfaces=[{"kind": "doc", "entry": "ui/a.html"}]))
-    attach_plugin_http(server, "beta", FakePluginAdapter(surfaces=[{"kind": "doc", "entry": "ui/b.html"}]))
+    attach_plugin_http(server, "alpha", FakePluginAdapter(), [{"kind": "doc", "entry": "ui/a.html"}])
+    attach_plugin_http(server, "beta", FakePluginAdapter(), [{"kind": "doc", "entry": "ui/b.html"}])
     assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/alpha/doc", "plugin/beta/doc"]
 
 
@@ -215,9 +218,7 @@ def test_declared_assets_are_served_public_under_the_plugin_prefix(server, tmp_p
     """The entry URL the payload advertises must serve without a token."""
     (tmp_path / "panel.html").write_text("<!doctype html><title>panel</title>")
     attach_plugin_http(
-        server,
-        "alpha",
-        FakePluginAdapter(surfaces=[{"kind": "panel", "entry": "ui/panel.html", "assets": tmp_path}]),
+        server, "alpha", FakePluginAdapter(), [{"kind": "panel", "entry": "ui/panel.html", "assets": tmp_path}]
     )
     (surface,) = server.plugin_ui_surfaces
     resp = TestClient(server.app).get(surface["entry"])
@@ -230,71 +231,80 @@ def test_a_missing_assets_dir_is_reported_at_startup_and_not_mounted(server, cap
         attach_plugin_http(
             server,
             "alpha",
-            FakePluginAdapter(surfaces=[{"kind": "panel", "entry": "ui/panel.html", "assets": "/no/such/dir"}]),
+            FakePluginAdapter(),
+            [{"kind": "panel", "entry": "ui/panel.html", "assets": "/no/such/dir"}],
         )
     assert "alpha" in caplog.text
     assert TestClient(server.app).get("/api/plugins/alpha/ui/panel.html").status_code == 404
 
 
-def test_adapter_without_the_method_is_skipped(server):
-    class Bare:
-        event_bus = None
-
-    attach_plugin_http(server, "alpha", Bare())  # must not raise
-    assert server.plugin_ui_surfaces == []
-
-
-def test_raising_get_ui_surfaces_is_logged_and_skipped(server, caplog):
-    class Boom:
-        event_bus = None
-
-        def get_ui_surfaces(self):
-            raise RuntimeError("surface declaration blew up")
-
-    with caplog.at_level(logging.WARNING):
-        attach_plugin_http(server, "boom", Boom())  # must not propagate
-    assert server.plugin_ui_surfaces == []
-    assert "boom" in caplog.text
-    attach_plugin_http(server, "good", FakePluginAdapter(surfaces=[DOC_SURFACE]))
-    assert [s["kind"] for s in server.plugin_ui_surfaces] == ["plugin/good/doc"]
-
-
-def test_raising_surfaces_does_not_cost_the_plugin_its_routes(server):
-    """The two collections are independent: a broken get_ui_surfaces() must not
-    take the plugin's working routes down with it."""
-
-    class HalfBroken(FakePluginAdapter):
-        def get_ui_surfaces(self):
-            raise RuntimeError("nope")
+def test_adapter_routes_and_a_registered_surface_share_one_mount(server, tmp_path):
+    """Starlette returns on the first prefix match, so a second Mount under
+    /api/plugins/<name> would be dead code. Routes and surface must merge before
+    mounting, or one of them silently 404s."""
+    (tmp_path / "panel.html").write_text("<!doctype html><title>panel</title>")
 
     async def endpoint(request):
         return JSONResponse({"ok": True})
 
-    attach_plugin_http(server, "alpha", HalfBroken(public=[Route("/hook", endpoint, methods=["GET"])]))
-    assert TestClient(server.app).get("/api/plugins/alpha/hook").status_code == 200
+    attach_plugin_http(
+        server,
+        "alpha",
+        FakePluginAdapter(public=[Route("/hook", endpoint, methods=["GET"])]),
+        [{"kind": "panel", "entry": "ui/panel.html", "assets": tmp_path}],
+    )
+    client = TestClient(server.app)
+    assert client.get("/api/plugins/alpha/hook").status_code == 200
+    assert client.get("/api/plugins/alpha/ui/panel.html").status_code == 200
 
 
 def test_http_disabled_skips_surfaces_with_a_warning(caplog):
-    adapter = FakePluginAdapter(surfaces=[DOC_SURFACE])
     with caplog.at_level(logging.WARNING):
-        attach_plugin_http(None, "alpha", adapter)  # HTTP disabled -> http_server is None
+        attach_plugin_http(None, "alpha", FakePluginAdapter(), [DOC_SURFACE])
     assert any("alpha" in r.getMessage() for r in caplog.records), "must warn naming the plugin"
+
+
+# ── page functions: a surface whose entry is generated, not a static file ──
+
+
+def test_a_page_function_is_served_as_the_entry(server):
+    """A page function removes the assets directory, so a one-file plugin stays one file."""
+    attach_plugin_http(server, "alpha", None, [{"kind": "dash", "page": lambda: "<h1>homelab</h1>"}])
+
+    (surface,) = server.plugin_ui_surfaces
+    assert surface["entry"] == "/api/plugins/alpha/page/dash"
+    resp = TestClient(server.app).get(surface["entry"])
+    assert resp.status_code == 200, "the page must serve without a token, as an iframe navigation carries none"
+    assert resp.text == "<h1>homelab</h1>"
+    assert "no-store" in resp.headers["cache-control"], "a generated page must not be heuristically cached"
+
+
+def test_an_async_page_function_is_served(server):
+    async def page():
+        return "<h1>async</h1>"
+
+    attach_plugin_http(server, "alpha", None, [{"kind": "dash", "page": page}])
+
+    assert TestClient(server.app).get("/api/plugins/alpha/page/dash").text == "<h1>async</h1>"
+
+
+def test_a_raising_page_is_isolated_and_named(server, caplog):
+    def page():
+        raise RuntimeError("page blew up")
+
+    attach_plugin_http(server, "alpha", None, [{"kind": "dash", "page": page}])
+
+    with caplog.at_level(logging.WARNING):
+        resp = TestClient(server.app).get("/api/plugins/alpha/page/dash")
+    assert resp.status_code == 500
+    assert "alpha" in caplog.text
 
 
 # ── GET /api/plugins: the payload the web UI reads ──
 
 
 def test_plugins_endpoint_serves_registered_surfaces(server, test_token):
-    attach_plugin_http(server, "onlyoffice", FakePluginAdapter(surfaces=[DOC_SURFACE]))
+    attach_plugin_http(server, "onlyoffice", FakePluginAdapter(), [DOC_SURFACE])
     body = TestClient(server.app).get("/api/plugins", headers={"Authorization": f"Bearer {test_token}"}).json()
     assert [s["kind"] for s in body["ui_surfaces"]] == ["plugin/onlyoffice/doc"]
     assert body["ui_surfaces"][0]["entry"] == "/api/plugins/onlyoffice/ui/editor.html"
-
-
-# ── BaseAdapter default ──
-
-
-def test_base_adapter_default_returns_empty():
-    from tsugite_daemon.adapters.base import BaseAdapter
-
-    assert BaseAdapter.get_ui_surfaces(object()) == []
