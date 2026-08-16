@@ -122,8 +122,9 @@ async def announced(recorded, timeout=2.0):
 def fast_announce(monkeypatch):
     """Shorten the announce debounce, so a test waits on the swap and not on the clock.
 
-    Still an order of magnitude longer than a turn on these documents takes, or a
-    run of edits would outrun the timer it is supposed to be re-arming.
+    Only for tests whose turns are separated by a wait of their own. A run of turns
+    back to back has to pin the debounce out of reach instead, or the run's own speed
+    becomes part of the assertion.
     """
     monkeypatch.setattr(sessions_module, "ANNOUNCE_DEBOUNCE", 0.05)
 
@@ -231,16 +232,26 @@ async def test_the_event_names_the_document_and_the_key_the_page_should_load(
 
 
 @pytest.mark.asyncio
-async def test_a_run_of_edits_announces_one_swap_and_not_one_per_edit(turn, adapter, fast_announce):
+async def test_a_run_of_edits_announces_one_swap_and_not_one_per_edit(turn, adapter, monkeypatch):
     """Resolving every comment on a document is a run of turns back to back, and a swap per
     turn takes the document out from under whoever is reading it, once per edit."""
+    # A debounce no run can outlast, then the trailing edge fired by hand. Racing a
+    # short one against 17 real turns makes the run's own speed part of the assertion:
+    # any pause longer than the debounce - a slow disk, a GC, a loaded CI box - lets
+    # the timer fire mid-run and the test reads it as a coalescing failure.
+    monkeypatch.setattr(sessions_module, "ANNOUNCE_DEBOUNCE", 30)
     make_live(adapter, DOCUMENT, LIVE_KEY)
     for number in range(17):
         await adapter.sessions.agent_turn(DOCUMENT, recording_work(turn, f"edit-{number}"))
 
-    events = await announced(turn)
+    state = adapter.sessions._state(DOCUMENT)
+    assert state.announce_handle is not None, "the run of edits left no announce armed"
+    state.announce_handle.cancel()
+    adapter.sessions._announce_now(state)
+
+    events = [detail for step, detail in turn if step == "event"]
     assert len(events) == 1, f"{len(events)} swaps for one run of edits"
-    assert events[0]["key"] == adapter.sessions._state(DOCUMENT).key, "the swap lands on what the run left behind"
+    assert events[0]["key"] == state.key, "the swap lands on what the run left behind"
 
 
 @pytest.mark.asyncio
