@@ -1,11 +1,13 @@
 """Tests for plugin discovery and loading."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tsugite.plugins import (
     GROUP_PLUGINS,
+    check_plugin_config,
     discover_plugins,
     load_adapter_plugins,
     load_module_only_plugins,
@@ -285,6 +287,47 @@ class TestLocalFilePlugins:
             result = discover_plugins({"dashboard": {"path": str(plugin_file)}})
 
         assert [p.entry_point for p in result] == ["tsugite_dashboard"]
+
+    def _write_config(self, xdg_config_file, plugins: dict):
+        xdg_config_file.write_text(json.dumps({"plugins": plugins}))
+
+    def test_check_passes_a_loadable_config(self, tmp_path, xdg_config_file):
+        plugin_file = self._write_plugin(tmp_path)
+        self._write_config(xdg_config_file, {"dashboard": {"path": str(plugin_file)}})
+
+        assert check_plugin_config() == []
+
+    def test_check_reports_a_syntax_error(self, tmp_path, xdg_config_file):
+        plugin_file = self._write_plugin(tmp_path, "def broken(:\n")
+        self._write_config(xdg_config_file, {"dashboard": {"path": str(plugin_file)}})
+
+        problems = check_plugin_config()
+
+        assert len(problems) == 1
+        assert "dashboard" in problems[0]
+        assert "syntax" in problems[0].lower()
+
+    def test_check_reports_a_missing_file(self, tmp_path, xdg_config_file):
+        self._write_config(xdg_config_file, {"dashboard": {"path": str(tmp_path / "gone.py")}})
+
+        problems = check_plugin_config()
+
+        assert len(problems) == 1
+        assert "gone.py" in problems[0]
+
+    def test_check_reports_unparseable_config_json(self, xdg_config_file):
+        xdg_config_file.write_text('{"plugins": {"dashboard": {"path": "dashboard.py"},}}')
+
+        problems = check_plugin_config()
+
+        assert len(problems) == 1
+        assert "config.json" in problems[0]
+
+    def test_check_ignores_a_disabled_plugin(self, tmp_path, xdg_config_file):
+        plugin_file = self._write_plugin(tmp_path, "def broken(:\n")
+        self._write_config(xdg_config_file, {"dashboard": {"path": str(plugin_file), "enabled": False}})
+
+        assert check_plugin_config() == []
 
 
 _REGISTERS_A_PAGE = """\

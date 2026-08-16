@@ -793,6 +793,16 @@ class AgentsMixin:
         adapter, body, err = await self._session_scoped_request(request)
         if err:
             return err
+
+        # Admission check, ahead of any parsing: a turn started now would enter
+        # _active_chats and the restart drain would never finish. It also has to
+        # precede get_or_create_interactive below, which persists a session.
+        if self.gateway and self.gateway.restart_requested:
+            return JSONResponse(
+                {"error": "the daemon is restarting", "code": "daemon_restarting"},
+                status_code=409,
+            )
+
         session_id = body.get("session_id")
 
         message = body.get("message", "").strip()

@@ -1,7 +1,4 @@
-"""Session tools for agents to manage async agent sessions.
-
-Tools use @tool(require_daemon=True) so they only appear in daemon mode.
-"""
+"""Session tools for agents to manage async agent sessions."""
 
 from dataclasses import asdict
 from typing import Optional

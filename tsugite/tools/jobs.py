@@ -1,7 +1,4 @@
-"""Jobs tool - `spawn_job()` for agents: background work with an optional verification loop.
-
-Tool uses @tool(require_daemon=True) so it only appears in daemon mode.
-"""
+"""Jobs tool - `spawn_job()` for agents: background work with an optional verification loop."""
 
 import concurrent.futures
 from typing import Optional

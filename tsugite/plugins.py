@@ -3,6 +3,7 @@
 import importlib.metadata
 import importlib.util
 import inspect
+import json
 import logging
 import sys
 from dataclasses import dataclass
@@ -108,6 +109,44 @@ def _iter_plugins(group: str, plugin_config: dict):
     for ep in [*installed, *_local_entry_points(group, plugin_config, names)]:
         cfg = plugin_config.get(ep.name, {})
         yield ep, cfg, cfg.get("enabled", True)
+
+
+def local_plugin_files() -> list[LocalPluginEntryPoint]:
+    """The enabled single-file plugins the next start would import."""
+    plugin_config = _resolve_plugin_config(None)
+    return [
+        ep
+        for ep, _cfg, enabled in _iter_plugins(GROUP_PLUGINS, plugin_config)
+        if enabled and isinstance(ep, LocalPluginEntryPoint)
+    ]
+
+
+def check_plugin_config() -> list[str]:
+    """Report what would stop the configured plugins loading on a fresh start.
+
+    The JSON is re-read here because load_config() swallows a parse error and
+    returns defaults, which drops every plugin without saying so.
+    """
+    from tsugite.config import get_config_path
+
+    config_path = get_config_path()
+    if config_path.exists():
+        try:
+            json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            return [f"{config_path} is not valid JSON: {e}"]
+
+    problems = []
+    for ep in local_plugin_files():
+        path = Path(ep.value)
+        if not path.is_file():
+            problems.append(f"Plugin '{ep.name}': no such file: {path}")
+            continue
+        try:
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+        except SyntaxError as e:
+            problems.append(f"Plugin '{ep.name}': syntax error at {path}:{e.lineno}: {e.msg}")
+    return problems
 
 
 def load_backend_entry_point(group: str, name: str):

@@ -339,6 +339,11 @@ BOOT_ONLY_SECTIONS = (
 class Gateway:
     """Main daemon gateway routing messages between platform adapters and agents."""
 
+    # The drain must outlast one more model round-trip: the turn that asked for the
+    # restart is still in flight when the tool call returns.
+    _drain_deadline = 120.0
+    _drain_poll = 0.5
+
     def __init__(self, config: DaemonConfig, config_path: Optional[Path] = None):
         self.config = config
         self.config_path = config_path
@@ -357,6 +362,7 @@ class Gateway:
         self._job_store = None
         self._identity_map: dict[str, str] = {}
         self._shutting_down = False
+        self.restart_requested = False
 
     async def start(self):
         """Start all enabled adapters."""
@@ -370,17 +376,8 @@ class Gateway:
 
         loop = asyncio.get_running_loop()
 
-        def _on_signal():
-            if self._shutting_down:
-                logger.info("Forced shutdown")
-                if self._http_server and self._http_server._server:
-                    self._http_server._server.force_exit = True
-                loop.stop()
-                return
-            asyncio.create_task(self._shutdown())
-
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, _on_signal)
+            loop.add_signal_handler(sig, self._on_signal)
 
         # Build reverse identity map: "discord:123456789" -> "DiscordUsername". Kept on
         # self (and passed to adapters BY REFERENCE) so a config reload can
@@ -649,6 +646,10 @@ class Gateway:
 
             set_notifier(notifier, loop)
 
+        from tsugite.tools.daemon_control import set_restart_controller
+
+        set_restart_controller(self, loop)
+
         if not tasks:
             raise ValueError("No adapters enabled in config")
 
@@ -663,6 +664,66 @@ class Gateway:
             logger.info("Shutting down...")
         finally:
             await self._shutdown()
+
+    def _force_exit_http(self):
+        """Make uvicorn exit without waiting for open connections."""
+        if self._http_server and self._http_server._server:
+            self._http_server._server.force_exit = True
+
+    def _on_signal(self):
+        # uvicorn re-raises a captured signal once serve() returns, so a Ctrl-C
+        # during the drain must cancel the restart rather than re-exec a daemon
+        # the user just asked to stop.
+        self.restart_requested = False
+        if self._shutting_down:
+            logger.info("Forced shutdown")
+            self._force_exit_http()
+            asyncio.get_running_loop().stop()
+            return
+        asyncio.create_task(self._shutdown())
+
+    def preflight_restart(self) -> list[str]:
+        """Problems that would stop the daemon coming back from a restart.
+
+        A restarted daemon dies on an unloadable daemon.yaml, and silently loads no
+        plugins on an unparseable config.json, so both are checked before prompting.
+        """
+        from tsugite.plugins import check_plugin_config
+
+        problems = []
+        try:
+            load_daemon_config(self.config_path)
+        except Exception as e:
+            problems.append(f"Daemon config would not load: {e}")
+        return problems + check_plugin_config()
+
+    def request_restart(self) -> None:
+        """Flag a restart and start draining the in-flight turns.
+
+        Returns immediately: the turn that asked for the restart is itself in
+        `_active_chats` and only pops once its tool call returns, so awaiting the
+        drain here would deadlock.
+        """
+        self.restart_requested = True
+        logger.info("Restart requested; draining in-flight turns")
+        asyncio.create_task(self._drain_then_shutdown())
+
+    async def _drain_then_shutdown(self):
+        """Wait for the in-flight turns to finish, then shut down so the CLI re-execs."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._drain_deadline
+        # A signal during the drain clears the flag, and then this task should stop
+        # rather than hold the gateway alive until the deadline.
+        while self.restart_requested and self._http_server and self._http_server._active_chats:
+            if loop.time() >= deadline:
+                logger.warning(
+                    "Restart drain deadline reached with %d turn(s) in flight; forcing shutdown",
+                    len(self._http_server._active_chats),
+                )
+                self._force_exit_http()
+                break
+            await asyncio.sleep(self._drain_poll)
+        await self._shutdown()
 
     def _resolve_session_sandbox(self, session_id: str):
         """Resolve a session's agent sandbox config into a SandboxContext, or None.
@@ -801,6 +862,7 @@ class Gateway:
         from tsugite_pty.tools import set_terminal_runtime
 
         from tsugite.tools import set_daemon_mode
+        from tsugite.tools.daemon_control import set_restart_controller
         from tsugite.tools.jobs import set_jobs_orchestrator
         from tsugite.tools.notify import set_notifier
         from tsugite.tools.schedule import set_scheduler
@@ -810,6 +872,7 @@ class Gateway:
         set_scheduler(None)
         set_session_runner(None)
         set_jobs_orchestrator(None, None)
+        set_restart_controller(None, None)
         set_terminal_runtime(None, None, None)
         set_daemon_mode(False)
 
@@ -902,8 +965,8 @@ def _install_crash_hooks() -> None:
 async def run_daemon(
     config_path: Optional[Path] = None,
     config_overrides: Optional[dict] = None,
-):
-    """Main daemon entry point."""
+) -> bool:
+    """Main daemon entry point. Returns True when a restart was requested."""
     config = load_daemon_config(config_path)
     if config_overrides:
         for key, value in config_overrides.items():
@@ -918,3 +981,4 @@ async def run_daemon(
 
     gateway = Gateway(config, config_path=config_path)
     await gateway.start()
+    return gateway.restart_requested

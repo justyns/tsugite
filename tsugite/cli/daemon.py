@@ -1,6 +1,9 @@
 """Daemon management CLI commands."""
 
+import logging
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -792,6 +795,14 @@ def token_revoke(
         raise typer.Exit(1)
 
 
+def _reexec(start_cwd: str) -> None:
+    """Replace this process with a fresh daemon; exec discards buffered log records, so flush first."""
+    console.print("[cyan]Restarting daemon...[/cyan]")
+    os.chdir(start_cwd)
+    logging.shutdown()
+    os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
 @daemon_app.callback(invoke_without_command=True)
 def daemon_main(
     ctx: typer.Context,
@@ -827,12 +838,20 @@ def daemon_main(
     if log_to_console is not None:
         overrides["log_to_console"] = log_to_console
 
+    restarting = False
+    # Agent code execution chdirs the whole process around, so the cwd at exec
+    # time is not necessarily the one the daemon was started from.
+    start_cwd = os.getcwd()
+
     try:
-        asyncio.run(run_daemon(config, config_overrides=overrides or None))
+        restarting = asyncio.run(run_daemon(config, config_overrides=overrides or None))
     except (KeyboardInterrupt, SystemExit, RuntimeError):
         pass
     finally:
         console.print("\n[yellow]Daemon stopped[/yellow]")
+
+    if restarting:
+        _reexec(start_cwd)
 
 
 __all__ = ["daemon_app"]

@@ -1,7 +1,4 @@
-"""Schedule tools for agents to manage daemon schedules directly.
-
-Tools use @tool(require_daemon=True) so they only appear in daemon mode.
-"""
+"""Schedule tools for agents to manage daemon schedules directly."""
 
 from typing import Optional
 from uuid import uuid4

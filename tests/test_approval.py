@@ -2,6 +2,7 @@
 
 import pytest
 
+from tests.interaction_doubles import FakeBackend, SpyNonInteractive
 from tsugite.approval import request_approval
 from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
@@ -14,45 +15,21 @@ def _clear_backend():
     set_interaction_backend(None)
 
 
-class _FakeBackend:
-    """Records every ask_user call and returns a canned answer."""
-
-    def __init__(self, answer):
-        self.answer = answer
-        self.calls = []
-
-    def ask_user(self, question, question_type="text", options=None):
-        self.calls.append((question, question_type, options))
-        return self.answer
-
-
-class _SpyNonInteractive(NonInteractiveBackend):
-    """A NonInteractiveBackend that records whether it was prompted."""
-
-    def __init__(self):
-        super().__init__()
-        self.calls = []
-
-    def ask_user(self, question, question_type="text", options=None):
-        self.calls.append((question, question_type, options))
-        return super().ask_user(question, question_type, options)
-
-
 class TestDecisionMapping:
     def test_approve(self):
-        set_interaction_backend(_FakeBackend("Approve"))
+        set_interaction_backend(FakeBackend("Approve"))
         assert request_approval("Fetch x?") == "approve"
 
     def test_deny(self):
-        set_interaction_backend(_FakeBackend("Deny"))
+        set_interaction_backend(FakeBackend("Deny"))
         assert request_approval("Fetch x?") == "deny"
 
     def test_always(self):
-        set_interaction_backend(_FakeBackend("Always allow"))
+        set_interaction_backend(FakeBackend("Always allow"))
         assert request_approval("Fetch x?", allow_always=True) == "always"
 
     def test_options_built_without_always(self):
-        backend = _FakeBackend("Approve")
+        backend = FakeBackend("Approve")
         set_interaction_backend(backend)
         request_approval("Fetch x?")
         question, qtype, options = backend.calls[0]
@@ -60,13 +37,13 @@ class TestDecisionMapping:
         assert options == ["Approve", "Deny"]
 
     def test_options_include_always_when_allowed(self):
-        backend = _FakeBackend("Approve")
+        backend = FakeBackend("Approve")
         set_interaction_backend(backend)
         request_approval("Fetch x?", allow_always=True)
         assert backend.calls[0][2] == ["Approve", "Deny", "Always allow"]
 
     def test_detail_folded_into_question(self):
-        backend = _FakeBackend("Approve")
+        backend = FakeBackend("Approve")
         set_interaction_backend(backend)
         request_approval("Fetch content?", detail="Domain: evil.test")
         question = backend.calls[0][0]
@@ -74,7 +51,7 @@ class TestDecisionMapping:
         assert "Domain: evil.test" in question
 
     def test_unrecognized_answer_denies(self):
-        set_interaction_backend(_FakeBackend("something unexpected"))
+        set_interaction_backend(FakeBackend("something unexpected"))
         assert request_approval("Fetch x?") == "deny"
 
 
@@ -84,7 +61,7 @@ class TestFailClosed:
         assert request_approval("Fetch x?") == "deny"
 
     def test_non_interactive_denies_without_prompting(self):
-        spy = _SpyNonInteractive()
+        spy = SpyNonInteractive()
         set_interaction_backend(spy)
         assert request_approval("Fetch x?", allow_always=True) == "deny"
         # Load-bearing guard: fail-closed must short-circuit BEFORE any prompt.
