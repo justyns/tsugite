@@ -51,7 +51,7 @@
     <svg viewBox="0 0 16 16" aria-hidden="true"
       ><path d="M2 4.5h7v3H6.5v4H2z" /><path d="M14 11.5H7v-3h2.5v-4H14z" /></svg
     >
-    tsugite
+    <span class="wordmark">tsugite</span>
     {#if subtitle}<span class="ver">{@render subtitle()}</span>{/if}
   </div>
 
@@ -174,6 +174,16 @@
       display: none;
     }
     .appbar :global(.t-seg) {
+      display: none;
+    }
+  }
+  /* The strip is the appbar's only shrinkable item, so on phones the usage
+     readout and wordmark yield rather than let it squeeze to nothing. */
+  @media (max-width: 560px) {
+    .usage-mobile {
+      display: none;
+    }
+    .brandmark .wordmark {
       display: none;
     }
   }

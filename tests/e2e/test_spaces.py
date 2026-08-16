@@ -8,7 +8,7 @@ round trip: a chat+note split in one space, a single fullscreen chat in another.
 
 from playwright.sync_api import expect
 
-from .helpers import E2E_USER_ID, open_view
+from .helpers import E2E_USER_ID, open_view, wait_for_authed
 
 SPACE_BAR = '[data-testid="space-bar"]'
 PANE = '[data-testid="mux-pane"]'
@@ -79,3 +79,36 @@ def test_a_space_can_be_renamed_and_closed(authenticated_page, e2e_session_store
     expect(_space(page, "Planning")).to_have_count(0)
     expect(_space(page, "Main")).to_have_attribute("aria-pressed", "true")
     expect(page.locator(PANE)).to_have_count(1)
+
+
+def test_the_spaces_strip_survives_a_phone_width(authenticated_page):
+    """The strip is the only shrinkable item in the appbar, so without a floor it
+    absorbs every sibling's overflow and collapses to a few pixels."""
+    page = authenticated_page
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.reload()
+    wait_for_authed(page)
+    page.get_by_role("button", name="New space").click()
+    page.wait_for_timeout(300)
+    try:
+        page.set_viewport_size({"width": 380, "height": 800})
+        page.wait_for_timeout(300)
+
+        strip = page.locator(SPACE_BAR)
+        box = strip.bounding_box()
+        assert box is not None and box["width"] >= 90, f"strip collapsed to {box and box['width']}px"
+        assert strip.get_by_role("button", name="Main", exact=True).is_visible()
+
+        # A wider appbar than the phone is a horizontal page scroll, which this UI never has.
+        overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        assert overflow == 0, f"page scrolls horizontally by {overflow}px"
+    finally:
+        # The page and its localStorage outlive this test, so hand back a desktop
+        # viewport and the single space the other tests start from.
+        page.set_viewport_size({"width": 1280, "height": 900})
+        page.wait_for_timeout(200)
+        for name in ("Space 2", "Space 3"):
+            close = page.get_by_role("button", name=f"Close {name}")
+            if close.count():
+                close.first.click()
+                page.wait_for_timeout(200)
