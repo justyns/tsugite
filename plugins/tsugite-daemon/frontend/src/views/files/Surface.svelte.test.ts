@@ -11,6 +11,7 @@ vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api 
 
 beforeEach(async () => {
   await page.viewport(1440, 900);
+  WORKSPACE.reset();
   const { agentsMeta } = await import('$lib/stores/agentsMeta.svelte');
   agentsMeta.agents = [];
   const { filesWorkspace } = await import('./workspace.svelte');
@@ -19,11 +20,22 @@ beforeEach(async () => {
   filesWorkspace.loading = false;
   filesWorkspace.error = null;
   filesWorkspace.indexState = 'none';
+  const { files } = await import('$lib/stores/files.svelte');
+  files.lastWrite = null;
 });
 
 async function mountSurface(path: string) {
   const { default: Surface } = await import('./Surface.svelte');
   render(Surface, { props: { params: { agent: 'smoke', path } } });
+}
+
+/** Replay the file_write frame through the real shell router. */
+async function broadcastFileWrite(path: string) {
+  const { routeShellEvent } = await import('$lib/api/events');
+  const { files } = await import('$lib/stores/files.svelte');
+  const sink = { onSessionEvent: (data: Record<string, unknown>) => files.applySessionEvent(data) };
+  const data = { session_id: 's1', event_type: 'file_write', path, line_count: 1 };
+  routeShellEvent({ type: 'session_event', seq: 1, data }, sink);
 }
 
 test('opens the pointed-at note and renders its markdown', async () => {
@@ -64,6 +76,48 @@ test('the raw toggle shows the source, tags line and all', async () => {
 
   await page.getByRole('button', { name: 'raw', exact: true }).click();
   await expect.element(page.getByText('tags: #ops #x')).toBeInTheDocument();
+});
+
+test('an agent tool edit to the open note refreshes the tab in place', async () => {
+  await mountSurface('ops/alpha.md');
+  await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
+
+  WORKSPACE.setContent('ops/alpha.md', '# Alpha\n\ntags: #ops\n\nrewritten by the agent\n');
+  await broadcastFileWrite('ops/alpha.md');
+
+  await expect.element(page.getByText('rewritten by the agent')).toBeInTheDocument();
+});
+
+test('a write to another file leaves the open note alone', async () => {
+  await mountSurface('ops/alpha.md');
+  const section = page.getByRole('heading', { name: 'Section', level: 2 });
+  await expect.element(section).toBeInTheDocument();
+
+  WORKSPACE.setContent('ops/alpha.md', '# Alpha\n\nrewritten by the agent\n');
+  await broadcastFileWrite('ops/beta.md');
+
+  await expect.element(page.getByText('rewritten by the agent')).not.toBeInTheDocument();
+  await expect.element(section).toBeInTheDocument();
+});
+
+test('unsaved edits survive an agent write and raise a stale-content warning', async () => {
+  await mountSurface('ops/alpha.md');
+  await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
+
+  await page.getByRole('button', { name: 'edit', exact: true }).click();
+  const area = page.getByRole('textbox', { name: 'Edit ops/alpha.md' });
+  await area.fill('my local draft');
+
+  const fresh = '# Alpha\n\nrewritten by the agent\n';
+  WORKSPACE.setContent('ops/alpha.md', fresh);
+  await broadcastFileWrite('ops/alpha.md');
+
+  await expect.element(page.getByTestId('files-stale')).toBeVisible();
+  await expect.element(area).toHaveValue('my local draft');
+
+  await page.getByRole('button', { name: /reload from disk/i }).click();
+  await expect.element(area).toHaveValue(fresh);
+  await expect.element(page.getByTestId('files-stale')).not.toBeInTheDocument();
 });
 
 test('at phone width the toolbar shows a back affordance that clears the path to the list', async () => {

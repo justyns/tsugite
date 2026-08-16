@@ -145,6 +145,7 @@ export const TESTID = {
   filesAttach: 'files-attach',
   filesPin: 'files-pin',
   filesModeSeg: 'files-mode-seg',
+  filesStale: 'files-stale',
   fileNode: (path: string) => `file-node-${path}`,
   // Agents builder view
   agentsRoster: 'agents-roster',

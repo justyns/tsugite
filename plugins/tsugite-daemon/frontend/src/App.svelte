@@ -26,6 +26,7 @@
   import { jobs } from '$lib/stores/jobs.svelte';
   import { schedules } from '$lib/stores/schedules.svelte';
   import { terminals } from '$lib/stores/terminals.svelte';
+  import { files } from '$lib/stores/files.svelte';
   import { usage } from '$lib/stores/usage.svelte';
   import { formatTokensCompact, formatUsd } from './views/usage/format';
   import { isEditableTarget } from '$lib/dom';
@@ -324,7 +325,11 @@
 
   const shellEventSink: ShellEventSink = {
     onReconnect: () => location.reload(),
-    onSessionEvent: (data) => sessions.applySessionEvent(data),
+    onSessionEvent: (data) => {
+      sessions.applySessionEvent(data);
+      // Carries the agent's file writes too, which open file tabs follow.
+      files.applySessionEvent(data);
+    },
     onSessionUpdate: (data) => sessions.applySessionUpdate(data),
     onCompactionStarted: (data) => sessions.applyCompaction(data, true),
     onCompactionFinished: (data) => sessions.applyCompaction(data, false),

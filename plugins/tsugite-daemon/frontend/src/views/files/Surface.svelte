@@ -18,6 +18,7 @@
   import AnnPopover from '$lib/components/artifact/AnnPopover.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { files } from '$lib/stores/files.svelte';
+  import { writeTargetsDoc } from '$lib/stores/fileWrites';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { isMarkdown } from './load';
   import { filesWorkspace } from './workspace.svelte';
@@ -50,6 +51,7 @@
   let editBuffer = $state('');
   let editArea = $state<HTMLTextAreaElement | null>(null);
   let saving = $state(false);
+  let staleOnDisk = $state(false);
 
   let docEl = $state<HTMLElement | null>(null);
   let pop = $state<{ open: boolean; x: number; y: number; text: string }>({
@@ -130,6 +132,7 @@
       doc = { path, content: file.content ?? '', markdown };
       activePath = path;
       editBuffer = file.content ?? '';
+      staleOnDisk = false;
       const parts = path.split('/');
       parts.pop();
       browseDir = parts.join('/');
@@ -154,6 +157,7 @@
     try {
       await files.write(agent, doc.path, editBuffer);
       doc = { ...doc, content: editBuffer };
+      staleOnDisk = false;
       toasts.push('ok', 'Saved', { body: doc.path });
       // Contents changed -> the shared backlink/tag index may have shifted.
       await filesWorkspace.reload(agent);
@@ -167,6 +171,21 @@
   function discard() {
     if (doc) editBuffer = doc.content;
     mode = doc?.markdown ? 'rendered' : 'raw';
+  }
+
+  async function reloadFromDisk() {
+    if (!doc) return;
+    try {
+      const file = await files.read(agent, doc.path);
+      const content = file.content ?? '';
+      doc = { ...doc, content };
+      editBuffer = content;
+      staleOnDisk = false;
+    } catch (err) {
+      toasts.push('err', 'Could not reload file', {
+        body: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   async function attachToChat() {
@@ -320,6 +339,18 @@
       if (path !== activePath) void openFile(path);
     });
   });
+
+  // Pull the new content in, unless the editor holds unsaved edits - only the
+  // user may discard those, so they get the stale strip instead.
+  $effect(() => {
+    const write = files.lastWrite;
+    if (!write) return;
+    untrack(() => {
+      if (!doc || !ws || !writeTargetsDoc(write.path, doc.path, ws.workspaceDir)) return;
+      if (dirty) staleOnDisk = true;
+      else void reloadFromDisk();
+    });
+  });
 </script>
 
 <section class="wk-shell">
@@ -357,6 +388,14 @@
         </button>
       {/if}
     </div>
+
+    {#if staleOnDisk}
+      <div class="wk-stale" role="status" data-testid={TESTID.filesStale}>
+        <Icon name="alert" />
+        <span>An agent changed this file. Your unsaved edits are still here.</span>
+        <Button size="sm" onclick={reloadFromDisk}>Reload from disk</Button>
+      </div>
+    {/if}
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -607,6 +646,22 @@
   }
   .wk-crumb .sep {
     color: var(--tx3);
+  }
+  .wk-stale {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--st-warn);
+    background: var(--bg2);
+    color: var(--tx1);
+    font-size: var(--fs-xs);
+    flex: none;
+    flex-wrap: wrap;
+  }
+  .wk-stale :global(svg) {
+    color: var(--st-warn);
+    flex: none;
   }
   .wk-doc {
     flex: 1;

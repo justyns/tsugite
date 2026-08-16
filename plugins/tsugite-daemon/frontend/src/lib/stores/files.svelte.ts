@@ -5,6 +5,7 @@
  * {content:null, is_text:false}. Exported as a class instance.
  */
 import { api } from '$lib/api/client';
+import { writtenPath } from './fileWrites';
 
 export interface WorkspaceEntry {
   path: string;
@@ -41,6 +42,13 @@ export class FilesStore {
   entries = $state<WorkspaceEntry[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
+  /** Revision counter, so a second write to the same file is still a fresh signal. */
+  lastWrite = $state<{ path: string; rev: number } | null>(null);
+
+  applySessionEvent(data: Record<string, unknown>): void {
+    const path = writtenPath(data);
+    if (path) this.lastWrite = { path, rev: (this.lastWrite?.rev ?? 0) + 1 };
+  }
 
   async list(agent: string, subdir = ''): Promise<void> {
     this.agent = agent;

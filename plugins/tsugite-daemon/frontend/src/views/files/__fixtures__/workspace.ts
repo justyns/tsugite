@@ -11,11 +11,13 @@ interface Entry {
   modified?: string;
 }
 
-const CONTENT: Record<string, string> = {
+const INITIAL_CONTENT: Record<string, string> = {
   'index.md': '# Home\n\ntags: #home\n\nStart at [[alpha]].\n',
   'ops/alpha.md': '# Alpha\n\ntags: #ops #x\n\nSee [[beta]] and [[ghost]].\n\n## Section\n\nbody\n',
   'ops/beta.md': '# Beta\n\ntags: #ops #x\n\nBack to [[alpha]] for context.\n',
 };
+
+let CONTENT: Record<string, string> = { ...INITIAL_CONTENT };
 
 const DIRS: Record<string, Entry[]> = {
   '': [
@@ -47,6 +49,13 @@ const DIRS: Record<string, Entry[]> = {
 };
 
 export const WORKSPACE = {
+  /** Stand in for an agent's tool rewriting a file underneath an open tab. */
+  setContent: (path: string, content: string) => {
+    CONTENT[path] = content;
+  },
+  reset: () => {
+    CONTENT = { ...INITIAL_CONTENT };
+  },
   api: {
     get: async (path: string) => {
       if (path === '/api/agents') {
