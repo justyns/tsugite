@@ -48,3 +48,22 @@ def test_stop_button_flips_while_streaming(chat_page, mock_chat, e2e_adapter):
     expect(page.locator(".t-msg--ai").last).to_contain_text("Done after a beat", timeout=15000)
     expect(send_button).to_be_visible()
     expect(stop_button).to_have_count(0)
+
+
+def test_soft_line_breaks_render_hard_in_the_persons_own_message_only(chat_page, mock_chat):
+    """The agent's reply keeps CommonMark: a model that hard-wraps its prose
+    must not gain a break mid-sentence."""
+    mock_chat("first half of a thought\nsecond half of the same thought")
+
+    page = chat_page
+    textarea = page.get_by_role("textbox", name="Message", exact=True)
+    textarea.fill("https://example.test/a\nhttps://example.test/b\nhttps://example.test/c")
+    textarea.press("Enter")
+
+    user_bubble = page.locator(".t-msg--user").last
+    expect(user_bubble).to_contain_text("example.test/c")
+    expect(user_bubble.locator("br")).to_have_count(2)
+
+    ai_bubble = page.locator(".t-msg--ai").last
+    expect(ai_bubble).to_contain_text("second half", timeout=15000)
+    expect(ai_bubble.locator("br")).to_have_count(0)

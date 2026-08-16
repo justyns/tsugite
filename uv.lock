@@ -11,6 +11,24 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P10D"
 
+[options.exclude-newer-package]
+tsugite-pty = "2099-01-02T06:00:00Z"
+tsugite-acp = "2099-01-02T06:00:00Z"
+tsugite-youtube = "2099-01-02T06:00:00Z"
+tsugite-web = "2099-01-02T06:00:00Z"
+hozo = "2099-01-02T06:00:00Z"
+tsugite-codex = "2099-01-02T06:00:00Z"
+tsugite-daemon = "2099-01-02T06:00:00Z"
+tsugite = "2099-01-02T06:00:00Z"
+tsugite-discord = "2099-01-02T06:00:00Z"
+tsugite-claude-code = "2099-01-02T06:00:00Z"
+tsugite-cc-driver = "2099-01-02T06:00:00Z"
+tsugite-cli = "2099-01-02T06:00:00Z"
+tsugite-codex-cli = "2099-01-02T06:00:00Z"
+tsugite-sandbox = "2099-01-02T06:00:00Z"
+tsugite-tmux = "2099-01-02T06:00:00Z"
+uridx = "2099-01-02T06:00:00Z"
+
 [manifest]
 members = [
     "tsugite-acp",

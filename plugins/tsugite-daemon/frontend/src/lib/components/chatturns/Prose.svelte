@@ -4,10 +4,13 @@
 
   let {
     content = '',
+    breaks = false,
   }: {
     // Markdown source. Rendered to HTML with `marked`; raw inline HTML in the
     // source (e.g. `<span class="math">`) passes through.
     content?: string;
+    // Render soft line breaks as hard ones. Set for the person's own turns.
+    breaks?: boolean;
   } = $props();
 
   // NOTE: content originates from the trusted daemon/agent stream. If untrusted
@@ -18,14 +21,17 @@
   // `content` grows every few ms; re-parsing the whole string each time is
   // superlinear, so deltas coalesce to one parse per frame with the trailing
   // (final) value guaranteed to render.
-  // svelte-ignore state_referenced_locally -- `content` seeds the first parse; the effect owns updates.
-  let html = $state(parseMarkdown(content));
-  const throttle = rafThrottle<string>((src) => (html = parseMarkdown(src)));
+  // svelte-ignore state_referenced_locally -- the props seed the first parse; the effect owns updates.
+  let html = $state(parseMarkdown(content, breaks));
+  const throttle = rafThrottle<{ src: string; breaks: boolean }>(
+    (next) => (html = parseMarkdown(next.src, next.breaks)),
+  );
 
   let seeded = false;
   $effect(() => {
-    const src = content;
-    if (seeded) throttle.push(src);
+    // Reads `breaks` too, so flipping it re-parses bubbles already on screen.
+    const next = { src: content, breaks };
+    if (seeded) throttle.push(next);
     else seeded = true;
   });
   $effect(() => () => throttle.dispose());

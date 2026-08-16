@@ -17,6 +17,7 @@
   import { readLocal, writeLocal } from '$lib/storage';
   import { contextProviders } from '$lib/context/contextProviders';
   import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
+  import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import { TESTID } from '$lib/testids';
 
   let { open = false, onclose }: { open?: boolean; onclose: () => void } = $props();
@@ -142,6 +143,20 @@
       <section class="d-sec">
         <h4>Appearance</h4>
         <ThemeSeg testid={TESTID.themeSwitch} />
+        <div class="d-toggle">
+          <Switch
+            checked={hardLineBreaks.enabled}
+            onCheckedChange={(v) => hardLineBreaks.set(v)}
+            ariaLabel="Render soft line breaks as hard line breaks"
+          />
+          <div class="d-toggle-lb">
+            <span class="tt">Hard line breaks</span>
+            <span class="sub">
+              Render soft line breaks in your messages as hard line breaks. Does not apply to the
+              agent's.
+            </span>
+          </div>
+        </div>
       </section>
 
       <section class="d-sec">

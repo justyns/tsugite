@@ -1,5 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { formatTokens, splitCommand } from './chatturns.util';
+import { formatTokens, parseMarkdown, splitCommand } from './chatturns.util';
+
+describe('parseMarkdown', () => {
+  const links = 'https://example.test/a\nhttps://example.test/b\nhttps://example.test/c';
+
+  it('collapses single newlines into one paragraph by default', () => {
+    const html = parseMarkdown(links);
+    expect(html).not.toContain('<br');
+    expect(html.match(/<p>/g)).toHaveLength(1);
+  });
+
+  it('renders each line of a link list separately when breaks are on', () => {
+    const html = parseMarkdown(links, true);
+    expect(html).toContain('<br');
+    expect(html.match(/<br/g)).toHaveLength(2);
+    expect(html.match(/<p>/g)).toHaveLength(1);
+  });
+
+  it('leaves a blank-line paragraph split alone either way', () => {
+    for (const breaks of [false, true]) {
+      expect(parseMarkdown('one\n\ntwo', breaks).match(/<p>/g)).toHaveLength(2);
+    }
+  });
+
+  it('keeps fenced code intact either way', () => {
+    const fenced = '```\nfirst\nsecond\n```';
+    for (const breaks of [false, true]) {
+      const html = parseMarkdown(fenced, breaks);
+      expect(html).toContain('<code>');
+      expect(html).not.toContain('<br');
+      expect(html).toContain('first\nsecond');
+    }
+  });
+
+  it('honours an explicit two-space hard break either way', () => {
+    for (const breaks of [false, true]) {
+      expect(parseMarkdown('one  \ntwo', breaks)).toContain('<br');
+    }
+  });
+});
 
 describe('splitCommand', () => {
   it('splits the program from its arguments', () => {

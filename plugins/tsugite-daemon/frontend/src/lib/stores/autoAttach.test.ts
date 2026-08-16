@@ -2,18 +2,11 @@
 // resetModules + re-import rebuilds the store against staged storage so the
 // construction-time read (the persist-across-reload contract) is observable.
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { fakeLocalStorage, preloadStore } from './testLocalStorage';
 
 const KEY = 'tsugite_geo_autoattach';
 
-function fakeLocalStorage() {
-  const map = new Map<string, string>();
-  return {
-    getItem: (k: string) => (map.has(k) ? (map.get(k) as string) : null),
-    setItem: (k: string, v: string) => void map.set(k, v),
-    removeItem: (k: string) => void map.delete(k),
-    clear: () => map.clear(),
-  };
-}
+preloadStore(() => import('./autoAttach.svelte'));
 
 let ls: ReturnType<typeof fakeLocalStorage>;
 beforeEach(() => {

@@ -4,9 +4,10 @@
 import { marked } from 'marked';
 
 /** Render trusted markdown to an HTML string synchronously. Shared by the
- *  reasoning (Think) and prose bubbles so both parse with identical options. */
-export function parseMarkdown(src: string): string {
-  return marked.parse(src, { async: false }) as string;
+ *  reasoning (Think) and prose bubbles so both parse with identical options.
+ *  `breaks` renders soft line breaks as hard ones. */
+export function parseMarkdown(src: string, breaks = false): string {
+  return marked.parse(src, { async: false, breaks }) as string;
 }
 
 /** Split a command line into its program (bolded in exec headers) and the rest. */

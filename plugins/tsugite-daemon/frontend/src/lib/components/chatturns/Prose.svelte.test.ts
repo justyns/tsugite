@@ -64,6 +64,27 @@ test('the raw unescaped runtime tag WOULD mount a live element — why the backe
   expect(container.querySelector('tsugite_execution_result')).not.toBeNull();
 });
 
+const LINKS = 'https://example.test/a\nhttps://example.test/b\nhttps://example.test/c';
+
+test('line-separated links share a line by default', async () => {
+  const { container } = await render(Prose, { content: LINKS });
+  expect(container.querySelectorAll('br')).toHaveLength(0);
+});
+
+test('line-separated links get a line each when breaks is set', async () => {
+  const { container } = await render(Prose, { content: LINKS, breaks: true });
+  expect(container.querySelectorAll('br')).toHaveLength(2);
+});
+
+test('flipping breaks re-renders a bubble already on screen', async () => {
+  // Toggled in Settings while the transcript is mounted, so the parse can't be
+  // a mount-time decision.
+  const { container, rerender } = await render(Prose, { content: LINKS, breaks: false });
+  expect(container.querySelectorAll('br')).toHaveLength(0);
+  await rerender({ content: LINKS, breaks: true });
+  await expect.poll(() => container.querySelectorAll('br').length).toBe(2);
+});
+
 test('a wide fenced code line scrolls inside its own block, not the pane', async () => {
   const line = 'result = ' + '9'.repeat(200);
   const { container } = await render(Prose, { content: '```py\n' + line + '\n```' });

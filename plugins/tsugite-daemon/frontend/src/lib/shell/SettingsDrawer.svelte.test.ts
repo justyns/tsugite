@@ -4,6 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { beforeEach, expect, test } from 'vitest';
 import SettingsDrawer from './SettingsDrawer.svelte';
 import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
+import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
 
 beforeEach(() => {
   localStorage.removeItem('tsugite_auto_follow');
@@ -31,4 +32,15 @@ test('toggling a context provider auto-attach persists through its store', async
   await render(SettingsDrawer, { open: true, onclose: () => {} });
   await page.getByRole('switch', { name: 'Auto-attach my location to messages' }).click();
   expect(localStorage.getItem('tsugite_geo_autoattach')).toBe('true');
+});
+
+test('hard line breaks are on out of the box, and turning them off persists', async () => {
+  hardLineBreaks.set(true);
+  await render(SettingsDrawer, { open: true, onclose: () => {} });
+  const toggle = page.getByRole('switch', { name: 'Render soft line breaks as hard line breaks' });
+  await expect.element(toggle).toHaveAttribute('aria-checked', 'true');
+
+  await toggle.click();
+  expect(hardLineBreaks.enabled).toBe(false);
+  expect(localStorage.getItem('tsugite_hard_line_breaks')).toBe('false');
 });

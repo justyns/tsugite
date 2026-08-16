@@ -28,6 +28,7 @@
   import type { IconName } from '$lib/components/icon/icons';
   import { sessionSourceType, isFinishedSession } from './sessionModel';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
+  import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import SessionMenu from './SessionMenu.svelte';
   import ModelEffort from './ModelEffort.svelte';
   import JobTile from './JobTile.svelte';
@@ -577,7 +578,7 @@
           {/if}
           {#each turn.blocks as block, bi (bi)}
             {#if block.kind === 'prose'}
-              <Prose content={block.text} />
+              <Prose content={block.text} breaks={turn.role === 'user' && hardLineBreaks.enabled} />
             {:else if block.kind === 'think'}
               <Think content={block.content} tokens={block.tokens} label={block.label} />
             {:else if block.kind === 'exec'}
