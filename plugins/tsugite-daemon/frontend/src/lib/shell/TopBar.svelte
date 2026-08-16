@@ -12,6 +12,7 @@
   import { spaces } from '$lib/stores/spaces.svelte';
   import { nextSpaceName } from './spaceName';
   import { toConnDisplay } from './connDisplay';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { TESTID } from '$lib/testids';
 
   let {
@@ -33,6 +34,15 @@
     cost?: string;
     tokens?: string;
   } = $props();
+
+  function closeSpace(id: string) {
+    const closed = spaces.removeSpace(id);
+    if (!closed) return;
+    toasts.push('ok', `Closed ${closed.space.name}`, {
+      actionLabel: 'Undo',
+      onAction: () => spaces.restoreSpace(closed),
+    });
+  }
 </script>
 
 <header class="appbar" data-testid={TESTID.topbar}>
@@ -54,7 +64,7 @@
     onSelect={(id) => spaces.setActive(id)}
     onAdd={() => spaces.addSpace(nextSpaceName(spaces.spaces.map((s) => s.name)))}
     onRename={(id, name) => spaces.renameSpace(id, name)}
-    onClose={(id) => spaces.removeSpace(id)}
+    onClose={closeSpace}
   />
 
   <span class="conn-mobile">

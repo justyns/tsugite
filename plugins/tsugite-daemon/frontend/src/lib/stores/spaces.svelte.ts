@@ -35,6 +35,7 @@ import {
   selectTab,
   splitPane,
 } from '$lib/shell/mux/layout';
+import { moveItem } from '$lib/reorder';
 import { readLocal, writeLocal } from '$lib/storage';
 
 export const SPACES_SCHEMA_VERSION = 1;
@@ -46,6 +47,12 @@ export interface Space {
   id: string;
   name: string;
   layout: Layout;
+}
+
+/** A closed space plus where it sat, so it can be put back. */
+export interface ClosedSpace {
+  space: Space;
+  index: number;
 }
 
 interface SpacesState {
@@ -300,13 +307,30 @@ export class SpacesStore {
     s.name = name;
     this.persist();
   }
-  removeSpace(id: string): void {
+  /** Returns what it removed, so a caller can offer an undo, or null if it refused. */
+  removeSpace(id: string): ClosedSpace | null {
     // Never drop below one space - the shell always has somewhere to dock.
-    if (this.spaces.length <= 1) return;
-    const idx = this.spaces.findIndex((s) => s.id === id);
-    if (idx === -1) return;
-    this.spaces.splice(idx, 1);
-    if (this.activeSpaceId === id) this.activeSpaceId = this.spaces[Math.max(0, idx - 1)]!.id;
+    if (this.spaces.length <= 1) return null;
+    const index = this.spaces.findIndex((s) => s.id === id);
+    if (index === -1) return null;
+    const [space] = this.spaces.splice(index, 1);
+    if (this.activeSpaceId === id) this.activeSpaceId = this.spaces[Math.max(0, index - 1)]!.id;
+    this.persist();
+    return { space: space!, index };
+  }
+
+  restoreSpace({ space, index }: ClosedSpace): void {
+    if (this.spaces.some((s) => s.id === space.id)) return;
+    this.spaces.splice(Math.min(index, this.spaces.length), 0, space);
+    this.activeSpaceId = space.id;
+    this.persist();
+  }
+
+  /** `insertAt` is an index in the current order, as a drop between two chips reports. */
+  moveSpace(id: string, insertAt: number): void {
+    const from = this.spaces.findIndex((s) => s.id === id);
+    if (from === -1) return;
+    this.spaces = moveItem(this.spaces, from, insertAt);
     this.persist();
   }
 

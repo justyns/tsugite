@@ -266,3 +266,60 @@ describe('persist debounce', () => {
     expect(writeLocal).not.toHaveBeenCalled();
   });
 });
+
+describe('closing a space is undoable', () => {
+  test('removeSpace hands back what it removed, and restoreSpace puts it back where it was', () => {
+    const store = new SpacesStore();
+    const a = store.activeSpaceId;
+    const b = store.addSpace('B');
+    const c = store.addSpace('C');
+    store.setActive(b);
+    const paneId = collectLeaves(store.active.layout.root)[0]!.id;
+    store.dock(paneId, { kind: 'terminal', params: { id: 't1' } });
+
+    const removed = store.removeSpace(b);
+    expect(removed).not.toBeNull();
+    expect(store.spaces.map((s) => s.id)).toEqual([a, c]);
+
+    store.restoreSpace(removed!);
+    expect(store.spaces.map((s) => s.id)).toEqual([a, b, c]);
+    expect(store.activeSpaceId).toBe(b);
+    // the layout comes back with it, not as a fresh empty space
+    const kinds = collectLeaves(store.spaces[1]!.layout.root).flatMap((l) =>
+      l.tabs.map((t) => t.kind),
+    );
+    expect(kinds).toContain('terminal');
+  });
+
+  test('removeSpace returns null when it refuses to drop the last space', () => {
+    const store = new SpacesStore();
+    expect(store.removeSpace(store.activeSpaceId)).toBeNull();
+  });
+});
+
+describe('spaces reorder', () => {
+  test('moveSpace takes an insertion index in the current order', () => {
+    const store = new SpacesStore();
+    const a = store.activeSpaceId;
+    const b = store.addSpace('B');
+    const c = store.addSpace('C');
+
+    store.moveSpace(c, 0);
+    expect(store.spaces.map((s) => s.id)).toEqual([c, a, b]);
+
+    store.moveSpace(c, 3);
+    expect(store.spaces.map((s) => s.id)).toEqual([a, b, c]);
+  });
+
+  test('reordering leaves the active space and every layout alone', () => {
+    const store = new SpacesStore();
+    const b = store.addSpace('B');
+    const paneId = collectLeaves(store.active.layout.root)[0]!.id;
+    store.dock(paneId, { kind: 'terminal', params: { id: 't1' } });
+
+    store.moveSpace(b, 0);
+    expect(store.activeSpaceId).toBe(b);
+    const kinds = collectLeaves(store.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+    expect(kinds).toContain('terminal');
+  });
+});

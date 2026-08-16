@@ -4,6 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { expect, test, vi } from 'vitest';
 import TopBar from './TopBar.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
+import { collectLeaves } from '$lib/shell/mux/layout';
 
 test('the palette trigger fires its callback', async () => {
   const onOpenPalette = vi.fn();
@@ -31,8 +32,8 @@ test('renders the brand wordmark', async () => {
   await expect.element(page.getByText('tsugite')).toBeInTheDocument();
 });
 
-// Read-only on purpose: the store is a singleton over real localStorage in the
-// browser runner, so a mutation here would leak into other tests.
+// The store is a singleton over real localStorage in the browser runner, so a test
+// that mutates it has to put it back (see the undo test below).
 test('the top bar mounts the spaces switcher, naming the active space', async () => {
   await render(TopBar, { onOpenPalette: () => {} });
   await expect.element(page.getByRole('group', { name: 'Spaces' })).toBeInTheDocument();
@@ -44,4 +45,32 @@ test('the top bar mounts the spaces switcher, naming the active space', async ()
 test('the top bar offers a control for creating a space', async () => {
   await render(TopBar, { onOpenPalette: () => {} });
   await expect.element(page.getByRole('button', { name: 'New space' })).toBeInTheDocument();
+});
+
+test('closing a space offers an undo that puts it back with its layout', async () => {
+  const { toasts } = await import('$lib/components/feedback/toast-store.svelte');
+  const doomed = spaces.addSpace('Doomed');
+  try {
+    toasts.items = [];
+    const paneId = collectLeaves(spaces.active.layout.root)[0]!.id;
+    spaces.dock(paneId, { kind: 'terminal', params: { id: 'undo-t1' } });
+
+    await render(TopBar, { onOpenPalette: () => {} });
+    await page.getByRole('button', { name: 'Close Doomed' }).click();
+    expect(spaces.spaces.some((s) => s.id === doomed)).toBe(false);
+
+    const toast = toasts.items.at(-1);
+    expect(toast?.actionLabel).toBe('Undo');
+    toast!.onAction!();
+
+    expect(spaces.spaces.some((s) => s.id === doomed)).toBe(true);
+    expect(spaces.activeSpaceId).toBe(doomed);
+    const kinds = collectLeaves(spaces.active.layout.root).flatMap((l) =>
+      l.tabs.map((t) => t.kind),
+    );
+    expect(kinds).toContain('terminal');
+  } finally {
+    spaces.removeSpace(doomed);
+    toasts.items = [];
+  }
 });
