@@ -17,6 +17,29 @@ app = typer.Typer(
 console = Console()
 
 
+def _print_version(value: bool) -> None:
+    if not value:
+        return
+    from tsugite import __version__
+
+    console.print(f"Tsugite version {__version__}")
+    raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_print_version,
+        is_eager=True,
+        help="Show version information.",
+    ),
+) -> None:
+    pass
+
+
 @app.command()
 def version():
     """Show version information."""

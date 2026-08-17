@@ -39,6 +39,26 @@ def test_version_command(cli_runner):
     assert f"Tsugite version {__version__}" in result.stdout
 
 
+def test_version_flag(cli_runner):
+    """`--version` is the flag form of the version subcommand."""
+    from tsugite import __version__
+
+    result = cli_runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert f"Tsugite version {__version__}" in result.stdout
+
+
+def test_version_short_flag(cli_runner):
+    """`-V` is the short form. Lowercase `-v` is left free for a future verbose flag."""
+    from tsugite import __version__
+
+    result = cli_runner.invoke(app, ["-V"])
+
+    assert result.exit_code == 0
+    assert f"Tsugite version {__version__}" in result.stdout
+
+
 def test_run_command_nonexistent_file(cli_runner, temp_dir):
     """Test run command with nonexistent agent file."""
     nonexistent = temp_dir / "nonexistent.md"
