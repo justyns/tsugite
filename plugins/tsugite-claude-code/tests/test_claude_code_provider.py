@@ -129,6 +129,21 @@ class TestClaudeCodeProcess:
         await process.stop()
 
     @pytest.mark.asyncio
+    async def test_start_disables_the_clis_own_memory_files(self, process):
+        """Tsugite owns the system prompt (--system-prompt-file), but the CLI also
+        injects the operator's ~/.claude/CLAUDE.md and the cwd's CLAUDE.md into every
+        turn, so an agent silently inherits instructions written for a different tool.
+        Verified against claude 2.1.233: without this the model can quote both."""
+        mock_proc = self._mock_proc()
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            await process.start(model="sonnet", system_prompt="test")
+            env = mock_exec.call_args[1]["env"]
+            assert env.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS") == "1"
+
+        await process.stop()
+
+    @pytest.mark.asyncio
     async def test_start_passes_workspace_cv_as_cwd(self, process, tmp_path):
         """Subprocess runs in the workspace bound to the current task."""
         from tsugite.cli.helpers import set_workspace_dir

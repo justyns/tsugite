@@ -137,6 +137,10 @@ class ClaudeCodeProcess:
 
         # Copy env but unset keys that trigger nested-session guard or API key usage
         env = {k: v for k, v in os.environ.items() if k not in _CLAUDE_ENV_VARS}
+        # `--system-prompt-file` above makes tsugite the author of the prompt, but the
+        # CLI still injects the operator's ~/.claude/CLAUDE.md and the cwd's CLAUDE.md
+        # on top of it - instructions written for a different tool, aimed at this agent.
+        env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
 
         workspace = get_workspace_dir()
         self._process = await asyncio.create_subprocess_exec(
