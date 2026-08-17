@@ -1165,6 +1165,12 @@ class JobsOrchestrator:
 
         # Retry: bump counter, spawn new worker, transition verifying → running.
         self._jobs.update(job.id, verify_attempts=new_attempts)
+        # fail_worker() acts only on a live job, so leave `verifying` before the
+        # executor starts, or its startup failure is dropped and the job is
+        # activated on top of a worker that never ran.
+        activate_first = job.executor != "agent"
+        if activate_first:
+            self._activate_worker(job.id, None, kind="retry", timeout_minutes=job.timeout_minutes)
         try:
             started = await self._spawn_worker(
                 job,
@@ -1178,9 +1184,10 @@ class JobsOrchestrator:
             logger.exception("Failed to spawn retry worker for job '%s': %s", job.id, e)
             self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
             return
-        self._activate_worker(
-            job.id, started.id if started else None, kind="retry", timeout_minutes=job.timeout_minutes
-        )
+        if not activate_first:
+            self._activate_worker(
+                job.id, started.id if started else None, kind="retry", timeout_minutes=job.timeout_minutes
+            )
 
     def _finalize(self, job: Job, terminal: JobState, **fields) -> None:
         """Cancel timer, write per-terminal fields, transition, emit tile event.

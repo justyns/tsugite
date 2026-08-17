@@ -539,6 +539,25 @@ async def test_retry_startup_failure_leaves_the_job_failed_not_running(store, ru
     assert "claude binary not found" in (fresh.error or ""), "the job must carry the executor's startup failure"
 
 
+@pytest.mark.asyncio
+async def test_verifier_retry_startup_failure_leaves_the_job_failed_not_running(store, runner, orchestrator, tmp_path):
+    """Same shape as the hint retry above, reached from VERIFYING instead: a failed
+    AC retries through the executor, and if that retry never starts the job must
+    carry the failure rather than sit in RUNNING behind a worker that never ran."""
+    ex = FailOnStartExecutor(orchestrator)
+    orchestrator.register_executor("fake", ex)
+    job = _seed_running_executor_job(
+        store, orchestrator, acceptance_criteria=["file_exists:missing.txt"], workspace_path=str(tmp_path)
+    )
+    await orchestrator.complete_worker(job.id, "claims it wrote the file")
+    await _drain(orchestrator)
+
+    assert [j for j, _ in ex.starts] == [job.id], "the failed AC must have retried through the executor"
+    fresh = store.get(job.id)
+    assert fresh.state != JobState.RUNNING.value, "a retry the executor never started must not report as running"
+    assert "claude binary not found" in (fresh.error or ""), "the job must carry the executor's startup failure"
+
+
 # ── payload carries the new fields ──
 
 
