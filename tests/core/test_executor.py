@@ -585,6 +585,21 @@ class TestExecutionResultToXml:
         # Output should be truncated to ~50KB
         assert len(xml) < len(large_output)
 
+    def test_truncation_covers_an_explicit_return_value(self):
+        """`return_value(x)` is the other way a turn hands back megabytes - the
+        last-expression path prints instead, so it rides `output` and is capped."""
+        result = ExecutionResult(
+            output="small",
+            error=None,
+            stdout="small",
+            stderr="",
+            return_value="y" * (300 * 1024),
+        )
+        xml = result.to_xml(max_output_kb=50)
+        assert len(xml) < 120 * 1024, f"a 300KB return_value reached the model uncapped ({len(xml)} bytes)"
+        assert 'truncated="true"' in xml
+        assert result.truncated is True
+
     def test_empty_output_still_present(self):
         result = ExecutionResult(
             output="",

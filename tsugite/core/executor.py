@@ -136,6 +136,13 @@ class ExecutionResult:
             output = output[:max_bytes]
             self.truncated = True
 
+        # An explicit return_value() is the other way a turn hands back megabytes;
+        # the last-expression path prints instead, so it already rides `output`.
+        return_value = None if self.return_value is None else _mask(str(self.return_value))
+        if return_value is not None and len(return_value) > max_bytes:
+            return_value = return_value[:max_bytes]
+            self.truncated = True
+
         status = "error" if self.error else "success"
         attrs = f'status="{status}"'
         if duration_ms:
@@ -163,8 +170,8 @@ class ExecutionResult:
             state_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.state_keys.items())
             parts.append(f"<state>{state_list}</state>")
 
-        if self.return_value is not None:
-            parts.append(f"<return_value>{escape(_mask(str(self.return_value)))}</return_value>")
+        if return_value is not None:
+            parts.append(f"<return_value>{escape(return_value)}</return_value>")
 
         parts.append("</tsugite_execution_result>")
         return "\n".join(parts)
