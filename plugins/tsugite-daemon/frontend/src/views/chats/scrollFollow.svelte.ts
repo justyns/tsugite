@@ -12,6 +12,7 @@
  * A mutated $state class instance, never a reassigned binding (AGENTS.md).
  */
 import { tick } from 'svelte';
+import { autoFollow } from '$lib/stores/autoFollow.svelte';
 
 /** Slop for "at the bottom". Fractional scrollTop on hi-dpi and the transient
  *  clientHeight change from a mobile URL-bar show/hide both leave a few px of
@@ -81,12 +82,25 @@ export class ScrollFollow {
   }
 
   /** Content grew (a new turn or a stream frame). Scroll to the tail only while
-   *  pinned, re-checking `pinned` INSIDE the rAF so an unpin that lands between
-   *  scheduling and paint aborts the catch-up rather than yanking the viewport
-   *  back down. The second rAF catches the settle relayout (the live stream
-   *  preview swapping for parsed blocks) so the tail stays put as a turn ends. */
+   *  pinned and while the Auto-follow preference is on. */
   sync(): void {
-    if (!this.pinned) return;
+    if (!this.pinned || !autoFollow.enabled) return;
+    this.#scrollToTail();
+  }
+
+  /** Re-pin and snap to the tail: the jump-to-latest affordance, this surface's
+   *  own send, and a session switch all want to resume following from the bottom.
+   *  Each is an explicit ask, so Auto-follow off does not suppress it. */
+  repin(): void {
+    this.pinned = true;
+    this.#scrollToTail();
+  }
+
+  /** Re-checks `pinned` INSIDE the rAF so an unpin that lands between scheduling
+   *  and paint aborts the scroll rather than yanking the viewport back down. The
+   *  second rAF catches the settle relayout (the live stream preview swapping for
+   *  parsed blocks) so the tail stays put as a turn ends. */
+  #scrollToTail(): void {
     const scroll = () => {
       const el = this.#el;
       if (!this.pinned || !el) return;
@@ -96,13 +110,6 @@ export class ScrollFollow {
       scroll();
       requestAnimationFrame(scroll);
     });
-  }
-
-  /** Re-pin and snap to the tail: the jump-to-latest affordance, this surface's
-   *  own send, and a session switch all want to resume following from the bottom. */
-  repin(): void {
-    this.pinned = true;
-    this.sync();
   }
 
   /** Run a mutation that PREPENDS earlier content (the load-earlier affordance)

@@ -14,23 +14,19 @@
   import { auth } from '$lib/stores/auth.svelte';
   import { togglePush } from '$lib/push';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
-  import { readLocal, writeLocal } from '$lib/storage';
   import { contextProviders } from '$lib/context/contextProviders';
   import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
+  import { autoFollow } from '$lib/stores/autoFollow.svelte';
   import { TESTID } from '$lib/testids';
 
   let { open = false, onclose }: { open?: boolean; onclose: () => void } = $props();
-
-  // Frontend-only pref, consumed by the conversation view once wired.
-  const AUTO_FOLLOW_KEY = 'tsugite_auto_follow';
 
   // Context providers that offer a per-device "auto-attach to every send" toggle.
   const autoAttachProviders = contextProviders.filter((p) => p.autoAttachStoreKey);
 
   let tokenDraft = $state(auth.token);
   let userIdDraft = $state(auth.userId);
-  let autoFollow = $state(readLocal(AUTO_FOLLOW_KEY) !== 'false');
 
   function commitCredentials(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -42,10 +38,6 @@
       if (value) auth.setUserId(value);
     }
   }
-
-  $effect(() => {
-    writeLocal(AUTO_FOLLOW_KEY, String(autoFollow));
-  });
 
   let pushBusy = $state(false);
   let pushSubscribed = $state(false);
@@ -162,7 +154,11 @@
       <section class="d-sec">
         <h4>Behavior</h4>
         <div class="d-toggle">
-          <Switch bind:checked={autoFollow} ariaLabel="Auto-follow new output" />
+          <Switch
+            checked={autoFollow.enabled}
+            onCheckedChange={(v) => autoFollow.set(v)}
+            ariaLabel="Auto-follow new output"
+          />
           <div class="d-toggle-lb">
             <span class="tt">Auto-follow</span>
             <span class="sub">Keep the transcript pinned to the newest output.</span>

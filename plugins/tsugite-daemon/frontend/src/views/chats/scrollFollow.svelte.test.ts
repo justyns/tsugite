@@ -1,6 +1,7 @@
 /// <reference types="@vitest/browser/context" />
 import { afterEach, expect, test } from 'vitest';
 import { ScrollFollow } from './scrollFollow.svelte';
+import { autoFollow } from '$lib/stores/autoFollow.svelte';
 
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 async function settle(): Promise<void> {
@@ -14,6 +15,7 @@ afterEach(() => {
   cleanups.forEach((fn) => fn());
   cleanups = [];
   document.body.querySelectorAll('.sf-fixture').forEach((n) => n.remove());
+  autoFollow.set(true); // the store is a singleton over real localStorage here
 });
 
 /** A short, overflowing scroll box: 100px tall over 600px of content. */
@@ -137,4 +139,25 @@ test('preserveAcross leaves the bottom to the tail-follow while pinned', async (
   await f.preserveAcross(() => prepend(el, 300));
   // Pinned: preserveAcross must NOT add the prepend delta - the follow owns the tail.
   expect(el.scrollTop).toBe(0);
+});
+
+test('auto-follow off stops the tail-follow chasing new output', async () => {
+  const el = fixture();
+  const f = attach(el);
+  autoFollow.set(false);
+  el.scrollTop = 0;
+  f.sync();
+  await settle();
+  expect(el.scrollTop).toBe(0);
+});
+
+test('jump-to-latest still snaps with auto-follow off (an explicit ask, not a chase)', async () => {
+  const el = fixture();
+  const f = attach(el);
+  autoFollow.set(false);
+  f.pinned = false;
+  el.scrollTop = 0;
+  f.repin();
+  await settle();
+  expect(dist(el)).toBeLessThan(4);
 });
