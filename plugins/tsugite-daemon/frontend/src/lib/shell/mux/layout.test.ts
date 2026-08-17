@@ -672,21 +672,18 @@ describe('serialize / deserialize', () => {
   test('self-heals a pathologically deep tree to the default instead of throwing (boot guard)', () => {
     // A JSON-parseable but absurdly nested layout used to stack-overflow the
     // unguarded validation walk, white-screening the app at store construction.
-    let node: unknown = { type: 'leaf', id: 'leaf-x', tabs: [], activeTabId: null };
-    for (let i = 0; i < 60000; i++) {
-      node = {
-        type: 'split',
-        id: `s-${i}`,
-        dir: 'row',
-        children: [node, { type: 'leaf', id: `l-${i}`, tabs: [], activeTabId: null }],
-        sizes: [0.5, 0.5],
-      };
-    }
-    const raw = JSON.stringify({
-      version: LAYOUT_SCHEMA_VERSION,
-      root: node,
-      focusedPaneId: 'leaf-x',
-    });
+    // Built as text on purpose: materializing the tree and JSON.stringify-ing it
+    // recurses outside the guard under test, so the test itself overflowed at
+    // this depth on some runs, and the allocation starved sibling workers into
+    // hook timeouts.
+    const DEPTH = 60000;
+    const leaf = '{"type":"leaf","id":"leaf-x","tabs":[],"activeTabId":null}';
+    const raw =
+      `{"version":${LAYOUT_SCHEMA_VERSION},"root":` +
+      '{"type":"split","id":"s","dir":"row","sizes":[0.5,0.5],"children":['.repeat(DEPTH) +
+      leaf +
+      `,${leaf}]}`.repeat(DEPTH) +
+      ',"focusedPaneId":"leaf-x"}';
     let restored!: ReturnType<typeof deserializeLayout>;
     expect(() => (restored = deserializeLayout(raw))).not.toThrow();
     expect(restored.root.type).toBe('leaf');
