@@ -502,6 +502,19 @@ class TsugiteAgent:
                         )
                     )
 
+                # Neutralizing the tag is silent otherwise, so a model impersonating
+                # the runtime leaves no trace for an operator reading logs or events.
+                if turn.spoofed_runtime_tag:
+                    logger.warning("Response wrote runtime-only tags; neutralized them (step %d)", turn_num + 1)
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            WarningEvent(
+                                message="Response wrote runtime-only tags; they were neutralized.",
+                                category="spoofed_runtime_tag",
+                                step=turn_num + 1,
+                            )
+                        )
+
                 # No code = the model is done. Its raw text is the answer.
                 if not code or not code.strip():
                     trailing_notice = ""
