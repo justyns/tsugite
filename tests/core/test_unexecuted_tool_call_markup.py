@@ -102,3 +102,56 @@ async def test_ordinary_prose_answer_still_ends_the_run_as_success(storage):
     assert mock.await_count == 1
     assert result == "The tree is clean; nothing to commit."
     assert _end_status(storage) == "success"
+
+
+@pytest.mark.asyncio
+async def test_prose_naming_the_markup_is_left_alone(storage):
+    """Explaining the markup is not emitting it: a bare tag name carries no name
+    attribute and no closing counterpart, and a code span is quoting rather than
+    calling."""
+    agent = _agent(storage)
+    reply = 'To call a tool, wrap it in an <invoke> element, as in `<invoke name="run_shell">`.'
+    mock = _patch(agent, return_value=_resp(reply))
+
+    result = await agent.run("how does tool calling work here?")
+
+    assert mock.await_count == 1, "prose about the markup must not cost a correction turn"
+    assert result == reply
+    assert _end_status(storage) == "success"
+
+
+@pytest.mark.asyncio
+async def test_a_fenced_example_of_the_markup_is_left_alone(storage):
+    """Markup quoted as code is an illustration, the same convention that makes a
+    bare ```python block non-executable."""
+    agent = _agent(storage)
+    reply = (
+        "Native tool calling looks like this:\n\n"
+        "```xml\n"
+        "<function_calls>\n"
+        '<invoke name="read_file">\n'
+        "</invoke>\n"
+        "</function_calls>\n"
+        "```\n\n"
+        "Tsugite uses ```python-exec blocks instead."
+    )
+    mock = _patch(agent, return_value=_resp(reply))
+
+    result = await agent.run("show me what native tool calling looks like")
+
+    assert mock.await_count == 1, "a fenced example must not cost a correction turn"
+    assert result == reply
+    assert _end_status(storage) == "success"
+
+
+@pytest.mark.asyncio
+async def test_a_complete_envelope_without_a_name_attribute_is_still_caught(storage):
+    """Not every model uses `<invoke name=...>`; an opening tag closed by its own
+    counterpart is an envelope too."""
+    agent = _agent(storage)
+    reply = "<tool_call>\n{'name': 'run_shell', 'arguments': {}}\n</tool_call>\n\nDone."
+    mock = _patch(agent, side_effect=[_resp(reply), _resp("Nothing to do.")])
+
+    await agent.run("run something")
+
+    assert mock.await_count == 2

@@ -153,13 +153,22 @@ def _has_bare_python_fence(cleaned: str) -> bool:
 
 
 # Tool-call envelopes a model may emit as text instead of a ```python-exec
-# block. Nothing here executes them, so such a reply did no work.
-_TOOL_CALL_MARKUP = re.compile(r"<(?:[a-z]+:)?(?:function_calls|invoke|tool_call|tool_use)\b", re.IGNORECASE)
+# block. Nothing here executes them, so such a reply did no work. An envelope
+# carries structure (`<invoke name="...">`, or an opening tag closed by its own
+# counterpart); prose naming the tags is not one.
+_TOOL_CALL_MARKUP = re.compile(
+    r"<(?:[a-z]+:)?invoke\s+name\s*="
+    r"|<(?:[a-z]+:)?(function_calls|tool_call|tool_use)\b[^>]*>.*?</(?:[a-z]+:)?\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Fenced blocks and inline spans - markup quoted as code is shown, not issued.
+_CODE_MARKUP = re.compile(r"^```.*?^```|`[^`\n]+`", re.MULTILINE | re.DOTALL)
 
 
 def _has_tool_call_markup(content: str) -> bool:
-    """True if the text contains a native tool-call envelope."""
-    return bool(content) and _TOOL_CALL_MARKUP.search(content) is not None
+    """True if the text contains a native tool-call envelope outside of code."""
+    return bool(content) and _TOOL_CALL_MARKUP.search(_CODE_MARKUP.sub("", content)) is not None
 
 
 # Tags the runtime injects into the model's NEXT user message after executing
