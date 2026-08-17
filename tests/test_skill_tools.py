@@ -536,3 +536,35 @@ def test_jinja_false_builtin_preserves_examples(tmp_path, monkeypatch):
     manager.load_skill(meta.name)
     rendered = manager._loaded_skills[meta.name]
     assert "{{ today() }}" in rendered
+
+
+def test_concurrent_runs_each_see_their_own_skill_manager(tmp_path):
+    """The daemon runs each turn in its own copied context on a worker thread, so
+    a process-global manager slot lets one run clobber another mid-turn. The
+    manager carries workspace + skill_paths, so the leak crosses workspaces: run A
+    would load run B's workspace's skill body under the same skill name."""
+    import contextvars
+
+    from tsugite.tools.skills import get_skill_manager, set_skill_manager
+
+    seen = {}
+
+    def run(name):
+        manager = SkillManager(workspace=tmp_path / name)
+        set_skill_manager(manager)
+        seen[name] = get_skill_manager() is manager
+
+    # Each run gets its own context, exactly as asyncio.to_thread(ctx.run, ...) does.
+    for name in ("alice", "bob"):
+        contextvars.copy_context().run(run, name)
+
+    # And a run started before another still sees its own after the other sets one.
+    def interleaved():
+        mine = SkillManager(workspace=tmp_path / "carol")
+        set_skill_manager(mine)
+        contextvars.copy_context().run(run, "dave")
+        seen["carol_after_dave"] = get_skill_manager() is mine
+
+    contextvars.copy_context().run(interleaved)
+
+    assert seen == {"alice": True, "bob": True, "dave": True, "carol_after_dave": True}, seen

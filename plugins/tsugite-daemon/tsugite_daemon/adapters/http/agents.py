@@ -596,19 +596,10 @@ class AgentsMixin:
         session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
         if session is None:
             return JSONResponse({"error": "no default session"}, status_code=404)
+        # The suppression is the mechanism: a skill manager belongs to the run
+        # that built it, so this handler cannot reach an in-flight turn's one.
+        # The removal takes effect on the session's next turn.
         adapter.session_store.suppress_skill(session.id, skill_name)
-
-        # Drop it from the currently-loaded manager too so any in-flight code path
-        # that still reads the global manager's state sees the removal. Best-effort:
-        # if the manager hasn't been initialised yet (no prior `prepare()` call)
-        # there's nothing to clear, and the suppression above still takes effect
-        # on the next turn.
-        from tsugite.tools.skills import get_skill_manager
-
-        try:
-            get_skill_manager().unload_skill(skill_name)
-        except (AttributeError, RuntimeError):
-            logger.debug("unload_skill on global manager skipped for %s", skill_name, exc_info=True)
 
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 

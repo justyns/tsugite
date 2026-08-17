@@ -1,5 +1,6 @@
 """Skill loading tools for Tsugite agents."""
 
+import contextvars
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -293,9 +294,12 @@ class SkillManager:
         self._loaded_skills.clear()
 
 
-# Global skill manager instance for backward compatibility
-# This will be replaced with instance-based access in the future
-_default_skill_manager: Optional[SkillManager] = None
+# Per-run, not process-global: the daemon runs each turn in its own copied
+# context on a worker thread, and a manager carries the run's workspace and
+# skill_paths, so a shared slot leaks one workspace's skill bodies into another.
+_default_skill_manager: contextvars.ContextVar[Optional[SkillManager]] = contextvars.ContextVar(
+    "skill_manager", default=None
+)
 
 
 def get_skill_manager(workspace=None) -> SkillManager:
@@ -310,13 +314,14 @@ def get_skill_manager(workspace=None) -> SkillManager:
     Returns:
         Default SkillManager instance
     """
-    global _default_skill_manager
-    if _default_skill_manager is None:
+    manager = _default_skill_manager.get()
+    if manager is None:
         from tsugite.config import load_config
 
         config = load_config()
-        _default_skill_manager = SkillManager(workspace=workspace, extra_paths=config.skill_paths or None)
-    return _default_skill_manager
+        manager = SkillManager(workspace=workspace, extra_paths=config.skill_paths or None)
+        _default_skill_manager.set(manager)
+    return manager
 
 
 def set_skill_manager(manager: SkillManager):
@@ -325,8 +330,7 @@ def set_skill_manager(manager: SkillManager):
     Args:
         manager: SkillManager instance to use as default
     """
-    global _default_skill_manager
-    _default_skill_manager = manager
+    _default_skill_manager.set(manager)
 
 
 @tool(parent_only=True)

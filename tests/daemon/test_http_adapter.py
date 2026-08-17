@@ -690,18 +690,6 @@ class TestUnloadSkillEndpoint:
         )
         assert resp.status_code == 401
 
-    def test_unload_skill_invokes_manager(self, client, test_token, mock_adapter):
-        """The handler also tells the global SkillManager to drop the skill so any
-        in-flight read of its state reflects the removal immediately."""
-        mock_adapter.session_store.create_default_session("alice", "test-agent")
-        with patch("tsugite.tools.skills.get_skill_manager") as get_mgr:
-            client.post(
-                "/api/agents/test-agent/unload-skill",
-                json={"user_id": "alice", "name": "skill-a"},
-                headers=self._headers(test_token),
-            )
-        get_mgr.return_value.unload_skill.assert_called_once_with("skill-a")
-
 
 class TestWebhookEndpoint:
     def test_webhook_valid_token(self, client, tmp_workspace):
