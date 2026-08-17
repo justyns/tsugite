@@ -86,7 +86,7 @@
       size="sm"
       iconOnly
       onclick={() => onOpenSettings?.()}
-      data-testid={TESTID.settingsTrigger}
+      data-testid={TESTID.settingsTriggerMobile}
       aria-label="Settings"
       title="Settings"
     >

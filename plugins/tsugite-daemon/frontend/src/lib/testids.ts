@@ -18,7 +18,10 @@ export const TESTID = {
   keystrip: 'keystrip',
   /** Spaces switcher in the top bar; its chips are selected by accessible name. */
   spaceBar: 'space-bar',
+  /** Rail-footer settings entry; the top bar's phone-width one is separate,
+   *  since both are in the DOM at once. */
   settingsTrigger: 'settings-trigger',
+  settingsTriggerMobile: 'settings-trigger-mobile',
   settingsDrawer: 'settings-drawer',
   /** Per-provider auto-attach toggle in Settings → Context (keyed by provider). */
   settingsContextAutoattach: (key: string) => `settings-context-autoattach-${key}`,
