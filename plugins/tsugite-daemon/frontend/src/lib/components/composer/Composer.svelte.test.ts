@@ -2,7 +2,7 @@
 import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { expect, test, vi } from 'vitest';
-import Composer from './Composer.svelte';
+import Composer, { SEND_GUARD_MS } from './Composer.svelte';
 import { TESTID } from '$lib/testids';
 import type { RefItem, RefSource } from './types';
 
@@ -434,4 +434,80 @@ test('a huge paste caps the input height and scrolls inside', async () => {
   await userEvent.fill(box, Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'));
   await expect.poll(() => el.clientHeight).toBeLessThanOrEqual(window.innerHeight * 0.4);
   expect(el.scrollHeight).toBeGreaterThan(el.clientHeight);
+});
+
+test('a fast second Enter after sending does not stop the turn it just started', async () => {
+  const onSend = vi.fn();
+  const onStop = vi.fn();
+  const screen = await render(Composer, { onSend, onStop });
+  await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'run the suite');
+  await userEvent.keyboard('{Enter}');
+  expect(onSend).toHaveBeenCalledWith('run the suite');
+
+  // The host flips to streaming as the turn starts, so the second Enter of an
+  // accidental double-tap lands on the freshly rendered Stop.
+  await screen.rerender({ streaming: true, onSend, onStop });
+  await userEvent.keyboard('{Enter}');
+  expect(onStop).not.toHaveBeenCalled();
+});
+
+test('Enter stops the turn once the guard window has passed', async () => {
+  const onSend = vi.fn();
+  const onStop = vi.fn();
+  const screen = await render(Composer, { onSend, onStop });
+  await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'run the suite');
+  await userEvent.keyboard('{Enter}');
+  await screen.rerender({ streaming: true, onSend, onStop });
+
+  // Fake only Date: the guard reads the clock but schedules nothing, and leaving
+  // setTimeout real keeps userEvent's own scheduling intact.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(Date.now() + SEND_GUARD_MS);
+    await userEvent.keyboard('{Enter}');
+    expect(onStop).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('a fast second Enter after queueing does not stop the turn either', async () => {
+  const onQueue = vi.fn();
+  const onStop = vi.fn();
+  render(Composer, { streaming: true, onQueue, onStop });
+  await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'follow-up question');
+  await userEvent.keyboard('{Enter}');
+  expect(onQueue).toHaveBeenCalledWith('follow-up question');
+
+  // Queueing clears the draft the same way sending does, so the next Enter would
+  // otherwise fall through to the stop branch.
+  await userEvent.keyboard('{Enter}');
+  expect(onStop).not.toHaveBeenCalled();
+});
+
+test('Escape stops the turn during the guard window', async () => {
+  const onSend = vi.fn();
+  const onStop = vi.fn();
+  const screen = await render(Composer, { onSend, onStop });
+  await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'run the suite');
+  await userEvent.keyboard('{Enter}');
+  await screen.rerender({ streaming: true, onSend, onStop });
+
+  // The guard reads a repeated Enter as an accident; Escape is unambiguous.
+  await userEvent.keyboard('{Escape}');
+  expect(onStop).toHaveBeenCalledTimes(1);
+});
+
+test('double-clicking Send does not stop the turn it just started', async () => {
+  const onSend = vi.fn();
+  const onStop = vi.fn();
+  const screen = await render(Composer, { value: 'run the suite', onSend, onStop });
+  await userEvent.click(page.getByRole('button', { name: 'Send message' }));
+  expect(onSend).toHaveBeenCalledWith('run the suite');
+
+  // Send and Stop are the same button element, so the second click of a
+  // double-click lands on Stop once the host flips to streaming.
+  await screen.rerender({ streaming: true, value: '', onSend, onStop });
+  await userEvent.click(page.getByRole('button', { name: 'Stop streaming' }));
+  expect(onStop).not.toHaveBeenCalled();
 });

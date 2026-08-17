@@ -7,6 +7,9 @@
   const ATTACH_KINDS = new Set<RefKind>(['file', 'session', 'plugin']);
   // Debounce a source search so a fast typist fires one request, not one per key.
   const SEARCH_DEBOUNCE_MS = 150;
+  // How long after a send the Stop control ignores an activation that arrives as
+  // the tail of a double-tap or double-click.
+  export const SEND_GUARD_MS = 500;
 </script>
 
 <script lang="ts">
@@ -287,6 +290,15 @@
     return () => mq.removeEventListener('change', sync);
   });
 
+  let lastSubmitAt = 0;
+
+  /** Send and Stop are the same control, so a repeated Enter or a double-click
+   *  lands on Stop as soon as the turn starts. Escape names Stop on its own and
+   *  so is never guarded. */
+  function stopIfArmed() {
+    if (Date.now() - lastSubmitAt >= SEND_GUARD_MS) onStop?.();
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     // The caller's own popover (e.g. the slash-command menu) gets first look;
     // a truthy return means it consumed the key.
@@ -312,11 +324,11 @@
     }
     if (e.key === 'Enter' && !e.shiftKey && !isTouch) {
       e.preventDefault();
-      // Mid-turn Enter with a draft queues it; with nothing typed it stops
-      // (the historical binding). Escape always stops.
+      // Mid-turn Enter with a draft queues it; with nothing typed it stops,
+      // unless the send that emptied the draft just happened.
       if (streaming) {
         if (canSend && onQueue) submit(onQueue);
-        else onStop?.();
+        else stopIfArmed();
       } else submit(onSend);
       return;
     }
@@ -330,6 +342,7 @@
     if (!canSend) return;
     cb?.(value.trim());
     value = '';
+    lastSubmitAt = Date.now();
     mention.open = false;
   }
 
@@ -490,7 +503,7 @@
       variant={streaming ? 'danger' : 'pri'}
       data-act={streaming ? 'stop' : 'send'}
       aria-label={streaming ? 'Stop streaming' : 'Send message'}
-      onclick={() => (streaming ? onStop?.() : submit(onSend))}
+      onclick={() => (streaming ? stopIfArmed() : submit(onSend))}
     >
       {#snippet icon()}<Icon name={streaming ? 'stop' : 'send'} />{/snippet}{streaming
         ? 'Stop'
