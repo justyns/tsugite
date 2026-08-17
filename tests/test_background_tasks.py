@@ -728,3 +728,24 @@ class TestPartialHistoryOnError:
         assert "I found 3 files" in call_kwargs["result"]
         assert call_kwargs["token_count"] == 100
         assert call_kwargs["cost"] == 0.05
+
+
+class TestRecordedRunOutcome:
+    """`handle_message` returning is not proof the run did anything, so the
+    schedule row takes its status from what the agent recorded."""
+
+    def test_a_non_success_end_is_reported(self):
+        from tsugite_daemon.adapters.scheduler_adapter import _recorded_run_outcome
+
+        from tsugite.history import get_history_backend
+
+        session = get_history_backend().create(agent_name="bot", model="openai:gpt-4o-mini")
+        session.record("session_end", status="error", error_message="no code ran")
+
+        assert _recorded_run_outcome(session.session_id) == ("error", "no code ran")
+
+    def test_a_run_with_no_history_reads_as_success(self):
+        from tsugite_daemon.adapters.scheduler_adapter import _recorded_run_outcome
+
+        assert _recorded_run_outcome(None) == ("success", None)
+        assert _recorded_run_outcome("no-such-session") == ("success", None)

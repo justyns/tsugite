@@ -250,6 +250,25 @@ class TestSchedulerExecution:
         assert "agent crashed" in stored.last_error
 
     @pytest.mark.asyncio
+    async def test_run_that_executed_nothing_is_not_recorded_as_success(self, scheduler, run_callback):
+        """A run can return without raising and still have executed nothing (a reply
+        built from tool-call markup). The row must not disagree with its history."""
+        run_callback.return_value = RunResult(
+            output="1 commit: docs: log the daily notes",
+            session_id="s1",
+            status="error",
+            error="model answered with unexecuted tool-call markup; no code ran",
+        )
+        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        stored = scheduler.get("job1")
+        assert stored.last_status == "error"
+        assert "no code ran" in stored.last_error
+        assert stored.consecutive_failures == 1
+
+    @pytest.mark.asyncio
     async def test_once_auto_removed(self, scheduler, run_callback):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="once", run_at=future)
@@ -427,8 +446,8 @@ class TestScriptEntry:
 class TestScriptDispatch:
     @pytest.mark.asyncio
     async def test_script_uses_script_callback(self, schedules_path):
-        run_cb = AsyncMock(return_value="agent result")
-        script_cb = AsyncMock(return_value="script result")
+        run_cb = AsyncMock(return_value=RunResult(output="agent result"))
+        script_cb = AsyncMock(return_value=RunResult(output="script result"))
         sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
 
         entry = ScheduleEntry(
@@ -449,8 +468,8 @@ class TestScriptDispatch:
 
     @pytest.mark.asyncio
     async def test_agent_uses_run_callback(self, schedules_path):
-        run_cb = AsyncMock(return_value="agent result")
-        script_cb = AsyncMock(return_value="script result")
+        run_cb = AsyncMock(return_value=RunResult(output="agent result"))
+        script_cb = AsyncMock(return_value=RunResult(output="script result"))
         sched = Scheduler(schedules_path, run_cb, script_callback=script_cb)
 
         entry = ScheduleEntry(

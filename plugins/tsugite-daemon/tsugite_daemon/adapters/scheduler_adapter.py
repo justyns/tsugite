@@ -32,6 +32,23 @@ _MAX_RESULT_CHARS = 4000
 MAX_CHAIN_DEPTH = 5
 
 
+def _recorded_run_outcome(conv_id: str | None) -> tuple[str, str | None]:
+    """The status the agent recorded for this run, from its history session.
+
+    An agent that answered with unexecuted tool-call markup, or hit max_turns,
+    returns text and records a non-success end.
+    """
+    from tsugite.history import get_history_backend
+
+    if not conv_id:
+        return "success", None
+    backend = get_history_backend()
+    if not backend.exists(conv_id):
+        return "success", None
+    summary = backend.load(conv_id).summary()
+    return (summary.status or "success"), summary.error_message
+
+
 def _resolve_originating(entry: ScheduleEntry, store) -> Session | None:
     """Resolve `entry.originating_session_id`, following `superseded_by` to the live successor."""
     sid = entry.originating_session_id
@@ -299,7 +316,8 @@ class SchedulerAdapter:
 
         await self._handle_on_complete(entry, result)
 
-        return RunResult(output=result, session_id=conv_id)
+        status, error = _recorded_run_outcome(conv_id)
+        return RunResult(output=result, session_id=conv_id, status=status, error=error)
 
     async def _auto_reply(
         self,

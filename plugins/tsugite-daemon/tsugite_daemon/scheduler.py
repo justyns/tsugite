@@ -116,6 +116,9 @@ def entry_to_dict(entry: "ScheduleEntry") -> dict:
 class RunResult:
     output: str
     session_id: str | None = None
+    # The run's own outcome: returning without raising is not proof of success.
+    status: str = "success"
+    error: str | None = None
 
 
 RunCallback = Callable[["ScheduleEntry"], Coroutine[None, None, "RunResult"]]
@@ -309,12 +312,15 @@ class Scheduler:
                 if entry.execution_type == "script":
                     if not self._script_callback:
                         raise RuntimeError("No script callback configured — cannot run script schedules")
-                    await self._script_callback(entry)
+                    run_result = await self._script_callback(entry)
                 else:
                     run_result = await self._run_callback(entry)
-                    run_conv_id = run_result.session_id
-                entry.last_status = "success"
-                entry.last_error = None
+                run_conv_id = run_result.session_id
+                # A row carries success/skipped/error only, so interrupted and
+                # cancelled land as errors.
+                succeeded = run_result.status == "success"
+                entry.last_status = "success" if succeeded else "error"
+                entry.last_error = None if succeeded else (run_result.error or run_result.status)
                 entry.run_count += 1
             except AgentSkippedError as e:
                 logger.info("Schedule '%s' skipped: %s", entry.id, e.reason)
