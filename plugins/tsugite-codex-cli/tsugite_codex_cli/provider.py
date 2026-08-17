@@ -40,13 +40,14 @@ def _codex_model_info(max_input_tokens: int, effort_levels: list[str] = _REASONI
 
 
 # Context windows are the `context_window` the backend reports for the
-# subscription path, which is smaller than the same model's API tier.
+# subscription path, which is smaller than the same model's API tier. Not
+# `max_context_window`, which some slugs report as 1M.
 _CODEX_CLI_MODELS: dict[str, ModelInfo] = {
     "codex_cli/gpt-5.6-sol": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
     "codex_cli/gpt-5.6-terra": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
     "codex_cli/gpt-5.6-luna": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6),
-    "codex_cli/gpt-5.5": _codex_model_info(1_050_000, effort_levels=_REASONING_LEVELS_V5_5),
-    "codex_cli/gpt-5.4": _codex_model_info(1_050_000),
+    "codex_cli/gpt-5.5": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_5),
+    "codex_cli/gpt-5.4": _codex_model_info(272_000),
     "codex_cli/gpt-5.4-mini": _codex_model_info(272_000),
 }
 
