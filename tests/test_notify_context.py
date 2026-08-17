@@ -42,3 +42,26 @@ def test_channels_do_not_leak_out_of_the_context(monkeypatch):
         pass
 
     assert "error" in notify_user("after the run")
+
+
+def test_two_concurrent_runs_do_not_see_each_others_channels():
+    """Both schedule coroutines run on the one event-loop thread, so thread-local
+    scoping gave zero isolation: one run read the other's channels, and whichever
+    finished first blinded the other. Each asyncio task gets its own context copy."""
+    import asyncio
+
+    seen = {}
+
+    async def run(name, channels):
+        with notify_context([(channels, None)]):
+            await asyncio.sleep(0)  # yield so the other task interleaves inside the context
+            seen[name] = notify_module._channels.get()
+            await asyncio.sleep(0)
+
+    async def main():
+        await asyncio.gather(run("alice", "alice-ntfy"), run("bob", "bob-slack"))
+
+    asyncio.run(main())
+
+    assert seen["alice"] == [("alice-ntfy", None)], f"alice saw another run's channels: {seen['alice']}"
+    assert seen["bob"] == [("bob-slack", None)], f"bob saw another run's channels: {seen['bob']}"
