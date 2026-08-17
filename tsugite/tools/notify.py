@@ -1,8 +1,8 @@
 """Notification tools for scheduled agent tasks."""
 
 import asyncio
+import contextvars
 import logging
-import threading
 from contextlib import contextmanager
 
 from . import tool
@@ -25,21 +25,24 @@ def set_notifier(callback, loop=None):
     _loop = loop
 
 
-_local = threading.local()
+# A ContextVar, not a threading.local: the daemon runs the agent loop and its
+# tool calls on a worker thread via copy_context().run(), which carries a
+# ContextVar across but leaves a threading.local behind.
+_channels: contextvars.ContextVar[list | None] = contextvars.ContextVar("notify_channels", default=None)
 
 
 @contextmanager
 def notify_context(channel_configs):
-    """Set notification channels for the current thread's agent run.
+    """Set notification channels for the current agent run.
 
     Args:
         channel_configs: List of (name, NotificationChannelConfig) tuples
     """
-    _local.channels = channel_configs
+    token = _channels.set(channel_configs)
     try:
         yield
     finally:
-        _local.channels = None
+        _channels.reset(token)
 
 
 def send_notification(message: str, channel_configs: list) -> dict:
@@ -69,7 +72,7 @@ def notify_user(message: str) -> dict:
     Returns:
         Dict with delivery status per channel
     """
-    channels = getattr(_local, "channels", None)
+    channels = _channels.get()
     if not channels:
         return {"error": "No notification channels configured for this run"}
 
