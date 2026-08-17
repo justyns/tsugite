@@ -69,6 +69,7 @@ test('closing a space offers an undo that puts it back with its layout', async (
       l.tabs.map((t) => t.kind),
     );
     expect(kinds).toContain('terminal');
+    expect(toasts.items.some((t) => t.id === toast!.id)).toBe(false);
   } finally {
     spaces.removeSpace(doomed);
     toasts.items = [];

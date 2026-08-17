@@ -38,9 +38,12 @@
   function closeSpace(id: string) {
     const closed = spaces.removeSpace(id);
     if (!closed) return;
-    toasts.push('ok', `Closed ${closed.space.name}`, {
+    const toastId = toasts.push('ok', `Closed ${closed.space.name}`, {
       actionLabel: 'Undo',
-      onAction: () => spaces.restoreSpace(closed),
+      onAction: () => {
+        spaces.restoreSpace(closed);
+        toasts.dismiss(toastId);
+      },
     });
   }
 </script>
