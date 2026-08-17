@@ -201,3 +201,17 @@ def register_shell_tools(definitions: List[ShellToolDefinition]) -> None:
     """
     for definition in definitions:
         register_shell_tool(definition)
+
+
+def bind_custom_tools(definitions: List[ShellToolDefinition]) -> list:
+    """Register a run's custom shell tools and return a Tool per definition.
+
+    Each Tool is built from the definition it was given. Resolving them back out
+    of the registry by name would instead hand this run whichever agent last
+    registered that name, since the registry is process-global and keyed on name
+    alone - one agent's `deploy` running another's command.
+    """
+    from tsugite.core.tools import create_tool_from_function
+
+    register_shell_tools(definitions)
+    return [create_tool_from_function(create_shell_tool_function(d)) for d in definitions]

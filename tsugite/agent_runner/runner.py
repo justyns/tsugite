@@ -461,19 +461,17 @@ async def _execute_agent_with_prompt(
     # Register per-agent custom shell tools (if any)
     if agent_config.custom_tools:
         from tsugite.shell_tool_config import parse_tool_definition_from_dict
-        from tsugite.tools.shell_tools import register_shell_tools
+        from tsugite.tools.shell_tools import bind_custom_tools
 
         try:
             custom_tool_definitions = [
                 parse_tool_definition_from_dict(tool_dict) for tool_dict in agent_config.custom_tools
             ]
-            register_shell_tools(custom_tool_definitions)
-
-            # Add custom tool names to the tool list
-            for tool_def in custom_tool_definitions:
-                from tsugite.core.tools import create_tool_from_tsugite
-
-                tools.append(create_tool_from_tsugite(tool_def.name))
+            # This run's own definitions win over anything the registry resolved
+            # under the same name for an earlier agent.
+            for custom in bind_custom_tools(custom_tool_definitions):
+                tools = [t for t in tools if t.name != custom.name]
+                tools.append(custom)
         except Exception as e:
             event_bus.emit(WarningEvent(message=f"Failed to register custom tools: {e}"))
 
