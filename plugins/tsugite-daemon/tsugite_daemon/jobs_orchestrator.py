@@ -728,6 +728,11 @@ class JobsOrchestrator:
                 )
             except Exception as e:
                 logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
+                if activate_first:
+                    # The optimistic RUNNING above also cleared the old error, so
+                    # without this the job sits live with no diagnostic, refusing
+                    # further retries until its phase timeout fires.
+                    self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
                 raise ValueError(f"failed to spawn retry worker: {e}") from e
             if not activate_first:
                 self._activate_worker(
@@ -965,6 +970,15 @@ class JobsOrchestrator:
         )
         job = self._jobs.get(job.id)
         logger.info("Job '%s' escalating to model '%s' (%s)", job.id, next_model, reason)
+        # Go live BEFORE the executor starts, for the same reason the retry paths do:
+        # fail_worker() acts only on a live job, so a startup failure raised from
+        # `verifying` would be dropped and the job then marked running behind a
+        # worker that never ran.
+        if job.state != JobState.RUNNING.value:
+            try:
+                self._jobs.update_state(job.id, JobState.RUNNING.value)
+            except JobStateTransitionError as e:
+                logger.warning("Cannot transition job '%s' to running before escalation: %s", job.id, e)
         try:
             started = await self._spawn_worker(
                 job,
@@ -980,11 +994,6 @@ class JobsOrchestrator:
         started_id = started.id if started else None
         self._jobs.update(job.id, worker_session_id=started_id)
         self._append_attempt(job.id, kind="escalation", worker_session_id=started_id)
-        if job.state != JobState.RUNNING.value:
-            try:
-                self._jobs.update_state(job.id, JobState.RUNNING.value)
-            except JobStateTransitionError as e:
-                logger.warning("Cannot transition job '%s' to running after escalation: %s", job.id, e)
         self._emit_job_event(self._jobs.get(job.id))
         self._schedule_timeout(job.id, job.timeout_minutes)
         return True

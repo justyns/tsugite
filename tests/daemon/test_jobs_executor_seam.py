@@ -558,6 +558,61 @@ async def test_verifier_retry_startup_failure_leaves_the_job_failed_not_running(
     assert "claude binary not found" in (fresh.error or ""), "the job must carry the executor's startup failure"
 
 
+@pytest.mark.asyncio
+async def test_retry_whose_spawn_raises_does_not_wedge_the_job_in_running(store, runner, orchestrator):
+    """`activate_first` leaves the parked state before the executor starts and clears
+    the old error. If the spawn then RAISES rather than reporting through
+    fail_worker, the job must not keep the RUNNING it was optimistically given -
+    a second retry is refused for the whole phase timeout while it looks running,
+    and the original diagnostic has already been wiped."""
+    orchestrator.register_executor("fake", FakeExecutor())
+    job = _seed_running_executor_job(store, orchestrator, acceptance_criteria=["x"])
+    await orchestrator.fail_worker(job.id, "first attempt died")
+    await _drain(orchestrator)
+    assert store.get(job.id).state == JobState.ERRORED.value
+
+    # A plugin whose get_job_executors() raises is logged and skipped at load, so
+    # after a daemon restart a persisted cc job can find no executor registered.
+    orchestrator._executors.pop("fake")
+    with pytest.raises(ValueError, match="failed to spawn retry worker"):
+        await orchestrator.retry_with_hint(job.id, "install it first")
+
+    fresh = store.get(job.id)
+    assert fresh.state != JobState.RUNNING.value, "a retry whose spawn raised must not report as running"
+    assert fresh.error, "clear_error wiped the old diagnostic, so the new failure must be recorded"
+
+
+@pytest.mark.asyncio
+async def test_escalation_startup_failure_leaves_the_job_failed_not_running(store, runner, orchestrator, tmp_path):
+    """Third door to the same defect: an exhausted verifier budget escalates to the
+    next ladder rung, spawning from VERIFYING. A non-agent executor that fails to
+    start there had its failure dropped too."""
+    ex = FailOnStartExecutor(orchestrator)
+    orchestrator.register_executor("fake", ex)
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="do the thing",
+            acceptance_criteria=["file_exists:missing.txt"],
+            executor="fake",
+            workspace_path=str(tmp_path),
+            max_attempts=1,
+            model_ladder=["cheap", "expensive"],
+        )
+    )
+    orchestrator.register_worker(job.id, None, timeout_minutes=30)
+
+    await orchestrator.complete_worker(job.id, "claims it wrote the file")
+    await _drain(orchestrator)
+
+    assert [j for j, _ in ex.starts] == [job.id], "the exhausted budget must have escalated through the executor"
+    fresh = store.get(job.id)
+    assert fresh.ladder_index == 1, "the escalation must have advanced a rung"
+    assert fresh.state != JobState.RUNNING.value, "an escalation the executor never started must not report as running"
+    assert "claude binary not found" in (fresh.error or ""), "the job must carry the executor's startup failure"
+
+
 # ── payload carries the new fields ──
 
 
