@@ -6,6 +6,7 @@
   // an <input> and close is a real button, both nested-interactive violations
   // inside a role="tab".
   import ContextMenu, { type ContextMenuItem } from '$lib/components/overlays/ContextMenu.svelte';
+  import { ReorderDrag } from '$lib/reorderDrag.svelte';
   import { TESTID } from '$lib/testids';
 
   interface SpaceItem {
@@ -33,30 +34,17 @@
     onReorder?: (id: string, insertAt: number) => void;
   } = $props();
 
-  // `dragover` exposes the payload's types but not its contents.
-  let dragging = $state<string | null>(null);
-  let dropAt = $state<number | null>(null);
-
-  function endDrag() {
-    dragging = null;
-    dropAt = null;
-  }
+  const drag = new ReorderDrag((id) => spaces.findIndex((s) => s.id === id));
 
   function onChipDragOver(event: DragEvent, id: string) {
-    if (!dragging || !onReorder) return;
-    event.preventDefault();
-    const r = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    dropAt = spaces.findIndex((s) => s.id === id) + (event.clientX < r.left + r.width / 2 ? 0 : 1);
+    if (!onReorder) return;
+    drag.over(event, id);
   }
 
   function onChipDrop(event: DragEvent) {
-    if (!dragging || dropAt === null || !onReorder) return;
-    event.preventDefault();
-    const from = spaces.findIndex((s) => s.id === dragging);
-    const id = dragging;
-    const insertAt = dropAt;
-    endDrag();
-    if (insertAt !== from && insertAt !== from + 1) onReorder(id, insertAt);
+    if (!onReorder) return;
+    const move = drag.drop(event);
+    if (move) onReorder(move.id, move.insertAt);
   }
 
   const closable = $derived(spaces.length > 1);
@@ -114,12 +102,12 @@
     <span
       class="sp"
       class:is-active={space.id === activeId}
-      class:is-dragging={dragging === space.id}
-      class:drop-before={dropAt === i}
-      class:drop-after={dropAt === i + 1 && i === spaces.length - 1}
+      class:is-dragging={drag.dragging === space.id}
+      class:drop-before={drag.dropAt === i}
+      class:drop-after={drag.dropAt === i + 1 && i === spaces.length - 1}
       draggable={onReorder && editingId !== space.id ? 'true' : undefined}
-      ondragstart={() => (dragging = space.id)}
-      ondragend={endDrag}
+      ondragstart={() => drag.start(space.id)}
+      ondragend={() => drag.end()}
       ondragover={(event) => onChipDragOver(event, space.id)}
       ondrop={onChipDrop}
     >

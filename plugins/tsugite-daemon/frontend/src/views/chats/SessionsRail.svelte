@@ -15,6 +15,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { writeSurfaceDrag } from '$lib/shell/mux/drag';
   import { moveItem } from '$lib/reorder';
+  import { ReorderDrag } from '$lib/reorderDrag.svelte';
   import { readLocal, writeLocal } from '$lib/storage';
   import type { SessionRow as Row } from '$lib/stores/sessions.svelte';
   import { TESTID } from '$lib/testids';
@@ -191,33 +192,22 @@
       params: { sessionId: row.id },
       title: row.title ?? 'chat',
     });
-    if (row.pinned) draggingPinned = row.id;
+    if (row.pinned) pinDrag.start(row.id);
   }
 
-  // `dragover` exposes the payload's types but not its contents.
-  let draggingPinned = $state<string | null>(null);
-  let dropAt = $state<number | null>(null);
   const pinnedIds = $derived(groups.pinned.map((p) => p.id));
-
-  function endPinnedDrag() {
-    draggingPinned = null;
-    dropAt = null;
-  }
+  const pinDrag = new ReorderDrag((id) => pinnedIds.indexOf(id), { axis: 'y' });
 
   function onPinnedDragOver(e: DragEvent, row: Row) {
-    if (!draggingPinned || !row.pinned) return;
-    e.preventDefault();
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    dropAt = pinnedIds.indexOf(row.id) + (e.clientY < r.top + r.height / 2 ? 0 : 1);
+    if (!row.pinned) return;
+    pinDrag.over(e, row.id);
   }
 
   function onPinnedDrop(e: DragEvent, row: Row) {
-    if (!draggingPinned || !row.pinned || dropAt === null) return;
-    e.preventDefault();
-    const next = moveItem(pinnedIds, pinnedIds.indexOf(draggingPinned), dropAt);
-    const changed = next.join() !== pinnedIds.join();
-    endPinnedDrag();
-    if (changed) void sessions.reorderPins(next);
+    if (!row.pinned) return;
+    const move = pinDrag.drop(e);
+    if (move)
+      void sessions.reorderPins(moveItem(pinnedIds, pinnedIds.indexOf(move.id), move.insertAt));
   }
 </script>
 
@@ -284,12 +274,14 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="srow-drag"
-      class:is-dragging={draggingPinned === row.id}
-      class:drop-above={row.pinned && dropAt === index}
-      class:drop-below={row.pinned && dropAt === index + 1 && index === pinnedIds.length - 1}
+      class:is-dragging={pinDrag.dragging === row.id}
+      class:drop-above={row.pinned && pinDrag.dropAt === index}
+      class:drop-below={row.pinned &&
+        pinDrag.dropAt === index + 1 &&
+        index === pinnedIds.length - 1}
       draggable="true"
       ondragstart={(e) => onRowDragStart(e, row)}
-      ondragend={endPinnedDrag}
+      ondragend={() => pinDrag.end()}
       ondragover={(e) => onPinnedDragOver(e, row)}
       ondrop={(e) => onPinnedDrop(e, row)}
       oncontextmenu={(e) => openRowMenu(e, row)}

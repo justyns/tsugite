@@ -39,6 +39,7 @@
   import Dot from '$lib/components/buttons/Dot.svelte';
   import ContextMenu, { type ContextMenuItem } from '$lib/components/overlays/ContextMenu.svelte';
   import { nextRovingIndex } from '$lib/actions/rovingNav';
+  import { ReorderDrag } from '$lib/reorderDrag.svelte';
 
   let {
     tabs,
@@ -148,40 +149,26 @@
     ];
   });
 
-  // `dragover` exposes the payload's types but not its contents.
-  let dragging = $state<string | null>(null);
-  let dropAt = $state<number | null>(null);
-
-  function endDrag() {
-    dragging = null;
-    dropAt = null;
-  }
+  // A tab from another pane leaves the drag unstarted and falls through to the
+  // pane's drop handler. Ours must stop propagation or the pane splits itself.
+  const drag = new ReorderDrag((id) => tabs.findIndex((t) => t.id === id), {
+    stopPropagation: true,
+  });
 
   function onTabDragStart(event: DragEvent, tab: PaneTab) {
-    dragging = tab.id;
+    drag.start(tab.id);
     if (event.dataTransfer) onDragTab?.(tab.id, event.dataTransfer);
   }
 
-  // A tab from another pane leaves `dragging` unset and falls through to the
-  // pane's drop handler. Ours must stop propagation or the pane splits itself.
   function onTabDragOver(event: DragEvent, tab: PaneTab) {
-    if (!dragging || !onReorder) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const r = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    dropAt =
-      tabs.findIndex((t) => t.id === tab.id) + (event.clientX < r.left + r.width / 2 ? 0 : 1);
+    if (!onReorder) return;
+    drag.over(event, tab.id);
   }
 
   function onTabDrop(event: DragEvent) {
-    if (!dragging || dropAt === null || !onReorder) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const from = tabs.findIndex((t) => t.id === dragging);
-    const id = dragging;
-    const insertAt = dropAt;
-    endDrag();
-    if (insertAt !== from && insertAt !== from + 1) onReorder(id, insertAt);
+    if (!onReorder) return;
+    const move = drag.drop(event);
+    if (move) onReorder(move.id, move.insertAt);
   }
 
   // Middle-click closes a tab (the mousedown preventDefault suppresses the
@@ -210,13 +197,13 @@
         class="mux-tab"
         class:is-active={tab.id === activeId}
         class:is-preview={tab.ephemeral}
-        class:is-dragging={dragging === tab.id}
-        class:drop-before={dropAt === i}
-        class:drop-after={dropAt === i + 1 && i === tabs.length - 1}
+        class:is-dragging={drag.dragging === tab.id}
+        class:drop-before={drag.dropAt === i}
+        class:drop-after={drag.dropAt === i + 1 && i === tabs.length - 1}
         role="tab"
         draggable={onReorder ? 'true' : undefined}
         ondragstart={(event) => onTabDragStart(event, tab)}
-        ondragend={endDrag}
+        ondragend={() => drag.end()}
         ondragover={(event) => onTabDragOver(event, tab)}
         ondrop={onTabDrop}
         id={panelId ? `${panelId}-tab-${tab.id}` : undefined}
