@@ -693,9 +693,7 @@ class LocalExecutor:
                 record["group_id"] = group
             self._tool_calls.append(record)
             if self.event_bus:
-                self.event_bus.emit(
-                    ToolCallEvent(tool_name=tool_obj.name, arguments=audit_args, group_id=self._current_group())
-                )
+                self.event_bus.emit(ToolCallEvent(tool_name=tool_obj.name, arguments=audit_args, group_id=group))
             t0 = time.perf_counter()
             try:
                 result = run_async_in_sync_context(tool_obj.execute(**kwargs))

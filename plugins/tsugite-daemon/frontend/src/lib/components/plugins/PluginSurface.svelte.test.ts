@@ -6,6 +6,7 @@ import PluginSurface from './PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
 import { theme } from '$lib/stores/theme.svelte';
 import { auth } from '$lib/stores/auth.svelte';
+import { TESTID } from '$lib/testids';
 // The bridge ships resolved token values, so the test page needs the real sheet.
 import '../../../styles/tokens.css';
 
@@ -51,7 +52,7 @@ function seed(entry: string, over: Partial<SurfaceDef> = {}): SurfaceDef {
 /** The bridge lands a frame or two after the iframe's load event. */
 async function handshake(): Promise<void> {
   await expect
-    .poll(() => document.querySelector('[data-phase]')?.getAttribute('data-phase'))
+    .poll(() => page.getByTestId(TESTID.pluginSurface).element().getAttribute('data-phase'))
     .toBe('ready');
 }
 
@@ -72,7 +73,9 @@ test('init carries the viewing user, so a surface can attribute what the human d
   await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
   await handshake();
 
-  const frame = document.querySelector('iframe')!;
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
   const init = (frame.contentWindow as unknown as { received: { user?: string }[] }).received[0];
   expect(init?.user).toBe('desk-viewer');
 });
@@ -82,7 +85,9 @@ test('init carries the protocol version and the resolved theme tokens', async ()
   await render(PluginSurface, { kind: 'plugin/demo/board', params: { path: 'q4.docx' } });
   await handshake();
 
-  const frame = document.querySelector('iframe')!;
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
   const init = (frame.contentWindow as unknown as { received: Record<string, never>[] })
     .received[0];
   expect(init).toMatchObject({
@@ -104,7 +109,9 @@ test('a theme switch re-skins a live surface', async () => {
 
   theme.set('latte');
 
-  const frame = document.querySelector('iframe')!;
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
   const themePushes = () =>
     (
       frame.contentWindow as unknown as { received: { type: string; theme?: { name: string } }[] }
@@ -159,7 +166,9 @@ test('focus landing in a frame the plugin page cannot see still claims the pane'
   await render(PluginSurface, { kind: 'plugin/demo/board', params: {}, focusPane });
   await handshake();
 
-  document.querySelector('iframe')!.focus();
+  document
+    .querySelector<HTMLIFrameElement>(`[data-testid="${TESTID.pluginSurface}"] iframe`)!
+    .focus();
   // Whether the harness page itself holds focus is not ours to control, so the
   // blur a real click into the frame raises is delivered by hand; what is under
   // test is the host reading it as a claim.
@@ -169,7 +178,9 @@ test('focus landing in a frame the plugin page cannot see still claims the pane'
 });
 
 function received(): { type: string; event?: { type: string; data: unknown } }[] {
-  const frame = document.querySelector('iframe')!;
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
   return (frame.contentWindow as unknown as { received: { type: string }[] }).received;
 }
 
@@ -230,8 +241,10 @@ test('a tab that outlived its plugin says so instead of framing nothing', async 
   pluginsMeta.loaded = true;
   await render(PluginSurface, { kind: 'plugin/uninstalled/thing', params: {} });
 
-  await expect.element(page.getByText("This tab's plugin isn't installed")).toBeInTheDocument();
-  expect(document.querySelector('iframe')).toBeNull();
+  await expect.element(page.getByTestId(TESTID.pluginSurfaceMissing)).toBeInTheDocument();
+  expect(
+    document.querySelector<HTMLIFrameElement>(`[data-testid="${TESTID.pluginSurface}"] iframe`),
+  ).toBeNull();
 });
 
 test('an unrecognized kind waits rather than accusing a plugin that may still load', async () => {
@@ -239,6 +252,8 @@ test('an unrecognized kind waits rather than accusing a plugin that may still lo
   pluginsMeta.loaded = false;
   await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
 
-  expect(document.body.textContent).not.toContain("isn't installed");
-  expect(document.querySelector('iframe')).toBeNull();
+  expect(document.querySelector(`[data-testid="${TESTID.pluginSurfaceMissing}"]`)).toBeNull();
+  expect(
+    document.querySelector<HTMLIFrameElement>(`[data-testid="${TESTID.pluginSurface}"] iframe`),
+  ).toBeNull();
 });

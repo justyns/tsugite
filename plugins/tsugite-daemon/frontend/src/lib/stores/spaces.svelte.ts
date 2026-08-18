@@ -72,7 +72,7 @@ function spaceId(): string {
 export function defaultSpace(name = 'Main'): Space {
   const base = defaultLayout();
   // The 'chat' surface kind is the docking alias of the default view
-  // (views' DEFAULT_VIEW_ID = 'chats'), mapped by shellNav's SURFACE_FOR_VIEW.
+  // (views[0].id = 'chats'), mapped by shellNav's SURFACE_FOR_VIEW.
   const layout = dockAsTab(base, base.root.id, { kind: 'chat', title: 'Chat' });
   return { id: spaceId(), name, layout };
 }

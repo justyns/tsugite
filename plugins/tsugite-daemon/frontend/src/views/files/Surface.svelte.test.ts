@@ -4,6 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { expect, test, vi, beforeEach } from 'vitest';
 import { WORKSPACE } from './__fixtures__/workspace';
 import { routeHistory } from '$lib/router.svelte';
+import { TESTID } from '$lib/testids';
 // The column measurements below depend on the app's global border-box reset.
 import '../../styles/tokens.css';
 
@@ -65,7 +66,7 @@ test('backlinks and related notes appear after the explicit on-demand scan, neve
   await expect.element(page.getByRole('button', { name: 'Scan workspace' })).toBeInTheDocument();
 
   await page.getByRole('button', { name: 'Scan workspace' }).click();
-  const backlinks = page.getByTestId('files-backlinks');
+  const backlinks = page.getByTestId(TESTID.filesBacklinks);
   await expect.element(backlinks.getByText('ops/beta.md')).toBeInTheDocument();
   await expect.element(page.getByText(/1 note shares/)).toBeInTheDocument();
 });
@@ -112,12 +113,12 @@ test('unsaved edits survive an agent write and raise a stale-content warning', a
   WORKSPACE.setContent('ops/alpha.md', fresh);
   await broadcastFileWrite('ops/alpha.md');
 
-  await expect.element(page.getByTestId('files-stale')).toBeVisible();
+  await expect.element(page.getByTestId(TESTID.filesStale)).toBeVisible();
   await expect.element(area).toHaveValue('my local draft');
 
   await page.getByRole('button', { name: /reload from disk/i }).click();
   await expect.element(area).toHaveValue(fresh);
-  await expect.element(page.getByTestId('files-stale')).not.toBeInTheDocument();
+  await expect.element(page.getByTestId(TESTID.filesStale)).not.toBeInTheDocument();
 });
 
 test('at phone width the toolbar shows a back affordance that clears the path to the list', async () => {
@@ -128,8 +129,8 @@ test('at phone width the toolbar shows a back affordance that clears the path to
   location.hash = '#files?agent=smoke&path=ops/alpha.md';
   await mountSurface('ops/alpha.md');
   await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
-  await expect.element(page.getByTestId('phone-back')).toBeVisible();
-  await page.getByTestId('phone-back').click();
+  await expect.element(page.getByTestId(TESTID.phoneBack)).toBeVisible();
+  await page.getByTestId(TESTID.phoneBack).click();
   expect(location.hash).toBe('#files');
 });
 
@@ -137,7 +138,7 @@ test('at desktop width the toolbar back affordance is hidden', async () => {
   await page.viewport(1440, 900);
   await mountSurface('ops/alpha.md');
   await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
-  await expect.element(page.getByTestId('phone-back')).not.toBeVisible();
+  await expect.element(page.getByTestId(TESTID.phoneBack)).not.toBeVisible();
 });
 
 // The column keys off pane width, not window width. Mount at a pane width and
@@ -152,7 +153,7 @@ async function paneSurface(width: number) {
   await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
   const shell = container.querySelector('.wk-shell') as HTMLElement;
   const doc = container.querySelector('section[aria-label="Document"]') as HTMLElement;
-  const meta = container.querySelector('[data-testid="files-meta"]') as HTMLElement;
+  const meta = container.querySelector(`[data-testid="${TESTID.filesMeta}"]`) as HTMLElement;
   return {
     shell: shell.getBoundingClientRect().width,
     doc: doc.getBoundingClientRect().width,

@@ -138,11 +138,6 @@ export function dockedSurface(viewId: string): PluginSurface | null {
   return surface?.mode === 'workspace' ? surface : null;
 }
 
-// The shell's default surface: the first rail entry. Single source of truth for
-// the fallback view - App's empty-pane rail highlight and viewById's unknown-id
-// fallback both resolve here, and spaces' default 'chat' surface aliases to it.
-export const DEFAULT_VIEW_ID = views[0]!.id;
-
 export function viewById(id: string): ViewDef {
   // An unknown id resolves to the default view.
   return allViews().find((view) => view.id === id) ?? views[0]!;
