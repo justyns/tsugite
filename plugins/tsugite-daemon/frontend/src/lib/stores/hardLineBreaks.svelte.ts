@@ -3,17 +3,6 @@
  * break, persisted to localStorage (`tsugite_hard_line_breaks`, default on).
  * Per-device like the other rendering preferences.
  */
-import { readLocal, writeLocal } from '$lib/storage';
+import { booleanPref } from './booleanPref.svelte';
 
-const KEY = 'tsugite_hard_line_breaks';
-
-class HardLineBreaksStore {
-  enabled = $state<boolean>(readLocal(KEY) !== 'false');
-
-  set(next: boolean): void {
-    this.enabled = next;
-    writeLocal(KEY, String(next));
-  }
-}
-
-export const hardLineBreaks = new HardLineBreaksStore();
+export const hardLineBreaks = booleanPref('tsugite_hard_line_breaks', true);

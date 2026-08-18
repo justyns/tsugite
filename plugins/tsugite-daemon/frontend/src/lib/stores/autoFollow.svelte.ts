@@ -3,17 +3,6 @@
  * streams, persisted per-device to localStorage (`tsugite_auto_follow`,
  * default on).
  */
-import { readLocal, writeLocal } from '$lib/storage';
+import { booleanPref } from './booleanPref.svelte';
 
-const KEY = 'tsugite_auto_follow';
-
-class AutoFollowStore {
-  enabled = $state<boolean>(readLocal(KEY) !== 'false');
-
-  set(next: boolean): void {
-    this.enabled = next;
-    writeLocal(KEY, String(next));
-  }
-}
-
-export const autoFollow = new AutoFollowStore();
+export const autoFollow = booleanPref('tsugite_auto_follow', true);
