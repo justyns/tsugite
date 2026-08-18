@@ -144,8 +144,8 @@ class SchedulerAdapter:
 
         Returns:
             The conv_id, and whether this run opened the record. A schedule with
-            `session_id` reuses one record across runs, so the second half is what
-            says a row is this run's to discard.
+            `session_id` reuses one record across every run, so only the run that
+            opened one may discard it.
         """
         if entry.session_id:
             conv_id = f"sched_{entry.session_id}"
@@ -171,12 +171,6 @@ class SchedulerAdapter:
         except ValueError:
             return conv_id, False
         return conv_id, True
-
-    def _discard_run_session(self, conv_id: str, entry: ScheduleEntry) -> None:
-        """Drop a run's session record. The schedule's own run history keeps the skip."""
-        adapter = self._run_adapter(entry)
-        if adapter:
-            adapter.session_store.delete_session(conv_id)
 
     def _update_run_session(self, conv_id: str, entry: ScheduleEntry, **fields):
         """Update a schedule run session's status."""
@@ -294,7 +288,7 @@ class SchedulerAdapter:
             # A guard that declines is the schedule working, not a run that happened.
             # The scheduler logs the skip and records it in the entry's run history.
             if opened_session:
-                self._discard_run_session(conv_id, entry)
+                adapter.session_store.delete_session(conv_id)
             raise
         except AgentExecutionError as e:
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
