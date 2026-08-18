@@ -4,7 +4,7 @@ Two surfaces:
   - get_http_routes()        -> auth-wrapped (daemon bearer token required)
   - get_public_http_routes() -> no auth (plugin does its own access control)
 
-Wiring is the gateway module-level attach_plugin_http(http_server, name, adapter),
+Wiring is the module-level attach_plugin_http(http_server, name, adapter),
 which is duck-typed + error-isolated so one misbehaving plugin can't abort startup.
 """
 
@@ -16,7 +16,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
 from tsugite_daemon.config import HTTPConfig
-from tsugite_daemon.gateway import attach_plugin_executors, attach_plugin_http
+from tsugite_daemon.plugin_wiring import attach_plugin_executors, attach_plugin_http
 from tsugite_daemon.webhook_store import WebhookStore
 
 

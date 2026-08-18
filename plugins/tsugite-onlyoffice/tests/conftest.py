@@ -83,7 +83,7 @@ def headers(token_store):
 def http_server(adapter, token_store, tmp_path):
     from tsugite_daemon.adapters.http import HTTPServer
     from tsugite_daemon.config import HTTPConfig
-    from tsugite_daemon.gateway import attach_plugin_http
+    from tsugite_daemon.plugin_wiring import attach_plugin_http
     from tsugite_daemon.webhook_store import WebhookStore
 
     server = HTTPServer(

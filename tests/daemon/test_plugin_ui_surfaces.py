@@ -17,7 +17,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
 from tsugite_daemon.config import HTTPConfig
-from tsugite_daemon.gateway import _collect_plugin_ui, attach_plugin_http
+from tsugite_daemon.plugin_wiring import _collect_plugin_ui, attach_plugin_http
 from tsugite_daemon.webhook_store import WebhookStore
 
 DOC_SURFACE = {
