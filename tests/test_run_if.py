@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from tsugite.agent_preparation import AgentPreparer
-from tsugite.md_agents import Agent, AgentConfig
+from tsugite.md_agents import Agent, AgentConfig, parse_agent_file
 
 
 def _make_agent(run_if: str, prefetch=None) -> Agent:
@@ -90,3 +90,12 @@ class TestRunIfGuard:
         preparer = AgentPreparer()
         result = preparer.prepare(agent, prompt="go", context={"count": "0"})
         assert result.skipped
+
+    def test_parsed_agent_file_skipped(self, tmp_path):
+        agent_file = tmp_path / "guarded.md"
+        agent_file.write_text('---\nname: guarded\nrun_if: "False"\n---\nDo something.')
+
+        result = AgentPreparer().prepare(parse_agent_file(agent_file), prompt="go")
+
+        assert result.skipped
+        assert result.system_message == ""

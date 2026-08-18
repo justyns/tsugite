@@ -83,7 +83,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
      - `./{name}.md` (current directory)
      - `builtin_agents/{name}.md` (package-provided)
      - Global directories (`~/.config/tsugite/agents/`)
-   - Merges agent inheritance chains (scalars override, lists merge, dicts deep merge)
+   - Merges agent inheritance chains (scalars and dicts override, lists merge)
 
 3. **Agent Parsing** (`tsugite/md_agents.py`)
    - Parses YAML frontmatter → `AgentConfig` (Pydantic model)

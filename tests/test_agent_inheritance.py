@@ -175,28 +175,6 @@ def test_find_agent_file_prefers_user_global_over_plugin(tmp_path):
     assert found == (fake_global / "reviewer.md").resolve()
 
 
-def test_merge_agent_configs_scalars():
-    """Test merging scalar fields (child overwrites parent)."""
-    parent = AgentConfig(
-        name="parent",
-        description="Parent agent",
-        model="ollama:parent-model",
-        max_turns=3,
-    )
-
-    child = AgentConfig(
-        name="child",
-        model="openai:gpt-4",
-        max_turns=10,
-    )
-
-    merged = merge_agent_configs(parent, child)
-
-    assert merged.name == "child"
-    assert merged.model == "openai:gpt-4"
-    assert merged.max_turns == 10
-
-
 def test_merge_agent_configs_lists():
     """Test merging list fields (tools, prefetch)."""
     parent = AgentConfig(
@@ -382,6 +360,16 @@ def test_merge_agent_configs_custom_tools():
     assert tools_by_name["tool1"]["command"] == "echo parent1"
     assert tools_by_name["tool2"]["command"] == "echo child2"  # Child overrides parent
     assert tools_by_name["tool3"]["command"] == "echo child3"
+
+
+def test_merge_agent_configs_skill_paths():
+    """Test merging skill_paths (union, like the auto_load_skills they resolve)."""
+    parent = AgentConfig(name="parent", skill_paths=["./team-skills", "./shared"])
+    child = AgentConfig(name="child", skill_paths=["./own-skills", "./shared"])
+
+    merged = merge_agent_configs(parent, child)
+
+    assert merged.skill_paths == ["./team-skills", "./shared", "./own-skills"]
 
 
 def test_detect_circular_inheritance():
@@ -607,22 +595,6 @@ def test_merge_preserves_child_name():
     assert merged.description == "Parent"
 
 
-def test_merge_with_empty_parent():
-    """Test merging with minimal parent config."""
-    parent = AgentConfig(name="parent")
-    child = AgentConfig(
-        name="child",
-        model="openai:gpt-4",
-        tools=["tool1"],
-    )
-
-    merged = merge_agent_configs(parent, child)
-
-    assert merged.name == "child"
-    assert merged.model == "openai:gpt-4"
-    assert merged.tools == ["tool1"]
-
-
 def test_default_max_turns_inheritance():
     """Test that default max_turns value doesn't override parent."""
     parent = AgentConfig(name="parent", max_turns=10)
@@ -632,3 +604,59 @@ def test_default_max_turns_inheritance():
 
     # Child's default 5 should not override parent's explicit 10
     assert merged.max_turns == 10
+
+
+# One non-default sample per AgentConfig field.
+FIELD_SAMPLES = {
+    "name": "child",
+    "description": "Child agent",
+    "model": "openai:gpt-4o-mini",
+    "max_turns": 42,
+    "tools": ["read_file"],
+    "strict_tools": True,
+    "prefetch": [{"tool": "get_env", "assign": "env"}],
+    "attachments": ["CHILD.md"],
+    "auto_load_skills": ["child-skill"],
+    "auto_load_agent_list": True,
+    "auto_load_agents": ["helper"],
+    "skill_paths": ["./skills"],
+    "instructions": "Child instructions.",
+    "extends": "base",
+    "reasoning_effort": "high",
+    "model_kwargs": {"response_format": "json"},
+    "custom_tools": [{"name": "child_tool", "command": "echo hi"}],
+    "disable_history": True,
+    "auto_context": True,
+    "visibility": "private",
+    "spawnable": False,
+    "network": {"allow_domains": ["example.test"]},
+    "sandbox": {"enabled": True},
+    "allowed_secrets": ["child-token"],
+    "run_if": "count | int > 0",
+}
+
+
+def test_field_samples_cover_agent_config():
+    assert set(FIELD_SAMPLES) == set(AgentConfig.model_fields)
+
+
+@pytest.mark.parametrize("field_name", sorted(FIELD_SAMPLES))
+def test_merge_keeps_child_field(field_name):
+    """Every field set on the child survives the merge."""
+    parent = AgentConfig(name="parent")
+    child = AgentConfig(**{"name": "child", field_name: FIELD_SAMPLES[field_name]})
+
+    merged = merge_agent_configs(parent, child)
+
+    assert getattr(merged, field_name) == FIELD_SAMPLES[field_name]
+
+
+@pytest.mark.parametrize("field_name", sorted(set(FIELD_SAMPLES) - {"name", "extends"}))
+def test_merge_inherits_parent_field(field_name):
+    """Every field the child leaves alone is inherited from the parent."""
+    parent = AgentConfig(**{"name": "parent", field_name: FIELD_SAMPLES[field_name]})
+    child = AgentConfig(name="child")
+
+    merged = merge_agent_configs(parent, child)
+
+    assert getattr(merged, field_name) == FIELD_SAMPLES[field_name]

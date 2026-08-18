@@ -293,18 +293,16 @@ def merge_agent_configs(parent, child):
     Returns:
         Merged AgentConfig with child taking precedence
 
-    Merge rules:
-    - Scalars (model, max_turns, reasoning_effort, etc.): child overwrites parent
-    - Lists (tools, attachments): merge and deduplicate
+    Merge rules, applied in order so the later ones win:
+    - Every field: child overwrites parent, dicts included (model_kwargs, network, sandbox)
+    - Lists (tools, attachments, skill_paths): merge and deduplicate
     - Lists (prefetch): concatenate (parent first, no deduplication)
     - Lists of dicts (custom_tools): merge and deduplicate by "name" field
     - Strings (instructions): concatenate with newline
     """
     from .md_agents import AgentConfig
 
-    # Merge all field types
-    merged_data = {}
-    merged_data.update(merge_scalar_fields(parent, child))
+    merged_data = merge_all_fields(parent, child)
     merged_data.update(merge_list_fields(parent, child))
     merged_data["instructions"] = merge_instructions(parent, child)
 
@@ -389,33 +387,29 @@ def _get_default_base_agent_name() -> Optional[str]:
         return "default"
 
 
-def merge_scalar_fields(parent, child) -> Dict[str, Any]:
-    """Merge scalar fields from parent and child configs.
+def merge_all_fields(parent, child) -> Dict[str, Any]:
+    """Merge every AgentConfig field, so a newly added one is never dropped.
 
-    Child values take precedence when explicitly set.
-
-    Args:
-        parent: Parent AgentConfig
-        child: Child AgentConfig
-
-    Returns:
-        Dict of merged scalar fields
+    A child takes precedence when it set the field to something other than `None`
+    or `""`, both of which read as "leave this to the parent". `merge_agent_configs`
+    then overwrites the fields that have their own strategy.
     """
-    return {
-        "name": child.name if child.name else parent.name,
-        "description": child.description if child.description else parent.description,
-        "model": child.model if child.model else parent.model,
-        "max_turns": child.max_turns if child.max_turns != 5 else parent.max_turns,
-        "reasoning_effort": child.reasoning_effort if child.reasoning_effort else parent.reasoning_effort,
-        "auto_load_agent_list": child.auto_load_agent_list or parent.auto_load_agent_list,
-    }
+    merged = {}
+    for field_name in type(child).model_fields:
+        value = getattr(child, field_name)
+        child_wins = field_name in child.model_fields_set and value not in (None, "")
+        merged[field_name] = value if child_wins else getattr(parent, field_name)
+
+    # `extends` names this agent's own parent, so it describes the child alone.
+    merged["extends"] = child.extends
+    return merged
 
 
 def merge_list_fields(parent, child) -> Dict[str, List]:
     """Merge list fields from parent and child configs.
 
     Different list types have different merge strategies:
-    - tools, attachments: merge and deduplicate
+    - tools, attachments, skill_paths: merge and deduplicate
     - prefetch: concatenate (parent first)
     - custom_tools: deduplicate by "name" field
 
@@ -449,6 +443,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
     merged_attachments = _merge_attachments(parent.attachments, child.attachments)
     merged_skills = _merge_dedup(parent.auto_load_skills, child.auto_load_skills)
     merged_auto_load_agents = _merge_dedup(parent.auto_load_agents, child.auto_load_agents)
+    merged_skill_paths = _merge_dedup(parent.skill_paths, child.skill_paths)
 
     # Custom tools - deduplicate by "name" field (child overrides parent)
     custom_tool_dict = {}
@@ -462,6 +457,7 @@ def merge_list_fields(parent, child) -> Dict[str, List]:
         "custom_tools": list(custom_tool_dict.values()),
         "auto_load_skills": merged_skills,
         "auto_load_agents": merged_auto_load_agents,
+        "skill_paths": merged_skill_paths,
     }
 
 
