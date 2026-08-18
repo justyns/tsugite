@@ -135,8 +135,18 @@ class SchedulerAdapter:
         """Resolve a notification channel's user to their canonical identity."""
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
-    def _create_run_session(self, entry: ScheduleEntry) -> str:
-        """Create a Session record for a schedule run. Returns the conv_id."""
+    def _run_adapter(self, entry: ScheduleEntry) -> BaseAdapter | None:
+        """The adapter a run's session record lives on, falling back to any configured one."""
+        return self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+
+    def _create_run_session(self, entry: ScheduleEntry) -> tuple[str, bool]:
+        """Create a Session record for a schedule run.
+
+        Returns:
+            The conv_id, and whether this run opened the record. A schedule with
+            `session_id` reuses one record across runs, so the second half is what
+            says a row is this run's to discard.
+        """
         if entry.session_id:
             conv_id = f"sched_{entry.session_id}"
         else:
@@ -144,26 +154,33 @@ class SchedulerAdapter:
             safe_id = entry.id.replace(":", "_")
             conv_id = f"sched_{safe_id}_{ts}"
 
-        adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+        adapter = self._run_adapter(entry)
+        if not adapter:
+            return conv_id, False
+        sched_session = Session(
+            id=conv_id,
+            agent=entry.agent,
+            source=SessionSource.SCHEDULE.value,
+            status=SessionStatus.RUNNING.value,
+            parent_id=entry.id,
+            prompt=entry.prompt or entry.command or "",
+            title=entry.id,
+        )
+        try:
+            adapter.session_store.create_session(sched_session)
+        except ValueError:
+            return conv_id, False
+        return conv_id, True
+
+    def _discard_run_session(self, conv_id: str, entry: ScheduleEntry) -> None:
+        """Drop a run's session record. The schedule's own run history keeps the skip."""
+        adapter = self._run_adapter(entry)
         if adapter:
-            sched_session = Session(
-                id=conv_id,
-                agent=entry.agent,
-                source=SessionSource.SCHEDULE.value,
-                status=SessionStatus.RUNNING.value,
-                parent_id=entry.id,
-                prompt=entry.prompt or entry.command or "",
-                title=entry.id,
-            )
-            try:
-                adapter.session_store.create_session(sched_session)
-            except ValueError:
-                pass
-        return conv_id
+            adapter.session_store.delete_session(conv_id)
 
     def _update_run_session(self, conv_id: str, entry: ScheduleEntry, **fields):
         """Update a schedule run session's status."""
-        adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+        adapter = self._run_adapter(entry)
         if adapter:
             try:
                 adapter.session_store.update_session(conv_id, **fields)
@@ -173,7 +190,7 @@ class SchedulerAdapter:
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
         logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
-        conv_id = self._create_run_session(entry)
+        conv_id, _opened = self._create_run_session(entry)
 
         try:
             proc = await asyncio.to_thread(
@@ -217,7 +234,7 @@ class SchedulerAdapter:
         if not adapter:
             raise ValueError(f"No adapter found for agent '{entry.agent}'")
         logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
-        conv_id = self._create_run_session(entry)
+        conv_id, opened_session = self._create_run_session(entry)
         user_id = f"scheduler:{entry.agent}"
         metadata = {
             "schedule_id": entry.id,
@@ -274,7 +291,10 @@ class SchedulerAdapter:
                     channel_context=channel_context,
                 )
         except AgentSkippedError:
-            self._update_run_session(conv_id, entry, status=SessionStatus.CANCELLED.value)
+            # A guard that declines is the schedule working, not a run that happened.
+            # The scheduler logs the skip and records it in the entry's run history.
+            if opened_session:
+                self._discard_run_session(conv_id, entry)
             raise
         except AgentExecutionError as e:
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
@@ -504,7 +524,7 @@ class SchedulerAdapter:
         """Write a completion result as a synthetic turn into the session's JSONL."""
 
         def _write():
-            adapter = self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+            adapter = self._run_adapter(entry)
             if not adapter:
                 return
             storage = self._get_session_storage(session_id, adapter)

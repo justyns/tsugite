@@ -899,6 +899,14 @@ class SessionStore:
             self._persist(session)
             return session
 
+    def delete_session(self, session_id: str) -> bool:
+        """Remove a session. Returns whether there was one to remove."""
+        with self._lock:
+            if session_id not in self._sessions:
+                return False
+            self._purge_session_state(session_id)
+            return True
+
     def _purge_session_state(self, session_id: str) -> None:
         """Remove a session plus its derived indexes and hot caches.
 

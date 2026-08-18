@@ -592,10 +592,8 @@ class TestSchedulerStatusUpdates:
         assert self._last_status(mock_adapter.session_store) == SessionStatus.COMPLETED.value
 
     @pytest.mark.asyncio
-    async def test_agent_skipped_marks_session_cancelled(self):
-        """AgentSkippedError currently re-raises without updating status, leaving the session pinned at RUNNING."""
-        from tsugite_daemon.session_store import SessionStatus
-
+    async def test_agent_skipped_discards_the_session(self):
+        """A guard that declines is a non-event, so the run's record goes with it."""
         from tsugite.agent_runner.models import AgentSkippedError
 
         sa, mock_adapter = _make_scheduler_adapter()
@@ -613,7 +611,8 @@ class TestSchedulerStatusUpdates:
             with pytest.raises(AgentSkippedError):
                 await sa._run_agent(entry)
 
-        assert self._last_status(mock_adapter.session_store) == SessionStatus.CANCELLED.value
+        assert self._last_status(mock_adapter.session_store) is None
+        mock_adapter.session_store.delete_session.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_unexpected_exception_marks_session_failed(self):
