@@ -1,10 +1,8 @@
 """Locating, jailing, keying, and replacing the documents the plugin serves.
 
-Every path that arrives over HTTP or from a tool goes through `resolve_existing`
-first, except the save callback, which uses plain `resolve` so a save still lands
-if the file vanished. Both halves of the policy and the errors they raise have
-one home instead of one per handler, and the route layer is the only place those
-errors turn into status codes.
+Every path arriving over HTTP or from a tool goes through `resolve_existing`,
+except the save callback, which uses plain `resolve` so a save still lands if the
+file vanished. The route layer is the only place these errors become status codes.
 """
 
 from __future__ import annotations
@@ -28,8 +26,8 @@ _KEY_LENGTH = 32
 def is_document(path: Path) -> bool:
     """Whether a path names something this plugin will serve.
 
-    The one predicate `resolve` refuses on and the listing filters by, because a
-    listing that answers this differently offers a row the routes then decline.
+    The one predicate `resolve` refuses on and the listing filters by, so a listing
+    never offers a row the routes then decline.
     """
     return path.suffix.lower() == EXTENSION
 
@@ -64,12 +62,10 @@ def resolve(documents_dir: Path, relative: str) -> Path:
     target = (root / relative).resolve()
     if not target.is_relative_to(root):
         raise OutsideDocumentsError(f"path {relative!r} escapes the documents directory")
-    # The listing filters by extension, but every other way in resolves a path the
-    # caller chose, and the jail alone would make the whole directory readable: a
-    # file token is a bearer credential that travels to the document server and its
-    # logs, so minting one for a private file hands it to a third party this
-    # deployment only trusts with documents. The write path needs the same rule, or
-    # a callback picks the name of the file it creates.
+    # The jail alone would make the whole directory readable, and a file token is a
+    # bearer credential that travels to the document server and its logs: minting one
+    # for a private file hands it to a third party trusted only with documents. The
+    # write path needs the same rule, or a callback picks the name of the file it creates.
     if not is_document(target):
         raise NotADocumentError(f"not a document: {relative}")
     return target
@@ -95,10 +91,10 @@ def resolve_existing(documents_dir: Path, relative: str) -> Path:
 def canonical(documents_dir: Path, relative: str) -> str:
     """Reduce a caller-supplied path to the one spelling of the document it names.
 
-    `notes.docx`, `./notes.docx` and `sub/../notes.docx` are one file, so anything
-    kept per document has to be kept under one of them: keyed on what the caller
-    typed, one document has a lock, a record of who has it open and a document key
-    per spelling, and two turns on it neither serialize nor see each other.
+    `notes.docx`, `./notes.docx` and `sub/../notes.docx` are one file, so per-document
+    state keys on this. Keyed on what the caller typed instead, one document would get
+    a lock and a document key per spelling, and two turns on it would neither serialize
+    nor see each other.
 
     Returns:
         The path relative to the documents directory, in posix form.
@@ -172,8 +168,8 @@ def replacing(path: Path):
     """Replace a document in a single step, through a sibling file.
 
     An interrupted write would leave the editor's own save looking like a corrupt
-    document, so the new bytes are written elsewhere and then take the name. A
-    write that raises takes its half-written file with it.
+    document, so the new bytes are written elsewhere and then take the name. A write
+    that raises takes its half-written file with it.
 
     The temp name is unique per write, not per process: a save arriving from the
     document server does not hold the turn's lock, so two writers on one document
@@ -186,7 +182,11 @@ def replacing(path: Path):
     handle, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     os.close(handle)
     tmp = Path(name)
-    yield tmp
+    try:
+        yield tmp
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     os.replace(tmp, path)
 
 

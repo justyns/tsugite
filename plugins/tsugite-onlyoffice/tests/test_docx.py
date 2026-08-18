@@ -6,6 +6,7 @@ strips `w14`, `w15` and `mc:Ignorable` off a Word document. Hence the
 byte-identity assertion on every entry.
 """
 
+import pytest
 from onlyoffice_helpers import zip_entries as entries
 from onlyoffice_helpers import zip_part as part
 from tsugite_onlyoffice.documents import replacing
@@ -70,3 +71,18 @@ def test_two_writers_on_one_document_do_not_share_a_temp_file(tmp_path):
         assert first != second, "overlapping writes need their own temp files"
         first.write_bytes(b"one")
         second.write_bytes(b"two")
+
+
+def test_a_failed_write_leaves_neither_the_document_nor_a_temp_file_behind(tmp_path):
+    """The temp file lives beside the document, so one left per failure accumulates in
+    the documents directory, where nothing lists it and nothing cleans it up."""
+    target = tmp_path / "notes.docx"
+    target.write_bytes(b"before")
+
+    with pytest.raises(RuntimeError):
+        with replacing(target) as tmp:
+            tmp.write_bytes(b"half a document")
+            raise RuntimeError("the write failed")
+
+    assert target.read_bytes() == b"before"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["notes.docx"]
