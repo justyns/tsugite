@@ -60,6 +60,14 @@ def _load_session_events(session_id: str) -> list:
     return list(backend.load(session_id).iter_events())
 
 
+def _session_user_label(user_id: str, source: str) -> str:
+    if user_id.isdigit():
+        return f"Discord: {user_id}"
+    if user_id.startswith("web-"):
+        return f"Web: {user_id}"
+    return user_id or source
+
+
 class AgentsMixin:
     def _agent_routes(self) -> list:
         return [
@@ -177,17 +185,12 @@ class AgentsMixin:
         default_ids = adapter.session_store.default_primary_ids(adapter.agent_name)
         live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
 
-        def _user_label(user_id: str, source: str) -> str:
-            if user_id.isdigit():
-                return f"Discord: {user_id}"
-            if user_id.startswith("web-"):
-                return f"Web: {user_id}"
-            return user_id or source
+        waiting_on = adapter.session_store.waiting_on_map()
 
         sessions = []
         for s in all_sessions:
             user_id = s.user_id or ""
-            label = _user_label(user_id, s.source)
+            label = _session_user_label(user_id, s.source)
             unread = bool(s.last_active and (not s.last_viewed_at or s.last_active > s.last_viewed_at))
             row = {
                 "id": s.id,
@@ -212,6 +215,9 @@ class AgentsMixin:
                 "last_viewed_at": s.last_viewed_at,
                 "superseded_by": s.superseded_by,
                 "unread": unread,
+                "needs_attention": s.needs_attention,
+                "pending_deliveries": s.pending_delivery_ids,
+                "waiting_on": waiting_on.get(s.id, []),
                 "is_primary": s.is_primary,
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.

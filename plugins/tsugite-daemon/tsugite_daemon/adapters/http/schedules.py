@@ -102,6 +102,10 @@ class SchedulesMixin:
             "command",
             "script_timeout",
             "target_session",
+            "delivery_mode",
+            "delivery_kind",
+            "incident_key",
+            "incident_title",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
         if not fields:

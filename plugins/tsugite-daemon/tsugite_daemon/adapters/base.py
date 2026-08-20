@@ -18,7 +18,13 @@ from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.config import AgentConfig, SandboxSettings
-from tsugite_daemon.session_store import METADATA_PRIMARY_FLAG, READ_ONLY_METADATA_KEYS, Session, SessionStore
+from tsugite_daemon.session_store import (
+    METADATA_PRIMARY_FLAG,
+    READ_ONLY_METADATA_KEYS,
+    Session,
+    SessionStore,
+    render_pending_deliveries_xml,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -497,7 +503,7 @@ class BaseAdapter(ABC):
 
         return progress_cb
 
-    def _build_agent_context(self, channel_context: ChannelContext) -> Dict[str, Any]:
+    def _build_agent_context(self, channel_context: ChannelContext, conv_id: Optional[str] = None) -> Dict[str, Any]:
         """Build context dict for agent template rendering."""
         ctx: Dict[str, Any] = {"is_daemon": True, "is_scheduled": False, "schedule_id": "", "has_notify_tool": False}
         meta = channel_context.metadata or {}
@@ -522,6 +528,8 @@ class BaseAdapter(ABC):
 
         ctx["can_spawn_jobs"] = get_jobs_orchestrator() is not None
         ctx["can_use_pty"] = runtime_available()
+        live = self.session_store.resolve_live(conv_id) if conv_id else None
+        ctx["has_pending_deliveries"] = bool(live and live.pending_deliveries)
 
         window_minutes = meta.get("heartbeat_window", 10)
         since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
@@ -561,6 +569,7 @@ class BaseAdapter(ABC):
         session_topic_xml = ""
         session_meta_xml = ""
         scratchpad_xml = ""
+        session: Optional[Session] = None
 
         meta = channel_context.metadata or {}
         if channel_context.source == "scheduler" and (meta.get("scheduled_for") or meta.get("actual_fire_time")):
@@ -571,7 +580,9 @@ class BaseAdapter(ABC):
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
-                session = self.session_store.get_session(conv_id_override)
+                session = self.session_store.resolve_live(conv_id_override) or self.session_store.get_session(
+                    conv_id_override
+                )
             else:
                 session = self.session_store.find_default_session(user_id, self.agent_name)
             if session is None:
@@ -617,13 +628,16 @@ class BaseAdapter(ABC):
         except Exception:
             logger.debug("Jobs context render failed", exc_info=True)
 
+        rendered = render_pending_deliveries_xml(session) if session else ""
+        deliveries_xml = "\n" + rendered if rendered else ""
+
         return f"""<message_context>
   <datetime>{timestamp}</datetime>{session_started_xml}{last_active_xml}{scheduler_timing_xml}
   <working_directory>{cwd_for_render}</working_directory>
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}{deliveries_xml}
 </message_context>
 
 {message}"""
@@ -820,7 +834,7 @@ class BaseAdapter(ABC):
                     "user_context", {"injected": [{"tag": "client_context", "items": shown}]}
                 )
 
-        agent_context = self._build_agent_context(channel_context)
+        agent_context = self._build_agent_context(channel_context, conv_id)
         agent_context["raw_message"] = message
         # Skip the sort+copy for the common case where nothing was suppressed.
         suppressed = self.session_store.get_suppressed_skills(conv_id)
@@ -1022,7 +1036,7 @@ class BaseAdapter(ABC):
         except (ValueError, KeyError):
             turn_was_in_flight = False
         if turn_was_in_flight:
-            self.session_store.end_turn(conv_id)
+            self.session_store.end_turn(conv_id, notify_listeners=False)
         new_session: Optional[Session] = None
         if self.session_store.begin_compaction(user_id, self.agent_name, session_id=conv_id):
             self._emit_ui(custom_logger, "compacting")

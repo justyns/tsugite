@@ -12,8 +12,9 @@ from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from uuid import uuid4
+from xml.sax.saxutils import escape, quoteattr
 
 from tsugite.core.record_store import SqliteCollectionStorage
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
@@ -150,11 +151,15 @@ READ_ONLY_METADATA_KEYS = frozenset(
         # sessions when their job finishes. Read-only so an agent can't tag a real
         # chat as a job host and get it auto-closed.
         "job_host",
+        # Dedupe key for a monitor's incident session. System-stamped, so an
+        # agent can't hijack another monitor's incidents by writing its key.
+        "incident_key",
     }
 )
 
 METADATA_SESSION_NAME = "session_name"
 METADATA_PRIMARY_FLAG = "is_primary"
+METADATA_INCIDENT_KEY = "incident_key"
 # Truthy on a placeholder session that exists only to host a /job spawned outside a
 # conversation. The jobs orchestrator reconciles these to a terminal status when the
 # job finishes so they stop rendering as active/"starting" in the sidebar.
@@ -227,12 +232,18 @@ class Session:
     model: Optional[str] = None
     agent_file: Optional[str] = None
     notify: list[str] = field(default_factory=list)
+    # `waiting_on` is the reverse view of this.
+    notify_sessions: list[str] = field(default_factory=list)
 
     title: Optional[str] = None
     scratchpad: str = ""
 
     pinned: bool = False
     pin_position: Optional[int] = None
+    # One entry per outstanding needs-ack delivery: {id, source, title, message, timestamp}.
+    pending_deliveries: list[dict] = field(default_factory=list)
+    # Held until the turn ends; persisted so a daemon death mid-turn does not swallow the card.
+    deferred_deliveries: list[dict] = field(default_factory=list)
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
 
@@ -261,6 +272,14 @@ class Session:
         return bool(self.metadata.get(METADATA_PRIMARY_FLAG))
 
     @property
+    def needs_attention(self) -> bool:
+        return bool(self.pending_deliveries)
+
+    @property
+    def pending_delivery_ids(self) -> list[str]:
+        return [d["id"] for d in self.pending_deliveries]
+
+    @property
     def has_live_work(self) -> bool:
         """Whether this session currently has work running.
 
@@ -285,6 +304,28 @@ class Session:
             self.created_at = now
         if not self.last_active:
             self.last_active = now
+
+
+PENDING_DELIVERY_MESSAGE_CHARS = 200
+
+
+def render_pending_deliveries_xml(session: Session) -> str:
+    if not session.pending_deliveries:
+        return ""
+
+    lines = ["  <pending_deliveries>"]
+    for item in session.pending_deliveries:
+        parts = [f"id={quoteattr(item['id'])}", f"source={quoteattr(item.get('source') or '')}"]
+        if item.get("title"):
+            parts.append(f"title={quoteattr(item['title'])}")
+        if item.get("timestamp"):
+            parts.append(f"at={quoteattr(item['timestamp'])}")
+        message = item.get("message") or ""
+        if len(message) > PENDING_DELIVERY_MESSAGE_CHARS:
+            message = message[:PENDING_DELIVERY_MESSAGE_CHARS] + "…"
+        lines.append(f"    <delivery {' '.join(parts)}>{escape(message)}</delivery>")
+    lines.append("  </pending_deliveries>")
+    return "\n".join(lines)
 
 
 class SessionStore:
@@ -318,6 +359,9 @@ class SessionStore:
         # is stored on Session itself (Session.compacting); this map only gates
         # concurrent begin_compaction calls.
         self._compaction_events: dict[tuple[str, str], threading.Event] = {}
+
+        # Fired with the session id after each turn ends, outside the lock.
+        self._on_turn_end: Optional[Callable[[str], None]] = None
 
         # Hot caches keyed by session_id, populated lazily on first read and
         # then updated incrementally inside `append_event`. Without these,
@@ -590,8 +634,7 @@ class SessionStore:
                 and s.status not in FINISHED_STATUSES
             }
 
-    def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
-        """Lock-held variant of find_named_session - caller must hold self._lock."""
+    def _find_by_metadata_locked(self, user_id: str, agent: str, key: str, value: str) -> Optional[Session]:
         candidates = [
             s
             for s in self._sessions.values()
@@ -599,14 +642,21 @@ class SessionStore:
             and s.agent == agent
             and s.superseded_by is None
             and s.status not in FINISHED_STATUSES
-            and s.metadata.get(METADATA_SESSION_NAME) == name
+            and s.metadata.get(key) == value
         ]
         return max(candidates, key=lambda s: s.last_active, default=None)
+
+    def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
+        return self._find_by_metadata_locked(user_id, agent, METADATA_SESSION_NAME, name)
 
     def find_named_session(self, user_id: str, agent: str, name: str) -> Optional[Session]:
         """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
         with self._lock:
             return self._find_named_session_locked(user_id, agent, name)
+
+    def find_incident_session(self, user_id: str, agent: str, incident_key: str) -> Optional[Session]:
+        with self._lock:
+            return self._find_by_metadata_locked(user_id, agent, METADATA_INCIDENT_KEY, incident_key)
 
     def _find_primary_session_locked(self, user_id: str, agent: str) -> Optional[Session]:
         """Lock-held variant of find_primary_session. Caller must hold self._lock."""
@@ -794,6 +844,9 @@ class SessionStore:
                 model_override=old_session.model_override,
                 workspace_override=old_session.workspace_override,
                 context_limit=old_session.context_limit,
+                pending_deliveries=list(old_session.pending_deliveries),
+                deferred_deliveries=list(old_session.deferred_deliveries),
+                notify_sessions=list(old_session.notify_sessions),
             )
             # Preserve original conversation start so <session_started> in the
             # message context reflects the user's perceived session age, not
@@ -827,6 +880,9 @@ class SessionStore:
             old_session.reasoning_effort = None
             old_session.model_override = None
             old_session.compacting = False
+            old_session.pending_deliveries = []
+            old_session.notify_sessions = []
+            old_session.deferred_deliveries = []
             # The successor owns any in-flight turn now; a stale marker on the
             # superseded session would trigger a spurious boot-time repair.
             old_session.turn_in_flight = False
@@ -834,6 +890,16 @@ class SessionStore:
             self._persist(old_session, new_session)
         self._evict_progress_cache(session_id)
         return new_session
+
+    def _live_end_locked(self, session: Session) -> Optional[Session]:
+        """Tail of `session`'s compaction chain, or None if it dead-ends."""
+        seen = set()
+        while session.superseded_by and session.id not in seen:
+            seen.add(session.id)
+            session = self._sessions.get(session.superseded_by)
+            if session is None:
+                return None
+        return session
 
     def resolve_compacted_successor(self, session_id: str) -> Optional[Session]:
         """Return the LIVE end of `session_id`'s compaction chain, or None.
@@ -845,15 +911,18 @@ class SessionStore:
         no successor, or the chain dead-ends on a pruned session.
         """
         with self._lock:
-            old = self._sessions.get(session_id)
-            if not old or not old.superseded_by:
+            session = self._sessions.get(session_id)
+            if not session or not session.superseded_by:
                 return None
-            seen = {session_id}
-            current = self._sessions.get(old.superseded_by)
-            while current and current.superseded_by and current.id not in seen:
-                seen.add(current.id)
-                current = self._sessions.get(current.superseded_by)
-            return current
+            return self._live_end_locked(session)
+
+    def resolve_live(self, session_id: str) -> Optional[Session]:
+        """The live session `session_id` refers to: itself when it was never
+        compacted, otherwise the tail of its chain. None when the id is unknown
+        or the chain dead-ends on a pruned session."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            return self._live_end_locked(session) if session else None
 
     def update_token_count(self, session_id: str, tokens_used: int) -> None:
         with self._lock:
@@ -1054,6 +1123,111 @@ class SessionStore:
             self._persist(session)
             return session
 
+    def hold_delivery(self, session_id: str, event: dict) -> bool:
+        """Hold a delivery when a turn is in flight, reporting whether it was held.
+
+        The check and the hold share the lock: deciding outside it lets a turn end
+        in between, leaving the card behind a flush that has already run.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or not session.turn_in_flight:
+                return False
+            session.deferred_deliveries.append(event)
+            self._persist(session)
+            return True
+
+    def take_deferred_deliveries(self, session_id: str) -> list[dict]:
+        """In arrival order."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or not session.deferred_deliveries:
+                return []
+            held = session.deferred_deliveries
+            session.deferred_deliveries = []
+            self._persist(session)
+            return held
+
+    def sessions_holding_deliveries(self) -> list[str]:
+        with self._lock:
+            return [s.id for s in self._sessions.values() if s.deferred_deliveries]
+
+    def record_delivery(self, session_id: str, event: dict, *, needs_attention: bool) -> Session:
+        """Append a delivery event and bump last_active, which is what `unread` derives from."""
+        self.append_event(session_id, event)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+            if needs_attention:
+                session.pending_deliveries.append(
+                    {
+                        "id": event["delivery_id"],
+                        "source": event.get("source") or "",
+                        "title": event.get("title"),
+                        "message": event.get("message") or "",
+                        "timestamp": event.get("timestamp") or "",
+                    }
+                )
+            session.last_active = datetime.now(timezone.utc).isoformat()
+            self._persist(session)
+        return session
+
+    def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
+        """Discharge one obligation, or every one when `delivery_id` is None.
+
+        Does not bump last_active: that would re-mark the session unread the
+        moment it is answered.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+            if delivery_id is None:
+                session.pending_deliveries = []
+            else:
+                session.pending_deliveries = [d for d in session.pending_deliveries if d.get("id") != delivery_id]
+            self._persist(session)
+            return session
+
+    def add_notify_session(self, session_id: str, target_id: str) -> Session:
+        """Register `target_id` as a session to notify when `session_id` finishes.
+
+        Bookkeeping, not conversation activity, so it leaves last_active alone.
+        Rejects a target belonging to someone else: the notification starts a turn
+        in that session, carrying this one's title and result into it.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+            target = self._sessions.get(target_id)
+            if not target:
+                raise ValueError(f"Notify target '{target_id}' not found")
+            # A background worker carries no user_id and inherits its spawner's
+            # audience, so only two attributed sessions can disagree.
+            if session.user_id and target.user_id and target.user_id != session.user_id:
+                raise ValueError(f"Notify target '{target_id}' belongs to another user")
+            if target_id not in session.notify_sessions:
+                session.notify_sessions.append(target_id)
+                self._persist(session)
+            return session
+
+    def waiting_on_map(self) -> dict[str, list[str]]:
+        """Map a session id to the unfinished sessions that will notify it.
+
+        Derived on read: a notifier drops out the moment it finishes.
+        """
+        waiting: dict[str, list[str]] = {}
+        with self._lock:
+            for session in self._sessions.values():
+                if session.status in FINISHED_STATUSES:
+                    continue
+                for target_id in session.notify_sessions:
+                    if target_id != session.id:
+                        waiting.setdefault(target_id, []).append(session.id)
+        return waiting
+
     def list_sessions(
         self,
         agent: Optional[str] = None,
@@ -1081,12 +1255,11 @@ class SessionStore:
             ]
             if limit:
                 results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
-                # Pins are persistent navigation - the recency window must not
-                # evict them (an idle pin would silently vanish from every
-                # consumer). The limit keeps bounding the non-pinned tail.
+                # Pins and unanswered cards must outlive the recency window; the
+                # limit keeps bounding the rest of the tail.
                 head = results[:limit]
                 head_ids = {s.id for s in head}
-                head.extend(s for s in results[limit:] if s.pinned and s.id not in head_ids)
+                head.extend(s for s in results[limit:] if (s.pinned or s.needs_attention) and s.id not in head_ids)
                 results = head
             return results
 
@@ -1231,6 +1404,9 @@ class SessionStore:
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
+        result["needs_attention"] = session.needs_attention
+        # Same key, same shape as the session-list row: ids, not whole cards.
+        result["pending_deliveries"] = session.pending_delivery_ids
         # `context_limit` (the raw dataclass field) is None until the first turn
         # reports a provider window, so a fresh session would get no meter. Expose
         # the RESOLVED limit alongside it (falls back to the agent default) so the
@@ -1422,6 +1598,9 @@ class SessionStore:
 
     # ── Turn lifecycle ──
 
+    def set_turn_end_listener(self, callback: Optional[Callable[[str], None]]) -> None:
+        self._on_turn_end = callback
+
     def begin_turn(self, session_id: str) -> None:
         """Durably mark a turn in flight so a daemon death mid-turn can be
         finalized at the next boot."""
@@ -1431,9 +1610,13 @@ class SessionStore:
                 session.turn_in_flight = True
                 self._persist(session)
 
-    def end_turn(self, session_id: Optional[str]) -> None:
+    def end_turn(self, session_id: Optional[str], *, notify_listeners: bool = True) -> None:
         """Clear the in-flight marker. Tolerates None/unknown ids (a turn that
-        failed before session routing has nothing to clear)."""
+        failed before session routing has nothing to clear).
+
+        `notify_listeners=False` is for compaction's marker handoff, where the
+        turn moves to the successor rather than ending.
+        """
         if not session_id:
             return
         with self._lock:
@@ -1441,6 +1624,8 @@ class SessionStore:
             if session and session.turn_in_flight:
                 session.turn_in_flight = False
                 self._persist(session)
+        if notify_listeners and self._on_turn_end:
+            self._on_turn_end(session_id)
 
     def _save(self):
         """Snapshot the whole in-memory store to daemon.db in one transaction.

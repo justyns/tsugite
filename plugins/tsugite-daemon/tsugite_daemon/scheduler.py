@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from cronsim import CronSim, CronSimError
 
 from tsugite.core.record_store import SqliteCollectionStorage
+from tsugite_daemon.session_runner import DELIVERY_KIND_FYI, DELIVERY_KINDS
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,19 @@ TARGET_SESSION_PRIMARY = "primary"
 TARGET_SESSION_ORIGINATING = "originating"
 TARGET_SESSION_NONE = "none"
 TARGET_SESSION_NAME_PREFIX = "name:"
+
+DELIVERY_MODE_EXISTING = "existing_session"
+DELIVERY_MODE_PARENT = "parent_session"
+DELIVERY_MODE_NEW = "new_session"
+DELIVERY_MODE_AUTO = "auto"
+DELIVERY_MODES = (DELIVERY_MODE_EXISTING, DELIVERY_MODE_PARENT, DELIVERY_MODE_NEW, DELIVERY_MODE_AUTO)
+
+
+def validate_delivery(delivery_mode: str, delivery_kind: str) -> None:
+    if delivery_mode not in DELIVERY_MODES:
+        raise ValueError(f"delivery_mode must be one of {', '.join(DELIVERY_MODES)}, got '{delivery_mode}'")
+    if delivery_kind not in DELIVERY_KINDS:
+        raise ValueError(f"delivery_kind must be one of {', '.join(DELIVERY_KINDS)}, got '{delivery_kind}'")
 
 
 @dataclass
@@ -78,6 +92,16 @@ class ScheduleEntry:
     #   "name:<n>"   -> find_named_session(name)
     #   "<sid>"      -> bare session id
     target_session: str | None = None
+    # Which session the run's result is delivered into:
+    #   "existing_session" -> target_session routing (the default)
+    #   "parent_session"   -> originating_session_id only
+    #   "new_session"      -> a dedicated incident session
+    #   "auto"             -> existing_session for fyi, new_session for needs_ack
+    delivery_mode: str = DELIVERY_MODE_EXISTING
+    delivery_kind: str = DELIVERY_KIND_FYI
+    # Dedupe key so repeat firings of one monitor share a single incident session.
+    incident_key: str | None = None
+    incident_title: str | None = None
 
     # Concurrency lock for this entry's runs. Per-entry so two fires of the
     # same schedule can't overlap; per-instance (not persisted) so the lock
@@ -102,6 +126,7 @@ class ScheduleEntry:
             raise ValueError(f"execution_type must be 'agent' or 'script', got '{self.execution_type}'")
         if self.execution_type == "script" and not self.command:
             raise ValueError("command required for script execution type")
+        validate_delivery(self.delivery_mode, self.delivery_kind)
 
 
 _PERSISTED_FIELDS = frozenset(f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True))
@@ -450,6 +475,7 @@ class Scheduler:
                 datetime.fromisoformat(entry.expires_at)
             except ValueError as e:
                 raise ValueError(f"Invalid expires_at '{entry.expires_at}': {e}") from e
+        validate_delivery(entry.delivery_mode, entry.delivery_kind)
         next_run = self._compute_next_run_iso(entry)  # raises ValueError on bad timezone
         self._validate_cron_interval(entry)
         return next_run

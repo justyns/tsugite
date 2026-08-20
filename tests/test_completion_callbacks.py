@@ -143,17 +143,18 @@ class TestHandleOnComplete:
         mock_session_runner.reply_to_session.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_injects_history_when_mid_turn(self, session_store, mock_session_runner):
+    async def test_delivers_a_card_when_mid_turn(self, session_store, mock_session_runner):
+        """A running turn takes the result as a card rather than a nested turn."""
         sa, _ = _make_sa(mock_session_runner)
         _create_session(session_store, session_id="session-abc")
         mock_session_runner.is_session_running.return_value = True
         entry = _make_entry(on_complete={"action": "reply"}, originating_session_id="session-abc")
 
-        with patch.object(sa, "_inject_completion_into_history", new_callable=AsyncMock) as mock_inject:
-            await sa._handle_on_complete(entry, "task output")
+        await sa._handle_on_complete(entry, "task output")
 
         mock_session_runner.reply_to_session.assert_not_awaited()
-        mock_inject.assert_awaited_once()
+        mock_session_runner.deliver_to_session.assert_called_once()
+        assert mock_session_runner.deliver_to_session.call_args.kwargs["source"] == "completion_callback"
 
     @pytest.mark.asyncio
     async def test_message_contains_structured_xml(self, session_store, mock_session_runner):

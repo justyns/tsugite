@@ -40,6 +40,7 @@ class SessionsMixin:
                     Route("/clear-primary", self._api_clear_primary, methods=["POST"]),
                     Route("/{session_id}/set-primary", self._api_set_primary, methods=["POST"]),
                     Route("/{session_id}/mark-viewed", self._api_mark_viewed, methods=["POST"]),
+                    Route("/{session_id}/dismiss-attention", self._api_dismiss_attention, methods=["POST"]),
                 ],
             ),
         ]
@@ -332,6 +333,23 @@ class SessionsMixin:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse({"ok": True, "last_viewed_at": session.last_viewed_at})
+
+    async def _api_dismiss_attention(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        body = await self._optional_json_body(request)
+        try:
+            session = self.session_runner.clear_attention(session_id, body.get("delivery_id"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse(
+            {
+                "ok": True,
+                "needs_attention": session.needs_attention,
+                "pending_deliveries": session.pending_delivery_ids,
+            }
+        )
 
     async def _api_cancel_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

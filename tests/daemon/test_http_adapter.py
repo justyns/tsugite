@@ -1113,6 +1113,27 @@ class TestSchedulesEndpoint:
         entry = body[body_key][0] if body_key else body
         assert "lock" not in entry
 
+    def test_update_accepts_delivery_fields(self, scheduler_client, test_token):
+        resp = scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"delivery_mode": "new_session", "delivery_kind": "needs_ack", "incident_key": "disk-2"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["delivery_mode"] == "new_session"
+        assert body["delivery_kind"] == "needs_ack"
+        assert body["incident_key"] == "disk-2"
+
+    def test_update_rejects_a_bad_delivery_mode(self, scheduler_client, test_token):
+        resp = scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"delivery_mode": "telepathy"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
+        assert "delivery_mode" in resp.json()["error"]
+
 
 class TestWorkspaceSaveEndpoint:
     def _put(self, client, test_token, path, content):

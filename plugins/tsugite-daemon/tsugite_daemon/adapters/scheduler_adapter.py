@@ -14,6 +14,9 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.auth import TokenStore
 from tsugite_daemon.config import NotificationChannelConfig
 from tsugite_daemon.scheduler import (
+    DELIVERY_MODE_AUTO,
+    DELIVERY_MODE_NEW,
+    DELIVERY_MODE_PARENT,
     TARGET_SESSION_NAME_PREFIX,
     TARGET_SESSION_NONE,
     TARGET_SESSION_ORIGINATING,
@@ -22,20 +25,22 @@ from tsugite_daemon.scheduler import (
     ScheduleEntry,
     Scheduler,
 )
-from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
+from tsugite_daemon.session_runner import DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH
+from tsugite_daemon.session_store import (
+    METADATA_INCIDENT_KEY,
+    Session,
+    SessionSource,
+    SessionStatus,
+    create_interactive_session,
+)
 
 logger = logging.getLogger(__name__)
 
 _MAX_RESULT_CHARS = 4000
 
 
-MAX_CHAIN_DEPTH = 5
-
-
 def _recorded_run_outcome(conv_id: str | None) -> tuple[str, str | None]:
-    """The status the agent recorded for this run, from its history session.
-
-    An agent that answered with unexecuted tool-call markup, or hit max_turns,
+    """An agent that answered with unexecuted tool-call markup, or hit max_turns,
     returns text and records a non-success end.
     """
     from tsugite.history import get_history_backend
@@ -50,25 +55,11 @@ def _recorded_run_outcome(conv_id: str | None) -> tuple[str, str | None]:
 
 
 def _resolve_originating(entry: ScheduleEntry, store) -> Session | None:
-    """Resolve `entry.originating_session_id`, following `superseded_by` to the live successor."""
     sid = entry.originating_session_id
-    if not sid:
-        return None
-    visited: set[str] = set()
-    try:
-        session = store.get_session(sid)
-    except ValueError:
-        return None
-    while session.superseded_by and session.id not in visited:
-        visited.add(session.id)
-        try:
-            session = store.get_session(session.superseded_by)
-        except ValueError:
-            return None
-    return session
+    return store.resolve_live(sid) if sid else None
 
 
-def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str) -> Session | None:
+def resolve_target_session(entry: ScheduleEntry, user_id: str | None, store, agent: str) -> Session | None:
     """Resolve `entry.target_session` to a concrete Session, or None to skip injection.
 
     See ScheduleEntry.target_session for the legal value forms.
@@ -84,10 +75,40 @@ def resolve_target_session(entry: ScheduleEntry, user_id: str, store, agent: str
         return _resolve_originating(entry, store)
     if spec.startswith(TARGET_SESSION_NAME_PREFIX):
         return store.find_named_session(user_id, agent, spec[len(TARGET_SESSION_NAME_PREFIX) :])
-    try:
-        return store.get_session(spec)
-    except ValueError:
-        return None
+    return store.resolve_live(spec)
+
+
+def _incident_session(entry: ScheduleEntry, user_id: str, store, agent: str, event_bus=None) -> Session:
+    key = entry.incident_key or entry.id
+    existing = store.find_incident_session(user_id, agent, key)
+    if existing:
+        return existing
+
+    title = entry.incident_title or f"Incident: {entry.id}"
+    session_id = create_interactive_session(
+        store,
+        agent,
+        user_id,
+        title=title,
+        event_bus=event_bus,
+        metadata={"type": "ops", "topic": title, "schedule_id": entry.id, METADATA_INCIDENT_KEY: key},
+        source=SessionSource.SCHEDULE.value,
+    )
+    return store.get_session(session_id)
+
+
+def resolve_delivery_sessions(
+    entry: ScheduleEntry, user_ids: list[str], store, agent: str, event_bus=None
+) -> list[Session]:
+    mode = entry.delivery_mode
+    if mode == DELIVERY_MODE_PARENT:
+        candidates = [_resolve_originating(entry, store)]
+    elif mode == DELIVERY_MODE_NEW or (mode == DELIVERY_MODE_AUTO and entry.delivery_kind == DELIVERY_KIND_NEEDS_ACK):
+        candidates = [_incident_session(entry, user_ids[0], store, agent, event_bus)]
+    else:
+        candidates = [resolve_target_session(entry, user_id, store, agent) for user_id in user_ids]
+
+    return list({s.id: s for s in candidates if s is not None}.values())
 
 
 class SchedulerAdapter:
@@ -108,7 +129,13 @@ class SchedulerAdapter:
         self._token_store = token_store
         self._tsugite_api_url = tsugite_api_url
         self._session_runner = None
-        self.scheduler = Scheduler(schedules_path, self._run_agent, script_callback=self._run_script)
+        self._failure_tasks: set[asyncio.Task] = set()
+        self.scheduler = Scheduler(
+            schedules_path,
+            self._run_agent,
+            script_callback=self._run_script,
+            on_repeated_failure=self._on_repeated_failure,
+        )
 
     def set_session_runner(self, session_runner) -> None:
         """Set the SessionRunner reference (called after both are constructed)."""
@@ -119,6 +146,34 @@ class SchedulerAdapter:
 
     async def stop(self):
         await self.scheduler.stop()
+
+    def _on_repeated_failure(self, entry: ScheduleEntry) -> None:
+        adapter = self._run_adapter(entry)
+        if not adapter:
+            return
+        message = (
+            f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n"
+            f"{entry.last_error or 'No error was recorded.'}"
+        )
+        task = asyncio.create_task(
+            self._deliver_result(
+                adapter,
+                entry,
+                message,
+                self._resolve_channels(entry.notify) if entry.notify else [],
+                source="schedule_failure",
+                kind=DELIVERY_KIND_NEEDS_ACK,
+                title=f"Schedule failing: {entry.id}",
+            )
+        )
+        self._failure_tasks.add(task)
+        task.add_done_callback(self._failure_tasks.discard)
+        task.add_done_callback(self._log_failure_delivery)
+
+    @staticmethod
+    def _log_failure_delivery(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception():
+            logger.error("Repeated-failure delivery failed: %s", task.exception())
 
     def _resolve_channels(self, channel_names: list[str]) -> list[tuple[str, NotificationChannelConfig]]:
         """Resolve channel names to (name, config) tuples."""
@@ -136,7 +191,6 @@ class SchedulerAdapter:
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
     def _run_adapter(self, entry: ScheduleEntry) -> BaseAdapter | None:
-        """The adapter a run's session record lives on, falling back to any configured one."""
         return self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
 
     def _create_run_session(self, entry: ScheduleEntry) -> tuple[str, bool]:
@@ -216,10 +270,9 @@ class SchedulerAdapter:
             except Exception as e:
                 logger.error("Notification for script schedule '%s' failed: %s", entry.id, e)
 
-            if entry.inject_history:
-                adapter = next(iter(self._adapters.values()), None)
-                if adapter:
-                    await self._inject_into_user_sessions(adapter, entry, result, resolved_channels)
+        adapter = self._adapters.get(entry.agent)
+        if entry.inject_history and adapter:
+            await self._deliver_result(adapter, entry, result, resolved_channels)
 
         return RunResult(output=result)
 
@@ -313,21 +366,7 @@ class SchedulerAdapter:
         self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
 
-        if resolved_channels:
-            truncated = result[:_MAX_RESULT_CHARS]
-
-            if entry.auto_reply:
-                await self._auto_reply(adapter, entry, truncated, resolved_channels)
-            else:
-                try:
-                    notification = f"**Schedule `{entry.id}` completed:**\n\n{truncated}"
-                    await asyncio.to_thread(send_notification, notification, resolved_channels)
-                except Exception as e:
-                    logger.error("Auto-notify for schedule '%s' failed: %s", entry.id, e)
-
-                if entry.inject_history:
-                    await self._inject_into_user_sessions(adapter, entry, truncated, resolved_channels)
-
+        await self._publish_result(adapter, entry, result[:_MAX_RESULT_CHARS], resolved_channels)
         await self._handle_on_complete(entry, result)
 
         status, error = _recorded_run_outcome(conv_id)
@@ -390,72 +429,85 @@ class SchedulerAdapter:
                 except Exception as e2:
                     logger.error("Fallback notification for '%s' also failed: %s", entry.id, e2)
 
-    async def _inject_into_user_sessions(
+    async def _publish_result(
+        self,
+        adapter: BaseAdapter,
+        entry: ScheduleEntry,
+        truncated: str,
+        resolved_channels: list[tuple[str, NotificationChannelConfig]],
+    ) -> None:
+        if resolved_channels and entry.auto_reply:
+            await self._auto_reply(adapter, entry, truncated, resolved_channels)
+            return
+        if resolved_channels:
+            try:
+                notification = f"**Schedule `{entry.id}` completed:**\n\n{truncated}"
+                await asyncio.to_thread(send_notification, notification, resolved_channels)
+            except Exception as e:
+                logger.error("Auto-notify for schedule '%s' failed: %s", entry.id, e)
+        if entry.inject_history:
+            await self._deliver_result(adapter, entry, truncated, resolved_channels)
+
+    def _delivery_recipients(
+        self,
+        adapter: BaseAdapter,
+        entry: ScheduleEntry,
+        resolved_channels: list[tuple[str, NotificationChannelConfig]],
+    ) -> list[str]:
+        """With several owners and nothing naming one, returns [""] so the run addresses no user."""
+        users = [
+            self._resolve_canonical_user(config) for _name, config in resolved_channels if config.type == "discord"
+        ]
+        if users:
+            return users
+        originating = _resolve_originating(entry, adapter.session_store)
+        if originating and originating.user_id:
+            return [originating.user_id]
+        owners = sorted(adapter.session_store.default_primary_ids(adapter.agent_name))
+        if len(owners) > 1:
+            logger.debug(
+                "Schedule '%s' names no user and %d could be meant; delivering only to a named session",
+                entry.id,
+                len(owners),
+            )
+            return [""]
+        return owners or [""]
+
+    async def _deliver_result(
         self,
         adapter: BaseAdapter,
         entry: ScheduleEntry,
         truncated_result: str,
         resolved_channels: list[tuple[str, NotificationChannelConfig]],
+        *,
+        source: str = "schedule",
+        kind: str | None = None,
+        title: str | None = None,
     ) -> None:
-        """Inject a synthetic turn into each notified user's main chat session."""
-        for _name, config in resolved_channels:
-            if config.type != "discord":
-                continue
-
-            canonical = self._resolve_canonical_user(config)
-
-            try:
-                await asyncio.to_thread(self._record_synthetic_turn, adapter, canonical, entry, truncated_result)
-            except Exception as e:
-                logger.error("Failed to inject history for schedule '%s' user '%s': %s", entry.id, canonical, e)
-
-    @staticmethod
-    def _get_session_storage(session_id: str, adapter: BaseAdapter):
-        from tsugite.history import get_history_backend
-
-        backend = get_history_backend()
-        if backend.exists(session_id):
-            return backend.load(session_id)
-        return backend.create(
-            agent_name=adapter.agent_name,
-            model=adapter.resolve_model(),
-            session_id=session_id,
-        )
-
-    @staticmethod
-    def _write_synthetic_pair(
-        storage: "SessionStorage",
-        user_text: str,
-        assistant_text: str,
-        metadata: dict,
-    ) -> None:
-        """Append a paired user_input + model_response, both tagged synthetic."""
-        storage.record("user_input", text=user_text, metadata=metadata)
-        storage.record("model_response", raw_content=assistant_text, metadata=metadata)
-
-    @staticmethod
-    def _record_synthetic_turn(adapter: BaseAdapter, user_id: str, entry: ScheduleEntry, result: str) -> None:
-        """Write synthetic user_input + model_response events for a scheduled task."""
-        session = resolve_target_session(entry, user_id, adapter.session_store, adapter.agent_name)
-        if session is None:
-            logger.debug(
-                "Schedule '%s' has no resolvable target_session for user '%s'; skipping injection",
-                entry.id,
-                user_id,
-            )
+        if not self._session_runner:
+            logger.debug("Schedule '%s' has no session runner; skipping delivery", entry.id)
             return
-        storage = SchedulerAdapter._get_session_storage(session.id, adapter)
-        SchedulerAdapter._write_synthetic_pair(
-            storage,
-            user_text=(
-                f'<scheduled_task id="{entry.id}">\n'
-                "This task ran in the background and the result "
-                "was sent as a notification to the user.\n"
-                "</scheduled_task>"
-            ),
-            assistant_text=result,
-            metadata={"synthetic": True, "schedule_id": entry.id},
+        recipients = self._delivery_recipients(adapter, entry, resolved_channels)
+        sessions = resolve_delivery_sessions(
+            entry, recipients, adapter.session_store, adapter.agent_name, adapter.event_bus
         )
+        if not sessions:
+            logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
+            return
+        for session in sessions:
+            try:
+                await asyncio.to_thread(
+                    self._session_runner.deliver_to_session,
+                    session.id,
+                    truncated_result,
+                    source=source,
+                    kind=kind or entry.delivery_kind,
+                    title=title or entry.incident_title,
+                    metadata={"schedule_id": entry.id},
+                    notify_channels=resolved_channels,
+                )
+            except Exception as e:
+                logger.error("Delivery for schedule '%s' to session '%s' failed: %s", entry.id, session.id, e)
 
     async def _handle_on_complete(self, entry: ScheduleEntry, result: str) -> None:
         """Handle on_complete callback after a background task finishes."""
@@ -485,13 +537,17 @@ class SchedulerAdapter:
             "</background_task_complete>"
         )
 
-        # If the session is mid-turn, inject into history so the agent sees it next turn.
-        # Otherwise, reply directly to wake the agent.
         if self._session_runner.is_session_running(session_id):
             try:
-                await self._inject_completion_into_history(session_id, entry, message)
+                await asyncio.to_thread(
+                    self._session_runner.deliver_to_session,
+                    session_id,
+                    message,
+                    source="completion_callback",
+                    metadata={"schedule_id": entry.id, "completion_callback": True},
+                )
             except Exception as e:
-                logger.error("Failed to inject completion history for task '%s': %s", entry.id, e)
+                logger.error("Completion delivery for task '%s' failed: %s", entry.id, e)
             return
 
         from tsugite_daemon.session_runner import set_current_chain_depth
@@ -508,25 +564,3 @@ class SchedulerAdapter:
             logger.error("on_complete reply to session '%s' failed: %s", session_id, e)
         finally:
             set_current_chain_depth(0)
-
-    async def _inject_completion_into_history(
-        self,
-        session_id: str,
-        entry: ScheduleEntry,
-        message: str,
-    ) -> None:
-        """Write a completion result as a synthetic turn into the session's JSONL."""
-
-        def _write():
-            adapter = self._run_adapter(entry)
-            if not adapter:
-                return
-            storage = self._get_session_storage(session_id, adapter)
-            self._write_synthetic_pair(
-                storage,
-                user_text=message,
-                assistant_text=f"Background task {entry.id} completed. Result noted.",
-                metadata={"synthetic": True, "schedule_id": entry.id, "completion_callback": True},
-            )
-
-        await asyncio.to_thread(_write)

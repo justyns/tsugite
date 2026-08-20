@@ -18,18 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 def _build_notifier(discord_adapters: dict, push_store=None, vapid_private_key=None, vapid_claims=None):
-    """Build an async callback(message, channel_configs) -> dict for sending notifications."""
-
-    async def _notify(message: str, channel_configs: list) -> dict:
+    async def _notify(message: str, channel_configs: list, url: str | None = None) -> dict:
         results = {}
+        linked = f"{message}\n\n{url}" if url else message
         for name, config in channel_configs:
             try:
                 if config.type == "discord":
-                    results[name] = await _send_discord_dm(discord_adapters, config, message)
+                    results[name] = await _send_discord_dm(discord_adapters, config, linked)
                 elif config.type == "webhook":
-                    results[name] = await _send_webhook(config, message)
+                    results[name] = await _send_webhook(config, linked)
                 elif config.type == "web-push":
-                    results[name] = await _send_web_push_all(push_store, message, vapid_private_key, vapid_claims)
+                    results[name] = await _send_web_push_all(
+                        push_store, message, vapid_private_key, vapid_claims, url=url
+                    )
             except Exception as e:
                 logger.error("Notification to '%s' failed: %s", name, e)
                 results[name] = {"error": str(e)}
@@ -38,7 +39,9 @@ def _build_notifier(discord_adapters: dict, push_store=None, vapid_private_key=N
     return _notify
 
 
-async def _send_web_push_all(push_store, message: str, vapid_private_key: str, vapid_claims: dict) -> dict:
+async def _send_web_push_all(
+    push_store, message: str, vapid_private_key: str, vapid_claims: dict, url: str | None = None
+) -> dict:
     """Send web push to all stored subscriptions, pruning expired ones."""
     if not push_store:
         return {"error": "push store not initialized"}
@@ -49,7 +52,7 @@ async def _send_web_push_all(push_store, message: str, vapid_private_key: str, v
     if not subs:
         return {"status": "no_subscribers"}
 
-    payload = {"title": "Tsugite", "body": message[:200], "url": "/"}
+    payload = {"title": "Tsugite", "body": message[:200], "url": url or "/"}
     sent = 0
     expired = []
     for sub in subs:
@@ -359,6 +362,7 @@ class Gateway:
                 session_store,
                 http_adapters,
                 event_bus=event_bus,
+                notification_channels=self.config.notification_channels,
             )
             if self._http_server:
                 self._http_server.session_runner = self._session_runner

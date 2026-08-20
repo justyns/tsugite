@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import uuid4
 
 from . import call_on_loop, deny_when_sandboxed, tool
+from .sessions import CURRENT_SESSION, get_current_session_id
 
 
 def _entry_to_dict(entry):
@@ -69,6 +70,17 @@ def _resolve_agent(agent: Optional[str]) -> str:
     return resolve_current_agent(agent)
 
 
+def _resolve_target_session(target_session: Optional[str], current_session_id: Optional[str]) -> Optional[str]:
+    """Resolved at creation, not fire time: a schedule fires in its own session,
+    where there is no current chat.
+    """
+    if target_session != CURRENT_SESSION:
+        return target_session
+    if not current_session_id:
+        raise ValueError('target_session="current" requires a session context (daemon mode)')
+    return current_session_id
+
+
 @tool(require_daemon=True)
 @deny_when_sandboxed
 def schedule_create(
@@ -90,6 +102,10 @@ def schedule_create(
     max_runs: Optional[int] = None,
     session_id: Optional[str] = None,
     target_session: Optional[str] = None,
+    delivery_mode: str = "existing_session",
+    delivery_kind: str = "fyi",
+    incident_key: Optional[str] = None,
+    incident_title: Optional[str] = None,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -106,7 +122,7 @@ def schedule_create(
         timezone: IANA timezone (default: UTC)
         notify: List of notification channel names to deliver results to on completion.
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
-        inject_history: If true (default), injects the task result into notified users' chat sessions so the agent has context when they reply.
+        inject_history: If true (default), delivers the task result into the recipient's chat session so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
         agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run — edit the file and the next execution picks up changes.
         execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM.
@@ -115,13 +131,22 @@ def schedule_create(
         expires_at: ISO datetime after which the schedule auto-disables (e.g., "2026-04-01T00:00:00Z").
         max_runs: Auto-disable after this many successful executions.
         session_id: If set, all runs of this schedule share the same session (persistent LLM context across runs). If omitted, each run gets its own isolated session.
-        target_session: Where the inject_history synthetic turn lands. Distinct from session_id (which controls the agent's run session). Legal forms:
+        target_session: Where the run's result is delivered. Distinct from session_id (which controls the agent's run session). Legal forms:
             None (default) - fallback chain: primary -> originating -> none
             "primary" - primary lookup only (no fallback)
             "originating" - originating_session_id only
-            "none" - skip injection
+            "none" - skip delivery
             "name:<n>" - lookup by metadata.session_name
+            "current" - the session creating the schedule, stored as its id
             "<sid>" - bare session id
+        delivery_mode: Which session the result is delivered into. "existing_session" (default) uses target_session
+            routing, "parent_session" the session that created the schedule, "new_session" a dedicated incident
+            session, "auto" picks existing_session for fyi and new_session for needs_ack.
+        delivery_kind: "fyi" (default) or "needs_ack". A needs_ack delivery flags the session as needing a reply
+            and pings the configured notification channels.
+        incident_key: Dedupe key so repeat firings of this schedule share one incident session instead of opening
+            a new one each run.
+        incident_title: Title for the incident session (default: "Incident: <id>").
 
     Returns:
         Created schedule details including computed next_run
@@ -141,6 +166,9 @@ def schedule_create(
     notify = _validate_notify(notify, notify_tool)
     agent = _resolve_agent(agent)
     _validate_agent(agent)
+
+    originating_session_id = get_current_session_id()
+    target_session = _resolve_target_session(target_session, originating_session_id)
 
     from tsugite_daemon.scheduler import ScheduleEntry
 
@@ -164,6 +192,11 @@ def schedule_create(
         max_runs=max_runs,
         session_id=session_id,
         target_session=target_session,
+        originating_session_id=originating_session_id,
+        delivery_mode=delivery_mode,
+        delivery_kind=delivery_kind,
+        incident_key=incident_key,
+        incident_title=incident_title,
     )
     result = _call(_scheduler.add, entry)
     return _entry_to_dict(result)
@@ -255,6 +288,10 @@ def schedule_update(
     max_runs: Optional[int] = None,
     session_id: Optional[str] = None,
     target_session: Optional[str] = None,
+    delivery_mode: Optional[str] = None,
+    delivery_kind: Optional[str] = None,
+    incident_key: Optional[str] = None,
+    incident_title: Optional[str] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -275,7 +312,11 @@ def schedule_update(
         expires_at: ISO datetime for auto-disable (optional). Set to empty string to clear.
         max_runs: Auto-disable after N successful runs (optional).
         session_id: Persistent session ID for this schedule (optional). Set to empty string to clear (reverts to per-run sessions).
-        target_session: Routing target for inject_history synthetic turn (optional). See schedule_create for legal forms. Set to empty string to clear (reverts to fallback chain).
+        target_session: Routing target for the delivered result (optional). See schedule_create for legal forms. Set to empty string to clear (reverts to fallback chain).
+        delivery_mode: New delivery mode (optional). See schedule_create for legal values.
+        delivery_kind: New delivery kind (optional). See schedule_create for legal values.
+        incident_key: New incident dedupe key (optional). Set to empty string to clear.
+        incident_title: New incident session title (optional). Set to empty string to clear.
 
     Returns:
         Updated schedule details
@@ -290,6 +331,8 @@ def schedule_update(
         "execution_type": execution_type,
         "script_timeout": script_timeout,
         "max_runs": max_runs,
+        "delivery_mode": delivery_mode,
+        "delivery_kind": delivery_kind,
     }
     fields = {k: v for k, v in simple.items() if v is not None}
 
@@ -311,6 +354,8 @@ def schedule_update(
         ("expires_at", expires_at),
         ("session_id", session_id),
         ("target_session", target_session),
+        ("incident_key", incident_key),
+        ("incident_title", incident_title),
     ]:
         if value is not None:
             fields[param_name] = value or None
@@ -439,9 +484,9 @@ def background_task(
         script_timeout: Max seconds for script execution (default: 60).
         on_complete: Completion callback. Currently supports {"action": "reply"} to auto-reply
             to the originating session when the task finishes, allowing the agent to chain work.
-        target_session: Routing target for the inject_history synthetic turn. See schedule_create for
-            legal forms. Defaults to "originating" when on_complete is set so completion replies still
-            land in the spawning session; otherwise defaults to None (fallback chain).
+        target_session: Routing target for the delivered result. See schedule_create for legal forms.
+            Defaults to "originating" when on_complete is set so completion replies still land in the
+            spawning session; otherwise defaults to None (fallback chain).
 
     Returns:
         Dict with status and generated task ID
@@ -461,12 +506,13 @@ def background_task(
     _validate_agent(agent)
 
     from tsugite_daemon.scheduler import ScheduleEntry
-    from tsugite_daemon.session_runner import get_current_chain_depth, get_current_session_id
+    from tsugite_daemon.session_runner import get_current_chain_depth
 
-    originating_session_id = get_current_session_id() if on_complete else None
+    originating_session_id = get_current_session_id()
     if on_complete and not originating_session_id:
         raise ValueError("on_complete requires a session context (daemon mode)")
     chain_depth = get_current_chain_depth() if on_complete else 0
+    target_session = _resolve_target_session(target_session, originating_session_id)
 
     if target_session is None and on_complete:
         from tsugite_daemon.scheduler import TARGET_SESSION_ORIGINATING

@@ -134,6 +134,52 @@ class TestEventsToMessagesStateless:
         assert msgs[-1]["role"] == "user"
         assert "Format Error" in msgs[-1]["content"] or "format_error" in msgs[-1]["content"]
 
+    def test_delivery_becomes_a_user_message(self):
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="t"),
+            _ev("model_response", raw_content="r"),
+            _ev("delivery", ts=FIXED_TS, message="rent is due", source="schedule", kind="needs_ack", title="Rent"),
+        ]
+        msgs = events_to_messages(events)
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+        content = msgs[2]["content"]
+        assert content.startswith('<tsugite_delivery source="schedule" kind="needs_ack"')
+        assert f'ts="{FIXED_TS_PREFIX[1:-1]}"' in content
+        assert "<title>Rent</title>" in content
+        assert "<message>rent is due</message>" in content
+        assert content.endswith("</tsugite_delivery>")
+
+    def test_delivery_frames_itself_as_something_the_user_did_not_send(self):
+        """A bare user-role card reads as if the person asked for it, so the
+        agent answers the reminder instead of the question they actually asked."""
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="help me debug this regex"),
+            _ev("delivery", ts=FIXED_TS, message="rent is due", source="schedule", kind="needs_ack"),
+        ]
+        content = events_to_messages(events)[1]["content"]
+
+        assert "not sent by the user" in content
+        assert "arrived on its own" in content
+        assert "only act on it if the user refers to it" in content.lower()
+
+    def test_delivery_without_title_omits_the_title_tag(self):
+        events = [_ev("delivery", ts=FIXED_TS, message="build finished", source="job", kind="fyi")]
+        msgs = events_to_messages(events)
+        assert len(msgs) == 1
+        content = msgs[0]["content"]
+        assert "<title>" not in content
+        assert "<message>build finished</message>" in content
+
+    def test_delivery_content_is_escaped(self):
+        events = [
+            _ev("delivery", ts=FIXED_TS, message="a < b & c", source="job", kind="fyi", title="x > y"),
+        ]
+        msgs = events_to_messages(events)
+        assert len(msgs) == 1
+        content = msgs[0]["content"]
+        assert "<message>a &lt; b &amp; c</message>" in content
+        assert "<title>x &gt; y</title>" in content
+
     def test_unknown_event_types_ignored(self):
         events = [
             _ev("user_input", ts=FIXED_TS, text="t"),

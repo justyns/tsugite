@@ -1,4 +1,4 @@
-"""Tests for scheduled task history injection into user sessions."""
+"""Tests for how a scheduled task's result reaches the user's sessions."""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -57,54 +57,6 @@ class TestInjectHistoryField:
         assert entry.inject_history is True
 
 
-class TestRecordSyntheticTurn:
-    @staticmethod
-    def _mock_adapter(session_id: str = "test-session") -> MagicMock:
-        adapter = MagicMock()
-        adapter.agent_name = "bot"
-        adapter.resolve_model.return_value = "test-model"
-        mock_session = MagicMock()
-        mock_session.id = session_id
-        mock_session.superseded_by = None
-        adapter.session_store = MagicMock()
-        # Simulate a user with primary session set.
-        adapter.session_store.find_primary_session.return_value = mock_session
-        return adapter
-
-    def _record_and_load(self, tmp_path, session_id, result):
-        """Run _record_synthetic_turn and return the events it recorded."""
-        from tsugite.history import get_history_backend, set_history_backend
-        from tsugite.history.sqlite_backend import SqliteHistoryBackend
-
-        mock_adapter = self._mock_adapter(session_id)
-        history = tmp_path / "history"
-        history.mkdir(parents=True, exist_ok=True)
-
-        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history):
-            set_history_backend(SqliteHistoryBackend())
-            SchedulerAdapter._record_synthetic_turn(mock_adapter, "alice", _make_entry(), result)
-
-            assert get_history_backend().exists(session_id), "synthetic turn was never recorded"
-            return [{"type": e.type, "data": e.data} for e in get_history_backend().load(session_id).load_events()]
-
-    def test_writes_synthetic_user_input_and_response(self, tmp_path):
-        records = self._record_and_load(tmp_path, "test-session", "Task completed successfully")
-        user_event = next(r for r in records if r.get("type") == "user_input")
-        response_event = next(r for r in records if r.get("type") == "model_response")
-
-        assert user_event["data"]["metadata"]["synthetic"] is True
-        assert user_event["data"]["metadata"]["schedule_id"] == "test-job"
-        assert '<scheduled_task id="test-job">' in user_event["data"]["text"]
-        assert response_event["data"]["raw_content"] == "Task completed successfully"
-        assert response_event["data"]["metadata"]["synthetic"] is True
-
-    def test_stores_result_as_is(self, tmp_path):
-        result = "pre-truncated result"
-        records = self._record_and_load(tmp_path, "trunc-session", result)
-        response_event = next(r for r in records if r.get("type") == "model_response")
-        assert response_event["data"]["raw_content"] == result
-
-
 def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tuple[SchedulerAdapter, MagicMock]:
     """Create a SchedulerAdapter with a mock agent adapter."""
     mock_adapter = MagicMock()
@@ -120,48 +72,42 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
     )
 
 
-class TestInjectIntoUserSessions:
-    @pytest.mark.asyncio
-    async def test_resolves_discord_identity(self):
+class TestResultDelivery:
+    def test_resolves_discord_identity(self):
         sa, mock_adapter = _make_scheduler_adapter(identity_map={"discord:123456789": "alice"})
-        entry = _make_entry()
 
-        with patch.object(sa, "_record_synthetic_turn") as mock_record:
-            await sa._inject_into_user_sessions(mock_adapter, entry, "result", [("dm", _make_discord_channel())])
+        recipients = sa._delivery_recipients(mock_adapter, _make_entry(), [("dm", _make_discord_channel())])
 
-        mock_record.assert_called_once()
-        call_args = mock_record.call_args[0]
-        assert call_args[0] is mock_adapter
-        assert call_args[1] == "alice"
-        assert call_args[2] is entry
-        assert call_args[3] == "result"
+        assert recipients == ["alice"]
 
-    @pytest.mark.asyncio
-    async def test_falls_back_to_raw_id(self):
-        sa, mock_adapter = _make_scheduler_adapter()
-        entry = _make_entry()
-
-        with patch.object(sa, "_record_synthetic_turn") as mock_record:
-            await sa._inject_into_user_sessions(
-                mock_adapter, entry, "result", [("dm", _make_discord_channel(user_id="999"))]
-            )
-
-        assert mock_record.call_args[0][1] == "999"
-
-    @pytest.mark.asyncio
-    async def test_skips_webhook_channels(self):
+    def test_falls_back_to_raw_id(self):
         sa, mock_adapter = _make_scheduler_adapter()
 
-        with patch.object(sa, "_record_synthetic_turn") as mock_record:
-            await sa._inject_into_user_sessions(
-                mock_adapter, _make_entry(), "result", [("hook", _make_webhook_channel())]
-            )
+        recipients = sa._delivery_recipients(
+            mock_adapter, _make_entry(), [("dm", _make_discord_channel(user_id="999"))]
+        )
 
-        mock_record.assert_not_called()
+        assert recipients == ["999"]
+
+    @pytest.mark.asyncio
+    async def test_webhook_channel_routes_without_a_user(self):
+        """A webhook channel names no user, and neither does this schedule, so the target resolves with no user."""
+        sa, mock_adapter = _make_scheduler_adapter()
+        sa.set_session_runner(MagicMock())
+        target = MagicMock(id="routed-session")
+
+        with patch(
+            "tsugite_daemon.adapters.scheduler_adapter.resolve_delivery_sessions", return_value=[target]
+        ) as mock_resolve:
+            await sa._deliver_result(mock_adapter, _make_entry(), "result", [("hook", _make_webhook_channel())])
+
+        assert mock_resolve.call_args[0][1] == [""]
+        sa._session_runner.deliver_to_session.assert_called_once()
+        assert sa._session_runner.deliver_to_session.call_args[0][0] == "routed-session"
 
     @pytest.mark.asyncio
     async def test_inject_history_false_guard_in_run_agent(self):
-        """inject_history=False prevents _inject_into_user_sessions from being called."""
+        """inject_history=False delivers nothing."""
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
             identity_map={"discord:123456789": "alice"},
@@ -173,11 +119,11 @@ class TestInjectIntoUserSessions:
         with (
             patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
             patch("tsugite.interaction.set_interaction_backend"),
-            patch.object(sa, "_inject_into_user_sessions") as mock_inject,
+            patch.object(sa, "_deliver_result") as mock_deliver,
         ):
             await sa._run_agent(entry)
 
-        mock_inject.assert_not_called()
+        mock_deliver.assert_not_called()
 
 
 class TestTargetSessionField:
@@ -329,48 +275,3 @@ class TestResolveTargetSession:
         self._add_session(store, "orig-id")
         entry = _make_entry(target_session="primary", originating_session_id="orig-id")
         assert resolve_target_session(entry, "alice", store, "bot") is None
-
-
-class TestRecordSyntheticTurnWithResolver:
-    """Integration: _record_synthetic_turn uses resolve_target_session, not get_or_create_interactive."""
-
-    def _make_real_adapter(self, store, agent="bot"):
-        adapter = MagicMock()
-        adapter.agent_name = agent
-        adapter.resolve_model.return_value = "test-model"
-        adapter.session_store = store
-        return adapter
-
-    def test_writes_to_resolved_target(self, tmp_path):
-        from tsugite_daemon.session_store import Session, SessionSource, SessionStore
-
-        store = SessionStore(tmp_path / "session_store.json")
-        target = Session(id="resolved-target", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="alice")
-        store.create_session(target)
-        adapter = self._make_real_adapter(store)
-        entry = _make_entry(target_session="resolved-target")
-
-        from tsugite.history import get_history_backend, set_history_backend
-        from tsugite.history.sqlite_backend import SqliteHistoryBackend
-
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
-            set_history_backend(SqliteHistoryBackend())
-            SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
-
-            assert get_history_backend().exists("resolved-target")
-
-    def test_no_target_skips_injection(self, tmp_path):
-        from tsugite_daemon.session_store import SessionStore
-
-        store = SessionStore(tmp_path / "session_store.json")
-        adapter = self._make_real_adapter(store)
-        entry = _make_entry(target_session="none", originating_session_id="orig-sess")
-
-        history_dir = tmp_path / "history"
-        history_dir.mkdir()
-        with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
-            SchedulerAdapter._record_synthetic_turn(adapter, "alice", entry, "result")
-
-        assert list(history_dir.iterdir()) == []

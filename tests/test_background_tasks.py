@@ -300,8 +300,8 @@ class TestAutoReply:
         assert call_kwargs["channel_context"].source == "background_task"
 
     @pytest.mark.asyncio
-    async def test_auto_reply_skips_inject_history(self):
-        """When auto_reply=True, _inject_into_user_sessions should NOT be called."""
+    async def test_auto_reply_skips_delivery(self):
+        """When auto_reply=True, the result is not also delivered."""
         sa, mock_adapter = _make_scheduler_adapter(
             identity_map={"discord:123456789": "alice"},
             notification_channels={"dm": _make_discord_channel()},
@@ -321,17 +321,17 @@ class TestAutoReply:
         with (
             patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
             patch("tsugite.interaction.set_interaction_backend"),
-            patch.object(sa, "_inject_into_user_sessions") as mock_inject,
+            patch.object(sa, "_deliver_result") as mock_deliver,
             patch.object(sa, "_auto_reply", new_callable=AsyncMock) as mock_auto,
         ):
             await sa._run_agent(entry)
 
         mock_auto.assert_awaited_once()
-        mock_inject.assert_not_called()
+        mock_deliver.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_regular_schedule_uses_old_behavior(self):
-        """auto_reply=False should use notification + inject_history as before."""
+    async def test_regular_schedule_notifies_and_delivers(self):
+        """auto_reply=False notifies the channel and delivers the result."""
         sa, mock_adapter = _make_scheduler_adapter(
             notification_channels={"dm": _make_discord_channel()},
         )
@@ -350,14 +350,14 @@ class TestAutoReply:
         with (
             patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
             patch("tsugite.interaction.set_interaction_backend"),
-            patch.object(sa, "_inject_into_user_sessions") as mock_inject,
+            patch.object(sa, "_deliver_result") as mock_deliver,
             patch.object(sa, "_auto_reply") as mock_auto,
         ):
             await sa._run_agent(entry)
 
         mock_auto.assert_not_called()
         mock_notify.assert_called_once()
-        mock_inject.assert_awaited_once()
+        mock_deliver.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_auto_reply_falls_back_on_error(self):

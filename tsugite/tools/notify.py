@@ -17,7 +17,7 @@ def set_notifier(callback, loop=None):
     """Called by the daemon gateway to set/clear the notification callback.
 
     Args:
-        callback: Async function(message, channel_configs) -> dict, or None to clear
+        callback: Async function(message, channel_configs, url) -> dict, or None to clear
         loop: Event loop the callback runs on
     """
     global _notifier, _loop
@@ -45,17 +45,35 @@ def notify_context(channel_configs):
         _channels.reset(token)
 
 
-def send_notification(message: str, channel_configs: list) -> dict:
-    """Send a notification to channels (thread-safe, callable from any thread)."""
+def send_notification(message: str, channel_configs: list, url: str | None = None) -> dict:
+    """Send a notification to channels (thread-safe, callable from any thread).
+
+    `url` is where the notification should open; channels without a link field
+    get it appended to the text.
+    """
     if not _notifier or not _loop:
         return {"error": "Notifier not configured"}
 
-    future = asyncio.run_coroutine_threadsafe(_notifier(message, channel_configs), _loop)
+    future = asyncio.run_coroutine_threadsafe(_notifier(message, channel_configs, url=url), _loop)
     try:
         return future.result(timeout=30)
     except Exception as e:
         logger.error("Notification dispatch failed: %s", e)
         return {"error": str(e)}
+
+
+def send_notification_nowait(message: str, channel_configs: list, url: str | None = None) -> None:
+    """For callers already on the notifier's own loop, where waiting would deadlock."""
+    if not _notifier or not _loop:
+        return
+
+    def _log_failure(fut) -> None:
+        if fut.exception():
+            logger.error("Notification dispatch failed: %s", fut.exception())
+
+    asyncio.run_coroutine_threadsafe(_notifier(message, channel_configs, url=url), _loop).add_done_callback(
+        _log_failure
+    )
 
 
 @tool(require_daemon=True)

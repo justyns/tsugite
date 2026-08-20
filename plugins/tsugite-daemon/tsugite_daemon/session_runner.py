@@ -7,10 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
+from uuid import uuid4
+from xml.sax.saxutils import escape, quoteattr
 
+from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.session_store import (
+    FINISHED_STATUSES,
     Session,
     SessionSource,
     SessionStatus,
@@ -19,7 +23,13 @@ from tsugite_daemon.session_store import (
 
 logger = logging.getLogger(__name__)
 
-# Context var for per-session state
+DELIVERY_KIND_FYI = "fyi"
+DELIVERY_KIND_NEEDS_ACK = "needs_ack"
+DELIVERY_KINDS = (DELIVERY_KIND_FYI, DELIVERY_KIND_NEEDS_ACK)
+
+# Cuts a cycle of sessions notifying each other.
+MAX_CHAIN_DEPTH = 5
+
 _current_session_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_session_id", default=None)
 _current_chain_depth: contextvars.ContextVar[int] = contextvars.ContextVar("chain_depth", default=0)
 
@@ -65,6 +75,24 @@ class LoggingProgressHandler(JSONLUIHandler):
             )
 
 
+_COMPLETION_SOURCES = {
+    SessionStatus.COMPLETED.value: "session_completion",
+    SessionStatus.CANCELLED.value: "session_cancelled",
+    SessionStatus.FAILED.value: "session_failed",
+}
+
+
+def build_completion_message(session: Session, status: str, summary: str) -> str:
+    body = ""
+    if summary:
+        tag = "error" if status == SessionStatus.FAILED.value else "result"
+        body = f"<{tag}>\n{escape(summary)}\n</{tag}>\n"
+    return (
+        f"<session_finished id={quoteattr(session.id)} status={quoteattr(status)}"
+        f" title={quoteattr(session.title or '')}>\n{body}</session_finished>"
+    )
+
+
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
 
 
@@ -77,14 +105,17 @@ class SessionRunner:
         adapters: dict,
         notify_callback: Optional[NotifyCallback] = None,
         event_bus=None,
+        notification_channels: Optional[dict] = None,
     ):
         self._store = store
         self._adapters = adapters
         self._event_bus = event_bus
+        self._notification_channels = notification_channels or {}
+        store.set_turn_end_listener(self._on_turn_end)
+        # A turn that died with the last daemon will never end, so its held cards need flushing now.
+        for session_id in store.sessions_holding_deliveries():
+            self._flush_deferred_deliveries(session_id)
         self._active_tasks: dict[str, asyncio.Task] = {}
-        # Completion listeners: async callback(session, result_str) fired when a
-        # session completes, is cancelled, or fails. The jobs orchestrator
-        # registers here via add_completion_listener.
         self._completion_listeners: list[NotifyCallback] = []
         if notify_callback:
             self._completion_listeners.append(notify_callback)
@@ -158,7 +189,7 @@ class SessionRunner:
             metadata["sandbox_override"] = session.metadata["sandbox_override"]
 
         # Delegated files (validated at spawn time) become first-turn attachments
-        # now that the target model is known for the vision gate; non-inlinable
+        # here, where the target model is known for the vision gate; non-inlinable
         # ones degrade to a path hint on the message.
         message = session.prompt
         delegation_files = (session.metadata or {}).get("delegation_files")
@@ -216,11 +247,7 @@ class SessionRunner:
 
             await self._dispatch_completion(updated, result_str)
 
-            await self._notify_parent(
-                session,
-                f"Session '{session.title or session.id}' completed: {result_str[:500]}",
-                "session_completion",
-            )
+            await self._notify_finished(session, SessionStatus.COMPLETED.value, result_str[:500])
 
         except asyncio.CancelledError:
             updated = self._store.update_session(session.id, status=SessionStatus.CANCELLED.value)
@@ -229,11 +256,7 @@ class SessionRunner:
                 self._event_bus.emit("session_update", {"action": "cancelled", "id": session.id})
             logger.info("Session '%s' cancelled", session.id)
             await self._dispatch_completion(updated, "CANCELLED")
-            await self._notify_parent(
-                session,
-                f"Session '{session.title or session.id}' was cancelled",
-                "session_cancelled",
-            )
+            await self._notify_finished(session, SessionStatus.CANCELLED.value, "")
         except Exception as e:
             updated = self._store.update_session(session.id, status=SessionStatus.FAILED.value, error=str(e))
             progress._emit("session_error", {"error": str(e)})
@@ -241,19 +264,58 @@ class SessionRunner:
                 self._event_bus.emit("session_update", {"action": "failed", "id": session.id})
             logger.error("Session '%s' failed: %s", session.id, e)
             await self._dispatch_completion(updated, f"FAILED: {str(e)[:500]}")
-            await self._notify_parent(
-                session,
-                f"Session '{session.title or session.id}' failed: {str(e)[:500]}",
-                "session_failed",
-            )
+            await self._notify_finished(session, SessionStatus.FAILED.value, str(e)[:500])
 
-    async def _notify_parent(self, session, summary: str, source: str) -> None:
-        if not session.parent_id:
+    async def _notify_finished(self, session: Session, status: str, summary: str) -> None:
+        listed = ([session.parent_id] if session.parent_id else []) + session.notify_sessions
+        targets = list(dict.fromkeys(listed))
+        if not targets:
+            return
+
+        depth = get_current_chain_depth()
+        if depth >= MAX_CHAIN_DEPTH:
+            logger.warning(
+                "Session '%s' finished at chain depth %d (max %d); not notifying %s",
+                session.id,
+                depth,
+                MAX_CHAIN_DEPTH,
+                targets,
+            )
+            return
+
+        message = build_completion_message(session, status, summary)
+        source = _COMPLETION_SOURCES[status]
+        set_current_chain_depth(depth + 1)
+        try:
+            for target_id in targets:
+                await self._notify_one(session, target_id, message, source)
+        finally:
+            set_current_chain_depth(depth)
+
+    async def _notify_one(self, session: Session, target_id: str, message: str, source: str) -> None:
+        if target_id == session.id:
+            logger.info("Session '%s' lists itself as a notify target; skipping", session.id)
+            return
+        target = self._store.resolve_live(target_id)
+        if target is None:
+            logger.info("Session '%s' cannot notify '%s': unknown or pruned", session.id, target_id)
+            return
+        if target.status in FINISHED_STATUSES:
+            logger.info("Session '%s' not notifying '%s': target already finished", session.id, target.id)
             return
         try:
-            await self.reply_to_session(session.parent_id, summary, source=source)
+            await self.reply_to_session(target.id, message, source=source)
         except Exception as e:
-            logger.warning("Failed to notify parent session '%s': %s", session.parent_id, e)
+            logger.warning("Session '%s' failed to notify '%s': %s", session.id, target.id, e)
+
+    def add_notify_session(self, session_id: str, target_id: str) -> Session:
+        session = self._store.add_notify_session(session_id, target_id)
+        if self._event_bus:
+            self._event_bus.emit(
+                "session_update",
+                {"action": "notify_target_added", "id": session_id, "target": target_id},
+            )
+        return session
 
     def rename_session(self, session_id: str, title: str) -> Session:
         session = self._store.update_session(session_id, title=title)
@@ -290,6 +352,116 @@ class SessionRunner:
                 {"action": "primary_cleared", "id": cleared.id if cleared else None},
             )
         return cleared
+
+    def deliver_to_session(
+        self,
+        session_id: str,
+        message: str,
+        *,
+        source: str,
+        kind: str = DELIVERY_KIND_FYI,
+        title: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        notify_channels: Optional[list[tuple[str, object]]] = None,
+    ) -> None:
+        """Deliver a card into a session's history without starting a turn.
+
+        Sync: call it from a worker thread (asyncio.to_thread) when the caller is
+        on the event loop.
+        """
+        session_id = self._live_id(session_id)
+        if self._store.get_session(session_id).status in FINISHED_STATUSES:
+            logger.info("Not delivering to session '%s': already finished", session_id)
+            return
+        if kind not in DELIVERY_KINDS:
+            raise ValueError(f"Invalid delivery kind '{kind}' (expected one of: {', '.join(sorted(DELIVERY_KINDS))})")
+
+        event = {
+            "type": "delivery",
+            "delivery_id": f"dlv-{uuid4().hex[:8]}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": message,
+            "source": source,
+            "kind": kind,
+            "title": title,
+            # Names only: the card outlives this call.
+            "notify_channels": [name for name, _config in notify_channels or []],
+            **(metadata or {}),
+        }
+        if self._store.hold_delivery(session_id, event):
+            return
+        self._flush_delivery(session_id, event)
+
+    def _live_id(self, session_id: str) -> str:
+        live = self._store.resolve_live(session_id)
+        return live.id if live else session_id
+
+    def _on_turn_end(self, session_id: str) -> None:
+        self._flush_deferred_deliveries(session_id)
+        self._close_job_batch(session_id)
+
+    @staticmethod
+    def _close_job_batch(session_id: str) -> None:
+        from tsugite.tools.jobs import get_jobs_orchestrator
+
+        orchestrator = get_jobs_orchestrator()
+        if orchestrator:
+            orchestrator.close_batch_barrier(session_id)
+
+    def _flush_deferred_deliveries(self, session_id: str) -> None:
+        for event in self._store.take_deferred_deliveries(session_id):
+            try:
+                self._flush_delivery(session_id, event)
+            except Exception:
+                logger.exception("Delivery '%s' for session '%s' was dropped", event.get("delivery_id"), session_id)
+
+    def _flush_delivery(self, session_id: str, event: dict) -> None:
+        is_needs_ack = event["kind"] == DELIVERY_KIND_NEEDS_ACK
+        session = self._store.record_delivery(session_id, event, needs_attention=is_needs_ack)
+        if self._event_bus:
+            payload = {k: v for k, v in event.items() if k not in ("type", "notify_channels")}
+            self._event_bus.emit("session_event", {"session_id": session_id, "event_type": "delivery", **payload})
+            self._event_bus.emit(
+                "session_update",
+                {
+                    "action": "delivered",
+                    "id": session_id,
+                    "needs_attention": session.needs_attention,
+                    "pending_deliveries": session.pending_delivery_ids,
+                },
+            )
+        if is_needs_ack:
+            self._notify_delivery(session_id, event)
+
+    def _notify_delivery(self, session_id: str, event: dict) -> None:
+        channels = [
+            (name, config)
+            for name in event.get("notify_channels") or []
+            if (config := self._notification_channels.get(name))
+        ]
+        if not channels:
+            return
+        title = event.get("title")
+        text = f"**{title}**\n\n{event['message']}" if title else event["message"]
+        try:
+            send_notification_nowait(text, channels, url=f"#chats?sessionId={session_id}")
+        except Exception as e:
+            logger.error("Delivery notification for session '%s' failed: %s", session_id, e)
+
+    def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
+        session_id = self._live_id(session_id)
+        session = self._store.clear_attention(session_id, delivery_id)
+        if self._event_bus:
+            self._event_bus.emit(
+                "session_update",
+                {
+                    "action": "attention_cleared",
+                    "id": session_id,
+                    "needs_attention": session.needs_attention,
+                    "pending_deliveries": session.pending_delivery_ids,
+                },
+            )
+        return session
 
     def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
         session = self._store.mark_viewed(session_id, ts=ts)

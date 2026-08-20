@@ -273,3 +273,51 @@ class TestBuildNotifier:
             results = await notifier("test message", [("push", config)])
             assert "push" in results
             assert results["push"]["sent"] == 1
+
+    @pytest.mark.asyncio
+    async def test_deep_link_rides_the_web_push_payload(self, store, sample_sub):
+        from tsugite_daemon.gateway import _build_notifier
+
+        store.subscribe(sample_sub)
+        notifier = _build_notifier(
+            {}, push_store=store, vapid_private_key="/key.pem", vapid_claims={"sub": "mailto:t@t"}
+        )
+
+        config = NotificationChannelConfig(type="web-push")
+        with patch(
+            "tsugite_daemon.push.send_web_push", new_callable=AsyncMock, return_value={"status": "sent"}
+        ) as mock_send:
+            await notifier("approve?", [("push", config)], url="#chats?sessionId=s1")
+
+        payload = mock_send.call_args[0][1]
+        assert payload["url"] == "#chats?sessionId=s1"
+        assert payload["body"] == "approve?"
+
+    @pytest.mark.asyncio
+    async def test_text_channels_get_the_link_appended(self):
+        from tsugite_daemon.gateway import _build_notifier
+
+        notifier = _build_notifier({})
+        config = NotificationChannelConfig(type="webhook", url="https://hook.example/x")
+
+        with patch("tsugite_daemon.gateway._send_webhook", new_callable=AsyncMock, return_value={"status": "sent"}):
+            from tsugite_daemon import gateway
+
+            await notifier("approve?", [("hook", config)], url="#chats?sessionId=s1")
+            sent_message = gateway._send_webhook.call_args[0][1]
+
+        assert sent_message.endswith("#chats?sessionId=s1")
+        assert sent_message.startswith("approve?")
+
+    @pytest.mark.asyncio
+    async def test_default_url_leaves_the_message_alone(self):
+        from tsugite_daemon.gateway import _build_notifier
+
+        notifier = _build_notifier({})
+        config = NotificationChannelConfig(type="webhook", url="https://hook.example/x")
+
+        with patch("tsugite_daemon.gateway._send_webhook", new_callable=AsyncMock, return_value={"status": "sent"}):
+            from tsugite_daemon import gateway
+
+            await notifier("plain", [("hook", config)])
+            assert gateway._send_webhook.call_args[0][1] == "plain"

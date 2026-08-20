@@ -194,6 +194,7 @@ FULL_ROUTE_TABLE = [
     ("/api/sessions/clear-primary", ("POST",), "_api_clear_primary"),
     ("/api/sessions/{session_id}/set-primary", ("POST",), "_api_set_primary"),
     ("/api/sessions/{session_id}/mark-viewed", ("POST",), "_api_mark_viewed"),
+    ("/api/sessions/{session_id}/dismiss-attention", ("POST",), "_api_dismiss_attention"),
     ("/api/sessions", ("GET",), "_api_list_sessions"),
     ("/api/sessions", ("POST",), "_api_start_session"),
     ("/api/schedules/", ("GET",), "_list_schedules"),
