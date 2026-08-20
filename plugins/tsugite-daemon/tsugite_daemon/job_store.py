@@ -146,14 +146,14 @@ class Job:
     # for legacy records predating the field.
     workspace_path: Optional[str] = None
     # When to fire the wake-up message after a terminal transition: one of
-    # "done", "stuck", "errored", "terminal" (any terminal state), or "never".
+    # "done", "stuck", "errored", "terminal" (any terminal state), "all_done"
+    # (reported by the batch barrier instead), or "never".
     # Default is None so __post_init__ can normalise to "never"; the JobStore
     # loader migrates legacy `notify=True` records to "terminal" before
     # construction.
     notify_when: Optional[str] = None
-    # Maximum verifier rounds before the Job goes stuck. Defaults to 3 to match
-    # the pre-feature constant; overridable per-job via /job --max-attempts or
-    # the spawn_job() tool.
+    # Maximum verifier rounds before the Job goes stuck. Overridable per-job via
+    # /job --max-attempts or the spawn_job() tool.
     max_attempts: int = 3
     # Append-only history of each worker round + its verifier, so retried jobs
     # don't orphan their earlier session ids. Each entry:
@@ -187,6 +187,9 @@ class Job:
     # agent jobs that never spawn a PTY (the tile falls back to a terminal_store
     # lookup keyed on worker_session_id).
     worker_terminal_id: Optional[str] = None
+    # Set once summarised in an "all_done" barrier message; cleared when a retry
+    # re-activates the job, putting it back in the next batch.
+    barrier_notified: bool = False
 
     def __post_init__(self):
         if not self.id:
@@ -262,6 +265,9 @@ class JobStore(RecordStore):
     def list_all(self) -> list[Job]:
         """Return every Job record, newest-first by updated_at."""
         return sorted(super().list_all(), key=lambda j: j.updated_at or "", reverse=True)
+
+    def list_active_for_parent(self, parent_session_id: str) -> list[Job]:
+        return [j for j in self.list_for_parent(parent_session_id) if j.state not in self.terminal_states]
 
     def _coerce_update_value(self, key: str, value):
         if key == "state":

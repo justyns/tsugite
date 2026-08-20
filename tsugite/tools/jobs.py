@@ -80,8 +80,10 @@ def spawn_job(
         agent: Worker agent file. Defaults to `job_worker`.
         max_attempts: Verifier-loop cap before stuck. Defaults to 3.
         notify_when: When to wake the parent: done | stuck | errored | terminal |
-            never. Defaults to never - be deliberate when enabling, since each
-            notification adds a turn to the parent conversation.
+            all_done | never. Defaults to never - be deliberate when enabling, since
+            each notification adds a turn to the parent conversation. "all_done"
+            replaces the per-job wake-up with one aggregate message, sent when the
+            last of this session's active jobs finishes.
         executor: Which registered executor produces the work. "agent" (default)
             spawns a tsugite worker session; a plugin may register others (e.g. a
             PTY-driven CLI). An unknown name is rejected.

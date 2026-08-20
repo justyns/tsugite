@@ -3,6 +3,7 @@
 Pure string building - no orchestrator state, no I/O.
 """
 
+from collections import Counter
 from typing import Optional
 
 from tsugite_daemon.job_store import Job, JobState
@@ -109,17 +110,33 @@ def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:
     return "\n".join(parts)
 
 
+def _short_prompt(prompt: Optional[str]) -> str:
+    text = prompt or ""
+    if len(text) <= 80:
+        return text
+    return text[:80] + "…"
+
+
 def _build_notify_message(job: Job) -> str:
     """One-line wake-up message posted to the parent session on terminal transition.
     Brief by design - the parent agent should call get_job(job_id) for details."""
-    prompt_short = (job.prompt or "")[:80]
-    if len(job.prompt or "") > 80:
-        prompt_short += "…"
-    base = f"Job {job.id} finished with state '{job.state}': {prompt_short}"
+    base = f"Job {job.id} finished with state '{job.state}': {_short_prompt(job.prompt)}"
     if job.state in (JobState.STUCK.value, JobState.ERRORED.value) and job.error:
-        first_line = job.error.splitlines()[0][:200]
-        base += f" - error: {first_line}"
+        base += f" - error: {job.error.splitlines()[0][:200]}"
     elif job.state == JobState.CANCELLED.value and job.error:
         base += f" - {job.error[:120]}"
     base += f". Use get_job('{job.id}') for details."
     return base
+
+
+def _build_barrier_message(jobs: list[Job]) -> str:
+    counts = Counter(job.state for job in jobs)
+    breakdown = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()))
+    lines = [f"All {len(jobs)} background job(s) finished ({breakdown})."]
+    for job in jobs:
+        line = f"- {job.id} [{job.state}]: {_short_prompt(job.prompt)}"
+        if job.error:
+            line += f" - {job.error.splitlines()[0][:200]}"
+        lines.append(line)
+    lines.append("Use get_job('<job_id>') for details on any of them.")
+    return "\n".join(lines)

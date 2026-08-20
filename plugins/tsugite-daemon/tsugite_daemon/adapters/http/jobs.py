@@ -5,6 +5,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
+from tsugite_daemon.job_store import JobState
 
 
 class JobsMixin:
@@ -37,7 +38,8 @@ class JobsMixin:
     async def _api_list_jobs(self, request: Request) -> JSONResponse:
         """Return Jobs for the Jobs tab, newest first. Optional ?state=<state>
         filter accepts a real Job state, the alias 'stuck' (= stuck + errored),
-        or 'active' (= running + verifying). ?limit=N caps the response
+        'active' (= queued + running + verifying), 'resolved' (= done + cancelled), or
+        'open' (everything not resolved). ?limit=N caps the response
         (default 100; 0 = unlimited)."""
         if err := self._check_auth(request):
             return err
@@ -47,12 +49,11 @@ class JobsMixin:
         state_filter = request.query_params.get("state")
         if state_filter:
             alias = {
-                # The "needs you" set the tab badge counts: parked jobs AND ones
-                # paused on a question.
                 "stuck": frozenset({"stuck", "errored", "awaiting_input"}),
-                "active": frozenset({"running", "verifying"}),
+                "active": frozenset({"queued", "running", "verifying"}),
                 "resolved": frozenset({"done", "cancelled"}),
             }
+            alias["open"] = frozenset(state.value for state in JobState) - alias["resolved"]
             allowed = alias.get(state_filter, frozenset({state_filter}))
             jobs = [j for j in jobs if j.state in allowed]
         try:

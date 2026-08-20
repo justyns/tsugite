@@ -172,11 +172,21 @@ class TestListJobsEndpoint:
         ids = {j["job_id"] for j in resp.json()["jobs"]}
         assert ids == {"job-s1", "job-e1", "job-w1"}
 
-    def test_state_alias_active_includes_running_and_verifying(self, client, test_token):
+    def test_state_alias_active_includes_queued_running_and_verifying(self, client, test_token):
+        # A queued job is live work the board and the nav badge both count; leaving
+        # it out made a queued-only daemon show row markers and no badge.
         resp = client.get("/api/jobs?state=active", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         ids = {j["job_id"] for j in resp.json()["jobs"]}
-        assert ids == {"job-r1", "job-v1"}
+        assert ids == {"job-q1", "job-r1", "job-v1"}
+
+    def test_state_alias_open_includes_every_unresolved_job(self, client, test_token):
+        # One bounded request for everything still outstanding, so the shell can
+        # seed its ambient job indicators at boot.
+        resp = client.get("/api/jobs?state=open", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 200
+        ids = {j["job_id"] for j in resp.json()["jobs"]}
+        assert ids == {"job-r1", "job-v1", "job-q1", "job-s1", "job-e1", "job-w1"}
 
     def test_state_alias_resolved_includes_done_and_cancelled(self, client, test_token):
         resp = client.get("/api/jobs?state=resolved", headers={"Authorization": f"Bearer {test_token}"})

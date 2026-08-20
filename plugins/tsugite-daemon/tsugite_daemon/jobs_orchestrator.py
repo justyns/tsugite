@@ -20,13 +20,14 @@ from typing import Optional
 
 from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_prompts import (
+    _build_barrier_message,
     _build_followup_prompt,
     _build_hint_prompt,
     _build_notify_message,
     _build_verifier_prompt,
     build_worker_prompt,
 )
-from tsugite_daemon.job_store import Job, JobState, JobStateTransitionError, JobStore
+from tsugite_daemon.job_store import _TERMINAL_STATES, Job, JobState, JobStateTransitionError, JobStore
 from tsugite_daemon.job_verdicts import (
     _extract_failed_acs,
     _is_infra_failure,
@@ -52,13 +53,7 @@ _JOB_TO_SESSION_STATUS = {
 }
 
 # Allowed notify_when values; anything else is coerced to "never" at intake.
-_VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "never"})
-
-# Hard cap per predicate. Subprocess hang shouldn't strand a Job; the per-phase
-# Job.timeout_minutes timer covers the verification phase too, so even if all
-# predicates take the full 30s the phase timeout will reap any longer hang.
-# Stderr snippet length surfaced in the failure reason.
-# Excerpt length for unparseable-verifier-output diagnostics.
+_VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "all_done", "never"})
 
 
 def _with_sandbox(job: Job, metadata: dict) -> dict:
@@ -220,7 +215,9 @@ class JobsOrchestrator:
         executor: which registered executor produces the work; "agent" (default)
             uses the built-in SessionRunner path. An unknown name raises ValueError
             before any Job record is created.
-        notify_when: one of "done", "stuck", "errored", "terminal", "never" (default).
+        notify_when: one of "done", "stuck", "errored", "terminal", "all_done",
+            "never" (default). "all_done" replaces the per-job wake-up with a single
+            aggregate one, fired when the parent's last active job finalizes.
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
@@ -369,7 +366,10 @@ class JobsOrchestrator:
         RUNNING transition, tile event, fresh phase timer."""
         fields: dict = {"worker_session_id": worker_session_id}
         if clear_error:
-            fields.update(resolved_at=None, error=None, error_detail=None, pending_question=None)
+            # barrier_notified too, or a resurrected job's one-job batch could never close.
+            fields.update(
+                resolved_at=None, error=None, error_detail=None, pending_question=None, barrier_notified=False
+            )
         self._jobs.update(job_id, **fields)
         self._append_attempt(job_id, kind=kind, worker_session_id=worker_session_id)
         try:
@@ -627,6 +627,7 @@ class JobsOrchestrator:
                 result["stuck_error_at_override"] = job.error
             self._jobs.update_state(job_id, JobState.DONE.value)
             self._jobs.update(job_id, result=result, error=None, resolved_at=_iso_now())
+            self.close_batch_barrier(job.parent_session_id)
             # Clean exit: stop a non-agent executor's child BEFORE pruning its cwd.
             await self._cancel_executor(self._jobs.get(job_id))
             if job.worktree_path:
@@ -1063,9 +1064,8 @@ class JobsOrchestrator:
         attempt_num = job.verify_attempts + 1
 
         # Recompute predicate / prose partition so the verifier's positional
-        # ac_results can be mapped back to original AC indices. When the Job has
-        # NO predicates this collapses to the legacy 1-to-1 mapping (None map +
-        # no merge), preserving backward compatibility for prose-only Jobs.
+        # ac_results can be mapped back to original AC indices. A Job with no
+        # predicates gets a plain 1-to-1 mapping (None map + no merge).
         predicates, prose_entries = partition_acs(job.acceptance_criteria)
         if predicates:
             prose_ac_indices: Optional[list[int]] = [e["ac_index"] for e in prose_entries]
@@ -1203,7 +1203,8 @@ class JobsOrchestrator:
 
         Worktrees are pruned on DONE/CANCELLED (clean exit, no inspection value),
         kept on STUCK/ERRORED so the user can see what the worker did wrong.
-        If job.notify is True, also schedules a wake-up reply to the parent session.
+        Also wakes the parent when `notify_when` matches, and closes the batch
+        barrier when this was the parent's last active job.
         """
         self._cancel_timeout(job.id)
         # Transition FIRST: if the Job is already terminal this raises and we
@@ -1230,6 +1231,7 @@ class JobsOrchestrator:
         self._reconcile_host_session(job, terminal)
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
+        self.close_batch_barrier(job.parent_session_id)
 
     async def _cancel_executor(self, job: Job) -> None:
         """Best-effort teardown of a non-agent executor's child. No-op for agent
@@ -1273,14 +1275,54 @@ class JobsOrchestrator:
         learns the Job finished. Best-effort: errors are logged, not raised."""
         self._schedule_reply(job, _build_notify_message(job), source="job_complete")
 
-    def _schedule_reply(self, job: Job, message: str, *, source: str) -> None:
-        """Wake the parent session with `message` as a background task.
-        Best-effort: errors are logged, not raised."""
+    def close_batch_barrier(self, parent_session_id: str) -> None:
+        """Wake the parent once, when the last of its active jobs has finalized.
+
+        Call this in the same synchronous region as the transition that produced
+        the terminal state; the remaining-active count means nothing if another
+        job can move in between. Only notify_when="all_done" jobs are summarised,
+        and a parent still mid-turn may spawn more of the batch, so the barrier
+        waits for the turn to end.
+        """
+        if self._jobs.list_active_for_parent(parent_session_id):
+            return
+        if self._parent_turn_in_flight(parent_session_id):
+            return
+        batch = [
+            j
+            for j in self._jobs.list_for_parent(parent_session_id)
+            if j.notify_when == "all_done" and not j.barrier_notified
+        ]
+        if not batch:
+            return
+        batch.sort(key=lambda j: j.created_at or "")
+        if not self._schedule_reply(
+            batch[-1], _build_barrier_message(batch), source="jobs_all_complete", metadata={"kind": "jobs_barrier"}
+        ):
+            return
+        for member in batch:
+            self._jobs.update(member.id, barrier_notified=True)
+
+    def _parent_turn_in_flight(self, parent_session_id: str) -> bool:
+        store = getattr(self._runner, "_store", None) if self._runner else None
+        if store is None:
+            return False
+        try:
+            return store.get_session(parent_session_id).turn_in_flight
+        except (ValueError, KeyError):
+            return False
+
+    def _schedule_reply(self, job: Job, message: str, *, source: str, metadata: Optional[dict] = None) -> bool:
+        """Queue a wake-up for the parent, returning whether it was queued.
+
+        Best-effort: errors are logged, not raised.
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.debug("No running loop; skipping %s wake-up for job '%s'", source, job.id)
-            return
+            return False
+        metadata = metadata or {"job_id": job.id, "kind": "job_notify"}
 
         async def _send():
             try:
@@ -1288,7 +1330,7 @@ class JobsOrchestrator:
                     job.parent_session_id,
                     message,
                     source=source,
-                    metadata={"job_id": job.id, "kind": "job_notify"},
+                    metadata=metadata,
                 )
             except Exception:
                 logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
@@ -1296,6 +1338,7 @@ class JobsOrchestrator:
         task = loop.create_task(_send())
         self._notify_tasks.add(task)
         task.add_done_callback(self._notify_tasks.discard)
+        return True
 
     def _spawn_bg(self, make_coro) -> bool:
         """Run `make_coro()` as a tracked background task, so it can't be garbage
@@ -1353,7 +1396,7 @@ class JobsOrchestrator:
 
     def _on_timeout(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
-        if job is None or job.state in _TERMINAL_JOB_STATES:
+        if job is None or job.state in _TERMINAL_STATES:
             return
         # Cancel whichever sessions are still live. Both can leak: the worker if
         # the timeout fires during the RUNNING phase, the verifier if it hangs
@@ -1435,7 +1478,7 @@ class JobsOrchestrator:
         reconciled = sum(
             self._reconcile_host_session(job, JobState(job.state))
             for job in self._jobs.list_all()
-            if job.state in _TERMINAL_JOB_STATES
+            if job.state in _TERMINAL_STATES
         )
         if reconciled:
             logger.info("Reconciled %d orphaned job-host session(s) from previous daemon run", reconciled)
@@ -1537,26 +1580,22 @@ class JobsOrchestrator:
                 logger.exception("Failed to broadcast job_update for job '%s'", job.id)
 
 
-_TERMINAL_JOB_STATES = frozenset(
-    {JobState.DONE.value, JobState.STUCK.value, JobState.CANCELLED.value, JobState.ERRORED.value}
-)
-
-
 def _should_notify(job: Job, terminal: JobState) -> bool:
     """Decide whether to wake the parent based on Job.notify_when.
 
     Recognised values: "done", "stuck", "errored", "terminal" (any terminal state),
-    "never" (no-op). Anything else is treated as "never" (defensive - a typo on
-    disk shouldn't spam the parent agent).
+    "never" (no-op), and "all_done" (no per-job wake-up; the job is reported by the
+    batch barrier instead). Anything else is treated as "never" (defensive - a typo
+    on disk shouldn't spam the parent agent).
     """
     # Job.__post_init__ already maps legacy `notify=True` → notify_when="terminal"
     # and normalises a missing value to "never", so this is a plain attribute read.
     notify_when = job.notify_when
     state = terminal.value if isinstance(terminal, JobState) else terminal
-    if notify_when == "never":
+    if notify_when in ("never", "all_done"):
         return False
     if notify_when == "terminal":
-        return state in _TERMINAL_JOB_STATES
+        return state in _TERMINAL_STATES
     return notify_when == state
 
 
@@ -1580,7 +1619,7 @@ def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: 
     active_states = {JobState.QUEUED.value, JobState.RUNNING.value, JobState.VERIFYING.value}
 
     active = [j for j in jobs if j.state in active_states]
-    recent = [j for j in jobs if j.state in _TERMINAL_JOB_STATES]
+    recent = [j for j in jobs if j.state in _TERMINAL_STATES]
     recent.sort(key=lambda j: j.resolved_at or j.updated_at or "", reverse=True)
     recent = recent[: max(0, int(recent_limit))]
 

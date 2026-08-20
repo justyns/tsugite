@@ -93,11 +93,6 @@ def get_commands() -> dict[str, AdapterCommand]:
     return _COMMANDS
 
 
-# ---------------------------------------------------------------------------
-# Built-in commands
-# ---------------------------------------------------------------------------
-
-
 @adapter_command(
     name="bg",
     description="Run a task in the background",
@@ -168,7 +163,7 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         CommandParam(
             "notify_when",
             str,
-            "When to wake the parent: done|stuck|errored|terminal|never (default never)",
+            "When to wake the parent: done|stuck|errored|terminal|all_done|never (default never)",
             required=False,
         ),
         CommandParam(
@@ -212,10 +207,9 @@ async def cmd_job(
     #     A stale/invalid id returns a friendly message rather than a 500 -
     #     get_session raises ValueError, it never returns None.
     #   - no session_id (the Jobs-tab "new job" modal, or `/job` with no chat
-    #     open): provision a fresh host session. The old fallback guessed the
-    #     user's primary chat via find_default_session, which silently attached
-    #     Jobs-tab jobs to whatever conversation happened to be primary - the
-    #     "wrong session" the tile showed up under.
+    #     open): provision a fresh host session. Never guess the primary chat -
+    #     that attaches a Jobs-tab job to whatever conversation happens to be
+    #     primary, and its tile shows up under an unrelated session.
     if session_id:
         try:
             parent = adapter.session_store.get_session(session_id)
