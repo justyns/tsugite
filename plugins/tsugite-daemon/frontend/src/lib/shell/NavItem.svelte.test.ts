@@ -10,6 +10,12 @@ afterEach(() => {
   if (location.hash) history.replaceState(null, '', location.pathname);
 });
 
+const jobs = { id: 'jobs', label: 'Jobs', icon: 'jobs' as const };
+const badges = [
+  { count: 2, variant: 'info' as const, label: '2 jobs running' },
+  { count: 1, variant: 'action' as const, label: '1 job needs you' },
+];
+
 test('the active row is marked with aria-current and links to its hash', async () => {
   await render(NavItem, { id: 'jobs', label: 'Jobs', icon: 'jobs', active: true });
   const link = page.getByRole('link', { name: 'Jobs' });
@@ -62,4 +68,23 @@ test('a modified click falls through to the anchor deep-link', async () => {
   link.dispatchEvent(event);
   expect(onactivate).not.toHaveBeenCalled();
   expect(event.defaultPrevented).toBe(false);
+});
+
+test('a collapsed row keeps its counts as one named dot', async () => {
+  const { container } = await render(NavItem, { ...jobs, collapsed: true, badges });
+  expect(container.querySelector('.bdg')).toBeNull();
+  await expect.element(page.getByLabelText('2 jobs running, 1 job needs you')).toBeVisible();
+  expect(container.querySelectorAll('.t-badge--dot')).toHaveLength(1);
+});
+
+test('the phone bar shows one dot instead of a row of counts', async () => {
+  const { container } = await render(NavItem, { ...jobs, narrow: true, badges });
+  expect(container.querySelector('.bdg')).toBeNull();
+  expect(container.querySelectorAll('.t-badge--dot')).toHaveLength(1);
+});
+
+test('a wide row shows every count in full', async () => {
+  const { container } = await render(NavItem, { ...jobs, badges });
+  expect(container.querySelectorAll('.bdg .t-badge')).toHaveLength(2);
+  expect(container.querySelector('.t-badge--dot')).toBeNull();
 });

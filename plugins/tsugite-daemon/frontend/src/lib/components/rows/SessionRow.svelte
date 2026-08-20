@@ -19,6 +19,7 @@
     isPinned = false,
     isUnread = false,
     activeJobCount = 0,
+    waitingOnCount = 0,
     onSelect,
     onOpenNewTab,
   }: {
@@ -32,19 +33,18 @@
     isPinned?: boolean;
     isUnread?: boolean;
     activeJobCount?: number;
+    waitingOnCount?: number;
     onSelect?: () => void;
     onOpenNewTab?: () => void;
   } = $props();
 
   const meta = $derived(sessionStateMeta(state));
-  // Ambient activity (running/thinking) and needs-you must never be hidden by
-  // the unread dot - the UI must never look calmer than the daemon says it is.
   // Only idle/done have no ambient glyph to protect, so unread can take the slot.
   const showUnreadDot = $derived(isUnread && (state === 'idle' || state === 'done'));
   const ariaLabel = $derived(buildSessionRowAriaLabel({ title, state, isUnread }));
-  const hasMarkers = $derived(state === 'needs-you' || activeJobCount > 0 || isPinned);
-  // A finished session (done/failed) reads muted so it never looks live, even
-  // when expanded in the rail's ended section. Hover/active restore full contrast.
+  const hasMarkers = $derived(
+    state === 'needs-you' || activeJobCount > 0 || waitingOnCount > 0 || isPinned,
+  );
   const isEnded = $derived(state === 'done' || state === 'failed');
 
   function handleKeydown(e: KeyboardEvent) {
@@ -93,6 +93,14 @@
             aria-label="{activeJobCount} active job{activeJobCount === 1 ? '' : 's'}"
             >{activeJobCount}&#9656;</span
           >
+        {/if}
+        {#if waitingOnCount > 0}
+          <span
+            class="wait"
+            aria-label="waiting on {waitingOnCount} session{waitingOnCount === 1 ? '' : 's'}"
+          >
+            <Icon name="clock" size={10} />{waitingOnCount}
+          </span>
         {/if}
         {#if isPinned}
           <Icon name="pin" size={10} />
@@ -225,6 +233,15 @@
     background: var(--bg3);
     border: 1px solid var(--bd1);
     color: var(--tx2);
+  }
+
+  .t-srow .wait {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font: 600 var(--fs-2xs) / 1 var(--font-mono);
+    color: var(--tx2);
+    flex: none;
   }
 
   /* t-dot (unread marker) */

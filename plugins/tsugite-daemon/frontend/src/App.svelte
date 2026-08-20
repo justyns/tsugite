@@ -36,6 +36,8 @@
   import { workspacePhoneScreen } from '$lib/shell/phoneNav';
   import { focusedSurface } from '$lib/shell/shellNav';
   import { resolveShellShortcut } from '$lib/shell/keymap';
+  import { chatsNavBadge, jobsNavBadges, needsYouTotal } from '$lib/shell/navBadges';
+  import { pageTitle } from '$lib/shell/pageTitle';
   import {
     buildPaletteItems,
     buildSessionItems,
@@ -45,7 +47,12 @@
     type PaletteContext,
   } from '$lib/shell/palette-sources';
   import { api } from '$lib/api/client';
-  import { isFinishedSession, formatWhen, sessionTopic } from './views/chats/sessionModel';
+  import {
+    isFinishedSession,
+    formatWhen,
+    needsYouSessions,
+    sessionTopic,
+  } from './views/chats/sessionModel';
   import { neighborSession } from './views/chats/chatNav';
   import { chatRouteParams } from './views/chats/chatLink';
   import { resolveDefaultSession } from './views/chats/defaultSession';
@@ -193,6 +200,35 @@
     untrack(() => openSurface({ kind: surface.kind, params, title: surface.label }));
   });
 
+  // The Jobs badge and the chats rail's job markers render outside the view that
+  // owns their data, so seed the jobs store at shell scope; the live `job_update`
+  // broadcasts fold in from there.
+  $effect(() => {
+    if (auth.gated) return;
+    void jobs.load({ state: 'open', limit: 200 });
+  });
+  // The sessions store is agent-scoped and shared with the chats rail.
+  $effect(() => {
+    if (auth.gated) return;
+    const agent = agentsMeta.agents[0]?.name;
+    if (!agent) {
+      void agentsMeta.load();
+      return;
+    }
+    untrack(() => {
+      if (!sessions.agent) void sessions.load(agent);
+    });
+  });
+
+  const needsYouChats = $derived(needsYouSessions(sessions.rows));
+  const navBadges = $derived({
+    jobs: jobsNavBadges(jobs.counts),
+    chats: chatsNavBadge(needsYouChats.length),
+  });
+  $effect(() => {
+    document.title = pageTitle(needsYouTotal(needsYouChats, jobs.jobs));
+  });
+
   // Plugin metadata at shell scope: plugin-contributed UI surfaces seed the
   // surface registry (a persisted plugin tab needs its entry to render) and the
   // nav rail, both of which live outside the plugins view.
@@ -239,11 +275,7 @@
       })),
     ),
   );
-  // Start a fresh chat and navigate to it, mirroring the chats rail's + button but
-  // at shell scope so ⌘/Ctrl+Shift+O and the palette reach it from any view. The
-  // roster is loaded lazily by whichever rail/view is mounted (chats is the default,
-  // so it is populated in practice); before it lands, fall back to the chats view
-  // where the rail's + button lives rather than force a load here.
+  // At shell scope so ⌘/Ctrl+Shift+O and the palette reach it from any view.
   async function newChat(): Promise<string | null> {
     const agent = agentsMeta.agents[0]?.name;
     if (!agent) {
@@ -408,7 +440,9 @@
       <NavRail
         views={allViews()}
         activeId={shellView.activeViewId}
+        badges={navBadges}
         collapsed={shellView.navCollapsed}
+        {narrow}
         onActivate={openView}
         onToggleCollapsed={() => shellView.toggleNav()}
         onOpenSettings={() => (settingsOpen = true)}

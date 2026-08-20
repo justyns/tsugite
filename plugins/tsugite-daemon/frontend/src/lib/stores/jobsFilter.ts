@@ -32,10 +32,10 @@ export interface JobFilter {
 }
 
 /** The three board groupings the tab badges count; mirrors the backend's
- *  ?state= aliases (jobs.py) and the Alpine GROUPS constant. */
+ *  ?state= aliases in jobs.py. */
 export const JOB_GROUPS = {
   stuck: ['stuck', 'errored', 'awaiting_input'],
-  active: ['running', 'verifying'],
+  active: ['queued', 'running', 'verifying'],
   resolved: ['done', 'cancelled'],
 } as const;
 
@@ -95,7 +95,25 @@ export function groupForState(state: string | undefined): JobGroup | null {
   return null;
 }
 
-/** Per-group counts for the board badges (the "needs you" badge reads .stuck). */
+export interface SessionJobTally {
+  open: number;
+  parked: number;
+}
+
+export function jobTallyBySession(jobs: JobLike[]): Map<string, SessionJobTally> {
+  const tallies = new Map<string, SessionJobTally>();
+  for (const job of jobs) {
+    const id = job.parent_session_id;
+    const group = groupForState(job.state);
+    if (!id || group === 'resolved') continue;
+    const tally = tallies.get(id) ?? { open: 0, parked: 0 };
+    tally.open += 1;
+    if (group === 'stuck') tally.parked += 1;
+    tallies.set(id, tally);
+  }
+  return tallies;
+}
+
 export function groupCounts(jobs: JobLike[]): Record<JobGroup, number> {
   const counts: Record<JobGroup, number> = { stuck: 0, active: 0, resolved: 0 };
   for (const job of jobs) {

@@ -6,41 +6,13 @@ import SessionsRail from './SessionsRail.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
 import { collectLeaves } from '$lib/shell/mux/layout';
 import { TESTID } from '$lib/testids';
-import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
+import { sessions } from '$lib/stores/sessions.svelte';
+import { sessionRow as row } from './__fixtures__/sessionRow';
 
 // The ended section persists its open/closed choice; reset it so each test
 // starts from the collapsed default.
 beforeEach(() => localStorage.removeItem('tsugite_rail_ended_open'));
 afterEach(() => vi.restoreAllMocks());
-
-function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
-  return {
-    id,
-    user_id: 'u',
-    label: id,
-    source: 'web',
-    status: 'active',
-    state: 'idle',
-    created_at: '2026-07-17T00:00:00Z',
-    last_active: '2026-07-17T00:00:00Z',
-    parent_id: null,
-    prompt: '',
-    model: null,
-    error: null,
-    result: null,
-    title: id,
-    is_default: false,
-    metadata: {},
-    pinned: false,
-    pin_position: null,
-    last_viewed_at: null,
-    superseded_by: null,
-    unread: false,
-    is_primary: false,
-    busy: false,
-    ...extra,
-  };
-}
 
 const base = {
   agent: 'smokeagent',

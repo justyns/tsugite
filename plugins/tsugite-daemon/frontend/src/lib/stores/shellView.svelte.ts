@@ -10,6 +10,7 @@
  * Exported as a class instance - never a reassigned binding.
  */
 import { readLocal, writeLocal } from '$lib/storage';
+import { views } from '../../views';
 
 export type WorkspaceView = 'chats' | 'terminals' | 'files';
 
@@ -40,10 +41,7 @@ function readRailCollapse(): RailCollapse {
 }
 
 export class ShellViewStore {
-  /** The nav view currently selected (drives the region shown + rail highlight). */
-  activeViewId = $state<string>('chats');
-  /** The most recent workspace view - the context rail renders this even while a
-   *  full view shows, so switching back restores the right rail. */
+  activeViewId = $state<string>(views[0]!.id);
   workspaceView = $state<WorkspaceView>('chats');
   navCollapsed = $state(false);
   private railCollapsed = $state<RailCollapse>({ chats: false, terminals: false, files: false });

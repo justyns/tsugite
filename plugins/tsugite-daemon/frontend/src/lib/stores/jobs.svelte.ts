@@ -81,11 +81,14 @@ export class JobsStore {
   loading = $state(false);
   error = $state<string | null>(null);
 
+  private loadSeq = 0;
+
   get counts(): Record<JobGroup, number> {
     return groupCounts(this.jobs);
   }
 
   async load(opts: { state?: string; limit?: number } = {}): Promise<void> {
+    const seq = ++this.loadSeq;
     this.loading = true;
     this.error = null;
     try {
@@ -94,11 +97,11 @@ export class JobsStore {
       if (opts.limit != null) params.set('limit', String(opts.limit));
       const qs = params.toString();
       const res = await api.get<{ jobs: Job[] }>(`/api/jobs${qs ? `?${qs}` : ''}`);
-      this.jobs = res.jobs;
+      if (seq === this.loadSeq) this.jobs = res.jobs;
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      if (seq === this.loadSeq) this.error = err instanceof Error ? err.message : String(err);
     } finally {
-      this.loading = false;
+      if (seq === this.loadSeq) this.loading = false;
     }
   }
 

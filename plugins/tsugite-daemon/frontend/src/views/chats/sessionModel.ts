@@ -5,6 +5,7 @@
  * fast unit vitest project and the rail stays a thin render of these.
  */
 import type { SessionRow } from '$lib/stores/sessions.svelte';
+import type { SessionJobTally } from '$lib/stores/jobsFilter';
 import type { SessionSourceType, SessionState } from '$lib/components/rows/rowState';
 
 /** metadata.type carries the semantic category badge (code/ops/res/chat). The
@@ -37,15 +38,32 @@ function busyState(row: SessionRow): SessionState {
 }
 
 export interface RowStateHints {
-  /** A blocking ask_user is outstanding for this session (tracked from the
-   *  session_event broadcast; never expressible by status alone). */
-  pendingAsk?: boolean;
+  needsYou?: boolean;
+}
+
+export function sessionNeedsYou(row: SessionRow, parkedJobs = 0): boolean {
+  if (row.needs_attention === true) return true;
+  if (parkedJobs > 0) return true;
+  const text = String(row.progress?.status_text ?? '').toLowerCase();
+  return text.includes('awaiting') || text.includes('question') || text.includes('input on');
+}
+
+export function needsYouSessions(
+  rows: SessionRow[],
+  jobCounts?: Map<string, SessionJobTally>,
+): SessionRow[] {
+  return rows.filter(
+    (row) =>
+      !row.superseded_by &&
+      !isFinishedSession(row) &&
+      sessionNeedsYou(row, jobCounts?.get(row.id)?.parked),
+  );
 }
 
 export function sessionRowState(row: SessionRow, hints: RowStateHints = {}): SessionState {
   if (row.status === 'failed') return 'failed';
   if (DONE_STATUSES.has(row.status)) return 'done';
-  if (hints.pendingAsk) return 'needs-you';
+  if (hints.needsYou) return 'needs-you';
   if (row.busy) return busyState(row);
   return 'idle';
 }
@@ -58,7 +76,6 @@ export interface SessionGroups {
 }
 
 export interface GroupHints {
-  /** Session ids with an outstanding ask_user (they sort into active). */
   attn: Set<string>;
 }
 

@@ -21,7 +21,8 @@ export interface ViewDef {
   mode: ViewMode;
 }
 
-// Do not reorder without reason.
+// Do not reorder without reason: the first entry is the landing view and the
+// fallback for an unknown id, and the phone rail shows only the first five rows.
 export const views: ViewDef[] = [
   { id: 'chats', label: 'Chats', icon: 'chat', mode: 'workspace' },
   { id: 'terminals', label: 'Terminals', icon: 'term', mode: 'workspace' },

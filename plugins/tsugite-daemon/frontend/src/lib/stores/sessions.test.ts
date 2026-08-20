@@ -186,3 +186,86 @@ describe('SessionsStore settings broadcast', () => {
     expect(store.settingsRev['s1']).toBe(2);
   });
 });
+
+describe('SessionsStore attention', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  test('a delivered update patches the row in place instead of reloading the list', () => {
+    const store = new SessionsStore();
+    store.agent = 'smoke';
+    store.rows = [row('s1', { needs_attention: false, unread: false })];
+    apiGet.mockClear();
+    store.applySessionUpdate({
+      action: 'delivered',
+      id: 's1',
+      needs_attention: true,
+      pending_deliveries: ['dlv-1'],
+    });
+    expect(store.rows[0]!.needs_attention).toBe(true);
+    // The chat gates each card's own dismiss control on this list.
+    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-1']);
+    // A delivery makes the session unread, so the rail marks it without a refetch.
+    expect(store.rows[0]!.unread).toBe(true);
+    vi.runAllTimers();
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+
+  test('an fyi delivery marks the row unread without raising needs-attention', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { needs_attention: false, unread: false })];
+    store.applySessionUpdate({ action: 'delivered', id: 's1', needs_attention: false });
+    expect(store.rows[0]!.needs_attention).toBe(false);
+    expect(store.rows[0]!.unread).toBe(true);
+  });
+
+  test('attention_cleared drops the flag in place', () => {
+    const store = new SessionsStore();
+    store.agent = 'smoke';
+    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
+    apiGet.mockClear();
+    store.applySessionUpdate({
+      action: 'attention_cleared',
+      id: 's1',
+      needs_attention: false,
+      pending_deliveries: [],
+    });
+    expect(store.rows[0]!.needs_attention).toBe(false);
+    expect(store.rows[0]!.pending_deliveries).toEqual([]);
+    vi.runAllTimers();
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+
+  test('clearing one of two deliveries leaves the row still needing the person', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1', 'dlv-2'] })];
+    store.applySessionUpdate({
+      action: 'attention_cleared',
+      id: 's1',
+      needs_attention: true,
+      pending_deliveries: ['dlv-2'],
+    });
+    expect(store.rows[0]!.needs_attention).toBe(true);
+    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-2']);
+  });
+
+  test('dismissAttention posts the dismissal and clears the flag optimistically', async () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
+    await store.dismissAttention('s1');
+    expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/dismiss-attention', undefined);
+    expect(store.rows[0]!.needs_attention).toBe(false);
+    expect(store.rows[0]!.pending_deliveries).toEqual([]);
+  });
+
+  test('dismissing one delivery names it and leaves the rest outstanding', async () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1', 'dlv-2'] })];
+    await store.dismissAttention('s1', 'dlv-1');
+    expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/dismiss-attention', {
+      delivery_id: 'dlv-1',
+    });
+    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-2']);
+    expect(store.rows[0]!.needs_attention).toBe(true);
+  });
+});

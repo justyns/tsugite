@@ -8,12 +8,15 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import NavItem from './NavItem.svelte';
   import KeyStrip from './KeyStrip.svelte';
+  import type { NavBadge } from './navBadges';
   import { TESTID } from '$lib/testids';
 
   let {
     views,
     activeId,
+    badges = {},
     collapsed = false,
+    narrow = false,
     onActivate,
     onToggleCollapsed,
     onOpenSettings,
@@ -22,8 +25,10 @@
   }: {
     views: ViewDef[];
     activeId: string;
+    badges?: Record<string, NavBadge[]>;
     /** Icons-only mode; labels hide but each glyph keeps its aria-label + tooltip. */
     collapsed?: boolean;
+    narrow?: boolean;
     /** Opens the clicked view; forwarded to each NavItem. */
     onActivate?: (id: string) => void;
     onToggleCollapsed?: () => void;
@@ -59,7 +64,9 @@
         label={view.label}
         icon={view.icon}
         active={view.id === activeId}
+        badges={badges[view.id]}
         {collapsed}
+        {narrow}
         onactivate={onActivate}
       />
     {/each}

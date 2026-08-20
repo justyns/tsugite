@@ -22,6 +22,7 @@ const callbacks = {
   onCopyId: noop,
   onOpenSession: noop,
   onRetry: noop,
+  onDismissAttention: noop,
 };
 
 // Reset to a desktop width so a narrow-viewport test never leaks into the next
@@ -872,4 +873,86 @@ test('the jobs chip links to the jobs board filtered to this session', async () 
   const chip = document.querySelector('.hd-chip') as HTMLAnchorElement | null;
   expect(chip?.textContent).toContain('1 job');
   expect(chip?.getAttribute('href')).toBe('#jobs?q=session%3Asess-1');
+});
+
+// --- Delivery cards ---------------------------------------------------------
+// `needsAck` is baked into the history event and never changes; whether THAT
+// delivery is still outstanding is live truth on the session row.
+const NEEDS_ACK = {
+  type: 'delivery',
+  source: 'schedule',
+  kind: 'needs_ack',
+  delivery_id: 'dlv-1',
+  title: 'Rent is due',
+  message: 'The rent run found an unpaid invoice.',
+  timestamp: '2026-08-14T15:10:00Z',
+  id: 9,
+};
+
+function attentionRow(pending: string[]): SessionRow {
+  return {
+    status: 'active',
+    title: 'rent',
+    metadata: {},
+    pinned: false,
+    is_primary: false,
+    busy: false,
+    needs_attention: pending.length > 0,
+    pending_deliveries: pending,
+  } as unknown as SessionRow;
+}
+
+test('an unacknowledged needs-ack card offers the dismiss control', async () => {
+  const ctrl = controllerWith([NEEDS_ACK]);
+  render(Conversation, { ctrl, row: attentionRow(['dlv-1']), railCollapsed: false, ...callbacks });
+
+  await expect.element(page.getByTestId(TESTID.chatDelivery)).toHaveTextContent('needs you');
+  await expect.element(page.getByTestId(TESTID.chatDeliveryDismiss)).toBeVisible();
+});
+
+test('a dismissed session stops offering dismiss on its needs-ack cards', async () => {
+  // The event still says needs_ack forever; the row says the obligation is
+  // discharged. Rendering the stale event leaves a live Dismiss button on every
+  // card in the session, across reloads.
+  const ctrl = controllerWith([NEEDS_ACK]);
+  render(Conversation, { ctrl, row: attentionRow([]), railCollapsed: false, ...callbacks });
+
+  const card = page.getByTestId(TESTID.chatDelivery);
+  await expect.element(card).toHaveTextContent('The rent run found an unpaid invoice.');
+  expect(card.element().textContent).not.toContain('needs you');
+  expect(document.querySelector(`[data-testid="${TESTID.chatDeliveryDismiss}"]`)).toBeNull();
+});
+
+test('dismissing one of two cards leaves the other one outstanding', async () => {
+  // One bool for N cards made the first dismiss silence every other obligation
+  // in the chat.
+  const ctrl = controllerWith([
+    { ...NEEDS_ACK, delivery_id: 'dlv-1', message: 'rent is due friday', id: 9 },
+    { ...NEEDS_ACK, delivery_id: 'dlv-2', message: 'approve the deploy?', id: 10 },
+  ]);
+  render(Conversation, { ctrl, row: attentionRow(['dlv-2']), railCollapsed: false, ...callbacks });
+
+  const cards = document.querySelectorAll(`[data-testid="${TESTID.chatDelivery}"]`);
+  expect(cards).toHaveLength(2);
+  expect(cards[0]!.textContent).not.toContain('needs you');
+  expect(cards[1]!.textContent).toContain('needs you');
+  expect(document.querySelectorAll(`[data-testid="${TESTID.chatDeliveryDismiss}"]`)).toHaveLength(
+    1,
+  );
+});
+
+test('dismissing a card names the delivery it discharges', async () => {
+  const dismissed: (string | undefined)[] = [];
+  const ctrl = controllerWith([NEEDS_ACK]);
+  render(Conversation, {
+    ctrl,
+    row: attentionRow(['dlv-1']),
+    railCollapsed: false,
+    ...callbacks,
+    onDismissAttention: (id?: string) => dismissed.push(id),
+  });
+
+  await page.getByTestId(TESTID.chatDeliveryDismiss).click();
+
+  expect(dismissed).toEqual(['dlv-1']);
 });

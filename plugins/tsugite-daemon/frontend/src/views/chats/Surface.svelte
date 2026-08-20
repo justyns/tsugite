@@ -3,8 +3,8 @@
   // one session docked as a mux tab. The session list lives in the shared context
   // rail (SessionsRail); this surface just renders whichever session it's pointed
   // at. `params.sessionId` binds it to a specific session (a rail click or deep
-  // link); with none, it resolves the default (primary/pinned/newest) like the old
-  // single-surface view, so the default-docked chat still lands on a real thread.
+  // link); with none, it resolves the default (primary/pinned/newest), so the
+  // default-docked chat still lands on a real thread.
   import { untrack } from 'svelte';
   import { conn } from '$lib/stores/conn.svelte';
   import { sessions } from '$lib/stores/sessions.svelte';
@@ -301,6 +301,8 @@
     onCopyId={() => void copySessionId()}
     onOpenSession={selectSession}
     onRetry={(text) => void onSend(text, { uploadedFiles: [] })}
+    onDismissAttention={(deliveryId) =>
+      selectedId && void sessions.dismissAttention(selectedId, deliveryId)}
   />
   {#if canCompose}
     <ChatComposer

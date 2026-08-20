@@ -50,9 +50,10 @@ export interface SessionRow extends SessionRowLike {
   unread: boolean;
   is_primary: boolean;
   busy: boolean;
-  /** Authoritative "a compaction is running for this session" flag. Absent on
-   *  rows painted from an older SWR cache, so consumers test for `=== true`. */
   compacting?: boolean;
+  needs_attention?: boolean;
+  pending_deliveries?: string[];
+  waiting_on?: string[];
   progress?: Progress;
 }
 
@@ -74,6 +75,10 @@ export interface SessionListOpts {
 
 const TERMINAL_ACTIONS = new Set(['completed', 'cancelled', 'failed']);
 const REVALIDATE_DEBOUNCE_MS = 250;
+
+function pendingIds(data: Record<string, unknown>): string[] {
+  return Array.isArray(data.pending_deliveries) ? (data.pending_deliveries as string[]) : [];
+}
 
 function cacheKey(agent: string): string {
   return `tsugite_sessions_${agent}`;
@@ -105,8 +110,7 @@ export class SessionsStore {
 
   private lastOpts: SessionListOpts = {};
   private revalidateTimer: ReturnType<typeof setTimeout> | null = null;
-  // Open conversation surfaces subscribed to their session's live broadcast
-  // frames (many surfaces can watch, and two can watch the same session).
+  private burst = new Map<string, Promise<void>>();
   private convSinks = new Map<string, Set<(data: Record<string, unknown>) => void>>();
 
   get ordered(): SessionRow[] {
@@ -129,11 +133,16 @@ export class SessionsStore {
     // Superseded (compacted-away) sessions stay in the store so a compaction
     // banner's "view source" can resolve them; the rail filters them from display.
     opts = { includeSuperseded: true, ...opts };
-    // untrack: load() is called from view $effects. Its synchronous reads of its
-    // own state (rows for the hydrate guard, agent for the switch check) must not
-    // become dependencies of the calling effect, or every rows write - including
-    // progress broadcasts - re-triggers the effect: load -> rows -> load, until
-    // effect_update_depth_exceeded stalls the app.
+    const key = agent + buildQuery(opts);
+    const started = this.burst.get(key);
+    if (started) return started;
+    const run = this.fetchList(agent, opts);
+    this.burst.set(key, run);
+    queueMicrotask(() => this.burst.delete(key));
+    return run;
+  }
+
+  private async fetchList(agent: string, opts: SessionListOpts): Promise<void> {
     untrack(() => {
       const prevAgent = this.agent;
       this.agent = agent;
@@ -228,6 +237,21 @@ export class SessionsStore {
         return;
       case 'viewed':
         if (id) this.rows = patchRow(this.rows, id, { unread: false } as Partial<SessionRow>);
+        return;
+      case 'delivered':
+        if (id)
+          this.rows = patchRow(this.rows, id, {
+            needs_attention: data.needs_attention === true,
+            pending_deliveries: pendingIds(data),
+            unread: true,
+          } as Partial<SessionRow>);
+        return;
+      case 'attention_cleared':
+        if (id)
+          this.rows = patchRow(this.rows, id, {
+            needs_attention: data.needs_attention === true,
+            pending_deliveries: pendingIds(data),
+          } as Partial<SessionRow>);
         return;
       case 'reordered':
         if (Array.isArray(data.ids)) this.rows = reorderPinRows(this.rows, data.ids as string[]);
@@ -386,6 +410,19 @@ export class SessionsStore {
     patch: Partial<Pick<SessionSettings, 'model' | 'reasoning_effort'>>,
   ): Promise<SessionSettings> {
     return api.patch<SessionSettings>(`/api/sessions/${encodeURIComponent(id)}/settings`, patch);
+  }
+
+  async dismissAttention(id: string, deliveryId?: string): Promise<void> {
+    await api.post(
+      `/api/sessions/${encodeURIComponent(id)}/dismiss-attention`,
+      deliveryId ? { delivery_id: deliveryId } : undefined,
+    );
+    const row = this.rows.find((r) => r.id === id);
+    const left = deliveryId ? (row?.pending_deliveries ?? []).filter((d) => d !== deliveryId) : [];
+    this.rows = patchRow(this.rows, id, {
+      needs_attention: left.length > 0,
+      pending_deliveries: left,
+    } as Partial<SessionRow>);
   }
 
   async markViewed(id: string, ts?: string): Promise<void> {

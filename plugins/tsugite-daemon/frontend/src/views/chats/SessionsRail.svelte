@@ -18,6 +18,7 @@
   import { ReorderDrag } from '$lib/reorderDrag.svelte';
   import { readLocal, writeLocal } from '$lib/storage';
   import type { SessionRow as Row } from '$lib/stores/sessions.svelte';
+  import type { SessionJobTally } from '$lib/stores/jobsFilter';
   import { TESTID } from '$lib/testids';
   import {
     parseSessionFilter,
@@ -43,6 +44,7 @@
     agents = [],
     selectedId,
     attn,
+    jobCounts = new Map(),
     loading = false,
     onSelect,
     onNew,
@@ -54,8 +56,8 @@
     /** All configured agents; >1 renders the agent picker. */
     agents?: string[];
     selectedId: string | null;
-    /** Session ids with an outstanding ask_user (drives needs-you). */
     attn: Set<string>;
+    jobCounts?: Map<string, SessionJobTally>;
     loading?: boolean;
     onSelect: (id: string) => void;
     onNew: () => void;
@@ -113,6 +115,9 @@
       row.pinned
         ? { label: 'Unpin', run: () => void sessions.unpin(row.id) }
         : { label: 'Pin', run: () => void sessions.pin(row.id) },
+      ...(row.needs_attention === true
+        ? [{ label: 'Dismiss attention', run: () => void sessions.dismissAttention(row.id) }]
+        : []),
       { label: 'Copy session id', run: () => void copyId(row.id) },
       { label: 'Add to chat', run: () => void attachRecordToChat('session', row.id) },
       { label: 'Copy reference', run: () => void copyReference('session', row.id) },
@@ -290,11 +295,13 @@
         title={row.title ?? 'Untitled session'}
         when={formatWhen(row.last_active ?? row.created_at)}
         description={sessionTopic(row)}
-        state={sessionRowState(row, { pendingAsk: attn.has(row.id) })}
+        state={sessionRowState(row, { needsYou: attn.has(row.id) })}
         sourceType={sessionSourceType(row)}
         isActive={row.id === selectedId}
         isPinned={row.pinned}
         isUnread={row.unread}
+        activeJobCount={jobCounts.get(row.id)?.open ?? 0}
+        waitingOnCount={row.waiting_on?.length ?? 0}
         onSelect={() => onSelect(row.id)}
         onOpenNewTab={() => openInNewTab(row)}
       />

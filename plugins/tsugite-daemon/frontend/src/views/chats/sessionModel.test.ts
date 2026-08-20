@@ -7,6 +7,8 @@ import {
   isFinishedSession,
   formatWhen,
   sessionTopic,
+  sessionNeedsYou,
+  needsYouSessions,
 } from './sessionModel';
 
 const base = (over: Partial<SessionRow> = {}): SessionRow =>
@@ -58,7 +60,7 @@ describe('sessionRowState', () => {
     expect(sessionRowState(base({ status: 'cancelled' }))).toBe('done');
   });
   it('needs-you wins over busy when a question is pending', () => {
-    expect(sessionRowState(base({ busy: true }), { pendingAsk: true })).toBe('needs-you');
+    expect(sessionRowState(base({ busy: true }), { needsYou: true })).toBe('needs-you');
   });
   it('busy with an LLM-wait status_text reads as thinking, else running', () => {
     const waiting = base({
@@ -153,5 +155,81 @@ describe('sessionTopic', () => {
   it('prefers metadata.topic, else derives from the label', () => {
     expect(sessionTopic(base({ metadata: { topic: 'sse backoff' } }))).toBe('sse backoff');
     expect(sessionTopic(base({ metadata: {}, label: 'Web: web-alice' }))).toBe('Web: web-alice');
+  });
+});
+
+describe('sessionNeedsYou', () => {
+  it('reads the daemon status_text for an outstanding question', () => {
+    expect(sessionNeedsYou(base({ progress: { status_text: 'Awaiting answer' } as never }))).toBe(
+      true,
+    );
+    expect(sessionNeedsYou(base({ progress: { status_text: 'Tool: grep' } as never }))).toBe(false);
+    expect(sessionNeedsYou(base())).toBe(false);
+  });
+
+  it('counts a durable needs-attention flag from a needs-ack delivery', () => {
+    expect(sessionNeedsYou(base({ needs_attention: true }))).toBe(true);
+    expect(sessionNeedsYou(base({ needs_attention: false }))).toBe(false);
+  });
+
+  it('counts a job parked on the person as needing you', () => {
+    expect(sessionNeedsYou(base(), 1)).toBe(true);
+    expect(sessionNeedsYou(base(), 0)).toBe(false);
+  });
+
+  it('groups a session with a parked job as active, not recent', () => {
+    const rows = [base({ id: 'blocked' }), base({ id: 'quiet' })];
+    const parked: Record<string, number> = { blocked: 1 };
+    const attn = new Set(rows.filter((r) => sessionNeedsYou(r, parked[r.id])).map((r) => r.id));
+    const g = groupSessions(rows, { attn });
+    expect(g.active.map((r) => r.id)).toEqual(['blocked']);
+    expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
+  });
+
+  it('groups a needs-attention row as active, not recent', () => {
+    const rows = [base({ id: 'ack', needs_attention: true }), base({ id: 'quiet' })];
+    const attn = new Set(rows.filter((r) => sessionNeedsYou(r)).map((r) => r.id));
+    const g = groupSessions(rows, { attn });
+    expect(g.active.map((r) => r.id)).toEqual(['ack']);
+    expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
+  });
+});
+
+describe('needsYouSessions', () => {
+  const tally = (parked: Record<string, number>) =>
+    new Map(Object.entries(parked).map(([id, n]) => [id, { open: n, parked: n }]));
+
+  it('collects the rows waiting on the person, jobs folded in', () => {
+    const rows = [
+      base({ id: 'ack', needs_attention: true }),
+      base({ id: 'asked', progress: { status_text: 'Awaiting answer' } as never }),
+      base({ id: 'blocked' }),
+      base({ id: 'quiet' }),
+    ];
+    expect(needsYouSessions(rows, tally({ blocked: 1 })).map((r) => r.id)).toEqual([
+      'ack',
+      'asked',
+      'blocked',
+    ]);
+  });
+
+  it('drops a finished session, whatever it was waiting for', () => {
+    const rows = [
+      base({ id: 'done', status: 'completed', needs_attention: true }),
+      base({ id: 'failed', status: 'failed' }),
+    ];
+    expect(needsYouSessions(rows, tally({ failed: 2 }))).toEqual([]);
+  });
+
+  it('drops a compacted-away session, leaving its successor to speak for it', () => {
+    const rows = [
+      base({ id: 'old', needs_attention: true, superseded_by: 'new' }),
+      base({ id: 'new', needs_attention: true }),
+    ];
+    expect(needsYouSessions(rows).map((r) => r.id)).toEqual(['new']);
+  });
+
+  it('ignores jobs entirely when given no tally', () => {
+    expect(needsYouSessions([base({ id: 'blocked' })])).toEqual([]);
   });
 });

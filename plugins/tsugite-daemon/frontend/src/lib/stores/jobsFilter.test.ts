@@ -4,6 +4,7 @@ import {
   groupCounts,
   groupForState,
   jobMatchesFilter,
+  jobTallyBySession,
   parseJobFilter,
 } from './jobsFilter';
 
@@ -84,14 +85,41 @@ describe('groupForState / groupCounts', () => {
     expect(groupForState('spawning')).toBeNull();
   });
 
+  it('reads a queued job as active - it is live work, not resolved', () => {
+    expect(groupForState('queued')).toBe('active');
+  });
+
   it('counts jobs per group', () => {
     expect(
       groupCounts([
+        { state: 'queued' },
         { state: 'running' },
         { state: 'verifying' },
         { state: 'stuck' },
         { state: 'done' },
       ]),
-    ).toEqual({ stuck: 1, active: 2, resolved: 1 });
+    ).toEqual({ stuck: 1, active: 3, resolved: 1 });
+  });
+});
+
+describe('jobTallyBySession', () => {
+  it("tallies each session's outstanding jobs, and which of them are parked", () => {
+    const tally = jobTallyBySession([
+      { job_id: '1', state: 'running', parent_session_id: 'a' },
+      { job_id: '2', state: 'queued', parent_session_id: 'a' },
+      { job_id: '3', state: 'stuck', parent_session_id: 'a' },
+      { job_id: '4', state: 'verifying', parent_session_id: 'b' },
+    ]);
+    expect(tally.get('a')).toEqual({ open: 3, parked: 1 });
+    expect(tally.get('b')).toEqual({ open: 1, parked: 0 });
+  });
+
+  it('drops resolved jobs and jobs with no owning session', () => {
+    const tally = jobTallyBySession([
+      { job_id: '1', state: 'done', parent_session_id: 'a' },
+      { job_id: '2', state: 'cancelled', parent_session_id: 'a' },
+      { job_id: '3', state: 'running', parent_session_id: null },
+    ]);
+    expect(tally.size).toBe(0);
   });
 });

@@ -111,6 +111,14 @@ export interface NoticeBlock {
   kind: 'notice';
   message: string;
 }
+export interface DeliveryBlock {
+  kind: 'delivery';
+  message: string;
+  source: string;
+  needsAck: boolean;
+  deliveryId?: string;
+  title?: string;
+}
 
 export type TurnBlock =
   | ProseBlock
@@ -121,7 +129,8 @@ export type TurnBlock =
   | ResultBlock
   | JobBlock
   | ErrorBlock
-  | NoticeBlock;
+  | NoticeBlock
+  | DeliveryBlock;
 
 /** A context-injection block peeled off the front of a user_input (scheduled
  *  task results, environment/context prefixes) - shown folded, never as the
@@ -645,8 +654,8 @@ class Builder {
       }
       case 'info': {
         // A mid-run message to the user - send_message() emits InfoEvent, and
-        // the daemon persists it as `info`. Rendered as agent prose in the turn
-        // (legacy parity: info bubbles), live and on replay alike.
+        // the daemon persists it as `info`. Rendered as agent prose in the turn,
+        // live and on replay alike.
         const turn = this.ensureAi(at);
         this.closeOpenCode(turn);
         this.flushStream(turn);
@@ -843,6 +852,24 @@ class Builder {
         else turn.blocks.push({ kind: 'job', job });
         return;
       }
+      case 'delivery': {
+        // Deliberately never assigned to `this.ai`: the next model frame must open
+        // its own bubble rather than append to a row that was never a model turn.
+        let turn = this.ai;
+        if (!turn) {
+          turn = { id: this.uid('ai'), role: 'ai', at, blocks: [] };
+          this.turns.push(turn);
+        }
+        turn.blocks.push({
+          kind: 'delivery',
+          message: str(e.message) ?? '',
+          source: str(e.source) ?? '',
+          needsAck: str(e.kind) === 'needs_ack',
+          ...(str(e.delivery_id) ? { deliveryId: str(e.delivery_id) } : {}),
+          ...(str(e.title) ? { title: str(e.title) } : {}),
+        });
+        return;
+      }
       // Group frames only mean anything inside a running code block. Never
       // ensureAi() here: a stray frame after the turn closed would spawn an
       // empty AI bubble, the same hazard reasoning_content guards against.
@@ -972,7 +999,7 @@ class Builder {
       }
       case 'ask_answered': {
         // Resolves the open prompt (answered, cancelled, or timed out). A missing
-        // id on either side is treated as a match (legacy / id-less backend).
+        // id on either side is treated as a match, for a backend that sends none.
         const id = str(e.ask_id);
         if (
           this.pendingAsk &&

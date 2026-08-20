@@ -2,9 +2,10 @@
   // One primary-nav row (.t-nav).
   // A real anchor so the hash router drives it (Cmd-click, middle-click work);
   // the active row is marked by aria-current, never by the accent bar alone.
-  import type { Snippet } from 'svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
+  import Badge from '$lib/components/buttons/Badge.svelte';
   import type { IconName } from '$lib/components/icon/icons';
+  import type { NavBadge } from './navBadges';
   import { TESTID } from '$lib/testids';
 
   let {
@@ -13,18 +14,17 @@
     icon,
     active = false,
     collapsed = false,
-    badge,
+    narrow = false,
+    badges = [],
     onactivate,
   }: {
     id: string;
     label: string;
     icon: IconName;
     active?: boolean;
-    /** Icons-only rail: the label hides, so the glyph carries the name + a tooltip. */
     collapsed?: boolean;
-    /** Live-count badges land here once session data is wired; omitted renders clean. */
-    badge?: Snippet;
-    /** Plain-click activation drives the mux; omit to leave the anchor a pure hash link. */
+    narrow?: boolean;
+    badges?: NavBadge[];
     onactivate?: (id: string) => void;
   } = $props();
 
@@ -37,6 +37,9 @@
     event.preventDefault();
     onactivate(id);
   }
+
+  const dotOnly = $derived(collapsed || narrow);
+  const dotLabel = $derived(badges.map((b) => b.label).join(', '));
 </script>
 
 <li>
@@ -53,7 +56,17 @@
   >
     <Icon name={icon} />
     <span class="lb">{label}</span>
-    {#if badge}<span class="bdg">{@render badge()}</span>{/if}
+    {#if badges.length}
+      {#if dotOnly}
+        <span class="dot"><Badge variant="dot" label={dotLabel} /></span>
+      {:else}
+        <span class="bdg">
+          {#each badges as badge}
+            <Badge variant={badge.variant} label={badge.label}>{badge.count}</Badge>
+          {/each}
+        </span>
+      {/if}
+    {/if}
   </a>
 </li>
 
@@ -93,14 +106,11 @@
   .t-nav.is-active :global(.ic) {
     color: var(--acc);
   }
-  /* Icons-only: center the glyph, drop the label + badge (the anchor carries an
-     aria-label + title so the row keeps its name and gains a tooltip). */
   .t-nav.is-collapsed {
     justify-content: center;
     padding: 0;
   }
-  .t-nav.is-collapsed .lb,
-  .t-nav.is-collapsed .bdg {
+  .t-nav.is-collapsed .lb {
     display: none;
   }
   .lb {
@@ -115,8 +125,12 @@
     gap: 4px;
     align-items: center;
   }
+  .dot {
+    position: absolute;
+    top: 3px;
+    right: 5px;
+  }
 
-  /* Narrow: stack glyph over label, badge floats to the corner. */
   @media (max-width: 640px) {
     .t-nav {
       flex-direction: column;
@@ -132,11 +146,9 @@
     .t-nav.is-active {
       box-shadow: none;
     }
-    .bdg {
-      position: absolute;
+    .dot {
       top: 1px;
       right: 2px;
-      margin: 0;
     }
   }
 </style>

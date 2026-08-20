@@ -39,7 +39,14 @@ export class AgentsMetaStore {
   loading = $state(false);
   error = $state<string | null>(null);
 
+  private inflight: Promise<void> | null = null;
+
   async load(): Promise<void> {
+    this.inflight ??= this.fetchAgents();
+    await this.inflight;
+  }
+
+  private async fetchAgents(): Promise<void> {
     this.loading = true;
     this.error = null;
     try {
@@ -49,6 +56,7 @@ export class AgentsMetaStore {
       this.error = err instanceof Error ? err.message : String(err);
     } finally {
       this.loading = false;
+      this.inflight = null;
     }
   }
 

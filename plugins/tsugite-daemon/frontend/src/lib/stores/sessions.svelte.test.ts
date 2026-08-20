@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { api } from '$lib/api/client';
 import { SessionsStore, type SessionRow } from './sessions.svelte';
+
+afterEach(() => vi.restoreAllMocks());
 
 function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -64,5 +67,38 @@ describe('SessionsStore unread lifecycle', () => {
     store.applySessionUpdate({ action: 'viewed', id: 'ghost' });
 
     expect(store.rows.find((r) => r.id === 'a')?.unread).toBe(true);
+  });
+});
+
+// The shell seeds the session list at boot while the chats rail loads it too;
+// both effects run in one flush, so the store coalesces that burst.
+describe('SessionsStore.load', () => {
+  it('shares one GET between callers that ask in the same tick', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [row('a')] } as never);
+    const store = new SessionsStore();
+
+    await Promise.all([store.load('odyn'), store.load('odyn')]);
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(store.rows.map((r) => r.id)).toEqual(['a']);
+  });
+
+  it('refetches for a reload that follows a mutation, not the boot burst', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [] } as never);
+    const store = new SessionsStore();
+
+    await store.load('odyn');
+    await store.load('odyn');
+
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves a different agent to its own GET', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [] } as never);
+    const store = new SessionsStore();
+
+    await Promise.all([store.load('odyn'), store.load('scout')]);
+
+    expect(get).toHaveBeenCalledTimes(2);
   });
 });

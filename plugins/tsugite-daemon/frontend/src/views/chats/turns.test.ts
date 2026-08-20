@@ -9,6 +9,7 @@ import {
   type ErrorBlock,
   type JobBlock,
   type NoticeBlock,
+  type DeliveryBlock,
 } from './turns';
 
 // Shapes copied from a live daemon capture (GET /api/sessions/{id}/events).
@@ -1592,5 +1593,67 @@ describe('buildTimeline (tsu_group execution groups)', () => {
       const code = t.turns[1]!.blocks.find((b) => b.kind === 'code') as CodeBlock;
       expect(code.groups).toBeUndefined();
     }
+  });
+});
+
+describe('buildTimeline (delivery cards)', () => {
+  const delivery = {
+    type: 'delivery',
+    source: 'schedule',
+    kind: 'needs_ack',
+    delivery_id: 'dlv-1',
+    title: 'Rent is due',
+    message: 'The rent run found an unpaid invoice.',
+    timestamp: '2026-07-14T15:10:00Z',
+    id: 9,
+  };
+
+  it('renders a delivery landing between turns as its own closed card row', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: 'hello', timestamp: '2026-07-14T15:00:01Z', id: 2 },
+      delivery,
+    ]);
+    const row = t.turns[t.turns.length - 1]!;
+    const card = row.blocks.find((b) => b.kind === 'delivery') as DeliveryBlock;
+    expect(card).toMatchObject({
+      source: 'schedule',
+      title: 'Rent is due',
+      message: 'The rent run found an unpaid invoice.',
+      needsAck: true,
+    });
+    // Its own row, and never a phantom streaming bubble - no turn is running.
+    expect(row.blocks).toHaveLength(1);
+    expect(row.streaming).toBeFalsy();
+  });
+
+  it('keeps a second delivery instead of clobbering the first', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      { ...delivery, message: 'first', delivery_id: 'dlv-1', id: 2 },
+      { ...delivery, message: 'second', delivery_id: 'dlv-2', id: 3 },
+    ]);
+    const cards = t.turns.flatMap((turn) => turn.blocks).filter((b) => b.kind === 'delivery');
+    expect(cards.map((c) => (c as DeliveryBlock).message)).toEqual(['first', 'second']);
+    // Each card names its own obligation, so one can be dismissed without the other.
+    expect(cards.map((c) => (c as DeliveryBlock).deliveryId)).toEqual(['dlv-1', 'dlv-2']);
+  });
+
+  it('marks an fyi delivery as not needing an acknowledgement', () => {
+    const t = buildTimeline([{ ...delivery, kind: 'fyi', title: undefined }]);
+    const card = t.turns[0]!.blocks[0] as DeliveryBlock;
+    expect(card.needsAck).toBe(false);
+    expect(card.title).toBeUndefined();
+  });
+
+  it('folds a delivery that races an open turn into that turn, keeping order', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      { type: 'thought', content: 'working', id: 2 },
+      delivery,
+      { type: 'final_result', result: 'done', id: 3 },
+    ]);
+    expect(t.turns).toHaveLength(2);
+    expect(t.turns[1]!.blocks.map((b) => b.kind)).toEqual(['prose', 'delivery', 'prose']);
   });
 });

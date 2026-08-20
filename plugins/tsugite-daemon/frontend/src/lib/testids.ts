@@ -139,8 +139,8 @@ export const TESTID = {
   chatEffortSeg: 'chat-effort-seg',
   /** Prominent, always-visible Retry on a failed turn (re-sends the last message). */
   chatRetry: 'chat-retry',
-  /** A user turn's attachments: an image thumbnail button, a non-image file chip,
-   *  and the full-image lightbox that a thumbnail opens. */
+  chatDelivery: 'chat-delivery',
+  chatDeliveryDismiss: 'chat-delivery-dismiss',
   chatAttachmentImage: 'chat-attachment-image',
   chatAttachmentChip: 'chat-attachment-chip',
   chatAttachmentLightbox: 'chat-attachment-lightbox',

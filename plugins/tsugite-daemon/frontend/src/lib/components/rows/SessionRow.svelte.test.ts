@@ -113,3 +113,26 @@ test('a running-but-unread row keeps the ambient spinner in the indicator slot',
   expect(container.querySelector('.ind .t-spin')).not.toBeNull();
   expect(container.querySelector('.ind .t-dot')).toBeNull();
 });
+
+test('a waiting-on count renders in the marker cluster with an accessible label', async () => {
+  render(SessionRow, {
+    title: 'ops: quarterly rollup',
+    when: '4m',
+    state: 'idle',
+    sourceType: 'ops',
+    waitingOnCount: 2,
+  });
+  await expect.element(page.getByLabelText('waiting on 2 sessions')).toBeInTheDocument();
+  await expect.element(page.getByText('2', { exact: true })).toBeInTheDocument();
+});
+
+test('the waiting-on label is singular for one session', async () => {
+  render(SessionRow, {
+    title: 'ops: quarterly rollup',
+    when: '4m',
+    state: 'idle',
+    sourceType: 'ops',
+    waitingOnCount: 1,
+  });
+  await expect.element(page.getByLabelText('waiting on 1 session')).toBeInTheDocument();
+});

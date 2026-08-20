@@ -6,8 +6,11 @@
   // the resolved default when the paramless default chat is focused).
   import { sessions } from '$lib/stores/sessions.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
+  import { jobs } from '$lib/stores/jobs.svelte';
+  import { jobTallyBySession } from '$lib/stores/jobsFilter';
   import SessionsRail from './SessionsRail.svelte';
   import { resolveDefaultSession } from './defaultSession';
+  import { needsYouSessions } from './sessionModel';
 
   let {
     focusedSessionId,
@@ -30,15 +33,8 @@
   // same default the surface itself resolves to.
   const selectedId = $derived(resolveDefaultSession(rows, focusedSessionId));
 
-  const attn = $derived.by(() => {
-    const set = new Set<string>();
-    for (const r of rows) {
-      const text = String(r.progress?.status_text ?? '').toLowerCase();
-      if (text.includes('awaiting') || text.includes('question') || text.includes('input on'))
-        set.add(r.id);
-    }
-    return set;
-  });
+  const jobCounts = $derived(jobTallyBySession(jobs.jobs));
+  const attn = $derived(new Set(needsYouSessions(rows, jobCounts).map((r) => r.id)));
 
   $effect(() => {
     if (agentsMeta.agents.length === 0) void agentsMeta.load();
@@ -64,6 +60,7 @@
   agents={agentNames}
   {selectedId}
   {attn}
+  {jobCounts}
   loading={sessions.loading}
   onSelect={(id) => onOpenChat(id, agent)}
   onNew={newSession}

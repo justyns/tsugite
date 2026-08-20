@@ -21,7 +21,7 @@
   import { TESTID } from '$lib/testids';
   import type { ConversationController } from './conversation.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
-  import { splitStreamFence, type Compaction } from './turns';
+  import { splitStreamFence, type Compaction, type DeliveryBlock } from './turns';
   import { formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
@@ -32,6 +32,7 @@
   import SessionMenu from './SessionMenu.svelte';
   import ModelEffort from './ModelEffort.svelte';
   import JobTile from './JobTile.svelte';
+  import DeliveryCard from './DeliveryCard.svelte';
   import Attachments from './Attachments.svelte';
   import PromptInspector, { type TokenBreakdown } from './PromptInspector.svelte';
   import RawMessages from './RawMessages.svelte';
@@ -57,6 +58,7 @@
     onCopyId,
     onOpenSession,
     onRetry,
+    onDismissAttention,
   }: {
     ctrl: ConversationController;
     row: SessionRow | null;
@@ -75,12 +77,10 @@
     onPin: () => void;
     onUnpin: () => void;
     onSetPrimary: () => void;
-    /** Copy the session id to the clipboard (menu affordance). */
     onCopyId: () => void;
-    /** Open another session in this pane (supersession chain navigation). */
     onOpenSession: (id: string) => void;
-    /** Re-send the given prompt (the retry affordance on the last AI turn). */
     onRetry: (text: string) => void;
+    onDismissAttention: (deliveryId?: string) => void;
   } = $props();
 
   let scrollEl = $state<HTMLElement>();
@@ -107,6 +107,14 @@
   );
 
   const links = $derived(metaLinks(row?.metadata));
+
+  function isOutstanding(block: DeliveryBlock): boolean {
+    return (
+      block.needsAck &&
+      !!block.deliveryId &&
+      (row?.pending_deliveries ?? []).includes(block.deliveryId)
+    );
+  }
 
   // The most recent user prompt, re-sent by the retry affordance on the last turn.
   const lastUserText = $derived.by(() => {
@@ -624,6 +632,12 @@
               </div>
             {:else if block.kind === 'job'}
               <JobTile job={block.job} />
+            {:else if block.kind === 'delivery'}
+              <DeliveryCard
+                {block}
+                outstanding={isOutstanding(block)}
+                onDismiss={() => onDismissAttention(block.deliveryId)}
+              />
             {/if}
           {/each}
           {#if turn.attachments}
