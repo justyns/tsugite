@@ -78,6 +78,28 @@ class HistoryBackend(Protocol):
 
     def count_events(self, session_id: str, *, type: Optional[str] = None) -> int: ...
 
+    def recent_events(
+        self,
+        *,
+        types: Iterable[str],
+        limit: int = 50,
+    ) -> "List[tuple[str, Event]]":
+        """The newest ``limit`` ``(session_id, event)`` rows of the given types across
+        every session, newest-first by insertion order.
+        """
+        ...
+
+    def latest_event_per_session(
+        self,
+        *,
+        types: Iterable[str],
+        limit: int = 50,
+    ) -> "List[tuple[str, Event]]":
+        """The newest matching event for each session that has one, newest-first,
+        capped at ``limit`` sessions.
+        """
+        ...
+
     def ensure_session(self, session_id: str) -> Session: ...
 
     def delete_session(self, session_id: str) -> bool: ...

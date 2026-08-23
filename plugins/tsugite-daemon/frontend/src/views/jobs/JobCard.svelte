@@ -6,7 +6,7 @@
   import JobPill from './JobPill.svelte';
   import JobCrit from './JobCrit.svelte';
   import { acCounts, acRows, attemptCount } from './jobModel';
-  import { relativeAgo, relativeTime } from './format';
+  import { formatAgo } from '$lib/relativeTime';
   import { boardColForState } from './board';
 
   let {
@@ -28,18 +28,18 @@
 
   // Secondary line under the pill: attempt / queue-age / resolved-age, per state.
   const meta = $derived.by(() => {
-    if (col === 'queued') return `${relativeTime(job.created_at, now)} in queue`;
+    if (col === 'queued') return `${formatAgo(job.created_at, now, 'bare')} in queue`;
     if (job.state === 'done')
-      return `${relativeAgo(job.resolved_at ?? job.updated_at, now)} · ${attempts} attempt${attempts === 1 ? '' : 's'}`;
-    if (job.state === 'cancelled') return relativeAgo(job.resolved_at ?? job.updated_at, now);
+      return `${formatAgo(job.resolved_at ?? job.updated_at, now)} · ${attempts} attempt${attempts === 1 ? '' : 's'}`;
+    if (job.state === 'cancelled') return formatAgo(job.resolved_at ?? job.updated_at, now);
     return `attempt ${attempts}/${job.max_attempts}`;
   });
   // Trailing timestamp for the live/parked states (queued/done/cancelled carry
   // their timing in `meta` already).
   const stamp = $derived.by(() => {
     if (col === 'queued' || job.state === 'done' || job.state === 'cancelled') return '';
-    if (job.state === 'awaiting_input') return `blocked ${relativeTime(job.updated_at, now)}`;
-    return relativeAgo(job.updated_at, now);
+    if (job.state === 'awaiting_input') return `blocked ${formatAgo(job.updated_at, now, 'bare')}`;
+    return formatAgo(job.updated_at, now);
   });
   const errorLine = $derived(
     job.state === 'errored' || job.state === 'stuck' ? (job.error ?? '') : '',

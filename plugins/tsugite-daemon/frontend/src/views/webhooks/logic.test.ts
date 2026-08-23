@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildTestPayload, deliveryPath, deliveryUrl, isValidSource, relativeTime } from './logic';
+import { buildTestPayload, deliveryPath, deliveryUrl, isValidSource } from './logic';
 
 describe('isValidSource', () => {
   test('accepts letters, digits, dot, underscore, dash', () => {
@@ -21,44 +21,7 @@ describe('isValidSource', () => {
   });
 });
 
-describe('relativeTime', () => {
-  const now = new Date('2026-07-14T12:00:00Z').getTime();
-
-  test('under a minute reads "just now"', () => {
-    expect(relativeTime('2026-07-14T11:59:31Z', now)).toBe('just now');
-  });
-
-  test('minutes', () => {
-    expect(relativeTime('2026-07-14T11:55:00Z', now)).toBe('5m');
-  });
-
-  test('hours', () => {
-    expect(relativeTime('2026-07-14T09:00:00Z', now)).toBe('3h');
-  });
-
-  test('days', () => {
-    expect(relativeTime('2026-07-11T12:00:00Z', now)).toBe('3d');
-  });
-
-  test('weeks', () => {
-    expect(relativeTime('2026-06-20T12:00:00Z', now)).toBe('3w');
-  });
-
-  test('months once past the ~5 week rollover', () => {
-    // 74 days back (May has 31): 74/30 rounds to 2, not the week-bucket's 3w+.
-    expect(relativeTime('2026-05-01T12:00:00Z', now)).toBe('2mo');
-  });
-
-  test('an unparseable timestamp returns empty rather than "NaNm"', () => {
-    expect(relativeTime('not-a-date', now)).toBe('');
-  });
-
-  test('defaults `now` to the current time when omitted', () => {
-    expect(relativeTime(new Date().toISOString())).toBe('just now');
-  });
-});
-
-describe('deliveryPath / deliveryUrl', () => {
+describe('relaveryPath / deliveryUrl', () => {
   test('path is the real top-level route, not under /api', () => {
     expect(deliveryPath('abc123')).toBe('/webhook/abc123');
   });

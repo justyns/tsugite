@@ -184,19 +184,6 @@ export function formatNextRun(iso: string | null | undefined, tz: string, now: n
   return fmt(iso, zone, { month: 'short', day: 'numeric' });
 }
 
-/** Relative "time ago" for a last-run instant; short date once older than a month. */
-export function formatAgo(iso: string | null | undefined, now: number): string {
-  if (!iso) return 'never';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return 'never';
-  const delta = now - t;
-  if (delta < MINUTE) return 'just now';
-  if (delta < HOUR) return `${Math.floor(delta / MINUTE)}m ago`;
-  if (delta < DAY) return `${Math.floor(delta / HOUR)}h ago`;
-  if (delta < 30 * DAY) return `${Math.floor(delta / DAY)}d ago`;
-  return fmt(iso, safeZone('UTC'), { month: 'short', day: 'numeric' });
-}
-
 /** Absolute short stamp ("jul 11 03:00") in local time, for a run/one-off instant. */
 export function formatStamp(iso: string | null | undefined): string {
   if (!iso) return '';

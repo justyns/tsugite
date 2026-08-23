@@ -12,7 +12,7 @@
   import type { Job } from '$lib/stores/jobs.svelte';
   import JobPill from './JobPill.svelte';
   import { acCounts, acRows, isTerminal } from './jobModel';
-  import { relativeAgo } from './format';
+  import { formatAgo } from '$lib/relativeTime';
   import { attachRecordToChat, copyReference } from '../chats/attachRecord';
 
   let {
@@ -67,8 +67,8 @@
     if (job.effort) items.push({ term: 'effort', value: job.effort });
     if (job.repo) items.push({ term: 'repo', value: job.repo, mono: true });
     items.push({ term: 'notify', value: job.notify_when ?? 'never' });
-    items.push({ term: 'created', value: relativeAgo(job.created_at, now) || '—' });
-    if (job.resolved_at) items.push({ term: 'resolved', value: relativeAgo(job.resolved_at, now) });
+    items.push({ term: 'created', value: formatAgo(job.created_at, now) || '—' });
+    if (job.resolved_at) items.push({ term: 'resolved', value: formatAgo(job.resolved_at, now) });
     items.push({ term: 'job', value: job.job_id, mono: true });
     return items;
   });

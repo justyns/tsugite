@@ -11,27 +11,6 @@ export function isValidSource(source: string): boolean {
   return SOURCE_PATTERN.test(source);
 }
 
-const MINUTE = 60;
-const HOUR = MINUTE * 60;
-const DAY = HOUR * 24;
-const WEEK = DAY * 7;
-const MONTH = DAY * 30;
-
-/** Relative-time label ("just now", "5m", "3h", "3d", "3w", "3mo"), rounded
- * the same way as the session/job timestamps. Empty string for an
- * unparseable timestamp rather than a misleading "NaNm". */
-export function relativeTime(iso: string, nowMs: number = Date.now()): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const diffSec = Math.max(0, Math.round((nowMs - then) / 1000));
-  if (diffSec < MINUTE) return 'just now';
-  if (diffSec < HOUR) return `${Math.round(diffSec / MINUTE)}m`;
-  if (diffSec < DAY) return `${Math.round(diffSec / HOUR)}h`;
-  if (diffSec < WEEK) return `${Math.round(diffSec / DAY)}d`;
-  if (diffSec < MONTH) return `${Math.round(diffSec / WEEK)}w`;
-  return `${Math.round(diffSec / MONTH)}mo`;
-}
-
 /** The real, working delivery path - adapters/http/webhooks.py mounts this
  * top-level (token-in-path auth), not under /api. */
 export function deliveryPath(token: string): string {

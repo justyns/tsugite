@@ -52,8 +52,18 @@ CREATE INDEX IF NOT EXISTS idx_sessions_agent      ON sessions(agent, created_at
 CREATE INDEX IF NOT EXISTS idx_sessions_branchfrom ON sessions(branched_from_session_id);
 """
 
+# recent_events filters on type and reads back down the rowid, so it needs id immediately
+# after type to come out of the index already ordered. latest_event_per_session groups by
+# session_id within a type, so it needs session_id in the key. Neither index serves the
+# other's query without a TEMP B-TREE FOR ORDER BY, so both stay.
+SCHEMA_0002 = """
+CREATE INDEX IF NOT EXISTS idx_events_type_id         ON events(type, id DESC);
+CREATE INDEX IF NOT EXISTS idx_events_type_session_id ON events(type, session_id, id DESC);
+"""
+
 MIGRATIONS: list[tuple[str, str]] = [
     ("0001_initial", SCHEMA_0001),
+    ("0002_events_activity_indexes", SCHEMA_0002),
 ]
 
 

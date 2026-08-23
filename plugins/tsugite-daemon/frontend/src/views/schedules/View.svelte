@@ -23,10 +23,10 @@
     nextUp,
     buildSpark,
     formatNextRun,
-    formatAgo,
     formatStamp,
     type SortDir,
   } from './schedulesView';
+  import { formatAgo } from '$lib/relativeTime';
   import RunStatusPill from './RunStatusPill.svelte';
   import EnableSwitch from './EnableSwitch.svelte';
   import ScheduleDrawer from './ScheduleDrawer.svelte';
@@ -270,7 +270,7 @@
               <td>
                 <span class="lastrun">
                   <RunStatusPill status={deriveRunStatus(s)} />
-                  <span class="ago c3 mono">{formatAgo(s.last_run, now)}</span>
+                  <span class="ago c3 mono">{formatAgo(s.last_run, now) || 'never'}</span>
                 </span>
               </td>
               <td><Spark points={spark.points} label={spark.label} /></td>

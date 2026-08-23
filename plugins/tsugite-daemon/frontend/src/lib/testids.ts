@@ -69,6 +69,12 @@ export const TESTID = {
   newJobExecutor: 'new-job-executor',
   newJobPreview: 'new-job-preview',
   newJobSubmit: 'new-job-submit',
+  // Activity feed
+  activityFeed: 'activity-feed',
+  activityFilter: (key: string) => `activity-filter-${key}`,
+  activityDay: (key: string) => `activity-day-${key}`,
+  activityEntry: (id: string) => `activity-entry-${id}`,
+  activityRetry: 'activity-retry',
   // Schedules view
   schedulesNew: 'schedules-new',
   schedulesCleanup: 'schedules-cleanup',

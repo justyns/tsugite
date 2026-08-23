@@ -149,3 +149,99 @@ def test_sqlite_backend_selected_by_env(monkeypatch, tmp_path):
         assert [e.type for e in backend.load(session.session_id).load_events()] == ["session_start", "user_input"]
     finally:
         close_all()
+
+
+@pytest.fixture
+def sqlite_backend(tmp_path):
+    """A SqliteHistoryBackend on its own database file."""
+    from tsugite.history.sqlite_backend import SqliteHistoryBackend
+    from tsugite.history.sqlite_conn import close_all
+
+    yield SqliteHistoryBackend(tmp_path / "history.db")
+    close_all()
+
+
+def _seed_cross_session(backend):
+    """Two sessions whose events interleave, so ordering can't come from grouping."""
+    a = backend.create(agent_name="alpha", model="test:model", session_id="sess-a")
+    b = backend.create(agent_name="beta", model="test:model", session_id="sess-b")
+    a.record("user_input", text="one")
+    b.record("user_input", text="two")
+    a.record("session_end", status="success")
+    b.record("session_end", status="error", error_message="boom")
+    return a, b
+
+
+def test_recent_events_reads_newest_first_across_sessions(sqlite_backend):
+    _seed_cross_session(sqlite_backend)
+
+    rows = sqlite_backend.recent_events(types=["user_input", "session_end"], limit=3)
+
+    assert [(sid, event.type) for sid, event in rows] == [
+        ("sess-b", "session_end"),
+        ("sess-a", "session_end"),
+        ("sess-b", "user_input"),
+    ]
+
+
+def test_latest_event_per_session_keeps_one_row_per_session(sqlite_backend):
+    """A session with many matching events collapses to its newest one, so a busy
+    session cannot push quieter ones out of the window."""
+    session_a, _b = _seed_cross_session(sqlite_backend)
+    for _ in range(5):
+        session_a.record("session_end", status="success")
+
+    rows = sqlite_backend.latest_event_per_session(types=["session_end"], limit=10)
+    assert [sid for sid, _event in rows] == ["sess-a", "sess-b"]
+
+    assert [sid for sid, _event in sqlite_backend.latest_event_per_session(types=["session_end"], limit=1)] == [
+        "sess-a"
+    ]
+
+
+def test_recent_events_filters_by_type_and_carries_data(sqlite_backend):
+    _seed_cross_session(sqlite_backend)
+
+    rows = sqlite_backend.recent_events(types=["session_end"], limit=10)
+
+    assert [(sid, event.data.get("status")) for sid, event in rows] == [
+        ("sess-b", "error"),
+        ("sess-a", "success"),
+    ]
+
+
+def test_recent_events_reads_the_index_without_a_sort(sqlite_backend):
+    """recent_events reaches idx_events_type_id and needs no sort step.
+
+    Both halves matter: an index that cannot serve the ORDER BY still gets named.
+    Tracing the connection asserts the plan of the statement the method actually ran.
+    """
+    _seed_cross_session(sqlite_backend)
+    conn = sqlite_backend._conn()
+    seen: list[str] = []
+    conn.set_trace_callback(seen.append)
+    sqlite_backend.recent_events(types=["compaction"], limit=50)
+    conn.set_trace_callback(None)
+    plan = " ".join(row[-1] for row in conn.execute("EXPLAIN QUERY PLAN " + seen[-1]).fetchall())
+
+    assert "idx_events_type_id" in plan, plan
+    assert "TEMP B-TREE" not in plan, plan
+
+
+def test_a_stale_migration_row_does_not_block_later_migrations(tmp_path):
+    """A recorded name no longer in MIGRATIONS (a renamed dev-era migration) doesn't
+    stop the current list from applying its indexes.
+    """
+    import sqlite3
+
+    from tsugite.history.sqlite_schema import SCHEMA_0001, apply_migrations
+
+    conn = sqlite3.connect(tmp_path / "history.db")
+    conn.executescript(SCHEMA_0001)
+    conn.execute("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO _migrations(name, applied_at) VALUES ('0002_events_type_session_id', '')")
+    conn.commit()
+
+    apply_migrations(conn)
+    indexes = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='events'")}
+    assert "idx_events_type_id" in indexes, sorted(indexes)

@@ -10,7 +10,7 @@
   import JobPill from './JobPill.svelte';
   import JobCrit from './JobCrit.svelte';
   import { acCounts, acRows, attemptCount } from './jobModel';
-  import { relativeTime } from './format';
+  import { formatAgo } from '$lib/relativeTime';
   import { boardColForState, type SortMode } from './board';
 
   let {
@@ -77,7 +77,7 @@
           {#if counts.total > 0}<JobCrit {counts} />{:else}<span class="c3 mono">—</span>{/if}
         </td>
         <td class="c2">{job.agent}</td>
-        <td class="c3 mono">{relativeTime(job.updated_at, now) || '—'}</td>
+        <td class="c3 mono">{formatAgo(job.updated_at, now, 'bare') || '—'}</td>
       </tr>
     {/each}
   </tbody>

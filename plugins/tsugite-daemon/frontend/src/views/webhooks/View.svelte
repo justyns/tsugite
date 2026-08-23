@@ -26,7 +26,8 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { api, type ApiError } from '$lib/api/client';
   import WebhookRow, { type TestResult } from './WebhookRow.svelte';
-  import { buildTestPayload, deliveryPath, isValidSource, relativeTime } from './logic';
+  import { buildTestPayload, deliveryPath, isValidSource } from './logic';
+  import { formatAgo } from '$lib/relativeTime';
 
   const TICK_MS = 30_000;
   const MAX_LOG_LINES = 20;
@@ -258,7 +259,7 @@
         >
           {#each testLog as line (line.id)}
             <div class="ln" class:lvl-e={!line.ok}>
-              <span class="ts_">{relativeTime(new Date(line.at).toISOString(), now)}</span>
+              <span class="ts_">{formatAgo(new Date(line.at).toISOString(), now, 'bare')}</span>
               {line.source} ({line.agent}) ← {line.status || 'error'}
               {line.detail}
             </div>

@@ -443,6 +443,50 @@ class SqliteHistoryBackend:
             params.append(type)
         return self._conn().execute(sql, params).fetchone()[0]
 
+    def recent_events(
+        self,
+        *,
+        types: Iterable[str],
+        limit: int = 50,
+    ) -> List[tuple[str, Event]]:
+        """Ordered by ``id`` so idx_events_type_id serves it without a sort."""
+        wanted = list(types)
+        placeholders = ",".join("?" * len(wanted))
+        rows = (
+            self._conn()
+            .execute(
+                f"SELECT id, session_id, type, ts, data FROM events WHERE type IN ({placeholders}) "
+                "ORDER BY id DESC LIMIT ?",
+                (*wanted, limit),
+            )
+            .fetchall()
+        )
+        return [(r["session_id"], _event_from_row(r)) for r in rows]
+
+    def latest_event_per_session(
+        self,
+        *,
+        types: Iterable[str],
+        limit: int = 50,
+    ) -> List[tuple[str, Event]]:
+        """``limit`` bounds the rows returned, not the work: the inner
+        ``SELECT MAX(id) ... GROUP BY session_id`` visits every matching event and needs a temp
+        b-tree, so cost grows with total history.
+        """
+        wanted = list(types)
+        placeholders = ",".join("?" * len(wanted))
+        rows = (
+            self._conn()
+            .execute(
+                "SELECT id, session_id, type, ts, data FROM events WHERE id IN "
+                f"(SELECT MAX(id) FROM events WHERE type IN ({placeholders}) GROUP BY session_id) "
+                "ORDER BY id DESC LIMIT ?",
+                (*wanted, limit),
+            )
+            .fetchall()
+        )
+        return [(r["session_id"], _event_from_row(r)) for r in rows]
+
     def ensure_session(self, session_id: str) -> SqliteSession:
         """Get-or-create a bare session row (no session_start), for telemetry targets.
 

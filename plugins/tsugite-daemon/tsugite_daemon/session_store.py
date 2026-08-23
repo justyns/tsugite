@@ -1,4 +1,4 @@
-"""Unified session store — replaces SessionManager and AgentSessionStore.
+"""Unified session store.
 
 Single global metadata layer for all session types (interactive, schedule,
 webhook, background, spawned). Conversation data stays in JSONL history files.
@@ -23,9 +23,14 @@ from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
 logger = logging.getLogger(__name__)
 
 
-_SESSION_END_EVENT_TYPES = frozenset(
+SESSION_END_EVENT_TYPES = frozenset(
     {"session_complete", "session_error", "session_cancelled", "final_result", "error", "cancelled", "session_end"}
 )
+"""Event types that mean a run stopped.
+
+Adding one widens the activity feed as well as the progress reset, and the frontend keeps
+its own copy in `frontend/src/lib/stores/progress.ts`; mirror changes there.
+"""
 
 
 def _progress_status_text(event: dict) -> Optional[str]:
@@ -70,7 +75,7 @@ def _progress_status_text(event: dict) -> Optional[str]:
 
 
 def _is_real_tool_event(event: dict) -> bool:
-    """True for events that count toward the tool counter — broadcast tool_result
+    """True for events that count toward the tool counter - broadcast tool_result
     with a named tool, or persisted tool_invocation. tool_call is NOT counted here
     because the matching tool_result fires later for the same invocation."""
     etype = event.get("type")
@@ -98,7 +103,7 @@ def _apply_event_to_progress(progress: dict, event: dict) -> None:
     """
     etype = event.get("type")
     progress["last_event_time"] = event.get("timestamp") or progress.get("last_event_time")
-    if etype in _SESSION_END_EVENT_TYPES:
+    if etype in SESSION_END_EVENT_TYPES:
         progress["turn_count"] = 0
         progress["tool_count"] = 0
         progress["status_text"] = ""
@@ -160,7 +165,7 @@ METADATA_JOB_HOST = "job_host"
 # is_primary makes the user's chosen primary session "follow" compaction. topic/type
 # describe the conversation's subject and are carried forward like title, so a compacted
 # session keeps its subject instead of resetting to blank until the next turn re-sets it.
-# task/pr/notes are user-authored workstream links and freeform notes — durable by
+# task/pr/notes are user-authored workstream links and freeform notes - durable by
 # intent. Anything outside this set is dropped deliberately; in particular status_text
 # is transient ("investigating", "idle") and must reset on compaction.
 COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
@@ -267,7 +272,7 @@ class Session:
         The durable half of "is this session busy". The HTTP layer's
         `_session_busy` builds on this, adding the live chat task that only it
         can see. Anything that needs to know whether a session is working
-        should ask this rather than infer it from progress fields — a progress
+        should ask this rather than infer it from progress fields - a progress
         label reports the last event, not what is happening now.
         """
         return self.turn_in_flight or self.status == SessionStatus.RUNNING.value
@@ -317,7 +322,7 @@ class SessionStore:
         # Hot caches keyed by session_id, populated lazily on first read and
         # then updated incrementally inside `append_event`. Without these,
         # `session_progress_summary` and `event_count` would re-parse the
-        # full .jsonl on every sidebar refresh — at 800+ sessions and
+        # full .jsonl on every sidebar refresh - at 800+ sessions and
         # multi-MB active session files that's tens of MB of file I/O per
         # SSE-driven update.
         self._progress_cache: dict[str, dict] = {}
@@ -547,7 +552,7 @@ class SessionStore:
         or the scanner found its name/trigger in the user message or final answer.
         Unreferenced skills get their counter incremented. Callers decide whether
         to drop skills whose counter now exceeds their TTL (we don't know per-skill
-        TTL here — that's a frontmatter/config concern).
+        TTL here - that's a frontmatter/config concern).
         """
         with self._lock:
             session = self._sessions.get(session_id)
@@ -586,7 +591,7 @@ class SessionStore:
             }
 
     def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
-        """Lock-held variant of find_named_session — caller must hold self._lock."""
+        """Lock-held variant of find_named_session - caller must hold self._lock."""
         candidates = [
             s
             for s in self._sessions.values()
@@ -780,7 +785,7 @@ class SessionStore:
                 title=old_session.title,
                 pinned=old_session.pinned,
                 pin_position=old_session.pin_position,
-                # Carry per-session UI/runtime state forward — compaction is "same
+                # Carry per-session UI/runtime state forward - compaction is "same
                 # conversation" from the user's POV, so suppressions, sticky-skill
                 # TTL counters, and effort/model overrides should follow the rotation.
                 sticky_skills=dict(old_session.sticky_skills),
@@ -985,7 +990,7 @@ class SessionStore:
         Sidebar refreshes only call `session_progress_summary` for sessions in
         live statuses, so finished sessions never re-read the cache; keeping
         them resident grows memory without bound across daemon uptime. The
-        event_count entry stays — it's still hit by `session_detail`.
+        event_count entry stays - it's still hit by `session_detail`.
         """
         with self._cache_lock:
             self._progress_cache.pop(session_id, None)
@@ -1145,7 +1150,7 @@ class SessionStore:
         backend.ensure_session(session_id).record(event.get("type", "unknown"), ts=ts, **data)
 
         # Update hot caches incrementally. Skip when the session_id has never
-        # been read — the cold-load path will populate everything in one go.
+        # been read - the cold-load path will populate everything in one go.
         with self._cache_lock:
             if session_id in self._event_count_cache:
                 self._event_count_cache[session_id] += 1
@@ -1174,7 +1179,7 @@ class SessionStore:
     ) -> dict:
         """Windowed / delta read of a session's UI events for the chat surface.
 
-        - ``after_id``: forward delta — only events with ``id`` greater than it
+        - ``after_id``: forward delta - only events with ``id`` greater than it
           (the incremental resync path). A forward catch-up, so ``has_more`` is
           always False.
         - ``limit`` alone: the newest ``limit`` events (the tail window on open).
@@ -1244,14 +1249,14 @@ class SessionStore:
 
         `status_text` is the last status-bearing event, which is the session's
         *current* status only while the log ends on a terminator. A log can end
-        mid-turn with nothing running — compaction retains a slice of turns and
+        mid-turn with nothing running - compaction retains a slice of turns and
         deliberately drops their `session_end` markers, and a crash or truncated
         write leaves the same shape. Callers rendering the label must therefore
         gate it on `has_live_work` (or the HTTP layer's broader `_session_busy`),
         or an idle session displays a stale "Waiting on LLM..." forever. This
         stays a pure derivation from events; liveness is not an event.
 
-        Callers MUST treat the returned dict as read-only — it's the cached
+        Callers MUST treat the returned dict as read-only - it's the cached
         object itself, shared across calls. Mutating it corrupts the cache.
         The sole production caller hands the result straight to JSONResponse
         and never mutates.
@@ -1478,7 +1483,7 @@ class SessionStore:
             if session.turn_in_flight:
                 session.turn_in_flight = False
                 changed = True
-            # A session that was mid-compaction at restart can't still be — the
+            # A session that was mid-compaction at restart can't still be - the
             # in-memory lock didn't survive. Clear the flag so the UI doesn't
             # show a stuck "compacting…" indicator.
             if session.compacting:

@@ -19,7 +19,8 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
-  import { deliveryUrl, relativeTime } from './logic';
+  import { deliveryUrl } from './logic';
+  import { formatAgo } from '$lib/relativeTime';
 
   let {
     webhook,
@@ -102,7 +103,7 @@
       >
         <Icon name={lastTest.ok ? 'check' : 'x'} size={11} />
         {lastTest.status || 'error'}
-        <span class="t-sub">{relativeTime(new Date(lastTest.at).toISOString(), now)}</span>
+        <span class="t-sub">{formatAgo(new Date(lastTest.at).toISOString(), now, 'bare')}</span>
       </span>
     {:else}
       <span class="test-result is-idle">
@@ -111,7 +112,7 @@
       </span>
     {/if}
   </td>
-  <td class="c3 mono">{relativeTime(webhook.created_at, now)}</td>
+  <td class="c3 mono">{formatAgo(webhook.created_at, now, 'bare')}</td>
   <td>
     <div class="acts">
       <Button

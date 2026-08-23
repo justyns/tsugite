@@ -7,7 +7,6 @@ import {
   nextUp,
   buildSpark,
   formatNextRun,
-  formatAgo,
   formatDuration,
   formatStamp,
   recentRuns,
@@ -176,17 +175,6 @@ describe('formatNextRun', () => {
 
   it('falls back to UTC for an unknown timezone rather than throwing', () => {
     expect(formatNextRun(iso(18 * 3_600_000), 'Mars/Olympus', NOW)).toBe('wed 06:00');
-  });
-});
-
-describe('formatAgo', () => {
-  it('renders never / relative buckets / old date', () => {
-    expect(formatAgo(null, NOW)).toBe('never');
-    expect(formatAgo(iso(-30_000), NOW)).toBe('just now');
-    expect(formatAgo(iso(-5 * 60_000), NOW)).toBe('5m ago');
-    expect(formatAgo(iso(-3 * 3_600_000), NOW)).toBe('3h ago');
-    expect(formatAgo(iso(-3 * 24 * 3_600_000), NOW)).toBe('3d ago');
-    expect(formatAgo(iso(-40 * 24 * 3_600_000), NOW)).toBe('jun 4');
   });
 });
 

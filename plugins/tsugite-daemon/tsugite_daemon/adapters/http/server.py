@@ -10,6 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from tsugite_daemon.adapters.http.activity import ActivityMixin
 from tsugite_daemon.adapters.http.agents import AgentsMixin
 from tsugite_daemon.adapters.http.files import FilesMixin
 from tsugite_daemon.adapters.http.helpers import (
@@ -50,6 +51,7 @@ class HTTPServer(
     PushMixin,
     SecretsMixin,
     UsageMixin,
+    ActivityMixin,
     IntrospectionMixin,
     StaticMixin,
 ):
@@ -197,6 +199,7 @@ class HTTPServer(
             *self._push_routes(),
             *self._secrets_routes(),
             *self._usage_routes(),
+            *self._activity_routes(),
             *self._introspection_routes(),
             *self._static_routes(),
         ]

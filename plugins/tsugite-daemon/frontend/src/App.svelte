@@ -24,6 +24,7 @@
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
+  import { activity } from '$lib/stores/activity.svelte';
   import { schedules } from '$lib/stores/schedules.svelte';
   import { terminals } from '$lib/stores/terminals.svelte';
   import { files } from '$lib/stores/files.svelte';
@@ -346,6 +347,7 @@
   function onShellEvent(event: SSEEvent) {
     routeShellEvent(event, shellEventSink);
     pluginsMeta.applyPluginEvent(event);
+    activity.applyEvent(event);
   }
 
   // Keystrip "today" cost/tokens: a real since-UTC-midnight fetch, kicked off once

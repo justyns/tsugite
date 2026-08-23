@@ -30,7 +30,7 @@ export interface ProgressEvent {
 }
 
 // Turn-end markers reset the rollup to an empty/idle state. Kept in sync with
-// session_store._SESSION_END_EVENT_TYPES.
+// session_store.SESSION_END_EVENT_TYPES.
 const SESSION_END_TYPES = new Set([
   'session_complete',
   'session_error',

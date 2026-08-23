@@ -22,7 +22,7 @@
   import type { ConversationController } from './conversation.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
   import { splitStreamFence, type Compaction } from './turns';
-  import { relativeTime } from '$lib/relativeTime';
+  import { formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
@@ -175,7 +175,7 @@
       c.replacedCount != null && c.retainedCount != null
         ? ` · ${c.replacedCount} turns → ${c.retainedCount} kept`
         : '';
-    const when = relativeTime(c.at);
+    const when = formatAgo(c.at);
     return `context compacted${when ? ` ${when}` : ''}${counts} · summary retained`;
   }
   let openSummary = $state<Record<string, boolean>>({});

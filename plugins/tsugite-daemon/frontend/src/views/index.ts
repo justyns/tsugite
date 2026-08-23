@@ -96,6 +96,15 @@ export const views: ViewDef[] = [
     icon: 'plug',
     mode: 'full',
   },
+  // Appended, so it is palette-only on phones (the rail hides rows past the
+  // fifth) rather than pushing an existing row off.
+  {
+    id: 'activity',
+    label: 'Activity',
+    load: () => import('./activity/View.svelte'),
+    icon: 'clock',
+    mode: 'full',
+  },
 ];
 
 // Dev-only surface that auto-discovers *.gallery.svelte demos. Reachable at

@@ -21,7 +21,7 @@
   import Meter from '$lib/components/datadisplay/Meter.svelte';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
   import { clipBoundaryLeft } from '$lib/dom';
-  import { relativeTime } from '$lib/relativeTime';
+  import { formatAgo } from '$lib/relativeTime';
 
   let {
     value,
@@ -70,7 +70,7 @@
     const parts: string[] = [];
     if (turn != null) parts.push(`turn ${turn + 1}`);
     if (at) {
-      const r = relativeTime(at);
+      const r = formatAgo(at);
       if (r) parts.push(r);
     }
     return parts.length ? `as of ${parts.join(' · ')}` : '';
