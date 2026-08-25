@@ -39,6 +39,27 @@ logger = logging.getLogger(__name__)
 _MAX_RESULT_CHARS = 4000
 
 
+def build_task_complete_message(task_id: str, chain_depth: int, prompt: str, result: str) -> str:
+    """The `<background_task_complete>` card handed back to the originating session.
+
+    Bodies are escaped: this card is delivered as a message, so it lands in the
+    session's history and is peeled back off by the UI. A result carrying the
+    closing tag would otherwise cut the card short and spill into the chat as
+    though the user had typed it.
+    """
+    from tsugite.prompt_xml import El
+
+    prompt_summary = prompt[:200] + ("…" if len(prompt) > 200 else "")
+    return El(
+        "background_task_complete",
+        [
+            El("prompt", [prompt_summary], inline=True),
+            El("result", [result[:_MAX_RESULT_CHARS]]),
+        ],
+        {"id": task_id, "chain_depth": chain_depth},
+    ).render(indent="  ")
+
+
 def _recorded_run_outcome(conv_id: str | None) -> tuple[str, str | None]:
     """An agent that answered with unexecuted tool-call markup, or hit max_turns,
     returns text and records a non-success end.
@@ -509,14 +530,7 @@ class SchedulerAdapter:
             )
             return
 
-        truncated = result[:_MAX_RESULT_CHARS]
-        prompt_summary = entry.prompt[:200] + ("…" if len(entry.prompt) > 200 else "")
-        message = (
-            f'<background_task_complete id="{entry.id}" chain_depth="{entry.chain_depth}">\n'
-            f"  <prompt>{prompt_summary}</prompt>\n"
-            f"  <result>\n{truncated}\n  </result>\n"
-            "</background_task_complete>"
-        )
+        message = build_task_complete_message(entry.id, entry.chain_depth, entry.prompt, result)
 
         if self._session_runner.is_session_running(session_id):
             try:
