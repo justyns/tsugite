@@ -3,10 +3,10 @@ name: research_coordinator
 description: Orchestrate research on a topic using multiple search agents
 model: ollama:qwen2.5-coder:14b
 max_turns: 12
-tools: [write_file, memory_write]
+tools: [write_file, read_file]
 prefetch:
-  - tool: search_memory
-    args: { query: "research methodology" }
+  - tool: read_file
+    args: { path: "~/.config/tsugite/research_methods.md" }
     assign: research_methods
 permissions_profile: research_safe
 context_budget:
@@ -52,6 +52,5 @@ Now synthesize a comprehensive research summary.
 
 ## Save Research
 <!-- tsu:tool name=write_file args={"path": "~/research/{{ user_prompt|slugify }}_{{ today() }}.md", "content": "{{ research_summary }}"} -->
-<!-- tsu:tool name=memory_write args={"title": "Research: {{ user_prompt }}", "content": "{{ research_summary }}", "tags": ["research", "{{ today() }}"]"} -->
 
 Research completed and saved!

@@ -98,7 +98,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - **Unified preparation pipeline** (used by both `run` and `render` commands)
    - Executes prefetch tools (frontmatter `prefetch` field)
    - Executes tool directives (inline `<!-- tsu:tool -->`)
-   - Builds template context (tasks, variables, helpers)
+   - Builds template context (variables, helpers)
    - Renders Jinja2 templates
    - Expands tool globs and categories
    - Loads auto_load_skills
@@ -106,7 +106,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
 
 5. **Template Rendering** (`tsugite/renderer.py`)
    - Jinja2 environment with custom helpers:
-     - `{{ user_prompt }}`, `{{ tasks }}`, `{{ task_summary }}`
+     - `{{ user_prompt }}`
      - `{{ now() }}`, `{{ today() }}`, `{{ yesterday() }}`, `{{ tomorrow() }}`
      - `{{ slugify(text) }}`, `{{ cwd() }}`
      - `{{ file_exists(path) }}`, `{{ is_file(path) }}`, `{{ is_dir(path) }}`, `{{ read_text(path) }}`

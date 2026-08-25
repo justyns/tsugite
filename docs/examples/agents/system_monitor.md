@@ -3,10 +3,10 @@ name: system_monitor
 description: Monitor system health and alert on issues
 model: ollama:qwen2.5-coder:7b
 max_turns: 5
-tools: [run, write_file, search_memory]
+tools: [run, write_file, read_file]
 prefetch:
-  - tool: search_memory
-    args: { query: "monitoring thresholds alerts" }
+  - tool: read_file
+    args: { path: "~/.config/tsugite/monitoring_thresholds.md" }
     assign: thresholds
 instructions: |
   Summarize findings as a concise operations report with clear alerts and recommended follow-up actions.

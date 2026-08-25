@@ -191,10 +191,6 @@ export const ICONS = {
     viewBox: '0 0 16 16',
     body: '<path d="M8 2.2l1.3 3.5L12.8 7 9.3 8.3 8 11.8 6.7 8.3 3.2 7l3.5-1.3z" fill="currentColor" stroke="none"/><path d="M12.4 2.2l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z" fill="currentColor" stroke="none"/>',
   },
-  todo: {
-    viewBox: '0 0 16 16',
-    body: '<path d="M6.5 4.5h7M6.5 8h7M6.5 11.5h7"/><path d="M2 4l1 1 1.8-2M2 10.4l1 1 1.8-2"/>',
-  },
   tool: {
     viewBox: '0 0 16 16',
     body: '<path d="M10.8 2.4a3 3 0 0 0-3.9 3.9L2.6 10.6a1.5 1.5 0 0 0 2.1 2.1l4.3-4.3a3 3 0 0 0 3.9-3.9L11 6.4l-1.7-.5-.5-1.7z"/>',
