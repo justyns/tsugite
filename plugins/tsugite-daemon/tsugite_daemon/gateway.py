@@ -268,48 +268,47 @@ class Gateway:
 
             http_adapter = HTTPAgentAdapter(runtime, session_store, identity_map=identity_map)
 
-            if http_adapter:
-                from tsugite_daemon.auth import TOKENS_FILENAME, TokenStore
-                from tsugite_daemon.webhook_store import WebhookStore
+            from tsugite_daemon.auth import TOKENS_FILENAME, TokenStore
+            from tsugite_daemon.webhook_store import WebhookStore
 
-                webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
-                self._token_store = TokenStore(self.config.state_dir / TOKENS_FILENAME)
+            webhook_store = WebhookStore(self.config.state_dir / "webhooks.json")
+            self._token_store = TokenStore(self.config.state_dir / TOKENS_FILENAME)
 
-                admin_token_count = len(self._token_store.list_admin_tokens())
-                if admin_token_count == 0:
-                    logger.warning("No API tokens configured. Run: tsugite daemon token create")
-                else:
-                    logger.info("HTTP auth enabled (%d admin token(s))", admin_token_count)
+            admin_token_count = len(self._token_store.list_admin_tokens())
+            if admin_token_count == 0:
+                logger.warning("No API tokens configured. Run: tsugite daemon token create")
+            else:
+                logger.info("HTTP auth enabled (%d admin token(s))", admin_token_count)
 
-                self._tsugite_api_url = f"http://127.0.0.1:{self.config.http.port}"
+            self._tsugite_api_url = f"http://127.0.0.1:{self.config.http.port}"
 
-                self._http_server = HTTPServer(
-                    self.config.http,
-                    http_adapter,
-                    webhook_store,
-                    gateway=self,
-                    token_store=self._token_store,
-                )
+            self._http_server = HTTPServer(
+                self.config.http,
+                http_adapter,
+                webhook_store,
+                gateway=self,
+                token_store=self._token_store,
+            )
 
-                # Wire up event_bus on the adapter so it can broadcast compaction state
-                http_adapter.event_bus = self._http_server.event_bus
+            # Wire up event_bus on the adapter so it can broadcast compaction state
+            http_adapter.event_bus = self._http_server.event_bus
 
-                # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
-                try:
-                    from tsugite_daemon.push import PushSubscriptionStore, get_or_create_vapid_keys
+            # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
+            try:
+                from tsugite_daemon.push import PushSubscriptionStore, get_or_create_vapid_keys
 
-                    self._push_store = PushSubscriptionStore(self.config.state_dir / "push_subscriptions.json")
-                    self._vapid_private_key, vapid_public = get_or_create_vapid_keys(self.config.state_dir)
-                    self._vapid_claims = {"sub": "mailto:tsugite@localhost"}
-                    self._http_server.push_store = self._push_store
-                    self._http_server.vapid_public_key = vapid_public
-                except ImportError:
-                    logger.debug("pywebpush/py-vapid not installed — web push disabled")
-                    self._push_store = None
-                    self._vapid_private_key = None
-                    self._vapid_claims = None
+                self._push_store = PushSubscriptionStore(self.config.state_dir / "push_subscriptions.json")
+                self._vapid_private_key, vapid_public = get_or_create_vapid_keys(self.config.state_dir)
+                self._vapid_claims = {"sub": "mailto:tsugite@localhost"}
+                self._http_server.push_store = self._push_store
+                self._http_server.vapid_public_key = vapid_public
+            except ImportError:
+                logger.debug("pywebpush/py-vapid not installed — web push disabled")
+                self._push_store = None
+                self._vapid_private_key = None
+                self._vapid_claims = None
 
-                tasks.append(self._http_server.start())
+            tasks.append(self._http_server.start())
 
         # Collect adapter start tasks
         tasks.extend(adapter.start() for adapter in self.adapters)
@@ -595,6 +594,10 @@ class Gateway:
         # Keep the session store's default limit in step with the reloaded config.
         runtime = new.runtime
         runtime.context_limit = self._resolve_context_limit(runtime)
+        # Sandbox is boot-only (BOOT_ONLY_SECTIONS): keep the policy the daemon
+        # started with, so agent turns and terminals resolve the same one and a
+        # changed `sandbox:` really does need the restart it reports.
+        runtime.sandbox = self.config.sandbox
         if self._session_store is not None:
             self._session_store.update_context_limit(runtime.context_limit)
 

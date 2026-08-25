@@ -240,7 +240,7 @@ export class ConversationController {
   async send(text: string, opts: SendOpts = {}): Promise<string | null> {
     let sessionId = this.sessionId;
     if (!sessionId) {
-      const res = await api.post<{ id: string }>(`/api/chat/sessions/new`, {
+      const res = await api.post<{ id: string }>('/api/chat/sessions/new', {
         user_id: auth.userId,
       });
       sessionId = res.id;

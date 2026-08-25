@@ -26,7 +26,7 @@
     focusedSessionId: string | null;
     focusedTerminalId: string | null;
     focusedFilePath: string | null;
-    onOpenChat: (sessionId: string, agent?: string) => void;
+    onOpenChat: (sessionId: string) => void;
     onOpenTerminal: (terminalId: string) => void;
     onOpenFile: (path: string) => void;
     /** Pin the focused pane's file preview (a file's double-click-to-keep). */

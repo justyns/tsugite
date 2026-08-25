@@ -145,9 +145,7 @@ class SchedulerAdapter:
         await self.scheduler.stop()
 
     def _on_repeated_failure(self, entry: ScheduleEntry) -> None:
-        adapter = self._run_adapter(entry)
-        if not adapter:
-            return
+        adapter = self._adapter
         message = (
             f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n"
             f"{entry.last_error or 'No error was recorded.'}"
@@ -187,9 +185,6 @@ class SchedulerAdapter:
         """Resolve a notification channel's user to their canonical identity."""
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
-    def _run_adapter(self, entry: ScheduleEntry) -> BaseAdapter | None:
-        return self._adapter
-
     def _create_run_session(self, entry: ScheduleEntry) -> tuple[str, bool]:
         """Create a Session record for a schedule run.
 
@@ -205,9 +200,7 @@ class SchedulerAdapter:
             safe_id = entry.id.replace(":", "_")
             conv_id = f"sched_{safe_id}_{ts}"
 
-        adapter = self._run_adapter(entry)
-        if not adapter:
-            return conv_id, False
+        adapter = self._adapter
         sched_session = Session(
             id=conv_id,
             source=SessionSource.SCHEDULE.value,
@@ -224,12 +217,10 @@ class SchedulerAdapter:
 
     def _update_run_session(self, conv_id: str, entry: ScheduleEntry, **fields):
         """Update a schedule run session's status."""
-        adapter = self._run_adapter(entry)
-        if adapter:
-            try:
-                adapter.session_store.update_session(conv_id, **fields)
-            except ValueError as e:
-                logger.warning("Schedule '%s' session update failed for %s: %s", entry.id, conv_id, e)
+        try:
+            self._adapter.session_store.update_session(conv_id, **fields)
+        except ValueError as e:
+            logger.warning("Schedule '%s' session update failed for %s: %s", entry.id, conv_id, e)
 
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""

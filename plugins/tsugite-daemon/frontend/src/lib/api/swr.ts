@@ -1,9 +1,8 @@
 /**
  * Stale-while-revalidate cache: paint the last-known list from localStorage on a
- * cold load, then let the store refetch and re-cache. The old Alpine UI used the
- * same pattern under keys like `tsugite_sessions_${agent}`; this keeps the wire
- * key scheme but wraps the payload in a versioned envelope so a schema bump
- * self-invalidates instead of hydrating a stale shape.
+ * cold load, then let the store refetch and re-cache. The payload rides in a
+ * versioned envelope so a schema bump self-invalidates instead of hydrating a
+ * stale shape.
  *
  * The parse/serialize halves are pure (node-unit-tested); readSwr/writeSwr are
  * the thin localStorage-guarded IO wrappers.

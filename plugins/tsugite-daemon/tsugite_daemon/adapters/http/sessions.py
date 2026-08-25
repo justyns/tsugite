@@ -126,12 +126,6 @@ class SessionsMixin:
                     return JSONResponse({"error": f"unknown model: {raw} ({exc})"}, status_code=400)
                 adapter.session_store.set_model_override(session_id, raw)
 
-        if "context_limit" in body:
-            raw = body["context_limit"]
-            if raw is not None and (not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0):
-                return JSONResponse({"error": "context_limit must be a positive integer or null"}, status_code=400)
-            adapter.session_store.set_session_context_limit(session_id, raw)
-
         # A model/effort change broadcasts a session_update so the same chat open
         # in other tabs refreshes its chips live (one shape shared with /model,
         # /effort). Emitted only when one of those actually changed.

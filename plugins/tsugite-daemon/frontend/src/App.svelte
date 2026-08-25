@@ -54,7 +54,6 @@
     sessionTopic,
   } from './views/chats/sessionModel';
   import { neighborSession } from './views/chats/chatNav';
-  import { chatRouteParams } from './views/chats/chatLink';
   import { resolveDefaultSession } from './views/chats/defaultSession';
   import { composerPrefill } from './views/chats/composerPrefill.svelte';
   import { modelPickerRequest } from './views/chats/modelPickerSignal.svelte';
@@ -130,7 +129,7 @@
   }
   function openChat(sessionId: string): void {
     const title = sessions.ordered.find((r) => r.id === sessionId)?.title ?? 'Chat';
-    openSurface({ kind: 'chat', params: chatRouteParams(sessionId), title });
+    openSurface({ kind: 'chat', params: { sessionId }, title });
   }
   function openTerminal(terminalId: string): void {
     const title = terminals.list.find((t) => t.id === terminalId)?.cmd ?? 'Terminal';
@@ -151,7 +150,7 @@
   // pick is a history entry - browser back/forward walks conversations,
   // terminals, and files again. The router effect below does the actual open.
   function selectChat(sessionId: string): void {
-    navigate('chats', chatRouteParams(sessionId));
+    navigate('chats', { sessionId });
   }
   function selectTerminal(terminalId: string): void {
     navigate('terminals', { terminalId });
@@ -210,9 +209,7 @@
   // The sessions store is shared with the chats rail.
   $effect(() => {
     if (auth.gated) return;
-    untrack(() => {
-      void sessions.load();
-    });
+    if (!sessions.loaded) void sessions.load();
   });
 
   const needsYouChats = $derived(needsYouSessions(sessions.rows));

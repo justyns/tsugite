@@ -287,7 +287,8 @@ class ChannelContext:
 class BaseAdapter(ABC):
     """Base class for platform adapters.
 
-    Each adapter instance is tied to a specific agent.
+    One adapter instance per platform, running turns against the daemon's
+    runtime defaults.
     """
 
     # Adapters whose surface renders token deltas live (the web chat) opt in;
@@ -951,7 +952,7 @@ class BaseAdapter(ABC):
         ps = getattr(result, "provider_state", None) or {}
         if ps.get("context_window"):
             # Per-session storage: this turn's reported window applies to THIS
-            # session only. An daemon-wide scalar would let any other turn (or a
+            # session only. A daemon-wide scalar would let any other turn (or a
             # secondary model call) clobber the displayed limit.
             self.session_store.update_session_context_limit(conv_id, ps["context_window"])
 
@@ -1220,9 +1221,7 @@ class BaseAdapter(ABC):
         old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
 
         if not old_events:
-            logger.info(
-                "All events fit in retention budget, skipping compaction",
-            )
+            logger.info("All events fit in retention budget, skipping compaction")
             return None
 
         old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
@@ -1333,9 +1332,7 @@ class BaseAdapter(ABC):
                     progress_callback=progress_callback,
                 )
         except Exception:
-            logger.exception(
-                "Compaction summarization failed",
-            )
+            logger.exception("Compaction summarization failed")
             raise
         if summary_usage["calls"]:
             logger.info(
@@ -1451,7 +1448,5 @@ class BaseAdapter(ABC):
         except Exception:
             logger.debug("Failed to seed post-compaction token estimate", exc_info=True)
 
-        logger.info(
-            "Session compacted",
-        )
+        logger.info("Session compacted")
         return new_session

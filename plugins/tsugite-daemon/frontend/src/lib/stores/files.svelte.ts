@@ -1,6 +1,6 @@
 /**
- * Files store: the workspace tree (GET /api/workspace),
- * text read/write, and attach-into-chat. The listing is gitignore-filtered and
+ * Files store: the workspace tree (GET /api/workspace), text read/write, and
+ * attach-into-chat. The listing is gitignore-filtered and
  * text-only server-side (binaries never appear); a binary read comes back
  * {content:null, is_text:false}. Exported as a class instance.
  */

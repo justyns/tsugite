@@ -126,7 +126,6 @@ export class ContextItems {
   loadFileRefs(): void {
     if (this.#refsLoaded) return;
     this.#refsLoaded = true;
-    this.fileRefs = [];
     loadWorkspace()
       .then((ws) => {
         this.fileRefs = ws.entries

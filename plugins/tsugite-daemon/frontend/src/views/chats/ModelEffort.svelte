@@ -1,8 +1,8 @@
 <script lang="ts">
   // Header model + effort pair: the model chip/popover plus a reasoning-effort
   // seg sized to what the session's resolved model actually supports
-  // (GET /api/chat/effort-levels?session_id=). A model with no
-  // declared effort levels gets no seg at all, and the resolved model string
+  // (GET /api/chat/effort-levels?session_id=). A model with no declared effort
+  // levels gets no seg at all, and the resolved model string
   // also names the picker's "default" chip. Effort is the persisted per-session
   // setting (GET/PATCH /api/sessions/{id}/settings), not a per-message override.
   import Seg from '$lib/components/inputs/Seg.svelte';

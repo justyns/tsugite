@@ -1481,22 +1481,18 @@ class JobsOrchestrator:
             logger.info("Reconciled %d orphaned job-host session(s) from previous daemon run", reconciled)
         return reconciled
 
+    def _runtime(self):
+        """The daemon's runtime defaults, or None when the runner has no adapter."""
+        return getattr(self._runner, "runtime", None)
+
     def _resolve_parent_sandbox_override(self, parent_session_id: str) -> Optional[dict]:
         """Resolve the daemon's sandbox config as an override dict, or None when
         sandboxing is off. Lets /job-created jobs inherit the sandbox even though
         there's no running-agent context."""
-        adapter = getattr(self._runner, "_adapter", None)
-        sb = getattr(getattr(adapter, "runtime", None), "sandbox", None)
+        sb = getattr(self._runtime(), "sandbox", None)
         if sb is None or not sb.enabled:
             return None
-        return {
-            "enabled": True,
-            "no_network": sb.no_network,
-            "allow_domains": list(sb.allow_domains),
-            "extra_ro_binds": [str(p) for p in sb.extra_ro_binds],
-            "extra_rw_binds": [str(p) for p in sb.extra_rw_binds],
-            "pass_env": list(getattr(sb, "pass_env", [])),
-        }
+        return sb.model_dump(mode="json")
 
     def _resolve_workspace_root(self, parent_session_id: str) -> Optional[Path]:
         """Workspace root a relative --repo is interpreted against: the parent
@@ -1509,8 +1505,7 @@ class JobsOrchestrator:
         parent = self._get_parent_session(parent_session_id)
         if parent is not None and getattr(parent, "workspace_override", None):
             return Path(parent.workspace_override)
-        adapter = getattr(self._runner, "_adapter", None)
-        workspace_dir = getattr(getattr(adapter, "runtime", None), "workspace_dir", None)
+        workspace_dir = getattr(self._runtime(), "workspace_dir", None)
         return Path(workspace_dir) if workspace_dir is not None else None
 
     def _emit_job_event(self, job: Optional[Job]) -> None:

@@ -36,7 +36,6 @@
     sessionTopic,
   } from './sessionModel';
   import { attachRecordToChat, copyReference } from './attachRecord';
-  import { chatRouteParams } from './chatLink';
 
   let {
     rows,
@@ -74,7 +73,7 @@
   function openInNewTab(row: Row) {
     spaces.open({
       kind: 'chat',
-      params: chatRouteParams(row.id),
+      params: { sessionId: row.id },
       title: row.title ?? 'Chat',
     });
   }

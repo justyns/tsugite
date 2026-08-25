@@ -241,9 +241,11 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     if "agents" in data:
         raise ValueError(
             f"{path}: the daemon-level 'agents:' block is no longer supported. "
-            "The daemon now takes flat defaults (default_workspace_dir, default_agent_file, "
-            "default_model, ...) which sessions override individually. "
-            "Migrate with: python scripts/migrate_daemon_agents.py <path-to-daemon.yaml>"
+            "Hoist the single agent's keys to the top level: workspace_dir, agent_file, model, "
+            "compaction_model, context_limit and max_turns become default_workspace_dir, "
+            "default_agent_file, default_model, default_compaction_model, default_context_limit "
+            "and default_max_turns; timezone, auto_compact and sandbox keep their names. "
+            "scripts/migrate_daemon_agents.py in the tsugite repo does it for you."
         )
 
     for channel in data.get("notification_channels", {}).values():

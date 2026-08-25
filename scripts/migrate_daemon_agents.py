@@ -21,6 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from tsugite.utils import atomic_write_text
+
 # agents[<name>].<key>  ->  top-level key
 HOISTED = {
     "workspace_dir": "default_workspace_dir",
@@ -170,7 +172,7 @@ def main() -> None:
 
     backup = args.config.with_suffix(f".yaml.bak-{datetime.now().strftime('%Y%m%d%H%M%S')}")
     shutil.copy2(args.config, backup)
-    args.config.write_text(migrated, encoding="utf-8")
+    atomic_write_text(args.config, migrated)
     print(f"\nWrote {args.config} (backup: {backup})")
 
 

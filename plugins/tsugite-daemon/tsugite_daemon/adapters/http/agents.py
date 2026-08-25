@@ -616,25 +616,17 @@ class AgentsMixin:
             }
         )
 
-    async def _session_scoped_request(
-        self, request: Request
-    ) -> tuple[Optional["HTTPAgentAdapter"], Optional[dict], Optional[JSONResponse]]:
-        """Parse a JSON body carrying an optional ``session_id`` and resolve the
-        adapter that owns that session. Returns ``(adapter, body, err)``; on failure
-        ``err`` is a JSONResponse and adapter/body are None.
-
-        Auth is enforced in ``_get_adapter``.
-        """
+    async def _authed_json_body(self, request: Request) -> tuple[Optional[dict], Optional[JSONResponse]]:
+        """Check auth and parse a JSON object body. Returns ``(body, err)``."""
         try:
             body = await request.json()
         except Exception:
             body = None
-        adapter, err = self._get_adapter(request)
-        if err:
-            return None, None, err
+        if err := self._check_auth(request):
+            return None, err
         if not isinstance(body, dict):
-            return None, None, JSONResponse({"error": "invalid JSON body"}, status_code=400)
-        return adapter, body, None
+            return None, JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        return body, None
 
     async def _respond(self, request: Request) -> JSONResponse:
         """Submit a response to an active ask_user prompt.
@@ -644,9 +636,10 @@ class AgentsMixin:
         whose in-memory backend is gone (timeout or daemon restart) is settled
         durably instead of silently lost.
         """
-        adapter, body, err = await self._session_scoped_request(request)
+        body, err = await self._authed_json_body(request)
         if err:
             return err
+        adapter = self.adapter
         session_id = body.get("session_id")
 
         response = body.get("response", "")
@@ -776,9 +769,10 @@ class AgentsMixin:
         return JSONResponse({"files": results})
 
     async def _chat(self, request: Request) -> Response:
-        adapter, body, err = await self._session_scoped_request(request)
+        body, err = await self._authed_json_body(request)
         if err:
             return err
+        adapter = self.adapter
 
         # Admission check, ahead of any parsing: a turn started now would enter
         # _active_chats and the restart drain would never finish. It also has to
@@ -985,9 +979,10 @@ class AgentsMixin:
         )
 
     async def _cancel_chat(self, request: Request) -> JSONResponse:
-        adapter, body, err = await self._session_scoped_request(request)
+        body, err = await self._authed_json_body(request)
         if err:
             return err
+        adapter = self.adapter
         session_id = body.get("session_id")
         raw_user_id = body.get("user_id", "web-anonymous")
         user_id = adapter.resolve_http_user(raw_user_id)

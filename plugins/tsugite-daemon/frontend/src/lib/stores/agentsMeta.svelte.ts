@@ -1,5 +1,5 @@
 /**
- * Agents-metadata store: the daemon runtime (GET /api/runtime) plus the editable
+ * Daemon-metadata store: the daemon runtime (GET /api/runtime) plus the editable
  * agent-file and skill-file browsers (GET/PUT /api/agent-files, /api/skill-files)
  * and the skill-load issues list. Files carry a `readonly` flag (builtins) the
  * editor must honour. Exported as a class instance.

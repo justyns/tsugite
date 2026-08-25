@@ -114,11 +114,7 @@
   // levels fetch when the argument in play wants them.
   $effect(() => {
     context.loadServerProviders();
-  });
-  $effect(() => {
     context.loadFileRefs();
-  });
-  $effect(() => {
     slash.loadCommands();
   });
   $effect(() => {

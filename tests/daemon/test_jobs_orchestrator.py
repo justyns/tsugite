@@ -1039,7 +1039,7 @@ async def test_relative_repo_falls_back_to_adapter_workspace_dir(store, runner, 
 
     repo = tmp_path / "myrepo"
     _make_git_repo(repo)
-    runner._adapter = SimpleNamespace(runtime=SimpleNamespace(workspace_dir=tmp_path))
+    runner.runtime = SimpleNamespace(workspace_dir=tmp_path)
 
     job, _ = await orchestrator.create_and_start_job(
         parent_session_id="parent-1", prompt="do", acceptance_criteria=[], repo="myrepo"

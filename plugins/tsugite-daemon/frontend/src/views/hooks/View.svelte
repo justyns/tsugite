@@ -7,7 +7,6 @@
   // the parsed rule cards above it are the server's read-back of the same file.
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
-  import Select from '$lib/components/inputs/Select.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { api } from '$lib/api/client';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
@@ -55,7 +54,7 @@
     loadError = null;
     saveError = null;
     try {
-      const res = await api.get<HooksPayload>(`/api/hooks`);
+      const res = await api.get<HooksPayload>('/api/hooks');
       payload = res;
       draft = res.raw;
     } catch (err) {
@@ -70,7 +69,7 @@
     saving = true;
     saveError = null;
     try {
-      const res = await api.put<HooksPayload>(`/api/hooks`, {
+      const res = await api.put<HooksPayload>('/api/hooks', {
         raw: draft,
       });
       payload = res;

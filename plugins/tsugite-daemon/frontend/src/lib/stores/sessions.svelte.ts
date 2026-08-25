@@ -1,7 +1,6 @@
 /**
- * Sessions store: the chat sidebar's backing data. Lists the rich
- * session rows (GET /api/chat/sessions - the only list that carries
- * pinned/progress/label/busy), overlays a live per-session progress rollup fed
+ * Sessions store: the chat sidebar's backing data. Lists the rich session rows
+ * (GET /api/chat/sessions - the only list that carries pinned/progress/label/busy), overlays a live per-session progress rollup fed
  * by cross-session `session_event` broadcasts, and owns every lifecycle mutation
  * (all under /api/sessions/{id}/*, keyed by session id).
  *
@@ -11,8 +10,8 @@
  * clears the overlay when a session_update reports the session finished. The
  * active surface's own per-chat stream (api/chat.ts) covers the rest.
  *
- * Cache: stale-while-revalidate. A cold load paints the last cached list for the
- * rows immediately (key tsugite_sessions) before the network returns.
+ * Cache: stale-while-revalidate. A cold load paints the last cached list
+ * immediately (key tsugite_sessions) before the network returns.
  * Exported as a class instance - never a reassigned $state binding.
  */
 import { untrack } from 'svelte';
@@ -104,6 +103,10 @@ export class SessionsStore {
   // model/effort pickers refetch and their chips update live in every tab.
   settingsRev = $state<Record<string, number>>({});
 
+  /** True once a list fetch has been issued, so shell-scope callers can skip a
+   *  duplicate cold load without re-reading the rows. */
+  loaded = $state(false);
+
   private lastOpts: SessionListOpts = {};
   private revalidateTimer: ReturnType<typeof setTimeout> | null = null;
   private burst = new Map<string, Promise<void>>();
@@ -140,6 +143,7 @@ export class SessionsStore {
 
   private async fetchList(opts: SessionListOpts): Promise<void> {
     untrack(() => {
+      this.loaded = true;
       this.lastOpts = opts;
       // Only hydrate the cache on a cold load - an in-place reload keeps the
       // current rows painted while the fetch runs.
@@ -294,7 +298,7 @@ export class SessionsStore {
     const body: Record<string, unknown> = {};
     if (opts.title != null) body.title = opts.title;
     if (opts.userId != null) body.user_id = opts.userId;
-    const res = await api.post<{ id: string }>(`/api/chat/sessions/new`, body);
+    const res = await api.post<{ id: string }>('/api/chat/sessions/new', body);
     return res.id;
   }
 

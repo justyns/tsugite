@@ -379,11 +379,12 @@ def run(
 
     daemon_metadata = None
     if join_daemon:
-        from tsugite.history import get_history_backend
+        from tsugite.agent_runner.history_integration import get_latest_conversation
 
         try:
             from tsugite_daemon.config import load_daemon_config
 
+            # Probe: the daemon battery has to be installed and configured.
             load_daemon_config()
         except ModuleNotFoundError as e:
             stderr_console.print(
@@ -397,7 +398,7 @@ def run(
 
         user_id = os.environ.get("USER", "cli-user")
 
-        latest_conv_id = next(iter(get_history_backend().list_sessions(limit=1)), None)
+        latest_conv_id = get_latest_conversation()
         if latest_conv_id:
             stderr_console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
             history_opts.continue_id = latest_conv_id

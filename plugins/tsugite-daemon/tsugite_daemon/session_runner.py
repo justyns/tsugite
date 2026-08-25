@@ -138,6 +138,11 @@ class SessionRunner:
     def store(self) -> SessionStore:
         return self._store
 
+    @property
+    def runtime(self):
+        """The adapter's runtime defaults, or None when no adapter is wired."""
+        return getattr(self._adapter, "runtime", None)
+
     def is_session_running(self, session_id: str) -> bool:
         task = self._active_tasks.get(session_id)
         return task is not None and not task.done()
@@ -163,11 +168,6 @@ class SessionRunner:
 
     async def _run_session(self, session: Session, progress: LoggingProgressHandler) -> None:
         adapter = self._adapter
-        if not adapter:
-            self._store.update_session(
-                session.id, status=SessionStatus.FAILED.value, error="No adapter available to run sessions"
-            )
-            return
 
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 

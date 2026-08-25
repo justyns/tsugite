@@ -570,14 +570,6 @@ class SessionStore:
             session = self._sessions.get(session_id)
             return session.model_override if session else None
 
-    def set_session_context_limit(self, session_id: str, limit: int | None) -> None:
-        """Pin this session's context window; None falls back to the daemon default."""
-        with self._lock:
-            session = self._sessions.get(session_id)
-            if session:
-                session.context_limit = limit
-                self._persist(session)
-
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
 
@@ -791,7 +783,7 @@ class SessionStore:
                 # two live successors. Callers should resolve the successor first.
                 raise ValueError(f"Session '{session_id}' was already compacted into '{old_session.superseded_by}'")
 
-            new_id = generate_session_id(old_session.agent_file or SESSION_ID_LABEL)
+            new_id = generate_session_id(SESSION_ID_LABEL)
             new_session = Session(
                 id=new_id,
                 source=old_session.source,
@@ -1459,10 +1451,9 @@ class SessionStore:
         self, channel_id: str, user_id: str, source: str = SessionSource.INTERACTIVE.value
     ) -> Session:
         with self._lock:
-            key = channel_id
             is_replacement = False
-            if key in self._channel_index:
-                session_id = self._channel_index[key]
+            if channel_id in self._channel_index:
+                session_id = self._channel_index[channel_id]
                 if session_id in self._sessions:
                     existing = self._sessions[session_id]
                     if existing.status not in FINISHED_STATUSES:
@@ -1480,7 +1471,7 @@ class SessionStore:
             session.cumulative_tokens = tokens
             session.message_count = msg_count
             self._sessions[conv_id] = session
-            self._channel_index[key] = conv_id
+            self._channel_index[channel_id] = conv_id
             self._persist(session)
             return session
 

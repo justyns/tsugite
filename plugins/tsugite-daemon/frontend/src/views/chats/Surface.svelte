@@ -17,7 +17,7 @@
   import ChatComposer from './ChatComposer.svelte';
   import { ConversationController, type SendOpts } from './conversation.svelte';
   import { resolveDefaultSession } from './defaultSession';
-  import { resolveChatAgent, isJobArtifact } from './chatAgent';
+  import { isJobArtifact } from './jobArtifact';
   import { goBackToWorkspaceList, isPhoneWidth } from '$lib/shell/phoneNav';
   import { hasFiles, extractFiles } from './dropFiles';
 

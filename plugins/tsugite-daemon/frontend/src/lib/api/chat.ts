@@ -73,7 +73,7 @@ export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}):
 
   const run = async (): Promise<void> => {
     try {
-      const resp = await fetch(`/api/chat`, {
+      const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -131,7 +131,7 @@ export async function cancelChat(
   const body: Record<string, unknown> = {};
   if (opts.userId != null) body.user_id = opts.userId;
   if (opts.sessionId != null) body.session_id = opts.sessionId;
-  await api.post(`/api/chat/cancel`, body);
+  await api.post('/api/chat/cancel', body);
 }
 
 /** The daemon's reply to a respond POST. `ok` = delivered to the waiting ask;
@@ -151,7 +151,7 @@ export async function respondToAsk(opts: {
   userId?: string;
   sessionId: string;
 }): Promise<AskAnswer> {
-  return await api.post<AskAnswer>(`/api/chat/respond`, {
+  return await api.post<AskAnswer>('/api/chat/respond', {
     ask_id: opts.askId,
     response: opts.response,
     user_id: opts.userId,

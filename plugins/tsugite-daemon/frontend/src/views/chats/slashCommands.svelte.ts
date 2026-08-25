@@ -116,16 +116,15 @@ export class SlashCommands {
   syncEffortLevels(): void {
     const sessionId = this.#deps.sessionId;
     if (this.argContext?.arg.widget !== 'effort' || !sessionId) return;
-    const key = sessionId;
-    if (key === this.#effortFetchKey) return;
-    this.#effortFetchKey = key;
+    if (sessionId === this.#effortFetchKey) return;
+    this.#effortFetchKey = sessionId;
     this.effortLevels = null;
     api
       .get<{ supported_effort_levels: string[] | null }>(
         `/api/chat/effort-levels?session_id=${encodeURIComponent(sessionId)}`,
       )
       .then((r) => {
-        if (this.#effortFetchKey === key) this.effortLevels = r.supported_effort_levels;
+        if (this.#effortFetchKey === sessionId) this.effortLevels = r.supported_effort_levels;
       })
       .catch(() => {});
   }
