@@ -1,11 +1,10 @@
 <script lang="ts">
-  // Files context rail: the workspace file tree + search + new-note, for one
-  // agent. A file click (or drag) opens it as a document surface in the focused
-  // pane via `onOpenFile`. The tree + backlink index are shared with the open
-  // document surfaces through the filesWorkspace store, so the expensive whole-
-  // workspace walk happens once per agent.
+  // Files context rail: the workspace file tree + search + new-note. A file
+  // click (or drag) opens it as a document surface in the focused pane via
+  // `onOpenFile`. The tree + backlink index are shared with the open document
+  // surfaces through the filesWorkspace store, so the expensive whole-workspace
+  // walk happens once.
   import Icon from '$lib/components/icon/Icon.svelte';
-  import Select from '$lib/components/inputs/Select.svelte';
   import SearchInput from '$lib/components/inputs/SearchInput.svelte';
   import Input from '$lib/components/inputs/Input.svelte';
   import Modal from '$lib/components/overlays/Modal.svelte';
@@ -16,7 +15,6 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { writeSurfaceDrag } from '$lib/shell/mux/drag';
   import { files } from '$lib/stores/files.svelte';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { TESTID } from '$lib/testids';
   import TreeNode from './TreeNode.svelte';
   import { isMarkdown } from './load';
@@ -28,30 +26,21 @@
     onPinFile,
   }: {
     focusedFilePath: string | null;
-    onOpenFile: (agent: string, path: string) => void;
+    onOpenFile: (path: string) => void;
     /** Double-click-to-keep: pins the file's preview into a permanent tab. */
-    onPinFile: (agent: string, path: string) => void;
+    onPinFile: (path: string) => void;
   } = $props();
 
-  let agentPick = $state('');
   let query = $state('');
   let expanded = $state<Set<string>>(new Set());
 
-  const agents = $derived(agentsMeta.agents.map((a) => a.name));
-  const agent = $derived(agentPick || agents[0] || '');
   const ws = $derived(filesWorkspace.ws);
   const idx = $derived(ws?.index ?? null);
   const wsName = $derived(ws?.workspaceDir.split('/').filter(Boolean).pop() ?? 'workspace');
 
+  // Load the shared workspace, then expand every directory so the tree reads open.
   $effect(() => {
-    if (agentsMeta.agents.length === 0) void agentsMeta.load();
-  });
-  // Load (or reload on agent change) the shared workspace, then expand every
-  // directory so the tree reads open.
-  $effect(() => {
-    const a = agent;
-    if (!a) return;
-    void filesWorkspace.ensure(a).then(() => {
+    void filesWorkspace.ensure().then(() => {
       if (filesWorkspace.ws)
         expanded = new Set(filesWorkspace.ws.entries.filter((e) => e.is_dir).map((e) => e.path));
     });
@@ -86,16 +75,16 @@
   }
 
   function open(path: string) {
-    onOpenFile(agent, path);
+    onOpenFile(path);
   }
 
   function pin(path: string) {
-    onPinFile(agent, path);
+    onPinFile(path);
   }
 
   function fileDragStart(e: DragEvent, path: string, name: string) {
     if (!e.dataTransfer) return;
-    writeSurfaceDrag(e.dataTransfer, { kind: 'file', params: { agent, path }, title: name });
+    writeSurfaceDrag(e.dataTransfer, { kind: 'file', params: { path }, title: name });
   }
 
   // Right-click menu on a file row (flat search results and tree nodes alike).
@@ -113,7 +102,7 @@
         run: () =>
           spaces.open({
             kind: 'file',
-            params: { agent, path },
+            params: { path },
             title: path.split('/').pop() ?? path,
           }),
       },
@@ -152,9 +141,9 @@
       .pop()!
       .replace(/\.[^.]+$/, '');
     try {
-      await files.write(agent, path, `# ${title}\n\n`);
+      await files.write(path, `# ${title}\n\n`);
       newNoteOpen = false;
-      await filesWorkspace.reload(agent);
+      await filesWorkspace.reload();
       open(path);
       toasts.push('ok', 'Note created', { body: path });
     } catch (err) {
@@ -170,9 +159,6 @@
     <strong>Workspace</strong>
     <span class="cnt">{wsName}/</span>
     <div class="grow"></div>
-    {#if agents.length > 1}
-      <Select options={agents} bind:value={agentPick} ariaLabel="Workspace agent" />
-    {/if}
     <button type="button" class="hd-btn" aria-label="New note" onclick={newNote}>
       <Icon name="plus" />
     </button>
@@ -192,7 +178,7 @@
       <PaneState kind="error" title="Could not load workspace">
         {#snippet hint()}<span class="mono">{filesWorkspace.error}</span>{/snippet}
         {#snippet actions()}
-          <Button size="sm" onclick={() => filesWorkspace.reload(agent)}>Retry</Button>
+          <Button size="sm" onclick={() => filesWorkspace.reload()}>Retry</Button>
         {/snippet}
       </PaneState>
     {:else if ws}
@@ -218,7 +204,6 @@
         {/if}
       {:else}
         <TreeNode
-          {agent}
           nodes={ws.tree}
           activePath={focusedFilePath ?? ''}
           {expanded}

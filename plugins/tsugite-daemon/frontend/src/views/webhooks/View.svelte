@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Webhooks: inbound HTTP triggers that drop a JSON envelope into an agent's
+  // Webhooks: inbound HTTP triggers that drop a JSON envelope into the
   // inbox/webhooks/ workspace folder. Real backend model (webhook_store.py)
-  // is just {token, agent, source, created_at} - no enable/disable flag, no
+  // is just {token, source, created_at} - no enable/disable flag, no
   // signing secret, and no delivery-history endpoint (deliveries land as
   // files on disk with nothing to list them back over HTTP). This view
   // reflects that honestly rather than a fuller shape:
@@ -22,7 +22,6 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
   import { webhooks, type Webhook } from '$lib/stores/webhooks.svelte';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { api, type ApiError } from '$lib/api/client';
   import WebhookRow, { type TestResult } from './WebhookRow.svelte';
@@ -35,7 +34,6 @@
   // Unique per component instance - the mux can dock more than one Webhooks
   // tab at once, and hardcoded ids would collide across instances.
   const uid = $props.id();
-  const agentFieldId = `${uid}-agent`;
   const sourceFieldId = `${uid}-source`;
   const createFormId = `${uid}-create-form`;
   const headingId = `${uid}-h`;
@@ -44,12 +42,10 @@
     id: number;
     token: string;
     source: string;
-    agent: string;
   }
 
   let now = $state(Date.now());
   let showCreate = $state(false);
-  let createAgent = $state('');
   let createSource = $state('');
   let createError = $state<string | null>(null);
   let creating = $state(false);
@@ -61,7 +57,6 @@
 
   onMount(() => {
     void webhooks.load();
-    void agentsMeta.load();
   });
 
   $effect(() => {
@@ -69,7 +64,6 @@
     return () => clearInterval(id);
   });
 
-  const agentOptions = $derived(agentsMeta.agents.map((a) => a.name));
   const sorted = $derived(
     [...webhooks.list].sort((a, b) => b.created_at.localeCompare(a.created_at)),
   );
@@ -85,7 +79,6 @@
   );
 
   function openCreate(): void {
-    createAgent = agentOptions[0] ?? '';
     createSource = '';
     createError = null;
     showCreate = true;
@@ -94,10 +87,6 @@
   async function submitCreate(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const source = createSource.trim();
-    if (!createAgent) {
-      createError = 'Select an agent.';
-      return;
-    }
     if (!isValidSource(source)) {
       createError = 'Source must be 1-64 chars: letters, digits, dot, underscore, or dash.';
       return;
@@ -105,9 +94,9 @@
     creating = true;
     createError = null;
     try {
-      await webhooks.create({ agent: createAgent, source });
+      await webhooks.create({ source });
       showCreate = false;
-      toasts.push('ok', `Webhook created for ${createAgent}`, { body: `source: ${source}` });
+      toasts.push('ok', 'Webhook created', { body: `source: ${source}` });
     } catch (err) {
       createError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -139,7 +128,6 @@
       id: ++logIdSeq,
       token: webhook.token,
       source: webhook.source,
-      agent: webhook.agent,
     };
     testLog = [line, ...testLog].slice(0, MAX_LOG_LINES);
   }
@@ -187,14 +175,7 @@
       {#snippet icon()}<Icon name="retry" />{/snippet}
     </Button>
     <div class="grow"></div>
-    <Button
-      variant="pri"
-      size="sm"
-      onclick={openCreate}
-      disabled={agentOptions.length === 0}
-      title={agentOptions.length === 0 ? 'No agents configured on this daemon' : undefined}
-      data-testid={TESTID.webhooksNew}
-    >
+    <Button variant="pri" size="sm" onclick={openCreate} data-testid={TESTID.webhooksNew}>
       {#snippet icon()}<Icon name="plus" />{/snippet}
       New webhook
     </Button>
@@ -218,7 +199,7 @@
          the one action, not duplicated per-state. -->
     <PaneState kind="empty" title="No webhooks yet">
       {#snippet icon()}<Icon name="hook" />{/snippet}
-      {#snippet hint()}Create one above to receive inbound events into an agent's inbox.{/snippet}
+      {#snippet hint()}Create one above to receive inbound events into the workspace inbox.{/snippet}
     </PaneState>
   {:else}
     <div class="tablewrap">
@@ -260,7 +241,7 @@
           {#each testLog as line (line.id)}
             <div class="ln" class:lvl-e={!line.ok}>
               <span class="ts_">{formatAgo(new Date(line.at).toISOString(), now, 'bare')}</span>
-              {line.source} ({line.agent}) ← {line.status || 'error'}
+              {line.source} ← {line.status || 'error'}
               {line.detail}
             </div>
           {/each}
@@ -273,11 +254,6 @@
 <Modal open={showCreate} onclose={() => (showCreate = false)} title="New webhook">
   <form id={createFormId} onsubmit={submitCreate} data-testid={TESTID.webhooksCreateForm}>
     <div class="mform">
-      <Field id={agentFieldId} label="agent">
-        {#snippet children()}
-          <Select id={agentFieldId} bind:value={createAgent} options={agentOptions} />
-        {/snippet}
-      </Field>
       <Field
         id={sourceFieldId}
         label="source"
@@ -313,8 +289,8 @@
 >
   {#if pendingDelete}
     <p data-testid={TESTID.webhooksDeleteConfirm}>
-      Delete <code>{pendingDelete.source}</code> for agent <code>{pendingDelete.agent}</code>? Any
-      service still posting to this URL will start getting 404s. This can't be undone.
+      Delete <code>{pendingDelete.source}</code>? Any service still posting to this URL will start
+      getting 404s. This can't be undone.
     </p>
   {/if}
   {#snippet footer()}

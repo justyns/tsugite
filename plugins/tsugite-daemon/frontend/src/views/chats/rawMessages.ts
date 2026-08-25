@@ -1,5 +1,5 @@
 /**
- * Raw-messages debug fetch: GET /api/agents/{agent}/raw-messages?session_id=…
+ * Raw-messages debug fetch: GET /api/chat/raw-messages?session_id=…
  * The daemon reconstructs, per turn, the request messages the model saw and its
  * raw response from the event log on demand - nothing durable is stored, so the
  * view is replay-safe and always matches what resume would rebuild.
@@ -37,14 +37,13 @@ export interface RawMessages {
 }
 
 export async function fetchRawMessages(
-  agent: string,
   sessionId: string,
   userId?: string,
 ): Promise<RawMessages | null> {
   const params = new URLSearchParams({ session_id: sessionId });
   if (userId) params.set('user_id', userId);
   const res = await api.get<{ raw_messages: RawMessages | null }>(
-    `/api/agents/${encodeURIComponent(agent)}/raw-messages?${params.toString()}`,
+    `/api/chat/raw-messages?${params.toString()}`,
   );
   return res.raw_messages;
 }

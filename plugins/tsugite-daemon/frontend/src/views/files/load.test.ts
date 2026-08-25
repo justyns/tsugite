@@ -27,11 +27,11 @@ describe('loadWorkspace', () => {
   });
 
   test('fetches the whole tree in a single recursive call', async () => {
-    const ws = await loadWorkspace('agent-x');
+    const ws = await loadWorkspace();
 
     expect(apiGet).toHaveBeenCalledTimes(1);
     const url = apiGet.mock.calls[0]?.[0] as string;
-    expect(url).toContain('/api/agents/agent-x/workspace');
+    expect(url).toContain('/api/workspace');
     expect(url).toContain('recursive=1');
 
     expect(ws.entries.map((e) => e.path)).toEqual(['top.md', 'sub', 'sub/nested.md']);
@@ -39,7 +39,7 @@ describe('loadWorkspace', () => {
   });
 
   test('builds tree and markdown index from the flat entries', async () => {
-    const ws = await loadWorkspace('agent-x');
+    const ws = await loadWorkspace();
 
     expect(ws.tree.map((n) => n.path)).toEqual(['sub', 'top.md']);
     expect(ws.index.files).toEqual(expect.arrayContaining(['top.md', 'sub/nested.md']));

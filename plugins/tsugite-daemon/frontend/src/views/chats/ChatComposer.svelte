@@ -32,7 +32,6 @@
   }
 
   let {
-    agent,
     sessionId,
     streaming = false,
     busy = false,
@@ -44,7 +43,6 @@
     onUnqueue,
     onCommandResult,
   }: {
-    agent: string;
     sessionId: string | null;
     streaming?: boolean;
     busy?: boolean;
@@ -84,9 +82,6 @@
     set value(v) {
       value = v;
     },
-    get agent() {
-      return agent;
-    },
     get sessionId() {
       return sessionId;
     },
@@ -102,9 +97,6 @@
     set value(v) {
       value = v;
     },
-    get agent() {
-      return agent;
-    },
     get sessionId() {
       return sessionId;
     },
@@ -118,17 +110,15 @@
   });
 
   // Load each controller's lists (best-effort - a missing feature just leaves the
-  // menu empty). The server providers load once; the workspace file list is
-  // per-agent; the command list re-fetches on agent change; effort levels fetch
-  // when the argument in play wants them.
+  // menu empty). The server providers and workspace file list load once; effort
+  // levels fetch when the argument in play wants them.
   $effect(() => {
     context.loadServerProviders();
   });
   $effect(() => {
-    context.loadFileRefs(agent);
+    context.loadFileRefs();
   });
   $effect(() => {
-    void agent;
     slash.loadCommands();
   });
   $effect(() => {
@@ -323,7 +313,6 @@
   <Composer
     bind:this={composerEl}
     bind:value
-    {agent}
     {streaming}
     queued={busy && !streaming}
     attachments={attach.attachments}

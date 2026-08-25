@@ -77,7 +77,7 @@ describe('SessionsStore.load', () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [row('a')] } as never);
     const store = new SessionsStore();
 
-    await Promise.all([store.load('odyn'), store.load('odyn')]);
+    await Promise.all([store.load(), store.load()]);
 
     expect(get).toHaveBeenCalledTimes(1);
     expect(store.rows.map((r) => r.id)).toEqual(['a']);
@@ -87,17 +87,8 @@ describe('SessionsStore.load', () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [] } as never);
     const store = new SessionsStore();
 
-    await store.load('odyn');
-    await store.load('odyn');
-
-    expect(get).toHaveBeenCalledTimes(2);
-  });
-
-  it('leaves a different agent to its own GET', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue({ sessions: [] } as never);
-    const store = new SessionsStore();
-
-    await Promise.all([store.load('odyn'), store.load('scout')]);
+    await store.load();
+    await store.load();
 
     expect(get).toHaveBeenCalledTimes(2);
   });

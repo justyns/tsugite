@@ -1,5 +1,5 @@
 /**
- * Per-surface chat stream helper. A send POSTs /api/agents/{agent}/chat and the
+ * Per-surface chat stream helper. A send POSTs /api/chat and the
  * response is an SSE stream OWNED by this surface - it carries the turn-end and
  * streaming frames (final_result/error/cancelled/stream_chunk) that the
  * cross-session broadcast deliberately withholds, so whichever surface ran the
@@ -56,11 +56,7 @@ const TERMINAL_FRAMES = new Set(['done', 'cancelled']);
 
 /** Start a chat turn. Returns a handle immediately; the stream is read in the
  *  background and drives the handler callbacks. */
-export function sendChat(
-  agent: string,
-  body: ChatSendBody,
-  handlers: ChatStreamHandlers = {},
-): ChatStreamHandle {
+export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}): ChatStreamHandle {
   const controller = new AbortController();
   let closed = false;
   // A 200 response means the daemon accepted the turn and opened the stream, so
@@ -77,7 +73,7 @@ export function sendChat(
 
   const run = async (): Promise<void> => {
     try {
-      const resp = await fetch(`/api/agents/${encodeURIComponent(agent)}/chat`, {
+      const resp = await fetch(`/api/chat`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -130,13 +126,12 @@ export function sendChat(
 /** Stop the agent server-side (the Stop button). Separate from a stream close:
  *  aborting the fetch leaves the daemon running the turn. */
 export async function cancelChat(
-  agent: string,
   opts: { userId?: string; sessionId?: string } = {},
 ): Promise<void> {
   const body: Record<string, unknown> = {};
   if (opts.userId != null) body.user_id = opts.userId;
   if (opts.sessionId != null) body.session_id = opts.sessionId;
-  await api.post(`/api/agents/${encodeURIComponent(agent)}/chat/cancel`, body);
+  await api.post(`/api/chat/cancel`, body);
 }
 
 /** The daemon's reply to a respond POST. `ok` = delivered to the waiting ask;
@@ -150,11 +145,13 @@ export interface AskAnswer {
 /** Answer an ask_user prompt. `askId` targets the durable ask by id (the primary
  *  key the daemon resolves against its live registry); session_id is the legacy
  *  fallback. Returns the parsed reply so the caller can branch on `status`. */
-export async function respondToAsk(
-  agent: string,
-  opts: { response: string; askId?: string; userId?: string; sessionId: string },
-): Promise<AskAnswer> {
-  return await api.post<AskAnswer>(`/api/agents/${encodeURIComponent(agent)}/respond`, {
+export async function respondToAsk(opts: {
+  response: string;
+  askId?: string;
+  userId?: string;
+  sessionId: string;
+}): Promise<AskAnswer> {
+  return await api.post<AskAnswer>(`/api/chat/respond`, {
     ask_id: opts.askId,
     response: opts.response,
     user_id: opts.userId,

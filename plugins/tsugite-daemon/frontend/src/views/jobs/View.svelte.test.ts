@@ -11,7 +11,7 @@ vi.mock('$lib/api/client', () => ({
     get: vi.fn(async (path: string) => {
       if (path.startsWith('/api/jobs')) return { jobs: SEED };
       if (path.startsWith('/api/executors')) return { executors: ['agent'] };
-      return { agents: [] };
+      return { agent_file: 'odyn', workspace_dir: '/ws' };
     }),
     post: vi.fn(async () => ({})),
     patch: vi.fn(async () => ({})),

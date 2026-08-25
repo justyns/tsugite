@@ -42,10 +42,10 @@
 
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-  const rosterByName = $derived(new Map(agentsMeta.agents.map((a) => [a.name, a])));
+  const runningAgentFile = $derived(agentsMeta.runtime?.agent_file ?? null);
 
   function rankOf(f: MdFile): number {
-    if (rosterByName.has(f.name)) return 0;
+    if (f.name === runningAgentFile) return 0;
     return f.readonly ? 2 : 1;
   }
 
@@ -74,8 +74,8 @@
   const parsed = $derived(parseAgentFile(content));
   const summary = $derived(summarizeAgent(parsed.frontmatter));
   const agentName = $derived(summary.name ?? selectedFile?.name ?? '');
-  const registered = $derived(agentName !== '' && rosterByName.has(agentName));
-  const runningTasks = $derived(rosterByName.get(agentName)?.running_tasks ?? 0);
+  const registered = $derived(agentName !== '' && agentName === runningAgentFile);
+  const runningTasks = $derived(registered ? (agentsMeta.runtime?.running_tasks ?? 0) : 0);
   const dirty = $derived(content !== savedContent);
 
   const sourceLabel = $derived(selectedFile ? selectedFile.source : '');
@@ -211,8 +211,8 @@
       <div class="roster" role="listbox" aria-label="Agents" tabindex="-1">
         {#each visibleFiles as f, i (f.path)}
           {@const isSel = f.path === selectedPath}
-          {@const live = rosterByName.has(f.name)}
-          {@const running = rosterByName.get(f.name)?.running_tasks ?? 0}
+          {@const live = f.name === runningAgentFile}
+          {@const running = live ? (agentsMeta.runtime?.running_tasks ?? 0) : 0}
           <button
             type="button"
             class="ag-row"

@@ -1,7 +1,6 @@
 /**
  * Sessions-rail filter grammar. Whitespace-separated tokens, modelled on the
  * jobs filter (stores/jobsFilter.ts) so the two search boxes read the same:
- *   agent:smoke     -> restrict to that agent   (repeatable, OR within the axis)
  *   status:failed   -> restrict to that status  (repeatable, OR within the axis)
  *   is:pinned       -> boolean facet: pinned | unread | primary | needs-you
  *   #sess-42        -> free-text term (the '#' is stripped)
@@ -15,7 +14,6 @@
  */
 
 export interface SessionFilter {
-  agents: string[];
   statuses: string[];
   flags: string[];
   terms: string[];
@@ -27,7 +25,6 @@ export interface SessionFilterRow {
   title: string | null;
   topic?: string;
   label?: string;
-  agent: string;
   status: string;
   pinned: boolean;
   unread: boolean;
@@ -45,22 +42,19 @@ function facet(token: string, key: string): string | null {
 }
 
 export function parseSessionFilter(text: string): SessionFilter {
-  const agents: string[] = [];
   const statuses: string[] = [];
   const flags: string[] = [];
   const terms: string[] = [];
   for (const token of text.trim().split(/\s+/)) {
     if (!token) continue;
-    const agent = facet(token, 'agent');
     const status = facet(token, 'status');
     const flag = facet(token, 'is');
-    if (agent !== null) agents.push(agent);
-    else if (status !== null) statuses.push(status);
+    if (status !== null) statuses.push(status);
     else if (flag !== null && FLAG_NAMES.has(flag)) flags.push(flag);
     else if (token.startsWith('#') && token.length > 1) terms.push(token.slice(1).toLowerCase());
     else terms.push(token.toLowerCase());
   }
-  return { agents, statuses, flags, terms };
+  return { statuses, flags, terms };
 }
 
 function haystack(row: SessionFilterRow): string {
@@ -83,7 +77,6 @@ function flagHeld(row: SessionFilterRow, flag: string): boolean {
 }
 
 export function sessionMatchesFilter(row: SessionFilterRow, filter: SessionFilter): boolean {
-  if (filter.agents.length && !filter.agents.includes(row.agent.toLowerCase())) return false;
   if (filter.statuses.length && !filter.statuses.includes(row.status.toLowerCase())) return false;
   if (filter.flags.length && !filter.flags.every((f) => flagHeld(row, f))) return false;
   if (filter.terms.length) {
@@ -95,12 +88,7 @@ export function sessionMatchesFilter(row: SessionFilterRow, filter: SessionFilte
 
 /** Whether any facet or term is set (an empty box shows the full grouped list). */
 export function isActiveFilter(filter: SessionFilter): boolean {
-  return (
-    filter.agents.length > 0 ||
-    filter.statuses.length > 0 ||
-    filter.flags.length > 0 ||
-    filter.terms.length > 0
-  );
+  return filter.statuses.length > 0 || filter.flags.length > 0 || filter.terms.length > 0;
 }
 
 /** The free-text portion, rejoined for the server-side ?q= full-store merge. */

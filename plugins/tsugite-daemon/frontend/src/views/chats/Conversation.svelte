@@ -389,7 +389,7 @@
 
     <span class="t-type" data-k={sourceType}>{sourceType === 'research' ? 'res' : sourceType}</span>
     <Pill st={pillState} label={pillLabel} />
-    <ModelEffort sessionId={ctrl.sessionId} agent={ctrl.agent} />
+    <ModelEffort sessionId={ctrl.sessionId} />
 
     <div class="grow"></div>
 
@@ -643,7 +643,7 @@
           {#if turn.attachments}
             <!-- Files/photos the person attached, rendered once under their words:
                  images as clickable thumbnails (lightbox), other files as chips. -->
-            <Attachments agent={ctrl.agent} attachments={turn.attachments} />
+            <Attachments attachments={turn.attachments} />
           {/if}
           {#if turn.stream}
             <!-- Raw token stream, rendered live; the reducer folds it into a
@@ -730,7 +730,7 @@
   {/if}
 
   {#if rawOpen && ctrl.sessionId}
-    <RawMessages agent={ctrl.agent} sessionId={ctrl.sessionId} onClose={() => (rawOpen = false)} />
+    <RawMessages sessionId={ctrl.sessionId} onClose={() => (rawOpen = false)} />
   {/if}
   {#if rawMetadataOpen && row}
     <RawSessionMetadata metadata={row.metadata} {links} onClose={() => (rawMetadataOpen = false)} />

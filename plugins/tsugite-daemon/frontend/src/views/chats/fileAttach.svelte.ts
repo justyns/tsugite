@@ -27,7 +27,6 @@ const PASTE_MAX_LINES = 11;
 export interface FileAttachDeps {
   /** The composer's bindable input text (read + written by the paste-inline path). */
   value: string;
-  readonly agent: string;
   readonly sessionId: string | null;
   /** Route a pasted reference marker to the context controller. */
   attachRef: (kind: string, id: string) => void;
@@ -158,7 +157,7 @@ export class FileAttach {
       const cfg = await loadImageConfig();
       const processed = await Promise.all(files.map((f) => reencodeImage(f, cfg)));
       const res = await api.uploadFiles<{ files: { name: string; size?: number }[] }>(
-        `/api/agents/${encodeURIComponent(this.#deps.agent)}/upload`,
+        `/api/chat/upload`,
         processed,
       );
       this.attachments = [

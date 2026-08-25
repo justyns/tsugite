@@ -1,11 +1,10 @@
 <script lang="ts">
-  // Chats context rail: loads the agent-scoped session list and renders the
+  // Chats context rail: loads the session list and renders the
   // filterable SessionsRail. A row click opens (or focuses) that session as a chat
   // surface in the focused pane via `onOpenChat`; the highlight tracks whichever
   // session the focused chat surface is currently showing (its explicit param, or
   // the resolved default when the paramless default chat is focused).
   import { sessions } from '$lib/stores/sessions.svelte';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
   import { jobTallyBySession } from '$lib/stores/jobsFilter';
   import SessionsRail from './SessionsRail.svelte';
@@ -18,14 +17,9 @@
   }: {
     /** The focused chat surface's raw sessionId param (null for the default chat). */
     focusedSessionId: string | null;
-    onOpenChat: (sessionId: string, agent?: string) => void;
+    onOpenChat: (sessionId: string) => void;
   } = $props();
 
-  // The rail is agent-scoped; the picker swaps which agent's sessions it lists
-  // and rides along on every open so cross-agent sessions resolve correctly.
-  let agentPick = $state('');
-  const agentNames = $derived(agentsMeta.agents.map((a) => a.name));
-  const agent = $derived(agentPick || agentNames[0] || '');
   // Superseded sessions are loaded (view-source targets) but not listed - the
   // live successor is the row that matters here.
   const rows = $derived(sessions.ordered.filter((r) => !r.superseded_by));
@@ -37,16 +31,13 @@
   const attn = $derived(new Set(needsYouSessions(rows, jobCounts).map((r) => r.id)));
 
   $effect(() => {
-    if (agentsMeta.agents.length === 0) void agentsMeta.load();
-  });
-  $effect(() => {
-    if (agent) void sessions.load(agent);
+    void sessions.load();
   });
 
   async function newSession() {
-    const id = await sessions.newSession(agent);
-    await sessions.load(agent);
-    onOpenChat(id, agent);
+    const id = await sessions.newSession();
+    await sessions.load();
+    onOpenChat(id);
   }
 
   function serverSearch(q: string) {
@@ -56,14 +47,11 @@
 
 <SessionsRail
   {rows}
-  {agent}
-  agents={agentNames}
   {selectedId}
   {attn}
   {jobCounts}
   loading={sessions.loading}
-  onSelect={(id) => onOpenChat(id, agent)}
+  onSelect={(id) => onOpenChat(id)}
   onNew={newSession}
-  onAgentChange={(a) => (agentPick = a)}
   onServerSearch={serverSearch}
 />

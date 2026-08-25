@@ -14,9 +14,8 @@ beforeEach(async () => {
   await page.viewport(1440, 900);
   WORKSPACE.reset();
   const { agentsMeta } = await import('$lib/stores/agentsMeta.svelte');
-  agentsMeta.agents = [];
+  agentsMeta.runtime = null;
   const { filesWorkspace } = await import('./workspace.svelte');
-  filesWorkspace.agent = '';
   filesWorkspace.ws = null;
   filesWorkspace.loading = false;
   filesWorkspace.error = null;
@@ -27,7 +26,7 @@ beforeEach(async () => {
 
 async function mountSurface(path: string) {
   const { default: Surface } = await import('./Surface.svelte');
-  render(Surface, { props: { params: { agent: 'smoke', path } } });
+  render(Surface, { props: { params: { path } } });
 }
 
 /** Replay the file_write frame through the real shell router. */
@@ -147,7 +146,7 @@ async function paneSurface(width: number) {
   await page.viewport(1440, 900);
   const { default: Surface } = await import('./Surface.svelte');
   const { container } = await render(Surface, {
-    props: { params: { agent: 'smoke', path: 'ops/alpha.md' } },
+    props: { params: { path: 'ops/alpha.md' } },
   });
   container.style.width = `${width}px`;
   await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();

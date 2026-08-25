@@ -11,7 +11,7 @@ const chat = vi.hoisted(() => ({
   respond: vi.fn(async (..._args: unknown[]) => ({ status: 'ok' }) as unknown),
 }));
 vi.mock('$lib/api/chat', () => ({
-  sendChat: vi.fn((_agent: string, body: Record<string, unknown>, handlers: ChatStreamHandlers) => {
+  sendChat: vi.fn((body: Record<string, unknown>, handlers: ChatStreamHandlers) => {
     chat.handlers = handlers;
     chat.body = body;
     return { close: chat.close };
@@ -34,7 +34,6 @@ type Ev = Record<string, unknown>;
 
 function controller(events: Ev[]): ConversationController {
   const ctrl = new ConversationController();
-  ctrl.agent = 'smoke';
   ctrl.sessionId = 'sess-1';
   ctrl.events = events;
   return ctrl;
@@ -241,7 +240,6 @@ test('answerAsk sends the ask_id and marks the prompt answered on an ok reply', 
   await ctrl.answerAsk('Approve');
 
   expect(chat.respond).toHaveBeenCalledWith(
-    'smoke',
     expect.objectContaining({ askId: 'ask-42', response: 'Approve', sessionId: 'sess-1' }),
   );
   expect(ctrl.ask?.answered).toBe(true);
@@ -296,7 +294,7 @@ test('a reload re-shows a still-pending ask from the persisted events, then clea
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   expect(ctrl.ask).not.toBeNull();
   expect(ctrl.ask?.askId).toBe('ask-abc');
@@ -325,7 +323,7 @@ test('a reload of an already-answered ask does not re-prompt', async () => {
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
   expect(ctrl.ask).toBeNull();
 });
 
@@ -396,7 +394,7 @@ test('open loads only the tail window and records the load-earlier cursor', asyn
     oldest_id: 5,
   });
 
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   expect(getPaths()[0]).toContain('/events?limit=');
   expect(ctrl.events).toHaveLength(2);
@@ -414,7 +412,7 @@ test('resync fetches only newer events (after_id) and APPENDS the delta', async 
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   apiMock.get.mockResolvedValueOnce({
     events: [
@@ -435,7 +433,7 @@ test('resync with an empty delta leaves the timeline untouched', async () => {
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   apiMock.get.mockResolvedValueOnce({ events: [] });
   await ctrl.resync();
@@ -449,7 +447,7 @@ test('resync discards its delta when the session switched mid-fetch', async () =
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   apiMock.get.mockImplementationOnce(async () => {
     ctrl.sessionId = 'other'; // a switch lands while the fetch is in flight
@@ -469,7 +467,7 @@ test('resync falls back to a full window reload when a compaction lands in the d
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   apiMock.get.mockResolvedValueOnce({
     events: [{ id: 3, type: 'compaction', replaced_count: 5, retained_count: 1 }],
@@ -500,7 +498,7 @@ test('loadEarlier prepends the earlier page and advances the cursor', async () =
     has_more: true,
     oldest_id: 5,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   apiMock.get.mockResolvedValueOnce({
     events: [
@@ -525,7 +523,7 @@ test('loadEarlier is a no-op when nothing earlier exists', async () => {
     has_more: false,
     oldest_id: 5,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
   apiMock.get.mockClear();
 
   await ctrl.loadEarlier();
@@ -617,7 +615,7 @@ test('a resync replaces live broadcast frames with the authoritative delta (no d
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   // A foreign turn's live frames land id-less via the broadcast.
   ctrl.ingestBroadcast({ session_id: 'sess-1', event_type: 'user_input', text: 'q2' });
@@ -654,7 +652,7 @@ test('the per-turn cache meta survives streaming, settle, and a resync (footer n
     has_more: false,
     oldest_id: 10,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   await ctrl.send('go');
   chat.handlers!.onEvent?.({ type: 'turn_start' });
@@ -693,7 +691,7 @@ test('pushEcho appends a local echo that survives a resync (separate ephemeral c
     has_more: false,
     oldest_id: 1,
   });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   ctrl.pushEcho('/status', 'Model: x', true);
   expect(ctrl.localEcho).toHaveLength(1);
@@ -710,11 +708,11 @@ test('pushEcho appends a local echo that survives a resync (separate ephemeral c
 test('switching sessions clears local echoes (per-session-view, gone on reload)', async () => {
   const ctrl = new ConversationController();
   apiMock.get.mockResolvedValue({ events: [], has_more: false, oldest_id: null });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
   ctrl.pushEcho('/status', 'Model: x', true);
   expect(ctrl.localEcho).toHaveLength(1);
 
-  await ctrl.open('smoke', 'sess-2');
+  await ctrl.open('sess-2');
   expect(ctrl.localEcho).toHaveLength(0);
 });
 
@@ -739,7 +737,7 @@ test('a normal send on a long session renders the message once through the settl
     window.push({ id: id + 1, type: 'final_result', result: 'r' });
   }
   apiMock.get.mockResolvedValueOnce({ events: window, has_more: true, oldest_id: 490 });
-  await ctrl.open('smoke', 'sess-1');
+  await ctrl.open('sess-1');
 
   const MSG = 'Reply exactly: ok. (dedupe-777)';
   await ctrl.send(MSG);

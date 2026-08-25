@@ -28,9 +28,9 @@
     focusedFilePath: string | null;
     onOpenChat: (sessionId: string, agent?: string) => void;
     onOpenTerminal: (terminalId: string) => void;
-    onOpenFile: (agent: string, path: string) => void;
+    onOpenFile: (path: string) => void;
     /** Pin the focused pane's file preview (a file's double-click-to-keep). */
-    onPinFile: (agent: string, path: string) => void;
+    onPinFile: (path: string) => void;
   } = $props();
 
   const TITLES: Record<WorkspaceView, string> = {

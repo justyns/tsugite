@@ -8,7 +8,6 @@ import { api } from '$lib/api/client';
 
 export interface Webhook {
   token: string;
-  agent: string;
   source: string;
   created_at: string;
 }
@@ -31,7 +30,7 @@ export class WebhooksStore {
     }
   }
 
-  async create(opts: { agent: string; source: string; token?: string }): Promise<Webhook> {
+  async create(opts: { source: string; token?: string }): Promise<Webhook> {
     const webhook = await api.post<Webhook>('/api/webhooks/', opts);
     this.list = [webhook, ...this.list];
     return webhook;

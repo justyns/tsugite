@@ -15,7 +15,6 @@ beforeEach(() => localStorage.removeItem('tsugite_rail_ended_open'));
 afterEach(() => vi.restoreAllMocks());
 
 const base = {
-  agent: 'smokeagent',
   selectedId: null,
   attn: new Set<string>(),
   onSelect: vi.fn(),
@@ -114,7 +113,7 @@ test('double-clicking a session row docks it as a fresh chat tab', async () => {
   expect(tabs.length).toBe(before + 1);
   const docked = tabs[tabs.length - 1]!;
   expect(docked.kind).toBe('chat');
-  expect(docked.params).toEqual({ sessionId: 's3', agent: 'smokeagent' });
+  expect(docked.params).toEqual({ sessionId: 's3' });
 });
 
 function dragRowOnto(from: HTMLElement, to: HTMLElement, half: 'top' | 'bottom') {

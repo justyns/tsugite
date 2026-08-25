@@ -71,24 +71,15 @@
     reloading = true;
     try {
       const r = await api.post<{
-        added: string[];
-        removed: string[];
         updated: string[];
-        skipped: string[];
         restart_required: string[];
       }>('/api/daemon/reload-config');
-      const changes = [
-        r.added.length ? `+${r.added.join(', ')}` : '',
-        r.removed.length ? `-${r.removed.join(', ')}` : '',
-        r.updated.length ? `~${r.updated.join(', ')}` : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
+      const changes = r.updated.length ? `~${r.updated.join(', ')}` : '';
       const restart = r.restart_required.length
         ? `restart required for: ${r.restart_required.join(', ')}`
         : '';
       toasts.push(restart ? 'warn' : 'ok', 'Config reloaded', {
-        body: [changes || 'no agent changes', restart].filter(Boolean).join(' — '),
+        body: [changes || 'no changes', restart].filter(Boolean).join(' — '),
       });
     } catch (err) {
       toasts.push('err', 'Config reload failed', { body: (err as Error).message });

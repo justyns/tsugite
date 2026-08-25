@@ -11,10 +11,8 @@
   import type { TurnAttachment } from './turns';
 
   let {
-    agent,
     attachments,
   }: {
-    agent: string;
     attachments: TurnAttachment[];
   } = $props();
 
@@ -43,7 +41,7 @@
   }
   function openInFiles(path: string): void {
     closeLightbox();
-    navigate('files', { agent, path });
+    navigate('files', { path });
   }
 
   // Land focus on the close control once the dialog renders.
@@ -55,7 +53,7 @@
 <div class="attachments">
   {#each attachments as a, i (i)}
     {#if isImage(a)}
-      <AttachmentThumb {agent} name={a.name} path={a.path} onopen={(url) => openLightbox(a, url)} />
+      <AttachmentThumb name={a.name} path={a.path} onopen={(url) => openLightbox(a, url)} />
     {:else}
       <button
         type="button"

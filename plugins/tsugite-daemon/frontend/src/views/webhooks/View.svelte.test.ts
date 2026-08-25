@@ -4,7 +4,7 @@ import { render, cleanup } from 'vitest-browser-svelte';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import View from './View.svelte';
 import { webhooks, type Webhook } from '$lib/stores/webhooks.svelte';
-import { agentsMeta, type AgentMeta } from '$lib/stores/agentsMeta.svelte';
+import { agentsMeta, type RuntimeInfo } from '$lib/stores/agentsMeta.svelte';
 
 afterEach(() => {
   cleanup();
@@ -12,14 +12,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function agent(name: string): AgentMeta {
-  return { name, agent_file: `${name}.md`, workspace_dir: `/tmp/${name}`, running_tasks: 0 };
+function agent(name: string): RuntimeInfo {
+  return {
+    agent_file: name,
+    workspace_dir: `/tmp/${name}`,
+    model: null,
+    context_limit: null,
+    running_tasks: 0,
+  };
 }
 
 function hook(overrides: Partial<Webhook> = {}): Webhook {
   return {
     token: 'tok-abc123',
-    agent: 'smoke',
     source: 'inbox-forward',
     created_at: new Date().toISOString(),
     ...overrides,
@@ -32,21 +37,22 @@ beforeEach(() => {
   webhooks.list = [];
   webhooks.loading = false;
   webhooks.error = null;
-  agentsMeta.agents = [];
+  agentsMeta.runtime = null;
   vi.spyOn(webhooks, 'load').mockResolvedValue(undefined);
   vi.spyOn(agentsMeta, 'load').mockResolvedValue(undefined);
 });
 
 test('shows the empty state, with the single New webhook action in the header', async () => {
-  agentsMeta.agents = [agent('smoke')];
+  agentsMeta.runtime = {
+    agent_file: 'smoke',
+    workspace_dir: '/ws',
+    model: null,
+    context_limit: null,
+    running_tasks: 0,
+  };
   await render(View, {});
   await expect.element(page.getByText('No webhooks yet')).toBeVisible();
   await expect.element(page.getByRole('button', { name: 'New webhook' })).toBeEnabled();
-});
-
-test('New webhook is disabled when no agents are configured', async () => {
-  await render(View, {});
-  await expect.element(page.getByRole('button', { name: 'New webhook' })).toBeDisabled();
 });
 
 test('shows a retryable error pane when the initial load fails and nothing is cached', async () => {
@@ -60,10 +66,9 @@ test('shows a retryable error pane when the initial load fails and nothing is ca
 });
 
 test('renders configured webhooks with the delivery URL masked by default', async () => {
-  webhooks.list = [hook({ token: 'secret-token-1', source: 'inbox-forward', agent: 'smoke' })];
+  webhooks.list = [hook({ token: 'secret-token-1', source: 'inbox-forward' })];
   await render(View, {});
   await expect.element(page.getByText('inbox-forward')).toBeVisible();
-  await expect.element(page.getByText('smoke')).toBeVisible();
   await expect.element(page.getByText('/webhook/secret-token-1')).not.toBeInTheDocument();
 
   await page.getByRole('button', { name: 'show' }).click();
@@ -80,7 +85,13 @@ test('a webhook never tested this session shows a neutral hint, not a fabricated
 });
 
 test('create: validates the source client-side before calling the store', async () => {
-  agentsMeta.agents = [agent('smoke')];
+  agentsMeta.runtime = {
+    agent_file: 'smoke',
+    workspace_dir: '/ws',
+    model: null,
+    context_limit: null,
+    running_tasks: 0,
+  };
   const createSpy = vi.spyOn(webhooks, 'create');
   await render(View, {});
 
@@ -99,27 +110,38 @@ test('create: validates the source client-side before calling the store', async 
   expect(createSpy).not.toHaveBeenCalled();
 });
 
-test('create: a valid submit calls the store with the selected agent and source, then closes', async () => {
-  agentsMeta.agents = [agent('smoke'), agent('helper')];
-  vi.spyOn(webhooks, 'create').mockResolvedValue(hook({ agent: 'helper', source: 'gh-events' }));
+test('create: a valid submit calls the store with the source, then closes', async () => {
+  agentsMeta.runtime = {
+    agent_file: 'smoke',
+    workspace_dir: '/ws',
+    model: null,
+    context_limit: null,
+    running_tasks: 0,
+  };
+  vi.spyOn(webhooks, 'create').mockResolvedValue(hook({ source: 'gh-events' }));
   await render(View, {});
 
   await page.getByRole('button', { name: 'New webhook' }).click();
   const dialog = page.getByRole('dialog', { name: 'New webhook' });
-  await dialog.getByLabelText('agent').selectOptions('helper');
   await dialog.getByLabelText('source').fill('gh-events');
   await dialog.getByRole('button', { name: 'Create' }).click();
 
   await expect.poll(() => webhooks.create).toHaveProperty('mock.calls.length', 1);
-  expect(webhooks.create).toHaveBeenCalledWith({ agent: 'helper', source: 'gh-events' });
+  expect(webhooks.create).toHaveBeenCalledWith({ source: 'gh-events' });
   // display:none removes the dialog from the a11y tree entirely once closed -
   // a stronger guarantee than "not visible" (see Conn.svelte.test.ts).
   await expect.element(dialog).not.toBeInTheDocument();
 });
 
 test('create: a store rejection surfaces inline and leaves the modal open', async () => {
-  agentsMeta.agents = [agent('smoke')];
-  vi.spyOn(webhooks, 'create').mockRejectedValue(new Error('unknown agent: smoke'));
+  agentsMeta.runtime = {
+    agent_file: 'smoke',
+    workspace_dir: '/ws',
+    model: null,
+    context_limit: null,
+    running_tasks: 0,
+  };
+  vi.spyOn(webhooks, 'create').mockRejectedValue(new Error('source already exists'));
   await render(View, {});
 
   await page.getByRole('button', { name: 'New webhook' }).click();
@@ -127,7 +149,7 @@ test('create: a store rejection surfaces inline and leaves the modal open', asyn
   await dialog.getByLabelText('source').fill('gh-events');
   await dialog.getByRole('button', { name: 'Create' }).click();
 
-  await expect.element(page.getByText('unknown agent: smoke')).toBeVisible();
+  await expect.element(page.getByText('source already exists')).toBeVisible();
   await expect.element(dialog).toBeVisible();
 });
 
@@ -160,7 +182,7 @@ test('delete: cancel leaves the webhook in place', async () => {
 });
 
 test('test fire: a real POST to the public delivery path records an ok result and logs it', async () => {
-  webhooks.list = [hook({ token: 'secret-token-1', source: 'inbox-forward', agent: 'smoke' })];
+  webhooks.list = [hook({ token: 'secret-token-1', source: 'inbox-forward' })];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     expect(String(input)).toBe('/webhook/secret-token-1');
     return new Response(JSON.stringify({ status: 'accepted', file: '2026-x.json' }), {

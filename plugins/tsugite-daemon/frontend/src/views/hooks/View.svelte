@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Hooks: per-agent lifecycle hook rules - the daemon fires each agent's
+  // Hooks: lifecycle hook rules - the daemon fires the workspace's
   // workspace `.tsugite/hooks.yaml` (post_tool, pre_message, pre_compact, ...).
   // The loader reads that file fresh on every firing, so a save here applies on
   // the agent's next turn with no restart. The editor is the raw YAML (the
@@ -10,7 +10,6 @@
   import Select from '$lib/components/inputs/Select.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { api } from '$lib/api/client';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
 
   interface HookRuleSummary {
@@ -32,10 +31,6 @@
     error: string | null;
   }
 
-  let agentPick = $state('');
-  const agents = $derived(agentsMeta.agents.map((a) => a.name));
-  const agent = $derived(agentPick || agents[0] || '');
-
   let loading = $state(false);
   let loadError = $state<string | null>(null);
   let payload = $state<HooksPayload | null>(null);
@@ -52,23 +47,15 @@
 `;
 
   $effect(() => {
-    if (agentsMeta.agents.length === 0) void agentsMeta.load();
+    void load();
   });
 
-  let loadedFor: string | null = null;
-  $effect(() => {
-    if (agent && agent !== loadedFor) {
-      loadedFor = agent;
-      void load(agent);
-    }
-  });
-
-  async function load(name: string) {
+  async function load() {
     loading = true;
     loadError = null;
     saveError = null;
     try {
-      const res = await api.get<HooksPayload>(`/api/agents/${encodeURIComponent(name)}/hooks`);
+      const res = await api.get<HooksPayload>(`/api/hooks`);
       payload = res;
       draft = res.raw;
     } catch (err) {
@@ -80,11 +67,10 @@
   }
 
   async function save() {
-    if (!agent) return;
     saving = true;
     saveError = null;
     try {
-      const res = await api.put<HooksPayload>(`/api/agents/${encodeURIComponent(agent)}/hooks`, {
+      const res = await api.put<HooksPayload>(`/api/hooks`, {
         raw: draft,
       });
       payload = res;
@@ -109,14 +95,6 @@
   <header class="vw-hd">
     <Icon name="fork" size={14} />
     <h2>hooks</h2>
-    {#if agents.length > 1}
-      <Select
-        options={agents}
-        value={agent}
-        ariaLabel="Hooks agent"
-        onchange={(a) => (agentPick = a)}
-      />
-    {/if}
     <span class="hint">
       {payload?.path ?? ''}{ruleCount ? ` · ${ruleCount} rule${ruleCount === 1 ? '' : 's'}` : ''}
     </span>
@@ -136,7 +114,7 @@
           {#snippet icon()}<Icon name="alert" />{/snippet}
           {#snippet hint()}{loadError}{/snippet}
           {#snippet actions()}
-            <Button size="sm" onclick={() => load(agent)}>
+            <Button size="sm" onclick={() => load()}>
               {#snippet icon()}<Icon name="retry" />{/snippet}
               Retry
             </Button>
@@ -175,8 +153,8 @@
       {:else}
         <div class="empty-note">
           <p>
-            No hooks configured for <b>{agent}</b>. Hooks run shell commands or agents on lifecycle
-            events (after tool calls, before messages, around compaction, …).
+            No hooks configured. Hooks run shell commands or agents on lifecycle events (after tool
+            calls, before messages, around compaction, …).
           </p>
           <Button size="sm" onclick={startFromTemplate}>
             {#snippet icon()}<Icon name="plus" />{/snippet}

@@ -1,9 +1,9 @@
 /**
- * Sessions store: the chat sidebar's backing data. Lists the rich per-agent
- * session rows (GET /api/agents/{agent}/sessions - the only list that carries
+ * Sessions store: the chat sidebar's backing data. Lists the rich
+ * session rows (GET /api/chat/sessions - the only list that carries
  * pinned/progress/label/busy), overlays a live per-session progress rollup fed
  * by cross-session `session_event` broadcasts, and owns every lifecycle mutation
- * (all under /api/sessions/{id}/*, keyed by session id across agents).
+ * (all under /api/sessions/{id}/*, keyed by session id).
  *
  * The own-tab / broadcast split matters here: turn-end + streaming events are
  * withheld from the broadcast, so this store models progress from the mid-turn
@@ -12,7 +12,7 @@
  * active surface's own per-chat stream (api/chat.ts) covers the rest.
  *
  * Cache: stale-while-revalidate. A cold load paints the last cached list for the
- * agent immediately (key tsugite_sessions_${agent}) before the network returns.
+ * rows immediately (key tsugite_sessions) before the network returns.
  * Exported as a class instance - never a reassigned $state binding.
  */
 import { untrack } from 'svelte';
@@ -61,7 +61,6 @@ export interface SessionRow extends SessionRowLike {
 export interface SessionSettings {
   reasoning_effort: string | null;
   model: string | null;
-  agent: string | null;
 }
 
 export interface SessionListOpts {
@@ -80,9 +79,7 @@ function pendingIds(data: Record<string, unknown>): string[] {
   return Array.isArray(data.pending_deliveries) ? (data.pending_deliveries as string[]) : [];
 }
 
-function cacheKey(agent: string): string {
-  return `tsugite_sessions_${agent}`;
-}
+const CACHE_KEY = 'tsugite_sessions';
 
 function buildQuery(opts: SessionListOpts): string {
   const params = new URLSearchParams();
@@ -100,7 +97,6 @@ export class SessionsStore {
   rows = $state<SessionRow[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
-  agent = $state('');
   // Live progress overlay keyed by session id, folded from session_event ticks.
   // Read through progressFor() so a row's server-sent progress is the fallback.
   progress = $state<Record<string, Progress>>({});
@@ -127,30 +123,28 @@ export class SessionsStore {
     return this.progress[id] ?? this.rows.find((r) => r.id === id)?.progress ?? null;
   }
 
-  /** Load (or reload) the session list for an agent. Paints the SWR cache first
-   *  on a cold load, then revalidates from the network and re-caches. */
-  async load(agent: string, opts: SessionListOpts = {}): Promise<void> {
+  /** Load (or reload) the session list. Paints the SWR cache first on a cold
+   *  load, then revalidates from the network and re-caches. */
+  async load(opts: SessionListOpts = {}): Promise<void> {
     // Superseded (compacted-away) sessions stay in the store so a compaction
     // banner's "view source" can resolve them; the rail filters them from display.
     opts = { includeSuperseded: true, ...opts };
-    const key = agent + buildQuery(opts);
+    const key = buildQuery(opts);
     const started = this.burst.get(key);
     if (started) return started;
-    const run = this.fetchList(agent, opts);
+    const run = this.fetchList(opts);
     this.burst.set(key, run);
     queueMicrotask(() => this.burst.delete(key));
     return run;
   }
 
-  private async fetchList(agent: string, opts: SessionListOpts): Promise<void> {
+  private async fetchList(opts: SessionListOpts): Promise<void> {
     untrack(() => {
-      const prevAgent = this.agent;
-      this.agent = agent;
       this.lastOpts = opts;
-      // Only hydrate the cache when switching to an agent we have nothing for -
-      // an in-place reload keeps the current rows painted while the fetch runs.
-      if (this.rows.length === 0 || prevAgent !== agent) {
-        const cached = readSwr<SessionRow[]>(cacheKey(agent));
+      // Only hydrate the cache on a cold load - an in-place reload keeps the
+      // current rows painted while the fetch runs.
+      if (this.rows.length === 0) {
+        const cached = readSwr<SessionRow[]>(CACHE_KEY);
         if (cached) this.rows = orderSessions(cached);
       }
       this.loading = true;
@@ -158,10 +152,10 @@ export class SessionsStore {
     });
     try {
       const res = await api.get<{ sessions: SessionRow[] }>(
-        `/api/agents/${encodeURIComponent(agent)}/sessions${buildQuery(opts)}`,
+        `/api/chat/sessions${buildQuery(opts)}`,
       );
       this.rows = orderSessions(res.sessions);
-      writeSwr(cacheKey(agent), res.sessions);
+      writeSwr(CACHE_KEY, res.sessions);
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -172,8 +166,7 @@ export class SessionsStore {
   /** Server-merge search: the sidebar holds ~100 recent rows, but a query scans
    *  the full store, so this reloads with ?q= rather than filtering locally. */
   async search(q: string): Promise<void> {
-    if (!this.agent) return;
-    await this.load(this.agent, { ...this.lastOpts, q });
+    await this.load({ ...this.lastOpts, q });
   }
 
   // --- SSE broadcast application ---
@@ -288,24 +281,20 @@ export class SessionsStore {
   }
 
   private scheduleRevalidate(): void {
-    if (!this.agent) return;
     if (this.revalidateTimer !== null) clearTimeout(this.revalidateTimer);
     this.revalidateTimer = setTimeout(() => {
       this.revalidateTimer = null;
-      void this.load(this.agent, this.lastOpts);
+      void this.load(this.lastOpts);
     }, REVALIDATE_DEBOUNCE_MS);
   }
 
-  // --- lifecycle mutations (keyed by session id, cross-agent) ---
+  // --- lifecycle mutations (keyed by session id) ---
 
-  async newSession(agent: string, opts: { title?: string; userId?: string } = {}): Promise<string> {
+  async newSession(opts: { title?: string; userId?: string } = {}): Promise<string> {
     const body: Record<string, unknown> = {};
     if (opts.title != null) body.title = opts.title;
     if (opts.userId != null) body.user_id = opts.userId;
-    const res = await api.post<{ id: string }>(
-      `/api/agents/${encodeURIComponent(agent)}/sessions/new`,
-      body,
-    );
+    const res = await api.post<{ id: string }>(`/api/chat/sessions/new`, body);
     return res.id;
   }
 
@@ -363,35 +352,30 @@ export class SessionsStore {
     await api.post(`/api/sessions/${encodeURIComponent(id)}/set-primary`);
   }
 
-  async clearPrimary(agent: string, userId: string): Promise<void> {
-    const params = new URLSearchParams({ agent, user_id: userId });
+  async clearPrimary(userId: string): Promise<void> {
+    const params = new URLSearchParams({ user_id: userId });
     await api.post(`/api/sessions/clear-primary?${params.toString()}`);
   }
 
-  /** Read a session's model / reasoning_effort / agent (the picker + effort seg). */
+  /** Read a session's model / reasoning_effort (the picker + effort seg). */
   async getSettings(id: string): Promise<SessionSettings> {
     return api.get<SessionSettings>(`/api/sessions/${encodeURIComponent(id)}/settings`);
   }
 
-  /** Resolve a session's identity from its record: the agent it actually runs
-   *  under and its metadata. Agent-agnostic (GET /api/sessions/{id}), so it works
-   *  even when that agent isn't a configured chat adapter - the chat surface uses
-   *  it to heal a stale/wrong deep-link `agent` param and to flag job artifacts. */
+  /** Resolve a session's metadata and resolved context limit from its record
+   *  (GET /api/sessions/{id}); the chat surface uses it to flag job artifacts. */
   async getInfo(id: string): Promise<{
-    agent: string | null;
     metadata: Record<string, unknown>;
     contextLimit: number | null;
     cumulativeTokens: number | null;
   }> {
     const res = await api.get<{
-      agent?: string | null;
       metadata?: Record<string, unknown>;
       context_limit?: number | null;
       context_limit_resolved?: number | null;
       cumulative_tokens?: number | null;
     }>(`/api/sessions/${encodeURIComponent(id)}`);
     return {
-      agent: res.agent ?? null,
       metadata: res.metadata ?? {},
       // Durable context truth for the meter: session_info frames are live-only,
       // so a freshly loaded conversation falls back to the session record. Prefer

@@ -33,7 +33,6 @@ afterEach(async () => {
 
 function controllerWith(events: Record<string, unknown>[]): ConversationController {
   const ctrl = new ConversationController();
-  ctrl.agent = 'smoke';
   ctrl.sessionId = 'sess-1';
   ctrl.events = events;
   return ctrl;
@@ -867,7 +866,7 @@ test('the jobs chip links to the jobs board filtered to this session', async () 
   await page.viewport(1440, 900);
   const ctrl = controllerWith([
     { type: 'user_input', text: 'ship it', timestamp: '2026-08-01T10:00:00Z' },
-    { type: 'job_status', job_id: 'job-1', state: 'running', agent: 'coder', prompt: 'ship it' },
+    { type: 'job_status', job_id: 'job-1', state: 'running', prompt: 'ship it' },
   ]);
   render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
   const chip = document.querySelector('.hd-chip') as HTMLAnchorElement | null;

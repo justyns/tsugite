@@ -19,7 +19,6 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { files } from '$lib/stores/files.svelte';
   import { writeTargetsDoc } from '$lib/stores/fileWrites';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { isMarkdown } from './load';
   import { filesWorkspace } from './workspace.svelte';
   import {
@@ -40,8 +39,6 @@
   }
 
   let { params }: { params?: Record<string, string> } = $props();
-
-  const agent = $derived(params?.agent ?? agentsMeta.agents[0]?.name ?? '');
 
   // svelte-ignore state_referenced_locally -- seeds from the initial param; user navigation drives it after.
   let activePath = $state(params?.path ?? '');
@@ -127,7 +124,7 @@
   async function openFile(path: string) {
     closePopover();
     try {
-      const file = await files.read(agent, path);
+      const file = await files.read(path);
       const markdown = isMarkdown(path);
       doc = { path, content: file.content ?? '', markdown };
       activePath = path;
@@ -155,12 +152,12 @@
     if (!doc || saving) return;
     saving = true;
     try {
-      await files.write(agent, doc.path, editBuffer);
+      await files.write(doc.path, editBuffer);
       doc = { ...doc, content: editBuffer };
       staleOnDisk = false;
       toasts.push('ok', 'Saved', { body: doc.path });
       // Contents changed -> the shared backlink/tag index may have shifted.
-      await filesWorkspace.reload(agent);
+      await filesWorkspace.reload();
     } catch (err) {
       toasts.push('err', 'Save failed', { body: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -176,7 +173,7 @@
   async function reloadFromDisk() {
     if (!doc) return;
     try {
-      const file = await files.read(agent, doc.path);
+      const file = await files.read(doc.path);
       const content = file.content ?? '';
       doc = { ...doc, content };
       editBuffer = content;
@@ -191,7 +188,7 @@
   async function attachToChat() {
     if (!activePath) return;
     try {
-      const attached = await files.attach(agent, activePath);
+      const attached = await files.attach(activePath);
       const name = attached[0]?.name ?? activePath;
       toasts.push('ok', 'Attached to chat', { body: `${name} copied into uploads/` });
     } catch (err) {
@@ -317,9 +314,7 @@
   });
 
   async function resolveAndOpen() {
-    if (agentsMeta.agents.length === 0) await agentsMeta.load();
-    if (!agent) return;
-    await filesWorkspace.ensure(agent);
+    await filesWorkspace.ensure();
     if (params?.path) await openFile(params.path);
   }
 
@@ -409,7 +404,7 @@
         <PaneState kind="error" title="Could not load workspace">
           {#snippet hint()}<span class="mono">{filesWorkspace.error}</span>{/snippet}
           {#snippet actions()}
-            <Button size="sm" onclick={() => filesWorkspace.reload(agent)}>Retry</Button>
+            <Button size="sm" onclick={() => filesWorkspace.reload()}>Retry</Button>
           {/snippet}
         </PaneState>
       {:else if filesWorkspace.loading && !doc}

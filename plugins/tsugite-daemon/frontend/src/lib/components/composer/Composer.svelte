@@ -37,7 +37,6 @@
     rows = 2,
     hint,
     showKbd = false,
-    agent,
     attachments = [],
     contextItems = [],
     contextMenu = [],
@@ -69,9 +68,6 @@
     /** Muted right-aligned note in the bottom row, e.g. `est. +1.2k tok`. */
     hint?: string;
     showKbd?: boolean;
-    /** Owning agent, forwarded to the staging strip so a staged image can load its
-     *  workspace bytes for a thumbnail. */
-    agent?: string;
     attachments?: Attachment[];
     /** Attached client-context items, shown as removable chips. Any present also
      *  lets an otherwise-empty composer send (a context-only message). */
@@ -391,7 +387,7 @@
 <div class="composer" class:is-queued={queued} bind:this={root}>
   <div class="attrow">
     {@render pasteAffordance?.()}
-    <StagedStrip {agent} {attachments} {contextItems} {onRemoveAttachment} {onRemoveContext} />
+    <StagedStrip {attachments} {contextItems} {onRemoveAttachment} {onRemoveContext} />
     <Button variant="ghost" size="sm" onclick={() => onAttach?.()}>
       {#snippet icon()}<Icon name="plus" />{/snippet}attach
     </Button>

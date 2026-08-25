@@ -54,7 +54,7 @@ const twoTurns: RawMessagesData = {
 
 test('renders one collapsible section per model call, showing role + content', async () => {
   mockRaw(twoTurns);
-  render(RawMessages, { agent: 'smoke', sessionId: 's1', onClose: () => {} });
+  render(RawMessages, { sessionId: 's1', onClose: () => {} });
 
   await expect.element(page.getByRole('dialog', { name: 'raw messages' })).toBeInTheDocument();
   // A summary per call, labelled by the monotonic index (not the repeating turn).
@@ -69,7 +69,7 @@ test('renders one collapsible section per model call, showing role + content', a
 
 test('a later call shows just its delta, with the full prompt behind a disclosure', async () => {
   mockRaw(twoTurns);
-  render(RawMessages, { agent: 'smoke', sessionId: 's1', onClose: () => {} });
+  render(RawMessages, { sessionId: 's1', onClose: () => {} });
   // Call 2 added two messages over call 1: the label says so, and the whole
   // 3-message prompt is available without being the default view.
   await expect.element(page.getByText('request · new this call')).toBeInTheDocument();
@@ -78,20 +78,20 @@ test('a later call shows just its delta, with the full prompt behind a disclosur
 
 test('a null system prompt shows the muted not-shown note', async () => {
   mockRaw(twoTurns);
-  render(RawMessages, { agent: 'smoke', sessionId: 's1', onClose: () => {} });
+  render(RawMessages, { sessionId: 's1', onClose: () => {} });
   await expect.element(page.getByText('system prompt not shown')).toBeInTheDocument();
 });
 
 test('an empty turn list renders a truthful note, not a blank body', async () => {
   mockRaw({ system_prompt: null, turns: [] });
-  render(RawMessages, { agent: 'smoke', sessionId: 's1', onClose: () => {} });
+  render(RawMessages, { sessionId: 's1', onClose: () => {} });
   await expect.element(page.getByText('no model turns recorded yet')).toBeInTheDocument();
 });
 
 test('the close button fires onClose', async () => {
   mockRaw(twoTurns);
   const onClose = vi.fn();
-  render(RawMessages, { agent: 'smoke', sessionId: 's1', onClose });
+  render(RawMessages, { sessionId: 's1', onClose });
   await expect.element(page.getByRole('dialog')).toBeInTheDocument();
   await page.getByRole('button', { name: 'Close' }).click();
   expect(onClose).toHaveBeenCalled();

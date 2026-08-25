@@ -11,8 +11,8 @@ import { authHeaders } from '$lib/api/client';
 /** Fetch `uploads/<name>` (or any workspace-relative path) as a blob object URL.
  *  Throws on any non-OK response so the caller can show a broken-file placeholder
  *  instead of a dead `<img>`. */
-export async function loadWorkspaceObjectURL(agent: string, path: string): Promise<string> {
-  const url = `/api/agents/${encodeURIComponent(agent)}/workspace/raw?path=${encodeURIComponent(path)}`;
+export async function loadWorkspaceObjectURL(path: string): Promise<string> {
+  const url = `/api/workspace/raw?path=${encodeURIComponent(path)}`;
   const resp = await fetch(url, { headers: authHeaders() });
   if (!resp.ok) throw new Error(`workspace raw ${resp.status}`);
   const blob = await resp.blob();

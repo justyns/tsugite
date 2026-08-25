@@ -1,5 +1,5 @@
 /**
- * Files store: an agent's workspace tree (GET /api/agents/{agent}/workspace),
+ * Files store: the workspace tree (GET /api/workspace),
  * text read/write, and attach-into-chat. The listing is gitignore-filtered and
  * text-only server-side (binaries never appear); a binary read comes back
  * {content:null, is_text:false}. Exported as a class instance.
@@ -31,12 +31,7 @@ export interface AttachedFile {
   context_attach: boolean;
 }
 
-function base(agent: string): string {
-  return `/api/agents/${encodeURIComponent(agent)}/workspace`;
-}
-
 export class FilesStore {
-  agent = $state('');
   subdir = $state('');
   workspaceDir = $state('');
   entries = $state<WorkspaceEntry[]>([]);
@@ -50,8 +45,7 @@ export class FilesStore {
     if (path) this.lastWrite = { path, rev: (this.lastWrite?.rev ?? 0) + 1 };
   }
 
-  async list(agent: string, subdir = ''): Promise<void> {
-    this.agent = agent;
+  async list(subdir = ''): Promise<void> {
     this.loading = true;
     this.error = null;
     try {
@@ -60,7 +54,7 @@ export class FilesStore {
         entries: WorkspaceEntry[];
         subdir: string;
         workspace_dir: string;
-      }>(`${base(agent)}${qs}`);
+      }>(`/api/workspace${qs}`);
       this.entries = res.entries;
       this.subdir = res.subdir;
       this.workspaceDir = res.workspace_dir;
@@ -71,19 +65,19 @@ export class FilesStore {
     }
   }
 
-  async read(agent: string, path: string): Promise<WorkspaceFile> {
+  async read(path: string): Promise<WorkspaceFile> {
     const qs = new URLSearchParams({ path }).toString();
-    return api.get<WorkspaceFile>(`${base(agent)}/content?${qs}`);
+    return api.get<WorkspaceFile>(`/api/workspace/content?${qs}`);
   }
 
-  async write(agent: string, path: string, content: string): Promise<void> {
-    await api.put(`${base(agent)}/content`, { path, content });
+  async write(path: string, content: string): Promise<void> {
+    await api.put('/api/workspace/content', { path, content });
   }
 
   /** Copy a workspace file into uploads/ so it can be attached to a chat turn. */
-  async attach(agent: string, path: string): Promise<AttachedFile[]> {
+  async attach(path: string): Promise<AttachedFile[]> {
     const qs = new URLSearchParams({ path }).toString();
-    const res = await api.post<{ files: AttachedFile[] }>(`${base(agent)}/attach?${qs}`);
+    const res = await api.post<{ files: AttachedFile[] }>(`/api/workspace/attach?${qs}`);
     return res.files;
   }
 }

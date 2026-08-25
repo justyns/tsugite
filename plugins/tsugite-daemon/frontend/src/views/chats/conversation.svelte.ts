@@ -124,7 +124,6 @@ export interface LocalEcho {
 }
 
 export class ConversationController {
-  agent = $state('');
   sessionId = $state<string | null>(null);
   events = $state<Event[]>([]);
   loading = $state(false);
@@ -185,10 +184,9 @@ export class ConversationController {
 
   /** Open a session in the pane: stop any live stream, then replay its history.
    *  A null id clears to the empty state (composer creates a session on send). */
-  async open(agent: string, sessionId: string | null): Promise<void> {
-    if (agent === this.agent && sessionId === this.sessionId) return;
+  async open(sessionId: string | null): Promise<void> {
+    if (sessionId === this.sessionId) return;
     this.closeStream();
-    this.agent = agent;
     this.sessionId = sessionId;
     this.events = [];
     this.ask = null;
@@ -242,10 +240,9 @@ export class ConversationController {
   async send(text: string, opts: SendOpts = {}): Promise<string | null> {
     let sessionId = this.sessionId;
     if (!sessionId) {
-      const res = await api.post<{ id: string }>(
-        `/api/agents/${encodeURIComponent(this.agent)}/sessions/new`,
-        { user_id: auth.userId },
-      );
+      const res = await api.post<{ id: string }>(`/api/chat/sessions/new`, {
+        user_id: auth.userId,
+      });
       sessionId = res.id;
       this.sessionId = sessionId;
     }
@@ -279,7 +276,6 @@ export class ConversationController {
     this.sendFailed = null;
     let gotFrame = false;
     this.handle = sendChat(
-      this.agent,
       {
         message: text,
         userId: auth.userId,
@@ -414,7 +410,7 @@ export class ConversationController {
    *  aborting the fetch would leave the daemon running the turn. */
   async stop(): Promise<void> {
     if (!this.sessionId) return;
-    await cancelChat(this.agent, { userId: auth.userId, sessionId: this.sessionId });
+    await cancelChat({ userId: auth.userId, sessionId: this.sessionId });
   }
 
   /** Submit an answer to the open ask_user prompt. Targets the durable ask by id
@@ -427,7 +423,7 @@ export class ConversationController {
     if (!ask || !this.sessionId) return;
     let res: AskAnswer;
     try {
-      res = await respondToAsk(this.agent, {
+      res = await respondToAsk({
         askId: ask.askId,
         response: value,
         userId: auth.userId,

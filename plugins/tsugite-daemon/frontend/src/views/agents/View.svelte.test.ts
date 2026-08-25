@@ -63,12 +63,16 @@ const FILES = [
   },
 ];
 
-const ROSTER = [
-  { name: 'odyn', agent_file: 'agents/odyn.md', workspace_dir: '/ws', running_tasks: 2 },
-];
+const RUNTIME = {
+  agent_file: 'odyn',
+  workspace_dir: '/ws',
+  model: null,
+  context_limit: null,
+  running_tasks: 2,
+};
 
 function routeGet(path: string): Promise<unknown> {
-  if (path === '/api/agents') return Promise.resolve({ agents: ROSTER });
+  if (path === '/api/runtime') return Promise.resolve(RUNTIME);
   if (path === '/api/agent-files') return Promise.resolve({ files: FILES });
   if (path.startsWith('/api/agent-files/content')) {
     const target = decodeURIComponent(path);
@@ -86,7 +90,7 @@ beforeEach(() => {
   vi.mocked(api.put).mockReset();
   vi.mocked(api.get).mockImplementation(routeGet as never);
   vi.mocked(api.put).mockResolvedValue(undefined as never);
-  agentsMeta.agents = [];
+  agentsMeta.runtime = null;
   agentsMeta.agentFiles = [];
   agentsMeta.loading = false;
   agentsMeta.error = null;

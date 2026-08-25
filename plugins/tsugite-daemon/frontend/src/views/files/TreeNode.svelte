@@ -10,7 +10,6 @@
 
   let {
     nodes,
-    agent,
     activePath,
     expanded,
     onToggle,
@@ -19,7 +18,6 @@
     onFileContextMenu,
   }: {
     nodes: TreeNode[];
-    agent: string;
     activePath: string;
     expanded: Set<string>;
     onToggle: (path: string) => void;
@@ -33,7 +31,7 @@
     if (!e.dataTransfer) return;
     writeSurfaceDrag(e.dataTransfer, {
       kind: 'file',
-      params: { agent, path: node.path },
+      params: { path: node.path },
       title: node.name,
     });
   }
@@ -55,7 +53,6 @@
       {#if open}
         <div class="kids">
           <Self
-            {agent}
             nodes={node.children}
             {activePath}
             {expanded}

@@ -50,7 +50,6 @@ beforeEach(() => {
       return Promise.resolve({
         model: 'acp:claude-opus-4-7',
         reasoning_effort: null,
-        agent: 'smoke',
       });
     if (path === '/api/models') return Promise.resolve(MODELS);
     return Promise.reject(new Error(`unexpected GET ${path}`));
@@ -59,7 +58,6 @@ beforeEach(() => {
     Promise.resolve({
       model: (body as { model: string }).model,
       reasoning_effort: null,
-      agent: 'smoke',
     }),
   );
 });
@@ -72,7 +70,7 @@ afterEach(() => {
 });
 
 test('shows the current model as a short label and opens a filterable popover', async () => {
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   const trigger = page.getByTestId('chat-model-trigger');
   // The provider prefix is dropped in the compact chip.
   await expect.element(trigger).toHaveTextContent('claude-opus-4-7');
@@ -96,7 +94,7 @@ test('shows the current model as a short label and opens a filterable popover', 
 });
 
 test('selecting a model PATCHes the session settings', async () => {
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   await page.getByTestId('chat-model-trigger').click();
   await page.getByTestId('chat-model-opt-openai:gpt-5.4').click();
   expect(vi.mocked(api.patch)).toHaveBeenCalledWith('/api/sessions/s1/settings', {
@@ -110,7 +108,7 @@ test('flips the popover left when a clipping ancestor would cut it off', async (
   // the sessions rail - the flip must measure against that ancestor, not the
   // viewport. A short chip label (e.g. "gpt-5.5") is what pulls the popover
   // left enough to cross the boundary.
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   const trigger = page.getByTestId('chat-model-trigger');
   const host = (trigger.element() as HTMLElement).closest('div')!.parentElement as HTMLElement;
   host.style.cssText +=
@@ -125,12 +123,11 @@ test('flips the popover left when a clipping ancestor would cut it off', async (
 test('a settings broadcast refetches and updates the model chip live', async () => {
   let model = 'acp:claude-opus-4-7';
   vi.mocked(api.get).mockImplementation((path: string) => {
-    if (path.endsWith('/settings'))
-      return Promise.resolve({ model, reasoning_effort: null, agent: 'smoke' });
+    if (path.endsWith('/settings')) return Promise.resolve({ model, reasoning_effort: null });
     if (path === '/api/models') return Promise.resolve(MODELS);
     return Promise.reject(new Error(`unexpected GET ${path}`));
   });
-  render(ModelPicker, { sessionId: 's-bcast', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's-bcast' });
   const trigger = page.getByTestId('chat-model-trigger');
   await expect.element(trigger).toHaveTextContent('claude-opus-4-7');
 
@@ -142,7 +139,7 @@ test('a settings broadcast refetches and updates the model chip live', async () 
 });
 
 test('opens the popover when a model-picker signal targets this session', async () => {
-  render(ModelPicker, { sessionId: 's-open', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's-open' });
   // Starts closed - the trigger is present but no popover.
   await expect.element(page.getByTestId('chat-model-trigger')).toBeInTheDocument();
   await expect.element(page.getByTestId('chat-model-popover')).not.toBeInTheDocument();
@@ -155,14 +152,14 @@ test('opens the popover when a model-picker signal targets this session', async 
 });
 
 test('ignores a model-picker signal aimed at another session', async () => {
-  render(ModelPicker, { sessionId: 's-mine', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's-mine' });
   modelPickerRequest.request('s-other');
   // The request never matches, so the popover stays closed (drained in afterEach).
   await expect.element(page.getByTestId('chat-model-popover')).not.toBeInTheDocument();
 });
 
 test('groups by provider and shows per-model context, price, and capability badges', async () => {
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   await page.getByTestId('chat-model-trigger').click();
 
   // Provider header rows name each group.
@@ -189,7 +186,7 @@ test('groups by provider and shows per-model context, price, and capability badg
 });
 
 test('keyboard navigation crosses provider group boundaries', async () => {
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   await page.getByTestId('chat-model-trigger').click();
   const search = page.getByTestId('chat-model-search');
   (search.element() as HTMLInputElement).focus();
@@ -203,7 +200,7 @@ test('keyboard navigation crosses provider group boundaries', async () => {
 });
 
 test('keyboard: arrow + Enter selects a filtered model', async () => {
-  render(ModelPicker, { sessionId: 's1', agent: 'smoke' });
+  render(ModelPicker, { sessionId: 's1' });
   await page.getByTestId('chat-model-trigger').click();
   const search = page.getByTestId('chat-model-search');
   await search.fill('openai');

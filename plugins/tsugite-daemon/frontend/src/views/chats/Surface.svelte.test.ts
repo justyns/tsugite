@@ -16,12 +16,15 @@ function stubInfo(agent: string | null, metadata: Record<string, unknown>) {
 }
 
 function roster(...names: string[]) {
-  agentsMeta.agents = names.map((name) => ({
-    name,
-    agent_file: '',
-    workspace_dir: '',
-    running_tasks: 0,
-  }));
+  agentsMeta.runtime = names.length
+    ? {
+        agent_file: names[0] as string,
+        workspace_dir: '/ws',
+        model: null,
+        context_limit: null,
+        running_tasks: 0,
+      }
+    : null;
 }
 
 /** Resolve /api/health (the image-config source) fast so uploadChosen reaches
@@ -69,19 +72,6 @@ test('a normal (non-artifact) session renders the composer', async () => {
   render(Surface, { params: { sessionId: 'session-parent' } });
   await expect.element(page.getByTestId('chat-composer')).toBeInTheDocument();
   expect(document.querySelector('[data-testid="chat-readonly"]')).toBeFalsy();
-});
-
-test('a session whose agent was removed from config gets a read-only note, not a composer', async () => {
-  // The session's true agent ('ghost') is not in the live roster: a send could
-  // only fail, so the composer is gated off with an explanatory read-only note.
-  roster('smoke');
-  stubInfo('ghost', {});
-  render(Surface, { params: { sessionId: 'session-orphan' } });
-  const ro = page.getByTestId('chat-readonly');
-  await expect.element(ro).toBeInTheDocument();
-  await expect.element(ro).toHaveTextContent('ghost');
-  await expect.element(ro).toHaveTextContent('no longer configured');
-  expect(document.querySelector('[data-testid="chat-composer"]')).toBeFalsy();
 });
 
 test('dropping OS files on the chat surface attaches them (multiple files)', async () => {
@@ -160,7 +150,6 @@ test('a fresh session paints a context meter from its resolved limit (0 / agent 
   // rather than no context readout until the first turn.
   roster('smoke');
   sessions.getInfo = async () => ({
-    agent: 'smoke',
     metadata: { job_host: true },
     contextLimit: 200_000,
     cumulativeTokens: 0,
@@ -202,7 +191,6 @@ test('auto-focus is suppressed at phone width (the keyboard would cover the conv
   let infoLoaded: Promise<unknown> = Promise.resolve();
   sessions.getInfo = () => {
     infoLoaded = Promise.resolve({
-      agent: 'smoke',
       metadata: { job_host: true },
       contextLimit: null,
       cumulativeTokens: null,

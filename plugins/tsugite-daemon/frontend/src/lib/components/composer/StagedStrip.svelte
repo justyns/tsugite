@@ -13,15 +13,11 @@
   import type { Attachment, ContextChip } from './types';
 
   let {
-    agent,
     attachments = [],
     contextItems = [],
     onRemoveAttachment,
     onRemoveContext,
   }: {
-    /** Owning agent, needed to load a staged image's bytes from its workspace.
-     *  Absent (e.g. the component gallery) falls image attachments back to chips. */
-    agent?: string;
     attachments?: Attachment[];
     contextItems?: ContextChip[];
     onRemoveAttachment?: (id: string) => void;
@@ -50,10 +46,9 @@
 
 {#each visible as row (row.id)}
   {#if row.kind === 'att'}
-    {#if agent && isImage(row.att.name)}
+    {#if isImage(row.att.name)}
       <span class="staged-thumb">
         <AttachmentThumb
-          {agent}
           name={row.att.name}
           path={`uploads/${row.att.name}`}
           size={46}

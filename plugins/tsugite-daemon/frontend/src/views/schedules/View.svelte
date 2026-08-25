@@ -43,10 +43,10 @@
   // broadcasts already refresh the store list via the shell event router.
   $effect(() => {
     void schedules.load();
-    void agentsMeta.load();
+    void agentsMeta.loadAgentFiles();
   });
 
-  const agentNames = $derived(agentsMeta.agents.map((a) => a.name));
+  const agentNames = $derived(agentsMeta.agentFiles.map((f) => f.name));
 
   let sortDir = $state<SortDir>('ascending');
   const sorted = $derived(sortSchedules(schedules.list, sortDir));

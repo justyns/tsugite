@@ -58,11 +58,13 @@ export const WORKSPACE = {
   },
   api: {
     get: async (path: string) => {
-      if (path === '/api/agents') {
+      if (path === '/api/runtime') {
         return {
-          agents: [
-            { name: 'smoke', agent_file: 'smoke.md', workspace_dir: '/ws/smoke', running_tasks: 0 },
-          ],
+          agent_file: 'smoke',
+          workspace_dir: '/ws/smoke',
+          model: null,
+          context_limit: null,
+          running_tasks: 0,
         };
       }
       const url = new URL(path, 'http://x');

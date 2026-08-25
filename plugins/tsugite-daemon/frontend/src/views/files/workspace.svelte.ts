@@ -12,7 +12,6 @@ import { loadContentIndex, loadWorkspace, type Workspace } from './load';
 export type IndexState = 'none' | 'building' | 'ready';
 
 export class FilesWorkspaceStore {
-  agent = $state('');
   ws = $state<Workspace | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
@@ -23,27 +22,26 @@ export class FilesWorkspaceStore {
   // scan for the new tree instead of adopting (or blocking on) the stale one.
   private indexInflight: { ws: Workspace; run: Promise<void> } | null = null;
 
-  /** Load the agent's workspace if it isn't already loaded (or loading). */
-  async ensure(agent: string): Promise<void> {
-    if (agent === this.agent && (this.ws || this.inflight)) {
+  /** Load the workspace if it isn't already loaded (or loading). */
+  async ensure(): Promise<void> {
+    if (this.ws || this.inflight) {
       await this.inflight;
       return;
     }
-    await this.reload(agent);
+    await this.reload();
   }
 
   /** Force a fresh walk (after a save changes the tree or link graph). A
    *  content index that was already built or requested is rebuilt for the new
    *  tree; one never requested stays unbuilt. */
-  async reload(agent: string): Promise<void> {
-    const rebuildIndex = this.indexState !== 'none' && agent === this.agent;
-    this.agent = agent;
+  async reload(): Promise<void> {
+    const rebuildIndex = this.indexState !== 'none';
     this.loading = true;
     this.error = null;
     this.indexState = 'none';
     const run = (async () => {
       try {
-        this.ws = await loadWorkspace(agent);
+        this.ws = await loadWorkspace();
         if (rebuildIndex) void this.ensureIndex();
       } catch (err) {
         this.error = err instanceof Error ? err.message : String(err);
@@ -65,7 +63,7 @@ export class FilesWorkspaceStore {
     this.indexState = 'building';
     const run = (async () => {
       try {
-        const index = await loadContentIndex(this.agent, ws.entries);
+        const index = await loadContentIndex(ws.entries);
         // A reload may have swapped the workspace mid-scan; only publish onto
         // the workspace the scan read from.
         if (this.ws === ws) {

@@ -8,7 +8,6 @@
   import { untrack } from 'svelte';
   import { conn } from '$lib/stores/conn.svelte';
   import { sessions } from '$lib/stores/sessions.svelte';
-  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { shellView } from '$lib/stores/shellView.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
@@ -28,13 +27,9 @@
   // svelte-ignore state_referenced_locally -- seeds from the initial param; the effect below follows later changes.
   let selectedId = $state<string | null>(params?.sessionId ?? null);
 
-  // Resolve the selected session's own agent + metadata from its record. A deep
-  // link can arrive with a stale/wrong `agent` param (the jobs board passed the
-  // job's worker-agent name, which is a builtin agent file, never a chat adapter),
-  // so the session's TRUE agent - not the param - must drive the rail/effort/
-  // composer calls or they 404. null until the fetch lands or the id is unknown.
+  // Resolve the selected session's metadata from its record. null until the
+  // fetch lands or the id is unknown.
   let sessionInfo = $state<{
-    agent: string | null;
     metadata: Record<string, unknown>;
     contextLimit: number | null;
     cumulativeTokens: number | null;
@@ -60,38 +55,17 @@
     if (id) loadSessionInfo(id);
   });
 
-  const agent = $derived(
-    resolveChatAgent({
-      sessionAgent: sessionInfo?.agent ?? null,
-      paramAgent: params?.agent,
-      fallbackAgent: agentsMeta.agents[0]?.name,
-    }),
-  );
   // A background job artifact (worker/verifier session) is inspect-only: the
   // conversation continues in the parent chat, so drop the composer rather than
   // let a turn be injected into the transcript.
   const jobArtifact = $derived(isJobArtifact(sessionInfo?.metadata));
-  // A session whose true agent is no longer in the live roster (removed from
-  // config) can only fail a send, so the composer is gated off. Guarded on a
-  // resolved sessionInfo AND a loaded roster so it doesn't flash mid-load; a deep
-  // link to an unknown session (agent null) falls through to the backend's
-  // session-owner routing rather than tripping this.
-  const agentMissing = $derived(
-    sessionInfo?.agent != null &&
-      agentsMeta.agents.length > 0 &&
-      !agentsMeta.agents.some((a) => a.name === sessionInfo!.agent),
-  );
-  const canCompose = $derived(!jobArtifact && !agentMissing);
+  const canCompose = $derived(!jobArtifact);
 
   const rows = $derived(sessions.ordered);
   const selectedRow = $derived<SessionRow | null>(rows.find((r) => r.id === selectedId) ?? null);
 
-  // Ensure the roster is loaded so `agent` resolves, then (re)load its sessions.
   $effect(() => {
-    if (agentsMeta.agents.length === 0) void agentsMeta.load();
-  });
-  $effect(() => {
-    if (agent) void sessions.load(agent);
+    void sessions.load();
   });
 
   // A rail click retargets this tab in place (spaces.openReusing rewrites the
@@ -108,9 +82,7 @@
   // Seed / recover the selection: keep an explicit params.sessionId (or any live
   // selection) when it's still valid, otherwise fall back to the resolved default.
   // A background list reload never yanks a live selection, and an explicitly
-  // pointed-at session is never yanked either - the shared sessions store holds
-  // ONE agent's rows, so another surface/rail loading a different agent must not
-  // steal this tab's cross-agent selection.
+  // pointed-at session is never yanked either.
   $effect(() => {
     if (rows.length === 0) return;
     const current = selectedId;
@@ -121,7 +93,7 @@
 
   // Keep the controller pointed at the selected session.
   $effect(() => {
-    void ctrl.open(agent, selectedId);
+    void ctrl.open(selectedId);
   });
 
   // Feed the session's live server-busy truth into the controller so the working
@@ -179,7 +151,7 @@
   }
 
   async function afterMutation() {
-    await sessions.load(agent);
+    await sessions.load();
   }
 
   // Lifecycle actions must land visibly: a toast on success, a toast on failure
@@ -200,7 +172,7 @@
     const id = await ctrl.send(text, opts);
     if (id && id !== selectedId) {
       selectedId = id;
-      await sessions.load(agent);
+      await sessions.load();
     }
   }
 
@@ -307,7 +279,6 @@
   {#if canCompose}
     <ChatComposer
       bind:this={composer}
-      {agent}
       sessionId={selectedId}
       streaming={ctrl.streaming}
       busy={selectedRow?.busy ?? false}
@@ -323,14 +294,6 @@
     <div class="ro-note" data-testid={TESTID.chatReadonly}>
       <Icon name="lock" size={13} />
       <span>Read-only: a job worker or verifier transcript. Reply in the parent chat.</span>
-    </div>
-  {:else}
-    <div class="ro-note" data-testid={TESTID.chatReadonly}>
-      <Icon name="lock" size={13} />
-      <span
-        >This chat's agent '{sessionInfo?.agent}' is no longer configured, so it can't take new
-        messages.</span
-      >
     </div>
   {/if}
   {#if fileDragActive}

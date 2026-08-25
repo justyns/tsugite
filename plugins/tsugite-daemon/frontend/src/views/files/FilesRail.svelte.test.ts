@@ -9,9 +9,8 @@ vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api 
 beforeEach(async () => {
   await page.viewport(1440, 900);
   const { agentsMeta } = await import('$lib/stores/agentsMeta.svelte');
-  agentsMeta.agents = [];
+  agentsMeta.runtime = null;
   const { filesWorkspace } = await import('./workspace.svelte');
-  filesWorkspace.agent = '';
   filesWorkspace.ws = null;
   filesWorkspace.loading = false;
   filesWorkspace.error = null;
@@ -42,29 +41,29 @@ test('a #tag search kicks the on-demand index scan and filters to notes carrying
 });
 
 test('a file click asks the shell to open it as a surface', async () => {
-  const opened: Array<[string, string]> = [];
+  const opened: string[] = [];
   const { default: FilesRail } = await import('./FilesRail.svelte');
   render(FilesRail, {
     props: {
       focusedFilePath: null,
-      onOpenFile: (agent: string, path: string) => opened.push([agent, path]),
+      onOpenFile: (path: string) => opened.push(path),
       onPinFile: () => {},
     },
   });
   await page.getByTestId('file-node-ops/alpha.md').click();
-  expect(opened).toContainEqual(['smoke', 'ops/alpha.md']);
+  expect(opened).toContain('ops/alpha.md');
 });
 
 test('a file double-click asks the shell to pin it (preview-tab keep)', async () => {
-  const pinned: Array<[string, string]> = [];
+  const pinned: string[] = [];
   const { default: FilesRail } = await import('./FilesRail.svelte');
   render(FilesRail, {
     props: {
       focusedFilePath: null,
       onOpenFile: () => {},
-      onPinFile: (agent: string, path: string) => pinned.push([agent, path]),
+      onPinFile: (path: string) => pinned.push(path),
     },
   });
   await userEvent.dblClick(page.getByTestId('file-node-ops/alpha.md'));
-  expect(pinned).toContainEqual(['smoke', 'ops/alpha.md']);
+  expect(pinned).toContain('ops/alpha.md');
 });

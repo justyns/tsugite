@@ -40,28 +40,21 @@
 
   let {
     rows,
-    agent,
-    agents = [],
     selectedId,
     attn,
     jobCounts = new Map(),
     loading = false,
     onSelect,
     onNew,
-    onAgentChange,
     onServerSearch,
   }: {
     rows: Row[];
-    agent: string;
-    /** All configured agents; >1 renders the agent picker. */
-    agents?: string[];
     selectedId: string | null;
     attn: Set<string>;
     jobCounts?: Map<string, SessionJobTally>;
     loading?: boolean;
     onSelect: (id: string) => void;
     onNew: () => void;
-    onAgentChange?: (agent: string) => void;
     /** Free-text portion of the query, for the store's server-merge search. */
     onServerSearch: (q: string) => void;
   } = $props();
@@ -81,7 +74,7 @@
   function openInNewTab(row: Row) {
     spaces.open({
       kind: 'chat',
-      params: chatRouteParams(row.id, agent),
+      params: chatRouteParams(row.id),
       title: row.title ?? 'Chat',
     });
   }
@@ -97,7 +90,7 @@
     try {
       await sessions.complete(id);
       toasts.push('ok', 'Session marked complete');
-      await sessions.load(agent);
+      await sessions.load();
     } catch (err) {
       toasts.push('err', 'Could not mark complete', {
         body: err instanceof Error ? err.message : String(err),
@@ -133,7 +126,6 @@
       title: r.title,
       topic: typeof r.metadata?.topic === 'string' ? r.metadata.topic : undefined,
       label: r.label,
-      agent,
       status: r.status,
       pinned: r.pinned,
       unread: r.unread,
@@ -222,18 +214,10 @@
       <SearchInput
         bind:value={search}
         ariaLabel="Filter sessions"
-        placeholder="filter — agent:x status:y"
+        placeholder="filter by status:x"
         shortcutKey="/"
       />
     </div>
-    {#if agents.length > 1}
-      <Select
-        options={agents}
-        value={agent}
-        ariaLabel="Chat agent"
-        onchange={(a) => onAgentChange?.(a)}
-      />
-    {/if}
     <Button
       variant="pri"
       size="sm"

@@ -50,19 +50,13 @@ test('renders a context chip and opens its value in a preview modal', async () =
 
 test('an image attachment renders as a thumbnail (not a filename chip)', async () => {
   stubImageFetch();
-  render(StagedStrip, { agent: 'ody', attachments: [IMG] });
+  render(StagedStrip, { attachments: [IMG] });
   await expect.element(page.getByTestId(TESTID.chatAttachmentImage)).toBeInTheDocument();
 });
 
 test('a non-image attachment shows as a file chip', async () => {
-  render(StagedStrip, { agent: 'ody', attachments: [DOC] });
+  render(StagedStrip, { attachments: [DOC] });
   await expect.element(page.getByText('notes.pdf · 12 KB')).toBeInTheDocument();
-  expect(page.getByTestId(TESTID.chatAttachmentImage).elements()).toHaveLength(0);
-});
-
-test('without an agent, an image falls back to a file chip', async () => {
-  render(StagedStrip, { attachments: [IMG] });
-  await expect.element(page.getByText('photo.png')).toBeInTheDocument();
   expect(page.getByTestId(TESTID.chatAttachmentImage).elements()).toHaveLength(0);
 });
 
@@ -70,7 +64,6 @@ test('remove buttons fire their callbacks with the right id/key', async () => {
   const onRemoveAttachment = vi.fn();
   const onRemoveContext = vi.fn();
   render(StagedStrip, {
-    agent: 'ody',
     attachments: [DOC],
     contextItems: [CTX],
     onRemoveAttachment,

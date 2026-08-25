@@ -1,5 +1,5 @@
 /**
- * Loads an agent's workspace for the client-side wiki. `loadWorkspace` asks the
+ * Loads the workspace for the client-side wiki. `loadWorkspace` asks the
  * workspace endpoint to walk the tree server-side and return the whole flat
  * listing in ONE request (listings only - it reads no file contents), then ships
  * a paths-only index, so opening the Files view costs a single directory GET
@@ -39,7 +39,6 @@ function markdownPaths(entries: WorkspaceEntry[]): string[] {
 // directly. `recursive` asks the daemon to walk the tree server-side and return
 // the full flat listing in one response (it sets `truncated` if it hit its cap).
 async function readDir(
-  agent: string,
   subdir: string,
   opts: { recursive?: boolean } = {},
 ): Promise<{ entries: WorkspaceEntry[]; workspaceDir: string; truncated: boolean }> {
@@ -51,7 +50,7 @@ async function readDir(
     entries: WorkspaceEntry[];
     workspace_dir: string;
     truncated?: boolean;
-  }>(`/api/agents/${encodeURIComponent(agent)}/workspace${qs ? `?${qs}` : ''}`);
+  }>(`/api/workspace${qs ? `?${qs}` : ''}`);
   return {
     entries: res.entries,
     workspaceDir: res.workspace_dir,
@@ -59,8 +58,8 @@ async function readDir(
   };
 }
 
-export async function loadWorkspace(agent: string): Promise<Workspace> {
-  const { entries, workspaceDir, truncated } = await readDir(agent, '', { recursive: true });
+export async function loadWorkspace(): Promise<Workspace> {
+  const { entries, workspaceDir, truncated } = await readDir('', { recursive: true });
   return {
     entries,
     tree: buildTree(entries),
@@ -72,15 +71,12 @@ export async function loadWorkspace(agent: string): Promise<Workspace> {
 
 /** Read every markdown file once (capped) and build the full backlink/tag
  *  index. On-demand only - this is the whole-workspace download. */
-export async function loadContentIndex(
-  agent: string,
-  entries: WorkspaceEntry[],
-): Promise<WikiIndex> {
+export async function loadContentIndex(entries: WorkspaceEntry[]): Promise<WikiIndex> {
   const paths = markdownPaths(entries).slice(0, MAX_INDEXED);
   const docs = await Promise.all(
     paths.map(async (path) => {
       try {
-        const file = await files.read(agent, path);
+        const file = await files.read(path);
         return { path, content: file.content ?? '' };
       } catch {
         return { path, content: '' };

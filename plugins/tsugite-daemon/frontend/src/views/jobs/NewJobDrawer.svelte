@@ -1,6 +1,6 @@
 <script lang="ts">
   // New-job composer. Emits the form; the view POSTs it to the generic command
-  // dispatcher (POST /api/agents/{agent}/commands/job). No structured create
+  // dispatcher (POST /api/commands/job). No structured create
   // route exists yet: the response is free text with no job_id,
   // so the view reloads the list rather than auto-opening the new tile.
   import Drawer from '$lib/components/overlays/Drawer.svelte';

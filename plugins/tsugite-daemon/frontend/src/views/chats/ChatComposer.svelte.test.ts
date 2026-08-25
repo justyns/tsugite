@@ -122,7 +122,6 @@ function stubCommands(
 }
 
 const base = {
-  agent: 'smokeagent',
   sessionId: 's1',
   onSend: vi.fn(),
   onStop: vi.fn(),

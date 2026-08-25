@@ -8,8 +8,7 @@
   import { auth } from '$lib/stores/auth.svelte';
   import { fetchRawMessages, type RawMessage, type RawMessages, type RawTurn } from './rawMessages';
 
-  let { agent, sessionId, onClose }: { agent: string; sessionId: string; onClose: () => void } =
-    $props();
+  let { sessionId, onClose }: { sessionId: string; onClose: () => void } = $props();
 
   let data = $state<RawMessages | null>(null);
   let loading = $state(true);
@@ -30,7 +29,7 @@
 
   async function load(): Promise<void> {
     try {
-      data = await fetchRawMessages(agent, sessionId, auth.userId ?? undefined);
+      data = await fetchRawMessages(sessionId, auth.userId ?? undefined);
       openTurns = data?.turns.map(() => false) ?? [];
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

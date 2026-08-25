@@ -1,7 +1,7 @@
 <script lang="ts">
   // Header model + effort pair: the model chip/popover plus a reasoning-effort
   // seg sized to what the session's resolved model actually supports
-  // (GET /api/agents/{agent}/effort-levels?session_id=). A model with no
+  // (GET /api/chat/effort-levels?session_id=). A model with no
   // declared effort levels gets no seg at all, and the resolved model string
   // also names the picker's "default" chip. Effort is the persisted per-session
   // setting (GET/PATCH /api/sessions/{id}/settings), not a per-message override.
@@ -12,7 +12,7 @@
   import { TESTID } from '$lib/testids';
   import ModelPicker from './ModelPicker.svelte';
 
-  let { sessionId, agent }: { sessionId: string | null; agent: string } = $props();
+  let { sessionId }: { sessionId: string | null } = $props();
 
   // Seg labels stay compact; everything not listed here shows verbatim.
   const SHORT: Record<string, string> = { minimal: 'min', medium: 'med' };
@@ -42,7 +42,7 @@
     if (!id) return;
     api
       .get<{ model: string; supported_effort_levels: string[] | null }>(
-        `/api/agents/${encodeURIComponent(agent)}/effort-levels?session_id=${encodeURIComponent(id)}`,
+        `/api/chat/effort-levels?session_id=${encodeURIComponent(id)}`,
       )
       .then((res) => {
         if (levelsKey !== key) return;
@@ -105,7 +105,7 @@
   }
 </script>
 
-<ModelPicker {sessionId} {agent} {resolvedModel} onChanged={() => (modelRev += 1)} />
+<ModelPicker {sessionId} {resolvedModel} onChanged={() => (modelRev += 1)} />
 {#if sessionId && options.length > 0}
   <span class="effort" data-testid={TESTID.chatEffortSeg}>
     <Seg {options} value={shownValue} ariaLabel="Reasoning effort" onchange={onPick} />

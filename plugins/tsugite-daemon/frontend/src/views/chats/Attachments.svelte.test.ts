@@ -38,27 +38,27 @@ afterEach(() => {
 
 test('renders an image attachment as a thumbnail read from the raw endpoint', async () => {
   const fetchMock = stubImageFetch();
-  render(Attachments, { agent: 'smoke', attachments: [IMG] });
+  render(Attachments, { attachments: [IMG] });
 
   await expect.element(page.getByAltText('photo.png')).toBeInTheDocument();
   expect(String(fetchMock.mock.calls[0]![0])).toContain(
-    '/api/agents/smoke/workspace/raw?path=uploads%2Fphoto.png',
+    '/api/workspace/raw?path=uploads%2Fphoto.png',
   );
 });
 
 test('renders a non-image attachment as a chip that opens the files view', async () => {
   stubImageFetch();
-  render(Attachments, { agent: 'smoke', attachments: [DOC] });
+  render(Attachments, { attachments: [DOC] });
 
   const chip = page.getByTestId(TESTID.chatAttachmentChip);
   await expect.element(chip).toBeInTheDocument();
   await chip.click();
-  expect(navigate).toHaveBeenCalledWith('files', { agent: 'smoke', path: 'uploads/notes.pdf' });
+  expect(navigate).toHaveBeenCalledWith('files', { path: 'uploads/notes.pdf' });
 });
 
 test('clicking a thumbnail opens the full-image lightbox, and close dismisses it', async () => {
   stubImageFetch();
-  render(Attachments, { agent: 'smoke', attachments: [IMG] });
+  render(Attachments, { attachments: [IMG] });
 
   // Wait for the blob to load (the button is disabled until then), then open it.
   await expect.element(page.getByAltText('photo.png')).toBeInTheDocument();
@@ -77,7 +77,7 @@ test('a failed load shows a broken-file placeholder instead of throwing', async 
     'fetch',
     vi.fn(async () => new Response('missing', { status: 404 })),
   );
-  render(Attachments, { agent: 'smoke', attachments: [IMG] });
+  render(Attachments, { attachments: [IMG] });
 
   await expect.element(page.getByTestId(TESTID.chatAttachmentImage)).toBeInTheDocument();
   await expect.element(page.getByAltText('photo.png')).not.toBeInTheDocument();
@@ -87,7 +87,7 @@ test('revokes the thumbnail object URL on unmount so a long chat never leaks', a
   stubImageFetch();
   const createSpy = vi.spyOn(URL, 'createObjectURL');
   const revokeSpy = vi.spyOn(URL, 'revokeObjectURL');
-  render(Attachments, { agent: 'smoke', attachments: [IMG] });
+  render(Attachments, { attachments: [IMG] });
 
   await expect.element(page.getByAltText('photo.png')).toBeInTheDocument();
   expect(createSpy).toHaveBeenCalledTimes(1);

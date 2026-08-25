@@ -40,14 +40,14 @@ export interface ContextDeps {
 
 export class ContextItems {
   #deps: ContextDeps;
-  #refAgent: string | null = null;
+  #refsLoaded = false;
 
   // Manually-attached context items (chips). Provider key -> item.
   contextItems = $state<ContextItem[]>([]);
   // Daemon-provided menu providers, loaded once (best-effort - empty if the daemon
   // lacks the feature). Client providers below always show regardless.
   serverProviders = $state<ServerProvider[]>([]);
-  // Workspace files feeding the @ popover, loaded once per agent (best-effort).
+  // Workspace files feeding the @ popover, loaded once (best-effort).
   // Picking a file attaches it as a workspace-file context item rather than
   // inserting `@path` text (see pickRef).
   fileRefs = $state<RefItem[]>([]);
@@ -122,14 +122,13 @@ export class ContextItems {
     fetchServerProviders().then((ps) => (this.serverProviders = ps));
   }
 
-  /** Load the workspace files feeding the @ popover, once per agent (best-effort). */
-  loadFileRefs(agent: string): void {
-    if (!agent || agent === this.#refAgent) return;
-    this.#refAgent = agent;
+  /** Load the workspace files feeding the @ popover, once (best-effort). */
+  loadFileRefs(): void {
+    if (this.#refsLoaded) return;
+    this.#refsLoaded = true;
     this.fileRefs = [];
-    loadWorkspace(agent)
+    loadWorkspace()
       .then((ws) => {
-        if (this.#refAgent !== agent) return;
         this.fileRefs = ws.entries
           .filter((e) => !e.is_dir)
           .map((e) => ({ id: e.path, kind: 'file' as const, label: e.path, group: 'Files' }));

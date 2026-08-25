@@ -84,7 +84,6 @@ describe('SessionsStore SSE application', () => {
 
     test('completed drops the progress overlay and patches the row status', () => {
       const store = new SessionsStore();
-      store.agent = 'smoke';
       store.rows = [row('s1', { status: 'running', state: 'running' })];
       store.progress = {
         s1: { turn_count: 3, tool_count: 1, status_text: 'x', last_event_time: null },
@@ -147,7 +146,6 @@ describe('SessionsStore getInfo context limit', () => {
     // session shows no context meter at all until its first turn.
     const store = new SessionsStore();
     apiGet.mockResolvedValueOnce({
-      agent: 'smoke',
       metadata: {},
       context_limit: null,
       context_limit_resolved: 200_000,
@@ -193,7 +191,6 @@ describe('SessionsStore attention', () => {
 
   test('a delivered update patches the row in place instead of reloading the list', () => {
     const store = new SessionsStore();
-    store.agent = 'smoke';
     store.rows = [row('s1', { needs_attention: false, unread: false })];
     apiGet.mockClear();
     store.applySessionUpdate({
@@ -221,7 +218,6 @@ describe('SessionsStore attention', () => {
 
   test('attention_cleared drops the flag in place', () => {
     const store = new SessionsStore();
-    store.agent = 'smoke';
     store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
     apiGet.mockClear();
     store.applySessionUpdate({

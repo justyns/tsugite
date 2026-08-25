@@ -8,13 +8,11 @@
   import { loadWorkspaceObjectURL } from '$lib/media/workspaceImage';
 
   let {
-    agent,
     name,
     path,
     size = 76,
     onopen,
   }: {
-    agent: string;
     name: string;
     path: string;
     /** Square edge in px. Sent-message thumbs use the default; the composer's
@@ -32,7 +30,7 @@
   $effect(() => {
     let mine: string | null = null;
     let cancelled = false;
-    loadWorkspaceObjectURL(agent, path)
+    loadWorkspaceObjectURL(path)
       .then((u) => {
         if (cancelled) {
           URL.revokeObjectURL(u);

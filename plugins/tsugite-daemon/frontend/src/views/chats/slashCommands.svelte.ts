@@ -3,7 +3,7 @@
  * /api/commands), its second-stage argument choices (static `choices`, or a
  * model-fetched `effort` list), inline-menu keyboard navigation, and dispatch to
  * the command endpoint. Reads the composer's bindable `value` and the open
- * session/agent through its deps so its `$derived` menus track the live input.
+ * session through its deps so its `$derived` menus track the live input.
  *
  * A mutated $state class instance, never a reassigned binding (AGENTS.md): the
  * component instantiates it, wires the effects that load its lists, and reads its
@@ -33,7 +33,6 @@ export interface Command {
 export interface SlashDeps {
   /** The composer's bindable input text (read + written). */
   value: string;
-  readonly agent: string;
   readonly sessionId: string | null;
   /** Deliver an argument-picked command through the same send path as a typed one. */
   handleSend: (text: string) => void;
@@ -111,20 +110,19 @@ export class SlashCommands {
   }
 
   /** Fetch the model's effort levels when the current arg wants them (a
-   *  `widget:"effort"` param). Deduped per agent#session; a null result (model has
+   *  `widget:"effort"` param). Deduped per session; a null result (model has
    *  no effort levels) leaves the arg a plain text field. Called from a component
    *  `$effect` so it re-runs as the argument in play changes. */
   syncEffortLevels(): void {
     const sessionId = this.#deps.sessionId;
     if (this.argContext?.arg.widget !== 'effort' || !sessionId) return;
-    const agent = this.#deps.agent;
-    const key = `${agent}#${sessionId}`;
+    const key = sessionId;
     if (key === this.#effortFetchKey) return;
     this.#effortFetchKey = key;
     this.effortLevels = null;
     api
       .get<{ supported_effort_levels: string[] | null }>(
-        `/api/agents/${encodeURIComponent(agent)}/effort-levels?session_id=${encodeURIComponent(sessionId)}`,
+        `/api/chat/effort-levels?session_id=${encodeURIComponent(sessionId)}`,
       )
       .then((r) => {
         if (this.#effortFetchKey === key) this.effortLevels = r.supported_effort_levels;
@@ -232,7 +230,7 @@ export class SlashCommands {
     const action = name === 'job' ? { label: 'Open jobs', href: '#jobs' } : undefined;
     try {
       const res = await api.post<{ result?: string }>(
-        `/api/agents/${encodeURIComponent(this.#deps.agent)}/commands/${encodeURIComponent(name)}`,
+        `/api/commands/${encodeURIComponent(name)}`,
         body,
       );
       this.#deps.onCommandResult?.(

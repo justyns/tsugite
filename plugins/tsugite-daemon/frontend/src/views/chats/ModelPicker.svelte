@@ -26,12 +26,10 @@
 
   let {
     sessionId,
-    agent,
     resolvedModel = null,
     onChanged,
   }: {
     sessionId: string | null;
-    agent: string;
     /** The effective model when no per-session override is set (the agent/global
      *  default), so the chip can name what "default" actually runs. */
     resolvedModel?: string | null;

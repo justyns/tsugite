@@ -43,7 +43,7 @@ test('a response-stream loss after a 200 routes to onStreamLost, not onError (de
   const onError = vi.fn();
   const onStreamLost = vi.fn();
   const onDone = vi.fn();
-  sendChat('smoke', { message: 'hi' }, { onEvent, onError, onStreamLost, onDone });
+  sendChat({ message: 'hi' }, { onEvent, onError, onStreamLost, onDone });
 
   await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'turn_start' }));
@@ -59,7 +59,7 @@ test('a fetch rejection before any response routes to onError (never delivered)'
   const onError = vi.fn();
   const onStreamLost = vi.fn();
   const onDone = vi.fn();
-  sendChat('smoke', { message: 'hi' }, { onError, onStreamLost, onDone });
+  sendChat({ message: 'hi' }, { onError, onStreamLost, onDone });
 
   await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   expect(onError).toHaveBeenCalledTimes(1);
@@ -84,7 +84,6 @@ test('context_metadata rides the payload when present', async () => {
   const cap = captureSendPayload();
   const onDone = vi.fn();
   sendChat(
-    'smoke',
     {
       message: 'where am i',
       contextMetadata: [
@@ -105,20 +104,20 @@ test('context_metadata rides the payload when present', async () => {
 test('context_metadata is omitted from the payload when empty or absent', async () => {
   const cap = captureSendPayload();
   const onDone = vi.fn();
-  sendChat('smoke', { message: 'hi', contextMetadata: [] }, { onDone });
+  sendChat({ message: 'hi', contextMetadata: [] }, { onDone });
   await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   expect('context_metadata' in cap.get()).toBe(false);
 });
 
 test('respondToAsk threads ask_id into the POST body and returns the parsed reply', async () => {
   vi.mocked(api.post).mockResolvedValueOnce({ status: 'ok' });
-  const res = await respondToAsk('smoke', {
+  const res = await respondToAsk({
     askId: 'ask-7',
     response: 'Approve',
     userId: 'u1',
     sessionId: 'sess-1',
   });
-  expect(api.post).toHaveBeenCalledWith('/api/agents/smoke/respond', {
+  expect(api.post).toHaveBeenCalledWith('/api/chat/respond', {
     ask_id: 'ask-7',
     response: 'Approve',
     user_id: 'u1',
@@ -139,7 +138,7 @@ test('a non-ok response (e.g. 409 busy) routes to onError (delivered but rejecte
   const onError = vi.fn();
   const onStreamLost = vi.fn();
   const onDone = vi.fn();
-  sendChat('smoke', { message: 'hi' }, { onError, onStreamLost, onDone });
+  sendChat({ message: 'hi' }, { onError, onStreamLost, onDone });
 
   await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   expect(onError).toHaveBeenCalledTimes(1);

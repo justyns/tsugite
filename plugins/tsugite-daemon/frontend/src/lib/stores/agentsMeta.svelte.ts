@@ -1,15 +1,16 @@
 /**
- * Agents-metadata store: the agent roster (GET /api/agents) plus the editable
+ * Agents-metadata store: the daemon runtime (GET /api/runtime) plus the editable
  * agent-file and skill-file browsers (GET/PUT /api/agent-files, /api/skill-files)
  * and the skill-load issues list. Files carry a `readonly` flag (builtins) the
  * editor must honour. Exported as a class instance.
  */
 import { api } from '$lib/api/client';
 
-export interface AgentMeta {
-  name: string;
+export interface RuntimeInfo {
   agent_file: string;
   workspace_dir: string;
+  model: string | null;
+  context_limit: number | null;
   running_tasks: number;
 }
 
@@ -32,7 +33,7 @@ export interface SkillIssue {
 }
 
 export class AgentsMetaStore {
-  agents = $state<AgentMeta[]>([]);
+  runtime = $state<RuntimeInfo | null>(null);
   agentFiles = $state<MdFile[]>([]);
   skillFiles = $state<MdFile[]>([]);
   skillIssues = $state<SkillIssue[]>([]);
@@ -50,8 +51,8 @@ export class AgentsMetaStore {
     this.loading = true;
     this.error = null;
     try {
-      const res = await api.get<{ agents: AgentMeta[] }>('/api/agents');
-      this.agents = res.agents;
+      const res = await api.get<RuntimeInfo>('/api/runtime');
+      this.runtime = res;
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     } finally {

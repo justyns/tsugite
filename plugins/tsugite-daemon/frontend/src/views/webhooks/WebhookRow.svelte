@@ -15,7 +15,6 @@
   // its own <table> instead of forcing the generic data-driven component.
   import type { Webhook } from '$lib/stores/webhooks.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
-  import Chip from '$lib/components/buttons/Chip.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
@@ -64,7 +63,6 @@
 <tr data-testid={TESTID.webhookRow(webhook.token)}>
   <td>
     <div class="src">{webhook.source}</div>
-    <Chip>{webhook.agent}</Chip>
   </td>
   <td>
     <div class="wh-url">

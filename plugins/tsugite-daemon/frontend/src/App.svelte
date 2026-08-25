@@ -128,9 +128,9 @@
   function openSurface(ref: Parameters<typeof spaces.openReusing>[0]): void {
     spaces.openReusing(ref);
   }
-  function openChat(sessionId: string, agent?: string): void {
+  function openChat(sessionId: string): void {
     const title = sessions.ordered.find((r) => r.id === sessionId)?.title ?? 'Chat';
-    openSurface({ kind: 'chat', params: chatRouteParams(sessionId, agent), title });
+    openSurface({ kind: 'chat', params: chatRouteParams(sessionId), title });
   }
   function openTerminal(terminalId: string): void {
     const title = terminals.list.find((t) => t.id === terminalId)?.cmd ?? 'Terminal';
@@ -139,10 +139,10 @@
   // Files open VSCode-style: a single-click previews into one reusable ephemeral
   // tab (the next click replaces it); double-clicking a file pins it (see
   // pinFilePreview). Chats/terminals keep the retarget-in-place openReusing path.
-  function openFile(agent: string, path: string): void {
+  function openFile(path: string): void {
     spaces.openPreview({
       kind: 'file',
-      params: { agent, path },
+      params: { path },
       title: path.split('/').pop() ?? path,
     });
   }
@@ -150,14 +150,14 @@
   // Rail selections route through the hash (not straight into the mux) so each
   // pick is a history entry - browser back/forward walks conversations,
   // terminals, and files again. The router effect below does the actual open.
-  function selectChat(sessionId: string, agent?: string): void {
-    navigate('chats', chatRouteParams(sessionId, agent));
+  function selectChat(sessionId: string): void {
+    navigate('chats', chatRouteParams(sessionId));
   }
   function selectTerminal(terminalId: string): void {
     navigate('terminals', { terminalId });
   }
-  function selectFile(agent: string, path: string): void {
-    navigate('files', { ...(agent ? { agent } : {}), path });
+  function selectFile(path: string): void {
+    navigate('files', { path });
   }
   // Double-clicking a file pins its preview (the single-clicks already opened it
   // as the focused pane's ephemeral tab). Not a navigation, so it hits the store
@@ -173,9 +173,9 @@
     const id = router.view;
     const params = router.params;
     untrack(() => {
-      if (id === 'chats' && params.sessionId) openChat(params.sessionId, params.agent);
+      if (id === 'chats' && params.sessionId) openChat(params.sessionId);
       else if (id === 'terminals' && params.terminalId) openTerminal(params.terminalId);
-      else if (id === 'files' && params.path) openFile(params.agent ?? '', params.path);
+      else if (id === 'files' && params.path) openFile(params.path);
     });
   });
 
@@ -207,16 +207,11 @@
     if (auth.gated) return;
     void jobs.load({ state: 'open', limit: 200 });
   });
-  // The sessions store is agent-scoped and shared with the chats rail.
+  // The sessions store is shared with the chats rail.
   $effect(() => {
     if (auth.gated) return;
-    const agent = agentsMeta.agents[0]?.name;
-    if (!agent) {
-      void agentsMeta.load();
-      return;
-    }
     untrack(() => {
-      if (!sessions.agent) void sessions.load(agent);
+      void sessions.load();
     });
   });
 
@@ -277,14 +272,9 @@
   );
   // At shell scope so ⌘/Ctrl+Shift+O and the palette reach it from any view.
   async function newChat(): Promise<string | null> {
-    const agent = agentsMeta.agents[0]?.name;
-    if (!agent) {
-      openView('chats');
-      return null;
-    }
-    const id = await sessions.newSession(agent);
-    await sessions.load(agent);
-    selectChat(id, agent);
+    const id = await sessions.newSession();
+    await sessions.load();
+    selectChat(id);
     return id;
   }
 

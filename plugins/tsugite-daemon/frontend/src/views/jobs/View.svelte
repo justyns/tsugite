@@ -98,7 +98,7 @@
   $effect(() => {
     void jobs.load();
     void jobs.loadExecutors();
-    void agentsMeta.load();
+    void agentsMeta.loadAgentFiles();
   });
 
   // An in-chat job tile's "open" lands here (via #jobs) with a pending request:
@@ -114,7 +114,7 @@
     }
   });
 
-  const agentNames = $derived(agentsMeta.agents.map((a) => a.name));
+  const agentNames = $derived(agentsMeta.agentFiles.map((f) => f.name));
 
   // The detail drawer and the composer share the one right-side slot, so opening
   // either closes the other.
@@ -219,10 +219,7 @@
         body.acceptance_criteria = form.acceptanceCriteria.join('|');
       if (form.executor && form.executor !== 'agent') body.executor = form.executor;
       if (form.notifyWhen && form.notifyWhen !== 'never') body.notify_when = form.notifyWhen;
-      const res = await api.post<{ result?: string }>(
-        `/api/agents/${encodeURIComponent(form.agent)}/commands/job`,
-        body,
-      );
+      const res = await api.post<{ result?: string }>(`/api/commands/job`, body);
       newJobOpen = false;
       toasts.push('ok', 'Job spawned', res.result ? { body: res.result } : {});
       await jobs.load();
