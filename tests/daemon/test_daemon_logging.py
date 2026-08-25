@@ -38,7 +38,7 @@ def _file_handlers():
 def test_log_file_defaults_to_state_dir(tmp_path):
     """No log_file configured must still produce a persistent rotating log
     under state_dir - otherwise a crash traceback is unrecoverable."""
-    config = DaemonConfig(state_dir=tmp_path / "state", agents={})
+    config = DaemonConfig(state_dir=tmp_path / "state", default_workspace_dir=tmp_path / "ws")
     _configure_logging(config)
     handlers = _file_handlers()
     assert handlers, "a persistent file handler must be installed by default"
@@ -46,7 +46,9 @@ def test_log_file_defaults_to_state_dir(tmp_path):
 
 
 def test_explicit_log_file_still_honored(tmp_path):
-    config = DaemonConfig(state_dir=tmp_path / "state", agents={}, log_file=tmp_path / "custom" / "d.log")
+    config = DaemonConfig(
+        state_dir=tmp_path / "state", default_workspace_dir=tmp_path / "ws", log_file=tmp_path / "custom" / "d.log"
+    )
     _configure_logging(config)
     handlers = _file_handlers()
     assert handlers
@@ -56,7 +58,7 @@ def test_explicit_log_file_still_honored(tmp_path):
 def test_crash_hooks_write_tracebacks_to_log(tmp_path):
     """Unhandled main-thread and worker-thread exceptions must land in the log
     file with a traceback (the agent loop runs in worker threads via to_thread)."""
-    config = DaemonConfig(state_dir=tmp_path / "state", agents={})
+    config = DaemonConfig(state_dir=tmp_path / "state", default_workspace_dir=tmp_path / "ws")
     _configure_logging(config)
     _install_crash_hooks()
 

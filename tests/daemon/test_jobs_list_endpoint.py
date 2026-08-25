@@ -8,7 +8,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.job_store import Job, JobStore
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
@@ -23,7 +23,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -39,8 +39,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -82,9 +81,8 @@ def job_store(tmp_path):
 def server(http_config, mock_adapter, webhook_store, agent_config, token_store, job_store):
     s = HTTPServer(
         config=http_config,
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     s.job_store = job_store
@@ -109,9 +107,8 @@ class TestListJobsEndpoint:
     ):
         s = HTTPServer(
             config=http_config,
-            adapters={"test-agent": mock_adapter},
+            adapter=mock_adapter,
             webhook_store=webhook_store,
-            agent_configs={"test-agent": agent_config},
             token_store=token_store,
         )
         # Intentionally do not set s.job_store
@@ -205,9 +202,8 @@ class TestListJobsEndpoint:
         empty_store = JobStore(tmp_path / "empty_jobs.json")
         s = HTTPServer(
             config=http_config,
-            adapters={"test-agent": mock_adapter},
+            adapter=mock_adapter,
             webhook_store=webhook_store,
-            agent_configs={"test-agent": agent_config},
             token_store=token_store,
         )
         s.job_store = empty_store

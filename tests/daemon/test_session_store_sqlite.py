@@ -18,7 +18,7 @@ def test_pin_survives_reopen_without_flush(tmp_path):
     """Write-through: a mutation that previously only marked the store dirty
     must be durable immediately - no flush(), no clean shutdown."""
     store = _store(tmp_path)
-    store.create_session(Session(id="s1", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
+    store.create_session(Session(id="s1", source=SessionSource.INTERACTIVE.value, user_id="u"))
     store.set_pin("s1", True)
 
     reopened = _store(tmp_path)
@@ -29,7 +29,7 @@ def test_pin_survives_reopen_without_flush(tmp_path):
 
 def test_no_json_writes_after_conversion(tmp_path):
     store = _store(tmp_path)
-    store.create_session(Session(id="s1", agent="a"))
+    store.create_session(Session(id="s1"))
     assert (tmp_path / "daemon.db").exists(), "sessions must land in daemon.db"
     assert not (tmp_path / "session_store.json").exists(), "no legacy JSON writes"
 
@@ -64,7 +64,7 @@ def test_legacy_json_migrated_and_left_untouched(tmp_path):
 
 def test_metadata_update_durable_without_flush(tmp_path):
     store = _store(tmp_path)
-    store.create_session(Session(id="s1", agent="a", user_id="u"))
+    store.create_session(Session(id="s1", user_id="u"))
     store.set_metadata_bulk("s1", {"topic": "databases"})
 
     reopened = _store(tmp_path)
@@ -75,7 +75,7 @@ def test_purged_sessions_deleted_durably(tmp_path):
     """Prune paths (schedule/background caps) must delete rows, not leave ghosts
     that resurrect on the next start."""
     store = _store(tmp_path)
-    store.create_session(Session(id="s1", agent="a", user_id="u"))
+    store.create_session(Session(id="s1", user_id="u"))
     with store._lock:
         store._purge_session_state("s1")
 

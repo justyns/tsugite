@@ -115,7 +115,7 @@ def test_progress_cache_evicted_on_session_finish(store, history_dir):
     status transition."""
     from tsugite_daemon.session_store import Session
 
-    session = store.create_session(Session(id="finish-test", agent="t", status=SessionStatus.ACTIVE.value))
+    session = store.create_session(Session(id="finish-test", status=SessionStatus.ACTIVE.value))
     sid = session.id
     _make_history_session(history_dir, sid)
     store.append_event(sid, {"type": "tool_invocation", "name": "bash"})
@@ -140,7 +140,7 @@ def test_progress_summary_stays_a_pure_fold_when_idle(store, history_dir):
     it is the caller's job, because liveness is not an event."""
     from tsugite_daemon.session_store import Session
 
-    session = store.create_session(Session(id="idle-tail", agent="t", status=SessionStatus.ACTIVE.value))
+    session = store.create_session(Session(id="idle-tail", status=SessionStatus.ACTIVE.value))
     _make_history_session(history_dir, session.id)
     _mid_turn_tail(store, session.id)
 
@@ -154,7 +154,7 @@ class TestSessionHasLiveWork:
     def _session(self, **kw):
         from tsugite_daemon.session_store import Session
 
-        return Session(id="s", agent="t", **kw)
+        return Session(id="s", **kw)
 
     def test_idle_interactive_session_has_no_live_work(self):
         assert self._session(status=SessionStatus.ACTIVE.value).has_live_work is False

@@ -54,15 +54,14 @@ def session_store(tmp_path):
 def client(tmp_path, workspace, token, session_store):
     token_store, _raw = token
     adapter = SimpleNamespace(
-        agent_name="smokeagent",
+        agent_label="smokeagent",
         session_store=session_store,
-        agent_config=SimpleNamespace(workspace_dir=workspace),
+        runtime=SimpleNamespace(workspace_dir=workspace),
     )
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8599),
-        adapters={"smokeagent": adapter},
+        adapter=adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
     return TestClient(server.app)
@@ -251,7 +250,7 @@ def test_capture_resolves_session_ctx(client, token, session_store, workspace):
         return []
 
     register_context_provider(ContextProvider(key="probe", label="Probe", capture=capture))
-    session = session_store.get_or_create_interactive("web-user", "smokeagent")
+    session = session_store.get_or_create_interactive("web-user")
     resp = client.post(
         "/api/context-providers/probe/capture",
         json={"session_id": session.id, "arg": "chosen-value"},
@@ -273,7 +272,7 @@ def test_choices_resolves_session_ctx(client, token, session_store, workspace):
         return []
 
     register_context_provider(ContextProvider(key="probe", label="Probe", capture=lambda arg, c: [], choices=choices))
-    session = session_store.get_or_create_interactive("web-user", "smokeagent")
+    session = session_store.get_or_create_interactive("web-user")
     resp = client.get(
         f"/api/context-providers/probe/choices?session_id={session.id}",
         headers=_auth(token),
@@ -310,7 +309,7 @@ def test_search_resolves_session_ctx_and_query(client, token, session_store, wor
         return []
 
     register_context_provider(ContextProvider(key="jira", label="Jira", autocomplete_prefix="jira", search=search))
-    session = session_store.get_or_create_interactive("web-user", "smokeagent")
+    session = session_store.get_or_create_interactive("web-user")
     resp = client.get(
         f"/api/context-providers/jira/search?session_id={session.id}&q=auth",
         headers=_auth(token),

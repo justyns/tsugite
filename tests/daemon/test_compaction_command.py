@@ -3,7 +3,7 @@
 The web UI surfaces custom compaction instructions through the existing
 slash-command UI: typing `/compact some instructions` is parsed by
 `tsugite/daemon/web/js/views/conversation/input.js:_runCommand` into a POST
-against `/api/agents/{agent}/commands/compact` with body
+against `/api/commands/compact` with body
 `{user_id, message: "some instructions"}`. The backend forwards `message`
 to `_compact_session(instructions=...)`.
 
@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.webhook_store import WebhookStore
 
 
@@ -31,7 +31,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -40,13 +40,12 @@ def adapter(agent_config, tmp_path):
 
     from tsugite.workspace import WorkspaceNotFoundError
 
-    session_store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
+    session_store = SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
 
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -68,9 +67,8 @@ def admin_token(token_store):
 def client(adapter, agent_config, tmp_path, token_store):
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     return TestClient(server.app)
@@ -80,7 +78,7 @@ def _seed_session_with_message(adapter, user_id: str) -> str:
     """`cmd_compact` returns "No conversation to compact" early when the session
     has zero messages. Bump message_count via the public counter to bypass that.
     """
-    session = adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+    session = adapter.session_store.get_or_create_interactive(user_id)
     adapter.session_store.update_token_count(session.id, 100)
     return session.id
 
@@ -118,7 +116,7 @@ class TestCompactCommandRouting:
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
             resp = client.post(
-                "/api/agents/test-agent/commands/compact",
+                "/api/commands/compact",
                 content=json.dumps({"user_id": user_id, "message": "focus on schema design"}),
                 headers={
                     "Authorization": f"Bearer {admin_token}",
@@ -143,7 +141,7 @@ class TestCompactCommandRouting:
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
             resp = client.post(
-                "/api/agents/test-agent/commands/compact",
+                "/api/commands/compact",
                 content=json.dumps({"user_id": user_id}),
                 headers={
                     "Authorization": f"Bearer {admin_token}",
@@ -158,12 +156,12 @@ class TestCompactCommandRouting:
         """When the user has no messages yet, the command must not call
         `_compact_session` and must return a friendly no-op string."""
         user_id = "compact-user-empty"
-        adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+        adapter.session_store.get_or_create_interactive(user_id)
 
         compact_mock = AsyncMock()
         with patch.object(adapter, "_compact_session", new=compact_mock):
             resp = client.post(
-                "/api/agents/test-agent/commands/compact",
+                "/api/commands/compact",
                 content=json.dumps({"user_id": user_id, "message": "ignored"}),
                 headers={
                     "Authorization": f"Bearer {admin_token}",
@@ -177,7 +175,7 @@ class TestCompactCommandRouting:
 
 
 class TestCompactRouteRoutesBySessionId:
-    """The web UI's compact button posts to /api/agents/{agent}/compact with the
+    """The web UI's compact button posts to /api/chat/compact with the
     selected session_id. Without per-session routing, _compact targets the
     user's default interactive session, which is often empty when the user is
     on a named/secondary session and 404s with 'no session to compact'.
@@ -188,7 +186,6 @@ class TestCompactRouteRoutesBySessionId:
 
         s = Session(
             id=session_id,
-            agent="test-agent",
             source=SessionSource.INTERACTIVE.value,
             user_id=user_id,
         )
@@ -199,7 +196,7 @@ class TestCompactRouteRoutesBySessionId:
     def test_compact_routes_to_named_session(self, client, adapter, admin_token):
         user_id = "alice"
         # Default interactive session — empty
-        adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+        adapter.session_store.get_or_create_interactive(user_id)
         # Named session the user is actively viewing
         named = self._seed_named_session(adapter, user_id, "named-A")
 
@@ -210,7 +207,7 @@ class TestCompactRouteRoutesBySessionId:
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
             resp = client.post(
-                "/api/agents/test-agent/compact",
+                "/api/chat/compact",
                 content=json.dumps({"user_id": user_id, "session_id": named.id}),
                 headers={
                     "Authorization": f"Bearer {admin_token}",
@@ -224,7 +221,7 @@ class TestCompactRouteRoutesBySessionId:
     def test_compact_falls_back_to_default_without_session_id(self, client, adapter, admin_token):
         """No session_id: behave like the legacy slash-command — target default."""
         user_id = "bob"
-        default = adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+        default = adapter.session_store.get_or_create_interactive(user_id)
         adapter.session_store.update_token_count(default.id, 50)
 
         captured = {}
@@ -234,7 +231,7 @@ class TestCompactRouteRoutesBySessionId:
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
             resp = client.post(
-                "/api/agents/test-agent/compact",
+                "/api/chat/compact",
                 content=json.dumps({"user_id": user_id}),
                 headers={
                     "Authorization": f"Bearer {admin_token}",

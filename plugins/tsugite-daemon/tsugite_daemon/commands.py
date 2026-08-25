@@ -98,7 +98,7 @@ def get_commands() -> dict[str, AdapterCommand]:
     description="Run a task in the background",
     params=[
         CommandParam("prompt", str, "The task to run"),
-        CommandParam("agent", str, "Target agent", required=False),
+        CommandParam("agent", str, "Agent file to run (default: the daemon default)", required=False),
     ],
 )
 async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) -> str:
@@ -109,11 +109,9 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
     if not _session_runner:
         return "Background sessions require the daemon session runner to be enabled."
 
-    target_agent = agent or adapter.agent_name
-
     session = Session(
         id="",
-        agent=target_agent,
+        agent_file=agent or None,
         source=SessionSource.BACKGROUND.value,
         prompt=prompt,
     )
@@ -261,7 +259,6 @@ def create_job_host_session(adapter: "BaseAdapter", user_id: str, prompt: str) -
     title = f"Job: {first_line[:60]}".rstrip() if first_line else "Job"
     return create_interactive_session(
         adapter.session_store,
-        adapter.agent_name,
         user_id,
         title=title,
         event_bus=getattr(adapter, "event_bus", None),
@@ -280,7 +277,7 @@ def _resolve_command_session(adapter: "BaseAdapter", user_id: str, session_id: s
             return adapter.session_store.get_session(session_id)
         except (ValueError, KeyError):
             pass
-    return adapter.session_store.find_default_session(user_id, adapter.agent_name)
+    return adapter.session_store.find_default_session(user_id)
 
 
 def _broadcast_settings(adapter: "BaseAdapter", session_id: str) -> None:
@@ -355,10 +352,10 @@ async def cmd_compact(
         return "No conversation to compact."
 
     old_id = session.id
-    if not adapter.session_store.begin_compaction(user_id, adapter.agent_name, session_id=old_id):
+    if not adapter.session_store.begin_compaction(user_id, session_id=old_id):
         return "Compaction already in progress."
 
-    adapter._broadcast_compaction("compaction_started", adapter.agent_name, old_id)
+    adapter._broadcast_compaction("compaction_started", old_id)
     new_session = None
     try:
         new_session = await adapter._compact_session(
@@ -370,8 +367,8 @@ async def cmd_compact(
     except Exception as e:
         return f"Compaction failed: {e}"
     finally:
-        adapter.session_store.end_compaction(user_id, adapter.agent_name, session_id=old_id)
-        adapter._broadcast_compaction("compaction_finished", adapter.agent_name, old_id)
+        adapter.session_store.end_compaction(user_id, session_id=old_id)
+        adapter._broadcast_compaction("compaction_finished", old_id)
 
     if new_session is None:
         return f"Nothing to compact (id: {old_id[:12]})"
@@ -399,7 +396,7 @@ async def cmd_status(adapter: BaseAdapter, user_id: str, session_id: str | None 
     context_limit = adapter.session_store.get_session_context_limit(session.id)
     tokens = session.cumulative_tokens
     pct = int(tokens / context_limit * 100) if context_limit else 0
-    compacting = adapter.session_store.is_compacting(user_id, adapter.agent_name)
+    compacting = adapter.session_store.is_compacting(user_id)
 
     lines = [
         f"Model: {adapter.resolve_session_model(session.id)}",
@@ -602,7 +599,7 @@ async def cmd_effort(
 )
 async def cmd_sessions(adapter: BaseAdapter, status: str | None = None) -> str:
     """List background sessions for the current agent."""
-    sessions = adapter.session_store.list_sessions(agent=adapter.agent_name, status=status)
+    sessions = adapter.session_store.list_sessions(status=status)
     if not sessions:
         return "No sessions found."
     lines = [f"[{s.status}] {s.id[:12]} — {s.title or (s.prompt or '')[:60]}" for s in sessions[:10]]

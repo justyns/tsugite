@@ -95,7 +95,7 @@ def _sort_key(entry: dict) -> datetime:
 def _session_title(session: "Optional[Session]", session_id: str) -> str:
     if session is None:
         return session_id
-    return session.title or _one_line(session.prompt, 80) or session.agent or session_id
+    return session.title or _one_line(session.prompt, 80) or session_id
 
 
 def _session_entry(session_id: str, session: "Optional[Session]", event: "Event") -> dict:

@@ -14,11 +14,11 @@ from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 @pytest.fixture
 def store(tmp_path):
-    return SessionStore(tmp_path / "store.json", context_limits={"agent-a": 128_000})
+    return SessionStore(tmp_path / "store.json", default_context_limit=128_000)
 
 
 def _make_session(store: SessionStore, sid: str, agent: str = "agent-a") -> Session:
-    s = Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value, user_id="u1")
+    s = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="u1")
     store.create_session(s)
     return s
 
@@ -51,7 +51,7 @@ def test_session_context_limit_survives_agent_wide_mutation(store):
     _make_session(store, "s1")
     store.update_session_context_limit("s1", 1_000_000)
 
-    store.update_context_limit("agent-a", 200_000)
+    store.update_context_limit(200_000)
 
     assert store.get_session_context_limit("s1") == 1_000_000, (
         "agent-wide context_limit mutation should not clobber a session's tracked limit"
@@ -94,7 +94,7 @@ def test_per_session_limit_persists_across_store_reload(store, tmp_path):
     _make_session(store, "s1")
     store.update_session_context_limit("s1", 1_000_000)
 
-    reloaded = SessionStore(store._path, context_limits={"agent-a": 128_000})
+    reloaded = SessionStore(store._path, default_context_limit=128_000)
 
     assert reloaded.get_session_context_limit("s1") == 1_000_000
 

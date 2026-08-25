@@ -25,12 +25,7 @@ class AutoCompactConfig(BaseModel):
 
 
 class SandboxSettings(BaseModel):
-    """Bubblewrap sandbox settings for daemon agent code execution.
-
-    Set globally on DaemonConfig (default for every agent) and/or per-agent on
-    AgentConfig (overrides the global, field by field). load_daemon_config merges
-    the two so consumers read a single resolved value on AgentConfig.sandbox.
-    """
+    """Bubblewrap sandbox settings for daemon code execution."""
 
     enabled: bool = False
     no_network: bool = False
@@ -40,8 +35,12 @@ class SandboxSettings(BaseModel):
     pass_env: List[str] = Field(default_factory=list)
 
 
-class AgentConfig(BaseModel):
-    """Configuration for a single agent."""
+class RuntimeDefaults(BaseModel):
+    """The daemon's resolved default runtime settings.
+
+    Assembled from the `default_*` keys on DaemonConfig. Sessions override these
+    individually; see SessionStore's per-session override fields.
+    """
 
     workspace_dir: Path
     agent_file: str
@@ -51,14 +50,13 @@ class AgentConfig(BaseModel):
     max_turns: Optional[int] = None
     timezone: str = ""  # IANA timezone for display (e.g. "America/Chicago")
     auto_compact: Optional[AutoCompactConfig] = None
-    sandbox: Optional[SandboxSettings] = None  # Per-agent override; merged with the global default
+    sandbox: Optional[SandboxSettings] = None
 
 
 class DiscordBotConfig(BaseModel):
     """Configuration for a single Discord bot."""
 
     name: str
-    agent: str  # References agents key
     token_secret: Optional[str] = None  # Resolved via tsugite.secrets.get_backend().get()
     token_file: Optional[Path] = None  # File path containing the token
     command_prefix: str = "!"
@@ -148,13 +146,37 @@ class DaemonConfig(BaseModel):
     log_level: str = "info"
     log_file: Optional[Path] = None
     log_to_console: bool = True
-    agents: Dict[str, AgentConfig]
+
+    default_workspace_dir: Path
+    default_agent_file: str = "default"
+    default_model: Optional[str] = None
+    default_compaction_model: Optional[str] = None
+    default_context_limit: Optional[int] = None
+    default_max_turns: Optional[int] = None
+    timezone: str = ""
+    auto_compact: Optional[AutoCompactConfig] = None
+
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None
     notification_channels: Dict[str, NotificationChannelConfig] = Field(default_factory=dict)
     identity_links: Dict[str, List[str]] = Field(default_factory=dict)
     plugins: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    sandbox: Optional[SandboxSettings] = None  # Global default, merged into each agent
+    sandbox: Optional[SandboxSettings] = None
+
+    @property
+    def runtime(self) -> RuntimeDefaults:
+        """The default runtime settings a session starts from."""
+        return RuntimeDefaults(
+            workspace_dir=self.default_workspace_dir,
+            agent_file=self.default_agent_file,
+            context_limit=self.default_context_limit,
+            model=self.default_model,
+            compaction_model=self.default_compaction_model,
+            max_turns=self.default_max_turns,
+            timezone=self.timezone,
+            auto_compact=self.auto_compact,
+            sandbox=self.sandbox,
+        )
 
 
 def _expand_env_vars(data: dict, *keys: str) -> None:
@@ -177,24 +199,6 @@ def _expand_sandbox_binds(sandbox_data: dict) -> None:
         binds = sandbox_data.get(key)
         if isinstance(binds, list):
             sandbox_data[key] = [str(Path(os.path.expandvars(p)).expanduser()) for p in binds]
-
-
-def _merge_sandbox(
-    global_sb: Optional[SandboxSettings], agent_sb: Optional[SandboxSettings]
-) -> Optional[SandboxSettings]:
-    """Resolve an agent's effective sandbox by layering it over the global default.
-
-    - No agent block: inherit the global wholesale (or None if there's no global).
-    - Agent block present: start from the global (or empty defaults) and override
-      only the fields the agent explicitly set, so e.g. a per-agent `enabled: false`
-      can opt out of a global `enabled: true` while still inheriting allow_domains.
-    """
-    if agent_sb is None:
-        return global_sb.model_copy(deep=True) if global_sb is not None else None
-    base = global_sb if global_sb is not None else SandboxSettings()
-    # exclude_unset keeps only the fields the agent set in YAML, so unset fields
-    # fall back to the global; update= layers them onto a deep copy of the base.
-    return base.model_copy(deep=True, update=agent_sb.model_dump(exclude_unset=True))
 
 
 def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
@@ -234,27 +238,22 @@ def load_daemon_config(path: Optional[Path] = None) -> DaemonConfig:
     if isinstance(data.get("sandbox"), dict):
         _expand_sandbox_binds(data["sandbox"])
 
-    for agent_data in data.get("agents", {}).values():
-        _expand_paths(agent_data, "workspace_dir")
-        if isinstance(agent_data.get("sandbox"), dict):
-            _expand_sandbox_binds(agent_data["sandbox"])
+    if "agents" in data:
+        raise ValueError(
+            f"{path}: the daemon-level 'agents:' block is no longer supported. "
+            "The daemon now takes flat defaults (default_workspace_dir, default_agent_file, "
+            "default_model, ...) which sessions override individually. "
+            "Migrate with: python scripts/migrate_daemon_agents.py <path-to-daemon.yaml>"
+        )
 
     for channel in data.get("notification_channels", {}).values():
         _expand_env_vars(channel, "url", "body_template")
         if "headers" in channel:
             channel["headers"] = {k: os.path.expandvars(v) for k, v in channel["headers"].items()}
 
-    _expand_paths(data, "state_dir", "log_file")
+    _expand_paths(data, "state_dir", "log_file", "default_workspace_dir")
 
-    config = DaemonConfig.model_validate(data)
-
-    # Resolve each agent's effective sandbox by merging the global default in,
-    # so consumers (the adapter chokepoint, gateway startup check) read a single
-    # value on AgentConfig.sandbox and never need the global.
-    for agent in config.agents.values():
-        agent.sandbox = _merge_sandbox(config.sandbox, agent.sandbox)
-
-    return config
+    return DaemonConfig.model_validate(data)
 
 
 def save_daemon_config(config: DaemonConfig, path: Optional[Path] = None) -> Path:

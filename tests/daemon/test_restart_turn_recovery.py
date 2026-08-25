@@ -34,7 +34,7 @@ def _event_types(history_dir: Path, session_id: str) -> list[str]:
 
 def test_boot_repair_finalizes_in_flight_interactive_turn(tmp_path, history_dir):
     store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(Session(id="s1", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
+    store.create_session(Session(id="s1", source=SessionSource.INTERACTIVE.value, user_id="u"))
     store.begin_turn("s1")
     _seed_mid_turn_history(history_dir, "s1")
 
@@ -56,7 +56,6 @@ def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, histor
     store.create_session(
         Session(
             id="s2",
-            agent="a",
             source=SessionSource.SPAWNED.value,
             status=SessionStatus.RUNNING.value,
             user_id="u",
@@ -72,7 +71,7 @@ def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, histor
 
 def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):
     store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(Session(id="s3", agent="a", source=SessionSource.INTERACTIVE.value, user_id="u"))
+    store.create_session(Session(id="s3", source=SessionSource.INTERACTIVE.value, user_id="u"))
     storage = seed_history_session("s3", agent="test", model="m")
     storage.record("user_input", text="hi")
     storage.record("session_end", status="success")
@@ -85,7 +84,7 @@ def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):
 
 def test_begin_and_end_turn_write_through(tmp_path, history_dir):
     store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(Session(id="s4", agent="a", user_id="u"))
+    store.create_session(Session(id="s4", user_id="u"))
     store.begin_turn("s4")
     assert SessionStore(tmp_path / "session_store.json").get_session("s4") is not None
 
@@ -102,7 +101,7 @@ async def test_adapter_brackets_turn_with_in_flight_marker(tmp_path, history_dir
     """handle_message must set the durable marker while the turn runs and clear
     it on both the success and error paths."""
     from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-    from tsugite_daemon.config import AgentConfig
+    from tsugite_daemon.config import RuntimeDefaults
 
     class _StubAdapter(BaseAdapter):
         async def start(self):
@@ -112,8 +111,8 @@ async def test_adapter_brackets_turn_with_in_flight_marker(tmp_path, history_dir
             pass
 
     store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(Session(id="s1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1"))
-    adapter = _StubAdapter("test-agent", AgentConfig(workspace_dir=tmp_path / "ws", agent_file="default"), store)
+    store.create_session(Session(id="s1", source=SessionSource.INTERACTIVE.value, user_id="u1"))
+    adapter = _StubAdapter(RuntimeDefaults(workspace_dir=tmp_path / "ws", agent_file="default"), store)
 
     seen = {}
 

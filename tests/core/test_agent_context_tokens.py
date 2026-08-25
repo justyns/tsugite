@@ -148,8 +148,8 @@ async def test_last_input_tokens_no_cache():
 
 def test_session_store_update_token_count_replaces(tmp_path):
     """update_token_count should replace cumulative_tokens (represents current context size)."""
-    store = SessionStore(tmp_path / "store.json", context_limits={"agent": 200000})
-    session = store.get_or_create_interactive("user", "agent")
+    store = SessionStore(tmp_path / "store.json", default_context_limit=200000)
+    session = store.get_or_create_interactive("user")
 
     store.update_token_count(session.id, 10000)
     assert store.get_session(session.id).cumulative_tokens == 10000

@@ -10,7 +10,7 @@ present in the payload that reaches subscribers.
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_runner import set_current_session_id
 from tsugite_daemon.session_store import SessionStore
 
@@ -38,8 +38,8 @@ class _RecordingBus:
 
 @pytest.fixture
 def adapter(tmp_path):
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
-    return _StubAdapter("test-agent", AgentConfig(workspace_dir=tmp_path / "workspace", agent_file="default"), store)
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
+    return _StubAdapter(RuntimeDefaults(workspace_dir=tmp_path / "workspace", agent_file="default"), store)
 
 
 def test_history_update_from_broadcast_turn_complete_has_session_id(adapter):

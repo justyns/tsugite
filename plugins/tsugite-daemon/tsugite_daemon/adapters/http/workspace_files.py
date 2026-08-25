@@ -34,18 +34,18 @@ MAX_WORKSPACE_RAW_SIZE = 10 * 1024 * 1024
 class WorkspaceFilesMixin:
     def _workspace_routes(self) -> list:
         return [
-            Route("/api/agents/{agent}/workspace", self._list_workspace_files, methods=["GET"]),
-            Route("/api/agents/{agent}/workspace/content", self._read_workspace_file, methods=["GET"]),
-            Route("/api/agents/{agent}/workspace/raw", self._read_workspace_raw, methods=["GET"]),
-            Route("/api/agents/{agent}/workspace/content", self._save_workspace_file, methods=["PUT"]),
-            Route("/api/agents/{agent}/workspace/attach", self._attach_workspace_file, methods=["POST"]),
+            Route("/api/workspace", self._list_workspace_files, methods=["GET"]),
+            Route("/api/workspace/content", self._read_workspace_file, methods=["GET"]),
+            Route("/api/workspace/raw", self._read_workspace_raw, methods=["GET"]),
+            Route("/api/workspace/content", self._save_workspace_file, methods=["PUT"]),
+            Route("/api/workspace/attach", self._attach_workspace_file, methods=["POST"]),
         ]
 
     def _validate_workspace_path(
         self, adapter: "HTTPAgentAdapter", path_str: str
     ) -> tuple[Path, Optional[JSONResponse]]:
         """Validate a workspace file path stays within the workspace directory."""
-        workspace_dir = adapter.agent_config.workspace_dir
+        workspace_dir = adapter.runtime.workspace_dir
         try:
             resolved = (workspace_dir / path_str).resolve()
         except (ValueError, OSError):
@@ -119,7 +119,7 @@ class WorkspaceFilesMixin:
         if err:
             return err
 
-        workspace_dir = adapter.agent_config.workspace_dir
+        workspace_dir = adapter.runtime.workspace_dir
         if not workspace_dir.is_dir():
             return JSONResponse({"entries": [], "subdir": "", "workspace_dir": str(workspace_dir)})
 
@@ -275,7 +275,7 @@ class WorkspaceFilesMixin:
         if not resolved.is_file():
             return JSONResponse({"error": "not a file"}, status_code=400)
 
-        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        uploads_dir = adapter.runtime.workspace_dir / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
 
         dest, dedup_err = _deduplicate_dest(uploads_dir, resolved.name)

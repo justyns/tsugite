@@ -25,7 +25,6 @@ def _adapter(tmp_path):
 def _session(store, sid="sess-open-chat", tokens=1234):
     s = Session(
         id=sid,
-        agent="default",
         source=SessionSource.INTERACTIVE.value,
         user_id="user-1",
         cumulative_tokens=tokens,
@@ -87,7 +86,7 @@ async def test_cmd_status_reports_session_context_limit(tmp_path):
     model), not the agent-wide default limit."""
     adapter, store = _adapter(tmp_path)
     _session(store)
-    store.update_context_limit("default", 128000)
+    store.update_context_limit(128000)
     store.update_session_context_limit("sess-open-chat", 200000)
     result = await cmd_status(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
     assert "200,000 tokens" in result

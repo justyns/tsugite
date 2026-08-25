@@ -58,9 +58,8 @@ def test_token(token_store):
 def client(tmp_path, token_store, usage_db):
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8385),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
     return TestClient(server.app)

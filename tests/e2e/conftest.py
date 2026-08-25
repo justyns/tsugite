@@ -11,7 +11,7 @@ import pytest
 import uvicorn
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -38,7 +38,7 @@ def e2e_workspace(e2e_tmp):
 
 @pytest.fixture(scope="session")
 def e2e_session_store(e2e_tmp):
-    return SessionStore(e2e_tmp / "sessions.json", context_limits={"test-agent": 128000})
+    return SessionStore(e2e_tmp / "sessions.json", default_context_limit=128000)
 
 
 @pytest.fixture(scope="session")
@@ -54,15 +54,13 @@ def e2e_auth_token(e2e_token_store):
 
 @pytest.fixture(scope="session")
 def e2e_adapter(e2e_workspace, e2e_session_store):
-    agent_config = AgentConfig(workspace_dir=e2e_workspace, agent_file="default")
 
     with patch("tsugite.workspace.Workspace") as mock_ws:
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=e2e_session_store,
         )
 
@@ -85,13 +83,11 @@ def e2e_adapter(e2e_workspace, e2e_session_store):
 def e2e_server(e2e_tmp, e2e_workspace, e2e_adapter, e2e_token_store):
     port = _free_port()
     config = HTTPConfig(enabled=True, host="127.0.0.1", port=port)
-    agent_config = AgentConfig(workspace_dir=e2e_workspace, agent_file="default")
 
     server = HTTPServer(
         config=config,
-        adapters={"test-agent": e2e_adapter},
+        adapter=e2e_adapter,
         webhook_store=WebhookStore(e2e_tmp / "webhooks.json"),
-        agent_configs={"test-agent": agent_config},
         token_store=e2e_token_store,
     )
 
@@ -172,7 +168,7 @@ def session_runner_backend(e2e_server, e2e_session_store, e2e_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     _url, server = e2e_server
-    runner = SessionRunner(e2e_session_store, {"test-agent": e2e_adapter}, event_bus=server.event_bus)
+    runner = SessionRunner(e2e_session_store, e2e_adapter, event_bus=server.event_bus)
     server.session_runner = runner
     yield runner
     server.session_runner = None
@@ -198,7 +194,7 @@ def chat_page(authenticated_page, e2e_session_store):
     load already lands here without any nav click.
     """
     page = authenticated_page
-    e2e_session_store.get_or_create_interactive(E2E_USER_ID, "test-agent")
+    e2e_session_store.get_or_create_interactive(E2E_USER_ID)
 
     page.reload()
     wait_for_authed(page)

@@ -29,7 +29,7 @@ TOKENS_FILENAME = "tokens.json"
 @dataclass
 class Token:
     hash: str
-    identity: str  # "admin:<name>" or "<agent>:<schedule_id>"
+    identity: str  # "admin:<name>" or "schedule:<schedule_id>"
     created_at: str  # ISO format
     prefix: str  # first 8 chars for display
     persistent: bool = False
@@ -115,8 +115,8 @@ class TokenStore:
 
     # --- Agent tokens (temporary, with TTL) ---
 
-    def issue(self, agent: str, schedule_id: str = "", ttl: int | None = None) -> str:
-        """Issue a temporary token for an agent/schedule. Returns the raw token."""
+    def issue(self, schedule_id: str = "", ttl: int | None = None) -> str:
+        """Issue a temporary token for a schedule run. Returns the raw token."""
         with self._lock:
             if len(self._tokens) > 100:
                 self.cleanup_expired()
@@ -124,7 +124,7 @@ class TokenStore:
         now = datetime.now(timezone.utc)
         t = Token(
             hash=self._hash(raw),
-            identity=f"{agent}:{schedule_id}",
+            identity=f"schedule:{schedule_id}",
             created_at=now.isoformat(),
             prefix=raw[:8],
             expires_at=(now + timedelta(seconds=ttl or self._default_ttl)).isoformat(),

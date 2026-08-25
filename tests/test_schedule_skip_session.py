@@ -25,12 +25,12 @@ def _make_scheduler_adapter(tmp_path):
     adapter_mock.handle_message = AsyncMock(return_value="done")
     adapter_mock.session_store = store
 
-    sa = SchedulerAdapter(adapters={"bot": adapter_mock}, schedules_path=tmp_path / "schedules.json")
+    sa = SchedulerAdapter(adapter=adapter_mock, schedules_path=tmp_path / "schedules.json")
     return sa, adapter_mock, store
 
 
 def _entry():
-    return ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+    return ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
 
 
 def _schedule_sessions(store):

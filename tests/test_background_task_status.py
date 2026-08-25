@@ -41,13 +41,13 @@ class TestGetRunningIds:
         assert scheduler.get_running_ids() == []
 
     def test_empty_with_schedules_not_running(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         assert scheduler.get_running_ids() == []
 
     @pytest.mark.asyncio
     async def test_returns_ids_while_lock_held(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
 
         entry = scheduler.get("job1")
@@ -67,7 +67,6 @@ class TestScheduleStatusTool:
         mock_sched = MagicMock()
         entry = ScheduleEntry(
             id="job1",
-            agent="bot",
             prompt="hello",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -80,7 +79,6 @@ class TestScheduleStatusTool:
 
         result = schedule_status(id="job1")
         assert result["id"] == "job1"
-        assert result["agent"] == "bot"
         assert result["is_running"] is False
         assert result["last_status"] == "success"
         assert result["enabled"] is True
@@ -89,7 +87,7 @@ class TestScheduleStatusTool:
         from tsugite.tools.schedule import schedule_status, set_scheduler
 
         mock_sched = MagicMock()
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         mock_sched.get.return_value = entry
         mock_sched.get_running_ids.return_value = ["job1"]
         set_scheduler(mock_sched, tool_loop)
@@ -103,9 +101,7 @@ class TestListRunningTasksTool:
         from tsugite.tools.schedule import list_running_tasks, set_scheduler
 
         mock_sched = MagicMock()
-        entry = ScheduleEntry(
-            id="bg-abc", agent="bot", prompt="do stuff", schedule_type="once", run_at="2099-01-01T00:00:00Z"
-        )
+        entry = ScheduleEntry(id="bg-abc", prompt="do stuff", schedule_type="once", run_at="2099-01-01T00:00:00Z")
         mock_sched.get_running_ids.return_value = ["bg-abc"]
         mock_sched.get.return_value = entry
         set_scheduler(mock_sched, tool_loop)
@@ -113,7 +109,6 @@ class TestListRunningTasksTool:
         result = list_running_tasks()
         assert len(result) == 1
         assert result[0]["id"] == "bg-abc"
-        assert result[0]["agent"] == "bot"
         assert result[0]["prompt"] == "do stuff"
 
     def test_empty_when_nothing_running(self, tool_loop):
@@ -129,9 +124,7 @@ class TestListRunningTasksTool:
         from tsugite.tools.schedule import list_running_tasks, set_scheduler
 
         mock_sched = MagicMock()
-        entry = ScheduleEntry(
-            id="bg-long", agent="bot", prompt="x" * 500, schedule_type="once", run_at="2099-01-01T00:00:00Z"
-        )
+        entry = ScheduleEntry(id="bg-long", prompt="x" * 500, schedule_type="once", run_at="2099-01-01T00:00:00Z")
         mock_sched.get_running_ids.return_value = ["bg-long"]
         mock_sched.get.return_value = entry
         set_scheduler(mock_sched, tool_loop)

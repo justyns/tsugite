@@ -10,7 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 
@@ -21,10 +21,10 @@ def adapter(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     store = SessionStore(tmp_path / "session_store.json")
-    config = AgentConfig(workspace_dir=workspace, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        return HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
+        return HTTPAgentAdapter(runtime=config, session_store=store)
 
 
 @pytest.fixture
@@ -33,9 +33,8 @@ def client_and_token(adapter, tmp_path):
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=None,
-        agent_configs={"test-agent": adapter.agent_config},
         token_store=token_store,
     )
     client = TestClient(server.app)
@@ -44,9 +43,7 @@ def client_and_token(adapter, tmp_path):
 
 
 def _mk_session(adapter, sid="s-busy"):
-    adapter.session_store.create_session(
-        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
-    )
+    adapter.session_store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="u1"))
     return sid
 
 
@@ -55,13 +52,13 @@ def test_sessions_payload_exposes_busy_flag(adapter, client_and_token):
     sid = _mk_session(adapter)
     adapter.session_store.begin_turn(sid)
 
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows[sid]["busy"] is True, "sessions payload must carry the authoritative busy flag"
 
     adapter.session_store.end_turn(sid)
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows[sid]["busy"] is False
 
@@ -74,7 +71,7 @@ def test_status_busy_reflects_turn_in_flight_without_http_chat(adapter, client_a
     adapter.session_store.begin_turn(sid)
 
     resp = client.get(
-        f"/api/agents/test-agent/status?user_id=u1&session_id={sid}",
+        f"/api/chat/status?user_id=u1&session_id={sid}",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
@@ -82,7 +79,7 @@ def test_status_busy_reflects_turn_in_flight_without_http_chat(adapter, client_a
 
     adapter.session_store.end_turn(sid)
     resp = client.get(
-        f"/api/agents/test-agent/status?user_id=u1&session_id={sid}",
+        f"/api/chat/status?user_id=u1&session_id={sid}",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.json()["busy"] is False
@@ -97,11 +94,9 @@ def test_sessions_payload_busy_from_live_http_task(adapter, client_and_token):
     client, token = client_and_token
     sid = _mk_session(adapter, "s-task")
     http_server = client.app_server
-    http_server._active_chats[("test-agent", "u1", sid)] = SimpleNamespace(
-        task=SimpleNamespace(done=lambda: False), backend=None
-    )
+    http_server._active_chats[("u1", sid)] = SimpleNamespace(task=SimpleNamespace(done=lambda: False), backend=None)
     try:
-        resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+        resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
         rows = {r["id"]: r for r in resp.json()["sessions"]}
         assert rows[sid]["busy"] is True
     finally:
@@ -115,16 +110,16 @@ def test_sessions_payload_exposes_compacting_flag(adapter, client_and_token):
     client, token = client_and_token
     sid = _mk_session(adapter, "s-compacting")
 
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows[sid]["compacting"] is False
 
-    adapter.session_store.begin_compaction("u1", "test-agent", session_id=sid)
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    adapter.session_store.begin_compaction("u1", session_id=sid)
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows[sid]["compacting"] is True
 
-    adapter.session_store.end_compaction("u1", "test-agent", session_id=sid)
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    adapter.session_store.end_compaction("u1", session_id=sid)
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows[sid]["compacting"] is False

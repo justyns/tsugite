@@ -34,7 +34,7 @@ from tsugite_daemon.adapters.http.terminals import TerminalsMixin
 from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
 from tsugite_daemon.adapters.http.workspace_files import WorkspaceFilesMixin
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.webhook_store import WebhookStore
 
 
@@ -60,16 +60,14 @@ class HTTPServer(
     def __init__(
         self,
         config: HTTPConfig,
-        adapters: dict[str, HTTPAgentAdapter],
+        adapter: HTTPAgentAdapter,
         webhook_store: WebhookStore,
-        agent_configs: dict[str, AgentConfig],
         gateway=None,
         token_store=None,
     ):
         self.config = config
-        self.adapters = adapters
+        self.adapter = adapter
         self.webhook_store = webhook_store
-        self.agent_configs = agent_configs
         self.gateway = gateway
         self._token_store = token_store
         self._server = None
@@ -82,7 +80,7 @@ class HTTPServer(
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self.plugin_ui_surfaces: list[dict] = []  # Filled by Gateway from the plugin UI surface registry
-        self._active_chats: dict[tuple[str, str, str], ActiveChat] = {}
+        self._active_chats: dict[tuple[str, str], ActiveChat] = {}
         self.event_bus = SSEBroadcaster()
         self.app = self._build_app()
 
@@ -146,43 +144,15 @@ class HTTPServer(
             logger.warning("auth failed (no token) path=%s", path)
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
-    def _get_adapter(
-        self, request: Request, *, fallback_session_id: Optional[str] = None
-    ) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
-        """Authenticate and resolve the agent adapter from the request.
+    def _get_adapter(self, request: Request) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
+        """Authenticate the request and hand back the daemon's adapter.
 
         Returns (adapter, None) on success, or (None, error_response) on failure.
-
-        When the URL agent isn't a live adapter but ``fallback_session_id`` names a
-        session, resolve that session's OWNING agent instead. Session-scoped routes
-        (chat / cancel / respond) pass the body's session_id so a reply lands on the
-        agent that owns the session even when the client pointed the request at a
-        non-adapter agent - e.g. the web UI opening a job's session with the worker
-        agent-file (``job_worker``) as the agent.
         """
         auth_err = self._check_auth(request)
         if auth_err:
             return None, auth_err
-        agent_name = request.path_params["agent"]
-        adapter = self.adapters.get(agent_name)
-        if adapter is None and fallback_session_id:
-            adapter = self._adapter_owning_session(fallback_session_id)
-        if not adapter:
-            return None, JSONResponse({"error": f"unknown agent: {agent_name}"}, status_code=404)
-        return adapter, None
-
-    def _adapter_owning_session(self, session_id: str) -> Optional[HTTPAgentAdapter]:
-        """The live HTTP adapter that owns ``session_id``, or None. Adapters share
-        one SessionStore, so any adapter's store answers; the session's ``agent``
-        field is the authoritative owner."""
-        store = next((a.session_store for a in self.adapters.values()), None)
-        if store is None:
-            return None
-        try:
-            session = store.get_session(session_id)
-        except (ValueError, KeyError):
-            return None
-        return self.adapters.get(session.agent)
+        return self.adapter, None
 
     def _build_app(self) -> Starlette:
         routes = [
@@ -208,7 +178,7 @@ class HTTPServer(
     def _core_routes(self) -> list:
         return [
             Route("/api/health", self._health, methods=["GET"]),
-            Route("/api/agents", self._list_agents, methods=["GET"]),
+            Route("/api/runtime", self._runtime_info, methods=["GET"]),
             Route("/api/models", self._list_models, methods=["GET"]),
             Route("/api/events", self._events, methods=["GET"]),
             Route("/api/commands", self._list_commands, methods=["GET"]),
@@ -244,7 +214,6 @@ class HTTPServer(
             {
                 "status": "ok",
                 "version": v,
-                "agents": list(self.adapters.keys()),
                 "images": {"max_edge": self.config.image_max_edge, "quality": self.config.image_quality},
             }
         )
@@ -279,28 +248,22 @@ class HTTPServer(
 
     def _context_provider_ctx(self, session_id: Optional[str]) -> dict:
         """The ``ctx`` a context provider receives, resolved from the request's
-        session the way the chat/command endpoints resolve a session's owner and
-        workspace: the session's authoritative ``agent`` field, that agent's
-        workspace (overridden by the session's own ``workspace_override``, as the
-        send path does), and the session's ``user_id``. Fields stay None when the
-        session is unknown so a ctx-agnostic provider still runs."""
+        session the way the chat/command endpoints resolve its workspace: the
+        session's ``workspace_override`` if set, else the daemon default, plus the
+        session's ``user_id``. Fields stay None when the session is unknown so a
+        ctx-agnostic provider still runs."""
         ctx = {"session_id": session_id, "user_id": None, "agent": None, "workspace_dir": None}
-        if not session_id:
-            return ctx
-        store = next((a.session_store for a in self.adapters.values()), None)
-        if store is None:
+        if not session_id or self.adapter is None:
             return ctx
         try:
-            session = store.get_session(session_id)
+            session = self.adapter.session_store.get_session(session_id)
         except (ValueError, KeyError):
             return ctx
-        adapter = self.adapters.get(session.agent)
         ctx["user_id"] = session.user_id
-        ctx["agent"] = session.agent
-        if session.workspace_override:
-            ctx["workspace_dir"] = Path(session.workspace_override)
-        elif adapter is not None:
-            ctx["workspace_dir"] = adapter.agent_config.workspace_dir
+        ctx["agent"] = self.adapter.agent_label
+        ctx["workspace_dir"] = (
+            Path(session.workspace_override) if session.workspace_override else self.adapter.runtime.workspace_dir
+        )
         return ctx
 
     async def _list_context_providers(self, request: Request) -> JSONResponse:
@@ -372,22 +335,22 @@ class HTTPServer(
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"items": [it.to_metadata() for it in items]})
 
-    async def _list_agents(self, request: Request) -> JSONResponse:
+    async def _runtime_info(self, request: Request) -> JSONResponse:
+        """The daemon's default runtime settings, plus how many chats are running."""
         if err := self._check_auth(request):
             return err
-        running_by_agent: dict[str, set[str]] = {}
-        for agent_name, _user_id, session_id in self._active_chats:
-            running_by_agent.setdefault(agent_name, set()).add(session_id)
-        agents = [
+        if self.adapter is None:
+            return JSONResponse({"error": "daemon runtime unavailable"}, status_code=503)
+        running = {session_id for _user_id, session_id in self._active_chats}
+        return JSONResponse(
             {
-                "name": name,
-                "agent_file": adapter.agent_config.agent_file,
-                "workspace_dir": str(adapter.agent_config.workspace_dir),
-                "running_tasks": len(running_by_agent.get(name, [])),
+                "agent_file": self.adapter.runtime.agent_file,
+                "workspace_dir": str(self.adapter.runtime.workspace_dir),
+                "model": self.adapter.runtime.model,
+                "context_limit": self.adapter.runtime.context_limit,
+                "running_tasks": len(running),
             }
-            for name, adapter in self.adapters.items()
-        ]
-        return JSONResponse({"agents": agents})
+        )
 
     async def _list_models(self, request: Request) -> JSONResponse:
         from tsugite.providers import get_provider, list_all_providers

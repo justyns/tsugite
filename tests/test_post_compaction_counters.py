@@ -4,7 +4,7 @@ Symptom: after compaction, the new session's `cumulative_tokens`,
 `message_count`, and `last_active` stayed at 0 / creation_time despite real
 activity. Root cause: `_compact_session` returned `None`, so callers
 (`_run_compaction`, HTTP `/compact`, `cmd_compact`) rediscovered the new
-session via `get_or_create_interactive(user_id, agent)`. That helper returns
+session via `get_or_create_interactive(user_id)`. That helper returns
 the *default* interactive session for the (user, agent) pair, which is the
 wrong session whenever the user compacts a non-default (named) session or a
 non-INTERACTIVE session. Counter updates then flowed to the wrong id and
@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 from tests.history_helpers import seed_history_session
@@ -75,15 +75,15 @@ async def test_compact_session_returns_new_session(workspace_dir, history_dir, t
     """`_compact_session` must return the `Session` it created so callers
     don't have to rediscover it through any lookup index.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -104,15 +104,15 @@ async def test_post_compaction_counters_update(workspace_dir, history_dir, tmp_p
     `last_active`. This is the load-bearing assertion: if the returned id is
     wrong (the old bug), the update silently no-ops.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -140,15 +140,15 @@ async def test_post_compaction_seeds_token_estimate(workspace_dir, history_dir, 
     so the UI's "X tokens / Y%" indicator reflects the carried-over context
     (summary + retained events) instead of showing 0%.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -170,16 +170,15 @@ async def test_compact_session_for_named_session_returns_correct_id(workspace_di
     successor - not the default-interactive session that
     `get_or_create_interactive` would surface.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
 
     # Default interactive session - would be returned by get_or_create_interactive.
-    default = store.get_or_create_interactive("alice", "test-agent")
+    default = store.get_or_create_interactive("alice")
 
     # Named session the user is actually viewing/compacting.
     named_id = "named-session-A"
     named = Session(
         id=named_id,
-        agent="test-agent",
         source=SessionSource.INTERACTIVE.value,
         user_id="alice",
         title="Reading",
@@ -189,9 +188,9 @@ async def test_compact_session_for_named_session_returns_correct_id(workspace_di
 
     _seed_session_events(named_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -211,15 +210,15 @@ async def test_compact_session_returns_none_when_nothing_to_compact(workspace_di
     rotation happens and `_compact_session` should return `None` so callers
     can keep using the original session id.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id, count=2)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
         return "Summary"

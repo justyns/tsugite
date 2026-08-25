@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.webhook_store import WebhookStore
 from tsugite_pty.pty_manager import PtyManager
 from tsugite_pty.terminal_store import TerminalSessionStore, TerminalState
@@ -27,7 +27,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -45,8 +45,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -85,9 +84,8 @@ def pty_manager():
 def server(http_config, mock_adapter, webhook_store, agent_config, token_store, terminal_store, pty_manager):
     s = HTTPServer(
         config=http_config,
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     s.terminal_store = terminal_store

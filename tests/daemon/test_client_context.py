@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, _build_client_context_block
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 
@@ -33,8 +33,8 @@ def adapter(tmp_path):
     ws.mkdir()
     (ws / "agent.md").write_text("---\nname: test-agent\n---\n\nHi.\n")
     store = SessionStore(tmp_path / "store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md"))
-    return _StubAdapter("test-agent", config, store)
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md"))
+    return _StubAdapter(config, store)
 
 
 class TestBuildClientContextBlock:
@@ -117,7 +117,7 @@ def _fake_result():
 def captured_run(adapter, monkeypatch):
     """Stub the heavy internals and capture the kwargs handle_message hands to
     run_agent, so a test can assert what reaches the prompt / user_input."""
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.agent_config.agent_file))
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.runtime.agent_file))
     monkeypatch.setattr(
         adapter, "_build_message_context", lambda msg, *a, **kw: f"<message_context>x</message_context>\n\n{msg}"
     )
@@ -143,7 +143,7 @@ class TestHandleMessageFolding:
     @pytest.mark.asyncio
     async def test_folds_into_prompt_and_recorded_user_input(self, captured_run):
         adapter, captured = captured_run
-        adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        adapter.session_store.get_or_create_interactive("alice")
         await adapter.handle_message(
             user_id="alice",
             message="summarize this page",
@@ -168,7 +168,7 @@ class TestHandleMessageFolding:
     @pytest.mark.asyncio
     async def test_no_context_metadata_leaves_prompt_and_user_input_untouched(self, captured_run):
         adapter, captured = captured_run
-        adapter.session_store.get_or_create_interactive("bob", "test-agent")
+        adapter.session_store.get_or_create_interactive("bob")
         await adapter.handle_message(
             user_id="bob",
             message="just a message",
@@ -211,7 +211,7 @@ class TestHandleMessageDetectors:
                 ),
             )
         )
-        adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        adapter.session_store.get_or_create_interactive("alice")
         await adapter.handle_message(
             user_id="alice",
             message="please look at ABC-123",
@@ -237,7 +237,7 @@ class TestHandleMessageDetectors:
             return [Attachment.context("det", "Detected", "dv")]
 
         register_context_provider(ContextProvider(key="det", label="Detected", detect=detect))
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         await adapter.handle_message(
             user_id="alice",
             message="hi",
@@ -256,8 +256,8 @@ class TestHandleMessageDetectors:
         # The detector still receives the session context.
         assert seen["session_id"] == session.id
         assert seen["user_id"] == "alice"
-        assert seen["agent"] == "test-agent"
-        assert seen["workspace_dir"] == adapter.agent_config.workspace_dir
+        assert seen["agent"] == adapter.runtime.agent_file
+        assert seen["workspace_dir"] == adapter.runtime.workspace_dir
 
     @pytest.mark.asyncio
     async def test_no_detection_keeps_no_context_path_byte_identical(self, captured_run, clean_registry):
@@ -265,7 +265,7 @@ class TestHandleMessageDetectors:
 
         adapter, captured = captured_run
         register_context_provider(ContextProvider(key="never", label="Never", detect=lambda message, ctx: []))
-        adapter.session_store.get_or_create_interactive("bob", "test-agent")
+        adapter.session_store.get_or_create_interactive("bob")
         await adapter.handle_message(
             user_id="bob",
             message="just a message",

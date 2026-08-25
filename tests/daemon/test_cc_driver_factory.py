@@ -8,7 +8,7 @@ from tsugite_cc_driver.adapter import CCDriverConfig, create_adapter
 def test_create_adapter_exposes_plugin_surface():
     adapter = create_adapter(
         config={"enabled": True, "base_url": "http://127.0.0.1:9999"},
-        agents_config={},
+        runtime=None,
         session_store=MagicMock(),
         identity_map={},
     )
@@ -21,7 +21,7 @@ def test_create_adapter_exposes_plugin_surface():
 
 
 def test_create_adapter_backrefs_orchestrator_to_executor():
-    adapter = create_adapter(config={"enabled": True}, agents_config={}, session_store=MagicMock(), identity_map={})
+    adapter = create_adapter(config={"enabled": True}, runtime=None, session_store=MagicMock(), identity_map={})
     orch = object()
     adapter.set_jobs_orchestrator(orch)
     assert adapter._executor.orchestrator is orch
@@ -30,14 +30,12 @@ def test_create_adapter_backrefs_orchestrator_to_executor():
 def test_create_adapter_disabled_by_default_returns_none():
     """cc-driver spawns claude with skip-permissions, so it must be explicit opt-in:
     installing the plugin must NOT activate it unless daemon.yaml enables it."""
-    assert create_adapter(config={}, agents_config={}, session_store=MagicMock(), identity_map={}) is None
-    assert (
-        create_adapter(config={"enabled": False}, agents_config={}, session_store=MagicMock(), identity_map={}) is None
-    )
+    assert create_adapter(config={}, runtime=None, session_store=MagicMock(), identity_map={}) is None
+    assert create_adapter(config={"enabled": False}, runtime=None, session_store=MagicMock(), identity_map={}) is None
 
 
 def test_create_adapter_enabled_returns_adapter():
-    adapter = create_adapter(config={"enabled": True}, agents_config={}, session_store=MagicMock(), identity_map={})
+    adapter = create_adapter(config={"enabled": True}, runtime=None, session_store=MagicMock(), identity_map={})
     assert adapter is not None
     assert set(adapter.get_job_executors()) == {"cc"}
 

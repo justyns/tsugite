@@ -21,7 +21,7 @@ def store(tmp_path):
 
 @pytest.fixture
 def session_in_store(store):
-    session = Session(id="test-1", agent="odyn", source=SessionSource.BACKGROUND.value)
+    session = Session(id="test-1", source=SessionSource.BACKGROUND.value)
     store.create_session(session)
     return session
 
@@ -69,7 +69,7 @@ class TestSessionMetadata:
 
     def test_metadata_persists_across_reload(self, tmp_path):
         store1 = SessionStore(tmp_path / "store.json")
-        s = Session(id="persist-test", agent="test")
+        s = Session(id="persist-test")
         store1.create_session(s)
         store1.set_metadata_bulk("persist-test", {"type": "research"})
 
@@ -126,42 +126,41 @@ class TestReadOnlyKeys:
 
 class TestChannelSessionIndex:
     def test_create_channel_session(self, store):
-        session = store.get_or_create_channel_session("channel-123", "odyn", "user-1")
-        assert session.agent == "odyn"
+        session = store.get_or_create_channel_session("channel-123", "user-1")
         assert session.metadata.get("channel_id") == "channel-123"
         assert session.source == SessionSource.INTERACTIVE.value
 
     def test_reuse_existing_channel_session(self, store):
-        s1 = store.get_or_create_channel_session("channel-123", "odyn", "user-1")
-        s2 = store.get_or_create_channel_session("channel-123", "odyn", "user-2")
+        s1 = store.get_or_create_channel_session("channel-123", "user-1")
+        s2 = store.get_or_create_channel_session("channel-123", "user-2")
         assert s1.id == s2.id
 
     def test_different_channel_different_session(self, store):
-        s1 = store.get_or_create_channel_session("channel-1", "odyn", "user-1")
-        s2 = store.get_or_create_channel_session("channel-2", "odyn", "user-1")
+        s1 = store.get_or_create_channel_session("channel-1", "user-1")
+        s2 = store.get_or_create_channel_session("channel-2", "user-1")
         assert s1.id != s2.id
 
-    def test_different_agent_different_session(self, store):
-        s1 = store.get_or_create_channel_session("channel-1", "odyn", "user-1")
-        s2 = store.get_or_create_channel_session("channel-1", "helper", "user-1")
-        assert s1.id != s2.id
+    def test_same_channel_reuses_the_session(self, store):
+        s1 = store.get_or_create_channel_session("channel-1", "user-1")
+        s2 = store.get_or_create_channel_session("channel-1", "user-1")
+        assert s1.id == s2.id
 
     def test_compact_session_repoints_channel_index(self, store):
         """Compacting a channel session must repoint the channel index to the successor,
         else the next channel message orphans the compacted history into a new empty session."""
-        s = store.get_or_create_channel_session("channel-xyz", "odyn", "user-1")
+        s = store.get_or_create_channel_session("channel-xyz", "user-1")
         successor = store.compact_session(s.id)
         assert successor.id != s.id
         # The channel must now resolve to the compacted successor, not a fresh empty session.
-        assert store.get_or_create_channel_session("channel-xyz", "odyn", "user-1").id == successor.id
-        assert store._channel_index[("channel-xyz", "odyn")] == successor.id
+        assert store.get_or_create_channel_session("channel-xyz", "user-1").id == successor.id
+        assert store._channel_index["channel-xyz"] == successor.id
 
     def test_channel_index_rebuilt_on_load(self, tmp_path):
         store1 = SessionStore(tmp_path / "store.json")
-        store1.get_or_create_channel_session("ch-1", "odyn", "user-1")
+        store1.get_or_create_channel_session("ch-1", "user-1")
 
         store2 = SessionStore(tmp_path / "store.json")
-        assert ("ch-1", "odyn") in store2._channel_index
+        assert "ch-1" in store2._channel_index
 
 
 # ── Session Runner Metadata ──
@@ -171,7 +170,7 @@ class TestSessionRunnerMetadata:
     @pytest.fixture
     def runner_deps(self, tmp_path):
         store = SessionStore(tmp_path / "store.json")
-        session = Session(id="runner-test", agent="odyn", source=SessionSource.BACKGROUND.value)
+        session = Session(id="runner-test", source=SessionSource.BACKGROUND.value)
         store.create_session(session)
         event_bus = MagicMock()
         return store, event_bus, session
@@ -230,7 +229,7 @@ class TestSessionMetadataTool:
         self.loop.close()
 
     def _create_session(self, sid="tool-test"):
-        session = Session(id=sid, agent="odyn", source=SessionSource.BACKGROUND.value)
+        session = Session(id=sid, source=SessionSource.BACKGROUND.value)
         self.store.create_session(session)
         return session
 

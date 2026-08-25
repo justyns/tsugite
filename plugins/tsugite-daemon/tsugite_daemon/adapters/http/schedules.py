@@ -155,10 +155,9 @@ class SchedulesMixin:
         if err := self._require_auth_and_scheduler(request):
             return err
         schedule_id = request.path_params["schedule_id"]
-        # Find any adapter to access the session store
-        adapter = next(iter(self.adapters.values()), None)
+        adapter = self.adapter
         if not adapter:
-            return JSONResponse({"error": "no adapters"}, status_code=500)
+            return JSONResponse({"error": "daemon runtime unavailable"}, status_code=503)
         sessions = adapter.session_store.list_sessions(parent_id=schedule_id, source="schedule")
         return JSONResponse(
             {

@@ -10,7 +10,6 @@ from .helpers import open_view, wait_for_authed
 def test_seeded_schedule_renders_and_toggle_persists(authenticated_page, scheduler_backend):
     entry = ScheduleEntry(
         id="e2e-schedule",
-        agent="test-agent",
         prompt="Say hello every morning",
         schedule_type="cron",
         cron_expr="0 9 * * *",

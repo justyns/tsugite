@@ -187,10 +187,10 @@ class CCDriverAdapter(BaseAdapter):
             logger.debug("cc-driver: %s emit failed for job '%s'", event, payload.get("job_id"))
 
 
-def create_adapter(*, config, agents_config, session_store, identity_map):
+def create_adapter(*, config, runtime, session_store, identity_map):
     """Adapter-plugin factory (tsugite.adapters entry point).
 
-    `config` is the daemon.yaml plugins.cc_driver dict; agents_config is unused
+    `config` is the daemon.yaml plugins.cc_driver dict; runtime is unused
     (cc-driver is not agent-scoped).
 
     Returns None (the gateway loop skips it) unless `enabled` is truthy - cc-driver

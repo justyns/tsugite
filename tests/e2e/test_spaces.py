@@ -26,7 +26,7 @@ def _split_active_pane(page) -> None:
 
 def test_each_space_keeps_its_own_layout(authenticated_page, e2e_session_store, e2e_workspace):
     (e2e_workspace / "e2e_space_note.md").write_text("# Space note\n\nPinned beside the chat.\n")
-    e2e_session_store.get_or_create_interactive(E2E_USER_ID, "test-agent")
+    e2e_session_store.get_or_create_interactive(E2E_USER_ID)
 
     page = authenticated_page
     page.reload()
@@ -61,7 +61,7 @@ def test_each_space_keeps_its_own_layout(authenticated_page, e2e_session_store, 
 
 
 def test_a_space_can_be_renamed_and_closed(authenticated_page, e2e_session_store):
-    e2e_session_store.get_or_create_interactive(E2E_USER_ID, "test-agent")
+    e2e_session_store.get_or_create_interactive(E2E_USER_ID)
 
     page = authenticated_page
     page.reload()

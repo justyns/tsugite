@@ -22,7 +22,7 @@ def _write_daemon_config(tmp_path):
     cfg_path.write_text(
         f"state_dir: {tmp_path / 'state'}\n"
         "http:\n  enabled: true\n  host: 127.0.0.1\n  port: 8321\n"
-        f"agents:\n  alpha:\n    agent_file: alpha.md\n    workspace_dir: {ws}\n"
+        f"default_agent_file: alpha.md\ndefault_workspace_dir: {ws}\n"
     )
     return cfg_path
 
@@ -58,24 +58,22 @@ class TestRejectsNewChats:
         from starlette.testclient import TestClient
         from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
         from tsugite_daemon.auth import TokenStore
-        from tsugite_daemon.config import AgentConfig, HTTPConfig
+        from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
         from tsugite_daemon.session_store import SessionStore
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        agent_config = AgentConfig(workspace_dir=workspace, agent_file="default")
+        agent_config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
         adapter = HTTPAgentAdapter(
-            agent_name="alpha",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=SessionStore(tmp_path / "session_store.json"),
         )
         token_store = TokenStore(tmp_path / "tokens.json")
         _token, raw = token_store.create_admin_token(name="t")
         server = HTTPServer(
             config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-            adapters={"alpha": adapter},
+            adapter=adapter,
             webhook_store=None,
-            agent_configs={"alpha": agent_config},
             token_store=token_store,
             gateway=SimpleNamespace(restart_requested=True, config_path=None),
         )
@@ -85,7 +83,7 @@ class TestRejectsNewChats:
         http_client, token = client
 
         resp = http_client.post(
-            "/api/agents/alpha/chat",
+            "/api/chat",
             json={"message": "hello", "user_id": "u1"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -99,7 +97,7 @@ class TestPreflight:
         assert gateway.preflight_restart() == []
 
     def test_reports_an_unloadable_daemon_config_instead_of_raising(self, gateway):
-        gateway.config_path.write_text("agents: [unclosed\n")
+        gateway.config_path.write_text("default_workspace_dir: [unclosed\n")
 
         problems = gateway.preflight_restart()
 

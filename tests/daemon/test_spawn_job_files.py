@@ -81,8 +81,8 @@ def test_spawn_job_rejects_missing(tmp_path, monkeypatch):
 def mock_adapter():
     adapter = MagicMock()
     adapter.handle_message = AsyncMock(return_value="done")
-    adapter.agent_config = MagicMock()
-    adapter.agent_config.workspace_dir = Path("/tmp/test")
+    adapter.runtime = MagicMock()
+    adapter.runtime.workspace_dir = Path("/tmp/test")
     adapter.session_store = MagicMock()
     return adapter
 
@@ -96,10 +96,9 @@ async def test_run_session_delivers_image_as_first_turn_attachment(tmp_path, moc
     img.write_bytes(JPEG)
 
     store = SessionStore(tmp_path / "store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
     session = Session(
         id="s1",
-        agent="default",
         source=SessionSource.SPAWNED.value,
         prompt="what is in this image?",
         model="claude_code:haiku",
@@ -122,10 +121,9 @@ async def test_run_session_non_inlinable_file_degrades_to_hint(tmp_path, mock_ad
     svg.write_bytes(b"<svg/>")
 
     store = SessionStore(tmp_path / "store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
     session = Session(
         id="s2",
-        agent="default",
         source=SessionSource.SPAWNED.value,
         prompt="describe this",
         model="claude_code:haiku",
@@ -144,8 +142,8 @@ async def test_run_session_without_files_unchanged(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
-    session = Session(id="s3", agent="default", source=SessionSource.SPAWNED.value, prompt="hi")
+    runner = SessionRunner(store, mock_adapter)
+    session = Session(id="s3", source=SessionSource.SPAWNED.value, prompt="hi")
     runner.start_session(session)
     await asyncio.sleep(0.3)
 

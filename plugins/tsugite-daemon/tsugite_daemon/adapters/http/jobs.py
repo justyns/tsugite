@@ -77,12 +77,9 @@ class JobsMixin:
         if err := self._require_auth_and_jobs(request):
             return err
         body = await self._optional_json_body(request)
-        agent = (body.get("agent") or "").strip()
-        if not agent:
-            return JSONResponse({"error": "agent is required"}, status_code=400)
-        adapter = self.adapters.get(agent)
+        adapter = self.adapter
         if adapter is None:
-            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=404)
+            return JSONResponse({"error": "daemon runtime unavailable"}, status_code=503)
         user_id = (body.get("user_id") or "").strip()
         if not user_id:
             return JSONResponse({"error": "user_id is required"}, status_code=400)

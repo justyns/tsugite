@@ -21,7 +21,7 @@ VALID_CONFIG = {
 def _create(config):
     from tsugite_onlyoffice.adapter import create_adapter
 
-    return create_adapter(config=config, agents_config={}, session_store=None, identity_map={})
+    return create_adapter(config=config, runtime=None, session_store=None, identity_map={})
 
 
 def test_adapter_entry_point_registered():

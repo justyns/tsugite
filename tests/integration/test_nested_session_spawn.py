@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http import HTTPAgentAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 
@@ -43,13 +43,11 @@ def _stub_run_agent_result() -> SimpleNamespace:
 async def test_child_handle_message_not_starved_by_parent(monkeypatch, workspaces, session_store):
     ws_parent, ws_child = workspaces
     parent_adapter = HTTPAgentAdapter(
-        "parent-agent",
-        AgentConfig(workspace_dir=ws_parent, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_parent, agent_file="default"),
         session_store,
     )
     child_adapter = HTTPAgentAdapter(
-        "child-agent",
-        AgentConfig(workspace_dir=ws_child, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_child, agent_file="default"),
         session_store,
     )
 

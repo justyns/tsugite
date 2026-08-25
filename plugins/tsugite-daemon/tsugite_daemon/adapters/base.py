@@ -17,7 +17,7 @@ from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
-from tsugite_daemon.config import AgentConfig, SandboxSettings
+from tsugite_daemon.config import RuntimeDefaults, SandboxSettings
 from tsugite_daemon.session_store import (
     METADATA_PRIMARY_FLAG,
     READ_ONLY_METADATA_KEYS,
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_sandbox_exec_options(metadata: Optional[Dict[str, Any]], agent_sandbox: Optional[Any]) -> Dict[str, Any]:
-    """Resolve sandbox-related ExecutionOptions kwargs for a daemon agent run.
+    """Resolve sandbox-related ExecutionOptions kwargs for a run.
 
     Inheritance: a `sandbox_override` stamped into the message metadata by a
     spawning sandboxed agent wins over the target agent's own config, so spawned
@@ -297,20 +297,24 @@ class BaseAdapter(ABC):
 
     def __init__(
         self,
-        agent_name: str,
-        agent_config: AgentConfig,
+        runtime: RuntimeDefaults,
         session_store: SessionStore,
         identity_map: Optional[Dict[str, str]] = None,
     ):
-        self.agent_name = agent_name
-        self.agent_config = agent_config
+        self.runtime = runtime
         self.session_store = session_store
         self._identity_map = identity_map or {}
         self.event_bus = None  # Set by HTTPServer for global SSE broadcast
 
         from tsugite.workspace import Workspace
 
-        self._workspace = Workspace.try_load(agent_config.workspace_dir)
+        self._workspace = Workspace.try_load(runtime.workspace_dir)
+
+    @property
+    def agent_label(self) -> str:
+        """Readable name for the agent this adapter runs, used by history,
+        usage accounting and hooks."""
+        return self.runtime.agent_file
 
     def get_http_routes(self) -> list:
         """Starlette Routes this adapter contributes, mounted by the daemon under
@@ -370,8 +374,8 @@ class BaseAdapter(ABC):
             agent_file: Agent file to resolve. Defaults to the configured agent_file.
         """
         return resolve_agent_path(
-            agent_file or self.agent_config.agent_file,
-            self.agent_config.workspace_dir,
+            agent_file or self.runtime.agent_file,
+            self.runtime.workspace_dir,
             self._workspace,
         )
 
@@ -382,7 +386,7 @@ class BaseAdapter(ABC):
         """
         from tsugite.models import resolve_effective_model
 
-        agent_model = self.agent_config.model
+        agent_model = self.runtime.model
         if not agent_model:
             agent_path = self._resolve_agent_path()
             if agent_path:
@@ -444,7 +448,7 @@ class BaseAdapter(ABC):
 
             save_run_to_history(
                 agent_path=agent_path,
-                agent_name=self.agent_name,
+                agent_name=self.agent_label,
                 prompt=message,
                 result=result_str,
                 model=self.resolve_model(),
@@ -476,17 +480,17 @@ class BaseAdapter(ABC):
         if custom_logger and hasattr(custom_logger, "ui_handler"):
             custom_logger.ui_handler._emit(event_type, {})
 
-    def _broadcast_compaction(self, event_type: str, agent: str, session_id: str, **payload: Any) -> None:
+    def _broadcast_compaction(self, event_type: str, session_id: str, **payload: Any) -> None:
         """Broadcast a compaction lifecycle/progress event to SSE subscribers.
 
         session_id is required so per-session UI state (the "compacting…"
         spinner, composer-disabled flag) can scope itself to the actual
-        compacting session instead of bleeding to every session in the agent.
+        compacting session instead of bleeding to every open session.
         """
         if not self.event_bus:
             return
         try:
-            self.event_bus.emit(event_type, {"agent": agent, "session_id": session_id, **payload})
+            self.event_bus.emit(event_type, {"session_id": session_id, **payload})
         except Exception:
             logger.debug("Failed to broadcast %s", event_type)
 
@@ -499,7 +503,7 @@ class BaseAdapter(ABC):
         """
 
         def progress_cb(payload: Dict[str, Any]) -> None:
-            self._broadcast_compaction("compaction_progress", self.agent_name, session_id, **payload)
+            self._broadcast_compaction("compaction_progress", session_id, **payload)
 
         return progress_cb
 
@@ -534,11 +538,11 @@ class BaseAdapter(ABC):
         window_minutes = meta.get("heartbeat_window", 10)
         since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
         ctx["active_sessions"] = [
-            {"id": s.id, "agent": s.agent, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
+            {"id": s.id, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
             for s in self.session_store.list_sessions(status="running")
         ]
         ctx["recent_completions"] = [
-            {"id": s.id, "agent": s.agent, "status": s.status, "result": (s.result or "")[:200]}
+            {"id": s.id, "status": s.status, "result": (s.result or "")[:200]}
             for s in self.session_store.list_sessions(status="completed", updated_since=since)
         ]
 
@@ -552,7 +556,7 @@ class BaseAdapter(ABC):
         """
         from tsugite.renderer import local_tz, render_iso_element
 
-        tz_name = self.agent_config.timezone
+        tz_name = self.runtime.timezone
         try:
             tz = ZoneInfo(tz_name) if tz_name else local_tz()
             tz_label = tz_name or str(tz)
@@ -576,7 +580,7 @@ class BaseAdapter(ABC):
             scheduled_xml = render_iso_element("scheduled_for", meta.get("scheduled_for"), tz, tz_label, now)
             actual_xml = render_iso_element("actual_fire_time", meta.get("actual_fire_time"), tz, tz_label, now)
             scheduler_timing_xml = scheduled_xml + actual_xml
-        context_limit_for_render = self.session_store.get_context_limit(self.agent_name)
+        context_limit_for_render = self.session_store.get_context_limit()
         try:
             conv_id_override = (channel_context.metadata or {}).get("conv_id_override")
             if conv_id_override:
@@ -584,7 +588,7 @@ class BaseAdapter(ABC):
                     conv_id_override
                 )
             else:
-                session = self.session_store.find_default_session(user_id, self.agent_name)
+                session = self.session_store.find_default_session(user_id)
             if session is None:
                 raise ValueError("no default session yet")
             tokens_used = session.cumulative_tokens
@@ -608,10 +612,10 @@ class BaseAdapter(ABC):
         except Exception:
             tokens_used = 0
 
-        # workspace_override beats agent_config.workspace_dir so the rendered cwd
+        # workspace_override beats runtime.workspace_dir so the rendered cwd
         # matches what set_workspace_dir actually puts the agent in (per-session
         # override used by the Jobs feature for its git worktree).
-        cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.agent_config.workspace_dir
+        cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.runtime.workspace_dir
 
         # Jobs anchored on this session - surface active + last 3 terminal so the
         # LLM can answer "what's happening with my job?" without dumping the full
@@ -702,7 +706,7 @@ class BaseAdapter(ABC):
         if not self.event_bus:
             return
         try:
-            payload: Dict[str, Any] = {"agent": self.agent_name}
+            payload: Dict[str, Any] = {}
             if conv_id:
                 payload["session_id"] = conv_id
             self.event_bus.emit("history_update", payload)
@@ -732,7 +736,7 @@ class BaseAdapter(ABC):
             if thread_session:
                 conv_id = thread_session.id
             else:
-                conv_id = self.session_store.get_or_create_interactive(user_id, self.agent_name).id
+                conv_id = self.session_store.get_or_create_interactive(user_id).id
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
         self.session_store.begin_turn(conv_id)
@@ -744,7 +748,7 @@ class BaseAdapter(ABC):
         # otherwise cumulative_tokens grow until the provider raises "Prompt
         # is too long" with no recovery. compact_session migrates pin state
         # to the successor, so the user's pin follows the rotation.
-        if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id, self.agent_name):
+        if self.session_store.needs_compaction(conv_id) or self.session_store.is_compacting(user_id):
             conv_id = await self._run_compaction(
                 user_id, conv_id, custom_logger, reason="token_threshold", _broadcast_state=_broadcast_state
             )
@@ -755,7 +759,6 @@ class BaseAdapter(ABC):
             set_current_session_id(conv_id)
 
         metadata = channel_context.to_dict()
-        metadata["daemon_agent"] = self.agent_name
 
         agent_path = self._resolve_agent_path()
         if channel_context.metadata and channel_context.metadata.get("agent_file_override"):
@@ -763,7 +766,7 @@ class BaseAdapter(ABC):
             if override.exists():
                 agent_path = override
         if not agent_path:
-            raise ValueError(f"Agent not found: {self.agent_config.agent_file}")
+            raise ValueError(f"Agent not found: {self.runtime.agent_file}")
 
         enriched_prompt = self._build_message_context(message, channel_context, user_id)
 
@@ -773,7 +776,7 @@ class BaseAdapter(ABC):
         # adapter's workspace. Resolved here because both the detector ctx and the
         # agent's PathContext (below) need it.
         workspace_override = (channel_context.metadata or {}).get("workspace_override")
-        workspace_dir = Path(workspace_override) if workspace_override else self.agent_config.workspace_dir
+        workspace_dir = Path(workspace_override) if workspace_override else self.runtime.workspace_dir
 
         # Client-supplied context and server-detected mentions both fold into a
         # <client_context> block that prepends to what the agent sees. The recorded
@@ -795,7 +798,7 @@ class BaseAdapter(ABC):
 
             early_storage = open_or_create_session(
                 agent_path=agent_path,
-                agent_name=self.agent_name,
+                agent_name=self.agent_label,
                 model=(channel_context.metadata or {}).get("model_override") or self.resolve_session_model(conv_id),
                 continue_conversation_id=conv_id,
             )
@@ -817,7 +820,7 @@ class BaseAdapter(ABC):
         detect_ctx = {
             "session_id": conv_id,
             "user_id": user_id,
-            "agent": self.agent_name,
+            "agent": self.agent_label,
             "workspace_dir": workspace_dir,
         }
         detected = await asyncio.to_thread(collect_detected_items, message, detect_ctx)
@@ -871,7 +874,7 @@ class BaseAdapter(ABC):
             meta = channel_context.metadata or {}
             effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(conv_id)
             model_override = (
-                meta.get("model_override") or self.session_store.get_model_override(conv_id) or self.agent_config.model
+                meta.get("model_override") or self.session_store.get_model_override(conv_id) or self.runtime.model
             )
             return run_agent(
                 agent_path=agent_path,
@@ -881,12 +884,12 @@ class BaseAdapter(ABC):
                 exec_options=ExecutionOptions(
                     return_token_usage=True,
                     model_override=model_override,
-                    max_turns_override=meta.get("max_turns_override") or self.agent_config.max_turns,
+                    max_turns_override=meta.get("max_turns_override") or self.runtime.max_turns,
                     reasoning_effort_override=effort_override,
                     # Token streaming: chunks flow to the per-chat SSE as
                     # stream_chunk frames (every shipped provider streams).
                     stream=self.supports_token_streaming,
-                    **resolve_sandbox_exec_options(meta, self.agent_config.sandbox),
+                    **resolve_sandbox_exec_options(meta, self.runtime.sandbox),
                 ),
                 path_context=path_context,
                 custom_logger=custom_logger,
@@ -904,13 +907,11 @@ class BaseAdapter(ABC):
                 code_events_after = self.session_store.count_events_by_type(conv_id, "code_execution")
                 if code_events_after > code_events_before:
                     logger.warning(
-                        "[%s] Prompt too long after %d code executions - not auto-retrying "
-                        "to avoid re-issuing side effects",
-                        self.agent_name,
+                        "Prompt too long after %d code executions - not auto-retrying to avoid re-issuing side effects",
                         code_events_after - code_events_before,
                     )
                     raise
-                logger.warning("[%s] Prompt too long, auto-compacting and retrying", self.agent_name)
+                logger.warning("Prompt too long, auto-compacting and retrying")
                 conv_id = await self._run_compaction(
                     user_id, conv_id, custom_logger, reason="prompt_too_long", _broadcast_state=_broadcast_state
                 )
@@ -950,7 +951,7 @@ class BaseAdapter(ABC):
         ps = getattr(result, "provider_state", None) or {}
         if ps.get("context_window"):
             # Per-session storage: this turn's reported window applies to THIS
-            # session only. An agent-wide scalar would let any other turn (or a
+            # session only. An daemon-wide scalar would let any other turn (or a
             # secondary model call) clobber the displayed limit.
             self.session_store.update_session_context_limit(conv_id, ps["context_window"])
 
@@ -963,7 +964,7 @@ class BaseAdapter(ABC):
 
             get_usage_store().record(
                 session_id=conv_id,
-                agent=self.agent_name,
+                agent=self.agent_label,
                 model=self.resolve_model(),
                 source=channel_context.source if channel_context else "daemon",
                 schedule_name=(channel_context.metadata or {}).get("schedule_id") if channel_context else None,
@@ -1038,19 +1039,19 @@ class BaseAdapter(ABC):
         if turn_was_in_flight:
             self.session_store.end_turn(conv_id, notify_listeners=False)
         new_session: Optional[Session] = None
-        if self.session_store.begin_compaction(user_id, self.agent_name, session_id=conv_id):
+        if self.session_store.begin_compaction(user_id, session_id=conv_id):
             self._emit_ui(custom_logger, "compacting")
-            self._broadcast_compaction("compaction_started", self.agent_name, conv_id)
+            self._broadcast_compaction("compaction_started", conv_id)
             try:
                 new_session = await self._compact_session(
                     conv_id, reason=reason, progress_callback=self._compaction_progress_cb(conv_id)
                 )
             finally:
-                self.session_store.end_compaction(user_id, self.agent_name, session_id=conv_id)
-                self._broadcast_compaction("compaction_finished", self.agent_name, conv_id)
+                self.session_store.end_compaction(user_id, session_id=conv_id)
+                self._broadcast_compaction("compaction_finished", conv_id)
         else:
             self._emit_ui(custom_logger, "compacting_waiting")
-            done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id, self.agent_name)
+            done = await asyncio.to_thread(self.session_store.wait_for_compaction, user_id)
             if not done:
                 raise TimeoutError("Timed out waiting for session compaction to finish")
             new_session = self.session_store.resolve_compacted_successor(conv_id)
@@ -1160,18 +1161,18 @@ class BaseAdapter(ABC):
         via `find_default_session` is unreliable for non-default or
         non-interactive sessions.
 
-        Defensive snapshot/restore of the agent-wide context-limit fallback. The
+        Defensive snapshot/restore of the daemon-wide context-limit fallback. The
         primary per-session limit lives on `Session.context_limit` and isn't
         touched here; this guard catches any future code path that mutates the
-        agent-wide default during the compaction flow.
+        daemon-wide default during the compaction flow.
         """
-        saved_session_store_limit = self.session_store.get_context_limit(self.agent_name)
-        saved_agent_config_limit = self.agent_config.context_limit
+        saved_session_store_limit = self.session_store.get_context_limit()
+        saved_runtime_limit = self.runtime.context_limit
         try:
             return await self._compact_session_inner(session_id, instructions, reason, progress_callback)
         finally:
-            self.session_store.update_context_limit(self.agent_name, saved_session_store_limit)
-            self.agent_config.context_limit = saved_agent_config_limit
+            self.session_store.update_context_limit(saved_session_store_limit)
+            self.runtime.context_limit = saved_runtime_limit
 
     async def _compact_session_inner(
         self,
@@ -1196,7 +1197,7 @@ class BaseAdapter(ABC):
         )
 
         resolved_model = self.resolve_model()
-        model = self.agent_config.compaction_model or infer_compaction_model(resolved_model)
+        model = self.runtime.compaction_model or infer_compaction_model(resolved_model)
 
         old_conv_id = session_id
         backend = get_history_backend()
@@ -1209,7 +1210,7 @@ class BaseAdapter(ABC):
         )
 
         # Fallback to the session's tracked window (set from the main model's
-        # last reported context_window) rather than the agent-wide scalar so
+        # last reported context_window) rather than the daemon-wide scalar so
         # sessions with different model overrides compute their own correct
         # retention budget.
         session_limit_fallback = self.session_store.get_session_context_limit(session_id)
@@ -1219,15 +1220,16 @@ class BaseAdapter(ABC):
         old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
 
         if not old_events:
-            logger.info("[%s] All events fit in retention budget, skipping compaction", self.agent_name)
+            logger.info(
+                "All events fit in retention budget, skipping compaction",
+            )
             return None
 
         old_user_inputs = sum(1 for e in old_events if e.type == "user_input")
         recent_user_inputs = sum(1 for e in recent_events if e.type == "user_input")
 
         logger.info(
-            "[%s] Compacting session: %d old turns summarized, %d recent turns retained",
-            self.agent_name,
+            "Compacting session: %d old turns summarized, %d recent turns retained",
             old_user_inputs,
             recent_user_inputs,
         )
@@ -1245,11 +1247,11 @@ class BaseAdapter(ABC):
         hook_context = {
             "conversation_id": old_conv_id,
             "user_id": old_session.user_id or "",
-            "agent_name": self.agent_name,
+            "agent_name": self.agent_label,
             "turn_count": old_user_inputs,
         }
         pre_compact_execs = await fire_compact_hooks(
-            self.agent_config.workspace_dir, "pre_compact", hook_context, interactive=False
+            self.runtime.workspace_dir, "pre_compact", hook_context, interactive=False
         )
         for ex in pre_compact_execs:
             storage.record("hook_execution", **ex.model_dump(exclude_none=True))
@@ -1280,7 +1282,7 @@ class BaseAdapter(ABC):
                     if path:
                         frontmatter_basenames.add(Path(path).name)
         except Exception:
-            logger.debug("[%s] Failed to enumerate attachment basenames", self.agent_name, exc_info=True)
+            logger.debug("Failed to enumerate attachment basenames", exc_info=True)
 
         functions_used = sorted(SessionSummary.from_events(old_events).functions_called)
         scaffolding_basenames = {b.lower() for b in frontmatter_basenames}
@@ -1331,12 +1333,13 @@ class BaseAdapter(ABC):
                     progress_callback=progress_callback,
                 )
         except Exception:
-            logger.exception("[%s] Compaction summarization failed", self.agent_name)
+            logger.exception(
+                "Compaction summarization failed",
+            )
             raise
         if summary_usage["calls"]:
             logger.info(
-                "[%s] Compaction summary used %d prompt + %d completion tokens across %d call(s)",
-                self.agent_name,
+                "Compaction summary used %d prompt + %d completion tokens across %d call(s)",
                 summary_usage["prompt_tokens"],
                 summary_usage["completion_tokens"],
                 summary_usage["calls"],
@@ -1349,7 +1352,7 @@ class BaseAdapter(ABC):
 
                 get_usage_store().record(
                     session_id=old_conv_id,
-                    agent=self.agent_name,
+                    agent=self.agent_label,
                     model=model,
                     source="compaction",
                     input_tokens=summary_usage["prompt_tokens"],
@@ -1366,7 +1369,7 @@ class BaseAdapter(ABC):
         # so session_start must reflect it rather than the agent's config default
         # — otherwise the post-compaction session is born mislabeled.
         new_storage = backend.create(
-            agent_name=self.agent_name,
+            agent_name=self.agent_label,
             model=new_session.model_override or resolved_model,
             parent_session=old_conv_id,
             session_id=new_session.id,
@@ -1404,7 +1407,7 @@ class BaseAdapter(ABC):
             new_storage.record(event.type, ts=event.ts, **data)
 
         post_compact_execs = await fire_compact_hooks(
-            self.agent_config.workspace_dir,
+            self.runtime.workspace_dir,
             "post_compact",
             {
                 **hook_context,
@@ -1431,7 +1434,7 @@ class BaseAdapter(ABC):
                 retained_count=recent_user_inputs,
             )
         except Exception:
-            logger.debug("[%s] Failed to write compacted_into pointer to old file", self.agent_name, exc_info=True)
+            logger.debug("Failed to write compacted_into pointer to old file", exc_info=True)
 
         from tsugite.tools.skills import clear_loaded_skills
 
@@ -1446,7 +1449,9 @@ class BaseAdapter(ABC):
             estimated = _count_tokens(text, resolved_model) if text else 0
             self.session_store.set_cumulative_tokens(new_session.id, estimated)
         except Exception:
-            logger.debug("[%s] Failed to seed post-compaction token estimate", self.agent_name, exc_info=True)
+            logger.debug("Failed to seed post-compaction token estimate", exc_info=True)
 
-        logger.info("[%s] Session compacted", self.agent_name)
+        logger.info(
+            "Session compacted",
+        )
         return new_session

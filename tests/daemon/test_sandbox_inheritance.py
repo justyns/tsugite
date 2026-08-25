@@ -18,8 +18,8 @@ from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 def mock_adapter():
     adapter = MagicMock()
     adapter.handle_message = AsyncMock(return_value="done")
-    adapter.agent_config = MagicMock()
-    adapter.agent_config.workspace_dir = Path("/tmp/test")
+    adapter.runtime = MagicMock()
+    adapter.runtime.workspace_dir = Path("/tmp/test")
     adapter._resolve_agent_path = MagicMock(return_value=Path("/tmp/test/agent.md"))
     adapter.session_store = MagicMock()
     return adapter
@@ -30,11 +30,10 @@ async def test_session_run_propagates_sandbox_override(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
     override = {"enabled": True, "allow_domains": ["github.com"], "no_network": False}
     session = Session(
         id="s1",
-        agent="default",
         source=SessionSource.BACKGROUND.value,
         prompt="task",
         metadata={"sandbox_override": override},
@@ -51,8 +50,8 @@ async def test_session_run_no_override_when_unset(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
-    session = Session(id="s2", agent="default", source=SessionSource.BACKGROUND.value, prompt="task")
+    runner = SessionRunner(store, mock_adapter)
+    session = Session(id="s2", source=SessionSource.BACKGROUND.value, prompt="task")
     runner.start_session(session)
     await asyncio.sleep(0.3)
 

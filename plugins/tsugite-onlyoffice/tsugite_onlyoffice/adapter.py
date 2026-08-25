@@ -444,10 +444,10 @@ class OnlyOfficeAdapter(BaseAdapter):
         return config
 
 
-def create_adapter(*, config, agents_config, session_store, identity_map):
+def create_adapter(*, config, runtime, session_store, identity_map):
     """Adapter-plugin factory (the tsugite.adapters entry point).
 
-    `config` is the daemon.yaml plugins.onlyoffice dict; agents_config,
+    `config` is the daemon.yaml plugins.onlyoffice dict; runtime,
     session_store and identity_map are unused, because the adapter is not
     agent-scoped. Returns None to stay inactive, which the gateway skips.
 

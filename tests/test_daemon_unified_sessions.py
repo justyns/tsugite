@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.config import AgentConfig, DaemonConfig
+from tsugite_daemon.config import DaemonConfig, RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 from tests.history_helpers import load_history_session, seed_history_session
@@ -15,7 +15,7 @@ from tests.history_helpers import load_history_session, seed_history_session
 
 def _seed_session(store, sid="session-1", agent="test-agent"):
     """Insert a minimal Session record so per-session state has somewhere to live."""
-    store.create_session(Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value))
+    store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value))
     return sid
 
 
@@ -34,7 +34,7 @@ def workspace_dir(tmp_path):
 
 @pytest.fixture
 def session_store(tmp_path):
-    return SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128000})
+    return SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
 
 
 @pytest.fixture
@@ -47,8 +47,8 @@ def identity_map():
 
 
 def _make_adapter(workspace_dir, session_store, identity_map=None):
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
-    return _StubAdapter("test-agent", agent_config, session_store, identity_map=identity_map)
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
+    return _StubAdapter(agent_config, session_store, identity_map=identity_map)
 
 
 class TestIdentityResolution:
@@ -111,7 +111,7 @@ class TestSharedSessionStore:
     """Two adapters sharing a SessionStore get the same conversation_id for linked users."""
 
     def test_shared_session_same_conv_id(self, workspace_dir, tmp_path, identity_map):
-        shared_store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128000})
+        shared_store = SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
 
         discord_adapter = _make_adapter(workspace_dir, shared_store, identity_map)
         http_adapter = _make_adapter(workspace_dir, shared_store, identity_map)
@@ -126,8 +126,8 @@ class TestSharedSessionStore:
 
         assert discord_user == http_user == "alice"
 
-        session1 = shared_store.get_or_create_interactive(discord_user, "test-agent")
-        session2 = shared_store.get_or_create_interactive(http_user, "test-agent")
+        session1 = shared_store.get_or_create_interactive(discord_user)
+        session2 = shared_store.get_or_create_interactive(http_user)
         assert session1.id == session2.id
 
 
@@ -136,22 +136,22 @@ class TestSessionStoreInteractive:
 
     def test_get_or_create_interactive(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        session = store.get_or_create_interactive("user1", "agent1")
-        assert "agent1" in session.id
+        session = store.get_or_create_interactive("user1")
+        assert "session" in session.id
         assert session.source == "interactive"
         assert session.user_id == "user1"
 
     def test_get_or_create_interactive_idempotent(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        s1 = store.get_or_create_interactive("user1", "agent1")
-        s2 = store.get_or_create_interactive("user1", "agent1")
+        s1 = store.get_or_create_interactive("user1")
+        s2 = store.get_or_create_interactive("user1")
         assert s1.id == s2.id
 
-    def test_different_agents_different_sessions(self, tmp_path):
+    def test_same_user_reuses_the_primary_session(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        s1 = store.get_or_create_interactive("user1", "agent1")
-        s2 = store.get_or_create_interactive("user1", "agent2")
-        assert s1.id != s2.id
+        s1 = store.get_or_create_interactive("user1")
+        s2 = store.get_or_create_interactive("user1")
+        assert s1.id == s2.id
 
 
 class TestSessionStoreSkillSuppression:
@@ -204,7 +204,7 @@ class TestSessionStoreSkillSuppression:
         """Compacting a session migrates suppressions to the new session_id and
         clears them off the predecessor so it doesn't carry orphan state."""
         store = SessionStore(tmp_path / "session_store.json")
-        session = store.get_or_create_interactive("alice", "test-agent")
+        session = store.get_or_create_interactive("alice")
         store.suppress_skill(session.id, "skill-a")
         store.suppress_skill(session.id, "skill-b")
 
@@ -216,7 +216,7 @@ class TestSessionStoreSkillSuppression:
 
     def test_compaction_without_suppression_is_noop(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        session = store.get_or_create_interactive("alice", "test-agent")
+        session = store.get_or_create_interactive("alice")
         new_session = store.compact_session(session.id)
 
         assert store.get_suppressed_skills(new_session.id) == set()
@@ -312,7 +312,7 @@ class TestSessionStoreStickySkills:
 
     def test_sticky_carries_through_compaction(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        session = store.get_or_create_interactive("alice", "test-agent")
+        session = store.get_or_create_interactive("alice")
         store.mark_sticky(session.id, "skill-a")
         store.bump_unused_counters(session.id, referenced=set())
 
@@ -343,7 +343,7 @@ class TestSessionStoreThreadSafety:
         results = {}
 
         def get_session(user_id):
-            session = store.get_or_create_interactive(user_id, "test-agent")
+            session = store.get_or_create_interactive(user_id)
             results[user_id] = session.id
 
         threads = [threading.Thread(target=get_session, args=(f"user-{i}",)) for i in range(10)]
@@ -361,13 +361,15 @@ class TestNoIdentityLinksBackwardCompat:
 
     def test_default_empty(self):
         config = DaemonConfig(
-            agents={"test": AgentConfig(workspace_dir=Path("/tmp/ws"), agent_file="default")},
+            default_workspace_dir=Path("/tmp/ws"),
+            default_agent_file="default",
         )
         assert config.identity_links == {}
 
     def test_identity_links_parsed(self):
         config = DaemonConfig(
-            agents={"test": AgentConfig(workspace_dir=Path("/tmp/ws"), agent_file="default")},
+            default_workspace_dir=Path("/tmp/ws"),
+            default_agent_file="default",
             identity_links={"alice": ["discord:123", "http:alice"]},
         )
         assert config.identity_links["alice"] == ["discord:123", "http:alice"]
@@ -388,9 +390,9 @@ class TestHTTPAdapterResolveUser:
     def test_resolve_linked(self, workspace_dir, tmp_path, identity_map):
         from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
-        agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+        agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
-        adapter = HTTPAgentAdapter("test-agent", agent_config, store, identity_map=identity_map)
+        adapter = HTTPAgentAdapter(agent_config, store, identity_map=identity_map)
 
         assert adapter.resolve_http_user("alice") == "alice"
         assert adapter.resolve_http_user("web-anonymous") == "alice"
@@ -398,18 +400,18 @@ class TestHTTPAdapterResolveUser:
     def test_resolve_unlinked(self, workspace_dir, tmp_path, identity_map):
         from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
-        agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+        agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
-        adapter = HTTPAgentAdapter("test-agent", agent_config, store, identity_map=identity_map)
+        adapter = HTTPAgentAdapter(agent_config, store, identity_map=identity_map)
 
         assert adapter.resolve_http_user("someone-else") == "someone-else"
 
     def test_resolve_no_map(self, workspace_dir, tmp_path):
         from tsugite_daemon.adapters.http import HTTPAgentAdapter
 
-        agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+        agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
         store = SessionStore(tmp_path / "session_store.json")
-        adapter = HTTPAgentAdapter("test-agent", agent_config, store)
+        adapter = HTTPAgentAdapter(agent_config, store)
 
         assert adapter.resolve_http_user("web-anonymous") == "web-anonymous"
 
@@ -432,8 +434,8 @@ class TestCompactSessionClearsSkills:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128000})
-        session = store.get_or_create_interactive("test-user", "test-agent")
+        store = SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
+        session = store.get_or_create_interactive("test-user")
         conv_id = session.id
 
         storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
@@ -488,8 +490,8 @@ class TestCompactSessionRecordsRange:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128000})
-        session = store.get_or_create_interactive("test-user", "test-agent")
+        store = SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
+        session = store.get_or_create_interactive("test-user")
         conv_id = session.id
 
         storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
@@ -535,7 +537,7 @@ class TestCompactSessionPreservesCreatedAt:
 
     def test_created_at_carries_through_compaction(self, tmp_path):
         store = SessionStore(tmp_path / "session_store.json")
-        session = store.get_or_create_interactive("alice", "test-agent")
+        session = store.get_or_create_interactive("alice")
         original_created_at = session.created_at
         assert original_created_at, "fixture sanity: created_at must be populated"
 
@@ -549,53 +551,53 @@ class TestCompactionLocking:
     """Tests for session compaction lock/queue mechanism."""
 
     def test_begin_compaction_returns_true_first_time(self, session_store):
-        assert session_store.begin_compaction("user1", "test-agent") is True
+        assert session_store.begin_compaction("user1") is True
 
     def test_begin_compaction_returns_false_if_already_compacting(self, session_store):
-        session_store.begin_compaction("user1", "test-agent")
-        assert session_store.begin_compaction("user1", "test-agent") is False
+        session_store.begin_compaction("user1")
+        assert session_store.begin_compaction("user1") is False
 
     def test_end_compaction_allows_new_begin(self, session_store):
-        session_store.begin_compaction("user1", "test-agent")
-        session_store.end_compaction("user1", "test-agent")
-        assert session_store.begin_compaction("user1", "test-agent") is True
+        session_store.begin_compaction("user1")
+        session_store.end_compaction("user1")
+        assert session_store.begin_compaction("user1") is True
 
     def test_is_compacting(self, session_store):
-        assert session_store.is_compacting("user1", "test-agent") is False
-        session_store.begin_compaction("user1", "test-agent")
-        assert session_store.is_compacting("user1", "test-agent") is True
-        session_store.end_compaction("user1", "test-agent")
-        assert session_store.is_compacting("user1", "test-agent") is False
+        assert session_store.is_compacting("user1") is False
+        session_store.begin_compaction("user1")
+        assert session_store.is_compacting("user1") is True
+        session_store.end_compaction("user1")
+        assert session_store.is_compacting("user1") is False
 
     def test_wait_for_compaction_returns_immediately_if_not_compacting(self, session_store):
-        assert session_store.wait_for_compaction("user1", "test-agent", timeout=0.1) is True
+        assert session_store.wait_for_compaction("user1", timeout=0.1) is True
 
     def test_wait_for_compaction_blocks_until_done(self, session_store):
-        session_store.begin_compaction("user1", "test-agent")
+        session_store.begin_compaction("user1")
         result = [None]
 
         def waiter():
-            result[0] = session_store.wait_for_compaction("user1", "test-agent", timeout=5)
+            result[0] = session_store.wait_for_compaction("user1", timeout=5)
 
         t = threading.Thread(target=waiter)
         t.start()
-        session_store.end_compaction("user1", "test-agent")
+        session_store.end_compaction("user1")
         t.join(timeout=2)
         assert not t.is_alive()
         assert result[0] is True
 
     def test_wait_for_compaction_times_out(self, session_store):
-        session_store.begin_compaction("user1", "test-agent")
-        assert session_store.wait_for_compaction("user1", "test-agent", timeout=0.05) is False
+        session_store.begin_compaction("user1")
+        assert session_store.wait_for_compaction("user1", timeout=0.05) is False
         # Clean up
-        session_store.end_compaction("user1", "test-agent")
+        session_store.end_compaction("user1")
 
     def test_different_users_independent(self, session_store):
-        session_store.begin_compaction("user1", "test-agent")
-        assert session_store.begin_compaction("user2", "test-agent") is True
-        assert session_store.is_compacting("user1", "test-agent") is True
-        assert session_store.is_compacting("user2", "test-agent") is True
+        session_store.begin_compaction("user1")
+        assert session_store.begin_compaction("user2") is True
+        assert session_store.is_compacting("user1") is True
+        assert session_store.is_compacting("user2") is True
 
     def test_end_compaction_idempotent(self, session_store):
         """end_compaction on a non-compacting session is a no-op."""
-        session_store.end_compaction("user1", "test-agent")  # Should not raise
+        session_store.end_compaction("user1")  # Should not raise

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tsugite.exceptions import AgentExecutionError
@@ -34,11 +34,10 @@ def adapter(tmp_path):
     (ws / "agent.md").write_text("---\nname: agent\n---\n\nHi.\n")
 
     store = SessionStore(tmp_path / "store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md"))
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md"))
 
     return _StubAdapter(
-        agent_name="test-agent",
-        agent_config=config,
+        runtime=config,
         session_store=store,
     )
 
@@ -48,7 +47,7 @@ def stub_adapter_internals(adapter, monkeypatch):
     """Stub out adapter side-effect methods irrelevant to retry/compaction
     behavior so tests can focus on `run_agent` + `_run_compaction` interplay.
     """
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.agent_config.agent_file))
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.runtime.agent_file))
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)
@@ -74,7 +73,7 @@ async def test_retry_skipped_after_side_effecting_code_ran(stub_adapter_internal
     tool call.
     """
     adapter = stub_adapter_internals
-    session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("alice")
     call_count = {"n": 0}
 
     def fake_run_agent(*args, **kwargs):
@@ -111,7 +110,7 @@ async def test_retry_still_fires_when_no_side_effects_yet(stub_adapter_internals
     and should still happen (preserves the existing recovery behavior).
     """
     adapter = stub_adapter_internals
-    session = adapter.session_store.get_or_create_interactive("bob", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("bob")
     call_count = {"n": 0}
 
     def fake_run_agent(*args, **kwargs):
@@ -143,7 +142,7 @@ async def test_retry_fires_for_pinned_session_when_no_side_effects(stub_adapter_
     user just sees a raw 'Prompt is too long' error with no recovery.
     """
     adapter = stub_adapter_internals
-    session = adapter.session_store.get_or_create_interactive("carol", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("carol")
     call_count = {"n": 0}
 
     def fake_run_agent(*args, **kwargs):
@@ -174,7 +173,7 @@ async def test_retry_skipped_for_pinned_session_after_side_effects(stub_adapter_
     overflow, do not retry — that would re-issue the tool call.
     """
     adapter = stub_adapter_internals
-    session = adapter.session_store.get_or_create_interactive("dave", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("dave")
     call_count = {"n": 0}
 
     def fake_run_agent(*args, **kwargs):
@@ -211,9 +210,9 @@ async def test_proactive_compaction_runs_for_override_session(stub_adapter_inter
     healthy turn — without it, the override session grows unbounded.
     """
     adapter = stub_adapter_internals
-    session = adapter.session_store.get_or_create_interactive("erin", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("erin")
     # Small context limit so seeded cumulative_tokens cross the 80% threshold.
-    adapter.session_store.update_context_limit("test-agent", 1000)
+    adapter.session_store.update_context_limit(1000)
     adapter.session_store.set_cumulative_tokens(session.id, 900)
     assert adapter.session_store.needs_compaction(session.id), "fixture precondition"
 

@@ -20,7 +20,7 @@ def _use_jsonl_backend():
 
 
 def _make_entry(**kwargs) -> ScheduleEntry:
-    defaults = dict(id="test-job", agent="bot", prompt="do something", schedule_type="cron", cron_expr="0 9 * * *")
+    defaults = dict(id="test-job", prompt="do something", schedule_type="cron", cron_expr="0 9 * * *")
     defaults.update(kwargs)
     return ScheduleEntry(**defaults)
 
@@ -63,7 +63,7 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
     mock_adapter.agent_name = "bot"
     return (
         SchedulerAdapter(
-            adapters={"bot": mock_adapter},
+            adapter=mock_adapter,
             schedules_path=Path("/tmp/test-schedules.json"),
             notification_channels=notification_channels or {},
             identity_map=identity_map or {},
@@ -161,7 +161,7 @@ class TestResolveTargetSession:
     def _add_session(store, sid, user_id="alice", agent="bot"):
         from tsugite_daemon.session_store import Session, SessionSource
 
-        s = Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id)
+        s = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id=user_id)
         store.create_session(s)
         return s
 
@@ -170,7 +170,7 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session=None, originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == "orig-sess"
 
@@ -178,23 +178,23 @@ class TestResolveTargetSession:
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session=None, originating_session_id=None)
-        assert resolve_target_session(entry, "alice", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store) is None
 
     def test_explicit_session_id(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         self._add_session(store, "explicit-id")
         entry = _make_entry(target_session="explicit-id")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == "explicit-id"
 
     def test_name_lookup(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
-        named = store.get_or_create_named_session("alice", "bot", "research")
+        named = store.get_or_create_named_session("alice", "research")
         entry = _make_entry(target_session="name:research")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == named.id
 
@@ -203,14 +203,14 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session="none", originating_session_id="orig-sess")
-        assert resolve_target_session(entry, "alice", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store) is None
 
     def test_originating_explicit(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         self._add_session(store, "orig-sess")
         entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == "orig-sess"
 
@@ -218,13 +218,13 @@ class TestResolveTargetSession:
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session="does-not-exist")
-        assert resolve_target_session(entry, "alice", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store) is None
 
     def test_originating_explicit_skipped_when_session_missing(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
         entry = _make_entry(target_session="originating", originating_session_id=None)
-        assert resolve_target_session(entry, "alice", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store) is None
 
     def test_originating_follows_superseded_chain(self, store):
         """A compacted originating session resolves to its successor."""
@@ -232,12 +232,12 @@ class TestResolveTargetSession:
         from tsugite_daemon.session_store import Session, SessionSource
 
         old = self._add_session(store, "orig-sess")
-        new = Session(id="new-sess", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="alice")
+        new = Session(id="new-sess", source=SessionSource.INTERACTIVE.value, user_id="alice")
         store.create_session(new)
         store.update_session(old.id, superseded_by=new.id)
 
         entry = _make_entry(target_session="originating", originating_session_id="orig-sess")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == "new-sess"
 
@@ -252,7 +252,7 @@ class TestResolveTargetSession:
 
         entry = _make_entry(target_session="originating", originating_session_id="sess-a")
         # Returns whichever session the walk halts on, but must terminate.
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id in {"sess-a", "sess-b"}
 
@@ -264,7 +264,7 @@ class TestResolveTargetSession:
         store.set_primary_session(primary.id)
 
         entry = _make_entry(target_session=None, originating_session_id="orig-id")
-        result = resolve_target_session(entry, "alice", store, "bot")
+        result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == "primary-id"
 
@@ -274,4 +274,4 @@ class TestResolveTargetSession:
 
         self._add_session(store, "orig-id")
         entry = _make_entry(target_session="primary", originating_session_id="orig-id")
-        assert resolve_target_session(entry, "alice", store, "bot") is None
+        assert resolve_target_session(entry, "alice", store) is None

@@ -266,4 +266,4 @@ The agent can send intermediate alerts during execution, and the final result is
 - **Tools not available** — Schedule tools only appear in daemon mode. Tell the user to start the daemon (`tsu daemon`) and do NOT create shell scripts or other workarounds.
 - **"Schedule already exists"** — IDs must be unique. Remove or pick a different name.
 - **"Invalid cron expression"** — Check syntax against the reference above.
-- **Agent not found** — The `agent` parameter must match a key in the daemon's `agents:` config. Omit `agent` to use the current agent.
+- **Agent not found** — The `agent_file` parameter must name an agent file the daemon can resolve. Omit it to use the daemon default.

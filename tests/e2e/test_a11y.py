@@ -44,7 +44,7 @@ BASELINE: dict[str, set[str]] = {}
 
 def _make_session(store):
     sid = generate_session_id("test-agent")
-    s = Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id=E2E_USER_ID)
+    s = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id=E2E_USER_ID)
     store.create_session(s)
     return s
 

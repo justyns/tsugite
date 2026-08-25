@@ -13,7 +13,7 @@ needing `session_store.json`. Web UI consumes both directions.
 from contextlib import ExitStack
 
 import pytest
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tests.history_helpers import load_history_session
@@ -31,15 +31,15 @@ async def test_new_session_compaction_event_carries_source_session_id(workspace_
     `source_session_id` so the UI back-link bubble can navigate to the
     predecessor without needing `session_start.parent_session`.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -58,15 +58,15 @@ async def test_old_session_gets_compacted_into_terminal_event(workspace_dir, his
     self-describing: anyone tailing it learns where the conversation continued
     without consulting session_store.json.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -94,15 +94,15 @@ async def test_compacted_into_not_written_when_nothing_to_compact(workspace_dir,
     """
     from unittest.mock import AsyncMock, patch
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id, count=2)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
         return "Summary"
@@ -142,8 +142,8 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     from tsugite.agent_runner.history_integration import get_resumable_session_state
     from tsugite.history.models import Event
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     _seed_session_events(conv_id)
@@ -168,9 +168,9 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
         return "Summary"
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with (
         patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
@@ -207,8 +207,8 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
 
     from tsugite.history.models import Event
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
     _seed_session_events(conv_id)
 
@@ -223,9 +223,9 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
     async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
         return "Summary"
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with (
         patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
@@ -253,15 +253,15 @@ async def test_compaction_session_start_records_effective_model_override(workspa
     override), not the agent's config default — otherwise the post-compaction
     session is born mislabeled.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
     store.set_model_override(conv_id, "codex_cli:gpt-5.5")
     _seed_session_events(conv_id)
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with ExitStack() as stack:
         for p in _patches(history_dir):
@@ -279,8 +279,8 @@ def test_compact_session_preserves_topic_and_type_metadata(tmp_path):
     the conversation keeps its subject across the rotation, consistent with how
     `title` is already preserved.
     """
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     store.set_metadata_bulk(session.id, {"topic": "researching widgets"})
     store.set_metadata_bulk(session.id, {"type": "research"})
 
@@ -302,8 +302,8 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     from tsugite.history.models import Event
     from tsugite.providers.base import CompletionResponse, Usage
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 1_000_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
     _seed_session_events(conv_id)
 
@@ -317,9 +317,9 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     provider.count_tokens = MagicMock(return_value=10)
     usage_store = MagicMock()
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     with (
         patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),

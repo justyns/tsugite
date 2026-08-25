@@ -47,7 +47,7 @@ class FakeRunner:
         self._next_session_id_counter = 0
         # Seed the default parent session so create_and_start_job's parent-agent
         # lookup has something to find.
-        self.store.sessions["parent-1"] = Session(id="parent-1", agent="default")
+        self.store.sessions["parent-1"] = Session(id="parent-1")
 
     def add_completion_listener(self, callback) -> None:
         if callback not in self._completion_listeners:
@@ -104,7 +104,6 @@ def _seed_running_job(store, orchestrator, runner, acceptance_criteria=None, age
 def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.value):
     return Session(
         id=session_id,
-        agent="default",
         source="spawned",
         status=status,
         metadata={"job_id": job.id},
@@ -114,7 +113,6 @@ def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.v
 def _verifier_session(job, session_id="verifier-1", status=SessionStatus.COMPLETED.value):
     return Session(
         id=session_id,
-        agent="job_verifier",
         source="spawned",
         status=status,
         metadata={"job_id": job.id, "verifier_for": job.worker_session_id},
@@ -225,7 +223,7 @@ async def test_verifier_overall_pass_marks_done(store, runner, orchestrator):
 def _job_host_session(session_id="host-1"):
     """Placeholder host session a /job launched outside any chat gets (status=active,
     tagged job_host)."""
-    return Session(id=session_id, agent="default", title="Job: do the thing", metadata={"job_host": True})
+    return Session(id=session_id, title="Job: do the thing", metadata={"job_host": True})
 
 
 def _seed_running_job_with_parent(store, orchestrator, parent_session_id):
@@ -442,111 +440,6 @@ def _seed_running_job_orphan_parent(store, orchestrator, runner, *, acceptance_c
     return store.get(job.id)
 
 
-@pytest.mark.asyncio
-async def test_verifier_falls_back_to_registered_adapter_when_parent_lookup_misses(store, runner, orchestrator):
-    """When the parent session can't be resolved (not in the store), the verifier
-    spawn must fall back to a registered adapter key from runner._adapters rather
-    than passing the agent_file name as the adapter key - otherwise the spawn fails
-    with "no adapter for agent 'job_verifier'"."""
-    # Parent lookup will MISS (orphan-parent not seeded), so the only routing signal
-    # is _adapters. Use a sentinel key that is neither 'default' nor 'job_verifier'.
-    assert "orphan-parent" not in runner.store.sessions
-    runner._adapters = {"some_key": object()}
-
-    job = _seed_running_job_orphan_parent(store, orchestrator, runner, acceptance_criteria=["x"])
-    await orchestrator.on_session_complete(_worker_session(job), "worker output")
-
-    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
-    assert len(verifier_spawns) == 1
-    v = verifier_spawns[0]
-    assert v.agent == "some_key", (
-        f"verifier must route through the registered adapter key when parent lookup misses, got agent={v.agent!r}"
-    )
-    assert v.agent_file == "job_verifier", (
-        f"verifier must still load job_verifier.md via agent_file, got agent_file={v.agent_file!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_loopback_worker_falls_back_to_registered_adapter_when_parent_lookup_misses(store, runner, orchestrator):
-    """On verifier failure (< max), the loop-back worker must also fall back to a
-    registered adapter key when the parent can't be resolved, rather than using
-    agent=job.agent directly (which is the agent_file name, not an adapter key)."""
-    assert "orphan-parent" not in runner.store.sessions
-    runner._adapters = {"some_key": object()}
-
-    job = _seed_running_job_orphan_parent(store, orchestrator, runner, acceptance_criteria=["x"], agent="job_worker")
-    await orchestrator.on_session_complete(_worker_session(job), "w1")
-    job = store.get(job.id)
-    fail_json = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "no"}], "overall_pass": False})
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail_json)
-
-    loopback_workers = [s for s in runner.started if (s.metadata or {}).get("loop_attempt")]
-    assert len(loopback_workers) == 1
-    w = loopback_workers[0]
-    assert w.agent == "some_key", (
-        f"loop-back worker must route through the registered adapter key when parent lookup misses, got agent={w.agent!r}"
-    )
-    assert w.agent_file == "job_worker", (
-        f"loop-back worker must still load job_worker.md via agent_file, got agent_file={w.agent_file!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_verifier_routes_through_parent_session_adapter_when_present(store, runner, orchestrator):
-    """Separate coverage of the parent-resolution path: when the parent session IS
-    in the store AND its agent names a registered adapter, the verifier routes
-    through that agent, NOT the arbitrary first _adapters key."""
-    # Parent 'parent-1' is seeded with agent='default'; register it plus a decoy so
-    # the decoy would only win if the (registered) parent resolution failed to.
-    runner._adapters = {"default": object(), "decoy_key": object()}
-    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
-    await orchestrator.on_session_complete(_worker_session(job), "worker output")
-
-    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
-    assert len(verifier_spawns) == 1
-    assert verifier_spawns[0].agent == "default", (
-        "verifier must route through the parent session's agent when the parent resolves, "
-        f"not the _adapters fallback; got agent={verifier_spawns[0].agent!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_verifier_falls_back_when_parent_agent_is_not_a_registered_adapter(store, runner, orchestrator):
-    """Hardened contract: a parent whose stored agent is NOT a registered adapter
-    (a daemon agent whose adapter key differs from its agent-file config name) is
-    not trusted blindly - it falls back to a registered adapter so the worker runs."""
-    # Parent seeded with agent='default', but only 'real_adapter' is registered.
-    runner._adapters = {"real_adapter": object()}
-    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
-    await orchestrator.on_session_complete(_worker_session(job), "worker output")
-
-    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
-    assert len(verifier_spawns) == 1
-    assert verifier_spawns[0].agent == "real_adapter", (
-        f"an unregistered parent agent must fall back to a registered adapter, got {verifier_spawns[0].agent!r}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_verifier_prefers_the_running_adapter_over_the_parent(store, runner, orchestrator):
-    """The adapter running the spawning turn is the most reliable signal and wins
-    over the parent session's stored agent."""
-    from tsugite.agent_runner.helpers import set_current_daemon_agent
-
-    runner._adapters = {"running_adapter": object(), "default": object()}
-    set_current_daemon_agent("running_adapter")
-    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
-    await orchestrator.on_session_complete(_worker_session(job), "worker output")
-
-    verifier_spawns = [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
-    assert len(verifier_spawns) == 1
-    assert verifier_spawns[0].agent == "running_adapter"
-
-
-# ── real-SessionStore contract: get_session RAISES on miss ──
-
-
 class RaisingStore:
     """Stand-in mirroring real SessionStore.get_session, which RAISES ValueError
     on an unknown session id (FakeStore returns None). The orchestrator guards
@@ -616,19 +509,9 @@ def test_on_timeout_finalizes_when_store_raises_on_session_miss(store, event_bus
     assert "timeout" in (final.error or "")
 
 
-def test_resolve_adapter_key_falls_through_to_fallback_when_store_raises(store, event_bus):
-    """When the parent lookup raises ValueError (real-store miss), _resolve_adapter_key
-    must swallow it and fall through to the _adapters fallback rather than crashing."""
-    runner = RaisingStoreRunner()
-    runner._adapters = {"some_key": object()}
-    orchestrator = JobsOrchestrator(store, runner, event_bus=event_bus)
-    # 'absent-parent' is not in runner.store.sessions → get_session raises ValueError.
-    assert orchestrator._resolve_adapter_key("absent-parent") == "some_key"
-
-
 @pytest.mark.asyncio
 async def test_session_without_job_id_is_ignored(store, runner, orchestrator):
-    unrelated = Session(id="x", agent="default", source="spawned", status="completed", metadata={})
+    unrelated = Session(id="x", source="spawned", status="completed", metadata={})
     # Should not raise, should not touch the store.
     await orchestrator.on_session_complete(unrelated, "ok")
 
@@ -681,7 +564,7 @@ def test_attach_coexists_with_other_listeners(store, runner, orchestrator):
     assert orchestrator.on_session_complete in runner._completion_listeners
 
     # Dispatch a benign session that has no job_id (orchestrator ignores it).
-    session = Session(id="x", agent="default", source="spawned", status="completed", metadata={})
+    session = Session(id="x", source="spawned", status="completed", metadata={})
 
     async def dispatch():
         for cb in runner._completion_listeners:
@@ -743,23 +626,6 @@ async def test_verifying_window_has_a_timer(store, runner, orchestrator):
 
 
 @pytest.mark.asyncio
-async def test_create_and_start_job_routes_through_parent_agent(store, runner, orchestrator):
-    """The worker must run through the parent session's adapter, not the first one
-    in dict order - otherwise jobs leak across agents (credentials, tools, model)."""
-    runner._adapters = {"coder": object(), "support": object()}
-    # Parent session lives in `support`.
-    runner.store.sessions["parent-A"] = Session(id="parent-A", agent="support")
-    job, started = await orchestrator.create_and_start_job(
-        parent_session_id="parent-A",
-        prompt="hello",
-        acceptance_criteria=[],
-        timeout_minutes=30,
-        spawned_by="user-slash",
-    )
-    assert started.agent == "support", f"worker must route through parent's adapter 'support', got {started.agent!r}"
-
-
-@pytest.mark.asyncio
 async def test_create_and_start_job_threads_delegation_files_to_worker(store, runner, orchestrator):
     """files= handed to spawn_job ride the Job and land on the worker session's
     metadata under `delegation_files`, where SessionRunner materializes them into
@@ -791,7 +657,7 @@ def test_on_timeout_skips_cancel_when_worker_already_terminal(store, runner, orc
     job = store.add(Job(id="", parent_session_id="parent-1", prompt="x"))
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
     # Pretend the worker already finished successfully.
-    runner.store.sessions["worker-1"] = Session(id="worker-1", agent="default", status=SessionStatus.COMPLETED.value)
+    runner.store.sessions["worker-1"] = Session(id="worker-1", status=SessionStatus.COMPLETED.value)
     orchestrator._on_timeout(job.id)
     assert "worker-1" not in runner.cancelled, "_on_timeout must not cancel a worker that already finished"
 
@@ -910,10 +776,10 @@ async def test_verifier_session_id_persisted_and_cancelled_on_timeout(store, run
     assert refreshed.verifier_session_id, "verifier session id must be stored on Job so timeout can cancel it"
     # Pretend the worker is already done (so its cancel is skipped) and verifier is hung.
     runner.store.sessions[refreshed.worker_session_id] = Session(
-        id=refreshed.worker_session_id, agent="default", status=SessionStatus.COMPLETED.value
+        id=refreshed.worker_session_id, status=SessionStatus.COMPLETED.value
     )
     runner.store.sessions[refreshed.verifier_session_id] = Session(
-        id=refreshed.verifier_session_id, agent="default", status=SessionStatus.RUNNING.value
+        id=refreshed.verifier_session_id, status=SessionStatus.RUNNING.value
     )
     orchestrator._on_timeout(job.id)
     assert refreshed.verifier_session_id in runner.cancelled, (
@@ -1167,20 +1033,20 @@ async def test_relative_repo_resolves_against_workspace_root(store, runner, orch
 @pytest.mark.asyncio
 async def test_relative_repo_falls_back_to_adapter_workspace_dir(store, runner, orchestrator, tmp_path):
     """When the parent session has no workspace_override (the normal chat case), a
-    relative --repo resolves against the parent adapter's agent_config.workspace_dir."""
+    relative --repo resolves against the daemon's default workspace_dir."""
     from pathlib import Path
     from types import SimpleNamespace
 
     repo = tmp_path / "myrepo"
     _make_git_repo(repo)
-    runner._adapters = {"default": SimpleNamespace(agent_config=SimpleNamespace(workspace_dir=tmp_path))}
+    runner._adapter = SimpleNamespace(runtime=SimpleNamespace(workspace_dir=tmp_path))
 
     job, _ = await orchestrator.create_and_start_job(
         parent_session_id="parent-1", prompt="do", acceptance_criteria=[], repo="myrepo"
     )
 
     wt = Path(store.get(job.id).worktree_path)
-    assert wt.is_relative_to(repo.resolve()), f"worktree {wt} must resolve under the adapter workspace_dir repo {repo}"
+    assert wt.is_relative_to(repo.resolve()), f"worktree {wt} must resolve under the default workspace_dir repo {repo}"
 
 
 @pytest.mark.asyncio
@@ -1271,7 +1137,7 @@ def test_worktree_pruned_on_mark_done_manual(store, runner, orchestrator, tmp_pa
 @pytest.mark.asyncio
 async def test_cancel_job_finalizes_cancelled_and_cancels_worker(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
-    runner.store.sessions["worker-1"] = Session(id="worker-1", agent="default", status=SessionStatus.RUNNING.value)
+    runner.store.sessions["worker-1"] = Session(id="worker-1", status=SessionStatus.RUNNING.value)
     await orchestrator.cancel_job(job.id, reason="user clicked cancel")
     assert store.get(job.id).state == JobState.CANCELLED.value
     assert "worker-1" in runner.cancelled
@@ -1358,7 +1224,7 @@ def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestr
     store.update_state(done_job.id, JobState.DONE.value)
 
     # Job for a DIFFERENT parent must NOT appear.
-    runner.store.sessions["other-parent"] = Session(id="other-parent", agent="default")
+    runner.store.sessions["other-parent"] = Session(id="other-parent")
     other = store.add(Job(id="", parent_session_id="other-parent", prompt="not mine"))
 
     xml = render_jobs_context_xml(store, "parent-1")

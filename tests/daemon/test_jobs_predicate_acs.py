@@ -37,7 +37,7 @@ class FakeRunner:
         self.started: list[Session] = []
         self.cancelled: list[str] = []
         self._next_session_id_counter = 0
-        self.store.sessions["parent-1"] = Session(id="parent-1", agent="default")
+        self.store.sessions["parent-1"] = Session(id="parent-1")
 
     def start_session(self, session: Session) -> Session:
         self._next_session_id_counter += 1
@@ -88,7 +88,6 @@ def _seed_running_job(store, orchestrator, runner, acceptance_criteria=None, wor
 def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.value):
     return Session(
         id=session_id,
-        agent="default",
         source="spawned",
         status=status,
         metadata={"job_id": job.id},
@@ -98,7 +97,6 @@ def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.v
 def _verifier_session(job, session_id="verifier-1", status=SessionStatus.COMPLETED.value):
     return Session(
         id=session_id,
-        agent="job_verifier",
         source="spawned",
         status=status,
         metadata={"job_id": job.id, "verifier_for": job.worker_session_id},

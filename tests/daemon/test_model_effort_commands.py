@@ -26,7 +26,6 @@ def _adapter(tmp_path):
 def _session(store, sid="sess-open-chat"):
     s = Session(
         id=sid,
-        agent="default",
         source=SessionSource.INTERACTIVE.value,
         user_id="user-1",
         message_count=1,

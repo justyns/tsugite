@@ -254,13 +254,11 @@ def load_module_only_plugins(group: str, plugin_config: dict | None = None) -> l
     return _load_plugin_group(group, plugin_config, on_loaded=lambda _: None)
 
 
-def load_adapter_plugins(
-    plugin_config, session_store, identity_map, agents_config
-) -> list[tuple[PluginInfo, object | None]]:
+def load_adapter_plugins(plugin_config, session_store, identity_map, runtime) -> list[tuple[PluginInfo, object | None]]:
     """Discover and instantiate adapter plugins.
 
     Each entry point should resolve to a factory callable that accepts
-    (config, agents_config, session_store, identity_map) and returns a BaseAdapter instance.
+    (config, runtime, session_store, identity_map) and returns a BaseAdapter instance.
     """
     results = []
     for ep, cfg, enabled in _iter_plugins(GROUP_ADAPTERS, _resolve_plugin_config(plugin_config)):
@@ -272,7 +270,7 @@ def load_adapter_plugins(
             factory = ep.load()
             adapter = factory(
                 config=cfg,
-                agents_config=agents_config,
+                runtime=runtime,
                 session_store=session_store,
                 identity_map=identity_map,
             )

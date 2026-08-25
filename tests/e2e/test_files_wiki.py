@@ -2,7 +2,7 @@
 between them, and the backlinks panel lists the referring note.
 
 The wiki has no server-side index (see files/wiki.ts) - it's computed
-client-side over `GET /api/agents/{agent}/workspace`, so seeding is just
+client-side over `GET /api/workspace`, so seeding is just
 writing real files into the fixture workspace directory. Wikilink resolution
 works from paths alone; backlinks need the on-demand content scan (the meta
 pane's "Scan workspace" affordance) - loading the view must never bulk-read

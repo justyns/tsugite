@@ -12,20 +12,20 @@ def store(tmp_path):
     return SessionStore(tmp_path / "session_store.json")
 
 
-def _make_session(store, sid, user_id="u1", agent="agent-x") -> Session:
-    s = Session(id=sid, agent=agent, source=SessionSource.INTERACTIVE.value, user_id=user_id)
+def _make_session(store, sid, user_id="u1") -> Session:
+    s = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id=user_id)
     store.create_session(s)
     return s
 
 
 def test_find_primary_returns_none_when_absent(store):
-    assert store.find_primary_session("u1", "agent-x") is None
+    assert store.find_primary_session("u1") is None
 
 
 def test_set_primary_marks_session(store):
     s = _make_session(store, "s-1")
     store.set_primary_session(s.id)
-    found = store.find_primary_session("u1", "agent-x")
+    found = store.find_primary_session("u1")
     assert found is not None
     assert found.id == "s-1"
     assert found.metadata.get("is_primary") is True
@@ -37,7 +37,7 @@ def test_set_primary_demotes_prior_primary(store):
     store.set_primary_session(a.id)
     store.set_primary_session(b.id)
 
-    assert store.find_primary_session("u1", "agent-x").id == "s-b"
+    assert store.find_primary_session("u1").id == "s-b"
     assert not store.get_session("s-a").metadata.get("is_primary")
     assert store.get_session("s-b").metadata.get("is_primary") is True
 
@@ -48,25 +48,25 @@ def test_set_primary_isolated_per_user(store):
     store.set_primary_session(a.id)
     store.set_primary_session(b.id)
 
-    assert store.find_primary_session("u1", "agent-x").id == "s-u1"
-    assert store.find_primary_session("u2", "agent-x").id == "s-u2"
+    assert store.find_primary_session("u1").id == "s-u1"
+    assert store.find_primary_session("u2").id == "s-u2"
 
 
-def test_set_primary_isolated_per_agent(store):
-    a = _make_session(store, "s-x", agent="agent-x")
-    b = _make_session(store, "s-y", agent="agent-y")
+def test_set_primary_demotes_the_previous_one(store):
+    """Primary is per-user now, so promoting a second session demotes the first."""
+    a = _make_session(store, "s-x")
+    b = _make_session(store, "s-y")
     store.set_primary_session(a.id)
     store.set_primary_session(b.id)
 
-    assert store.find_primary_session("u1", "agent-x").id == "s-x"
-    assert store.find_primary_session("u1", "agent-y").id == "s-y"
+    assert store.find_primary_session("u1").id == "s-y"
 
 
 def test_find_primary_skips_finished(store):
     s = _make_session(store, "s-1")
     store.set_primary_session(s.id)
     store.update_session(s.id, status=SessionStatus.COMPLETED.value)
-    assert store.find_primary_session("u1", "agent-x") is None
+    assert store.find_primary_session("u1") is None
 
 
 def test_find_primary_skips_superseded(store):
@@ -75,7 +75,7 @@ def test_find_primary_skips_superseded(store):
     successor = _make_session(store, "s-2")
     store.update_session(s.id, superseded_by=successor.id)
 
-    assert store.find_primary_session("u1", "agent-x") is None
+    assert store.find_primary_session("u1") is None
 
 
 def test_compaction_preserves_primary_flag(store):
@@ -85,7 +85,7 @@ def test_compaction_preserves_primary_flag(store):
     new_session = store.compact_session(s.id)
 
     assert new_session.metadata.get("is_primary") is True
-    found = store.find_primary_session("u1", "agent-x")
+    found = store.find_primary_session("u1")
     assert found is not None
     assert found.id == new_session.id
 
@@ -93,15 +93,15 @@ def test_compaction_preserves_primary_flag(store):
 def test_clear_primary_removes_flag(store):
     s = _make_session(store, "s-1")
     store.set_primary_session(s.id)
-    store.clear_primary_session("u1", "agent-x")
+    store.clear_primary_session("u1")
 
-    assert store.find_primary_session("u1", "agent-x") is None
+    assert store.find_primary_session("u1") is None
     assert not store.get_session("s-1").metadata.get("is_primary")
 
 
 def test_clear_primary_no_op_when_absent(store):
     """Clearing when nothing is primary should not raise."""
-    store.clear_primary_session("u1", "agent-x")
+    store.clear_primary_session("u1")
 
 
 def test_set_primary_unknown_session_raises(store):
@@ -151,7 +151,7 @@ def test_get_or_create_interactive_routes_to_primary(store):
     chosen = _make_session(store, "chosen-id")
     store.set_primary_session(chosen.id)
 
-    result = store.get_or_create_interactive("u1", "agent-x")
+    result = store.get_or_create_interactive("u1")
     assert result.id == "chosen-id"
 
 
@@ -161,7 +161,7 @@ def test_get_or_create_interactive_skips_primary_if_finished(store):
     store.set_primary_session(s.id)
     store.update_session(s.id, status=SessionStatus.COMPLETED.value)
 
-    result = store.get_or_create_interactive("u1", "agent-x")
+    result = store.get_or_create_interactive("u1")
     assert result.id != s.id
 
 
@@ -175,7 +175,7 @@ def test_set_primary_picks_latest_active(store):
     time.sleep(0.01)
     store.update_session(b.id, scratchpad="bumped")
 
-    found = store.find_primary_session("u1", "agent-x")
+    found = store.find_primary_session("u1")
     assert found is not None
     assert found.id == "s-b"
 
@@ -183,34 +183,32 @@ def test_set_primary_picks_latest_active(store):
 def test_find_default_session_returns_primary_when_set(store):
     s = _make_session(store, "s-default")
     store.set_primary_session(s.id)
-    assert store.find_default_session("u1", "agent-x").id == s.id
+    assert store.find_default_session("u1").id == s.id
 
 
 def test_find_default_session_returns_none_when_no_primary(store):
     _make_session(store, "s-no-primary")
-    assert store.find_default_session("u1", "agent-x") is None
+    assert store.find_default_session("u1") is None
 
 
 def test_create_default_session_marks_as_primary(store):
-    session = store.create_default_session("u1", "agent-x", title="hello")
+    session = store.create_default_session("u1", title="hello")
     assert session.user_id == "u1"
-    assert session.agent == "agent-x"
     assert session.title == "hello"
     assert session.metadata.get("is_primary") is True
-    assert store.find_default_session("u1", "agent-x").id == session.id
+    assert store.find_default_session("u1").id == session.id
 
 
 def test_create_default_session_uses_modern_id_format(store):
     """No `daemon_{agent}_{user_id}` literal, no hex suffix - use generate_session_id."""
-    session = store.create_default_session("u1", "agent-x")
+    session = store.create_default_session("u1")
     assert "daemon_agent-x_u1" not in session.id
-    assert session.id.startswith("agent-x_") or "agent-x" in session.id
 
 
 def test_create_default_session_demotes_prior_primary(store):
-    first = store.create_default_session("u1", "agent-x")
-    second = store.create_default_session("u1", "agent-x")
-    assert store.find_default_session("u1", "agent-x").id == second.id
+    first = store.create_default_session("u1")
+    second = store.create_default_session("u1")
+    assert store.find_default_session("u1").id == second.id
     assert not store.get_session(first.id).metadata.get("is_primary")
 
 
@@ -224,7 +222,7 @@ def test_get_or_create_interactive_does_not_spawn_hex_replacement(store):
     store.set_primary_session(legacy.id)
     store.update_session(legacy.id, status=SessionStatus.COMPLETED.value)
 
-    result = store.get_or_create_interactive("u1", "agent-x")
+    result = store.get_or_create_interactive("u1")
     assert result.id != legacy.id
     # No hex suffix: the new path uses generate_session_id, not f"daemon_{a}_{u}_{hex}".
     assert "daemon_agent-x_u1_" not in result.id

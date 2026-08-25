@@ -40,7 +40,7 @@ def _session_or_default(adapter: HTTPAgentAdapter, session_id: Optional[str], us
         except ValueError:
             session = None
     if session is None:
-        session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        session = adapter.session_store.find_default_session(user_id)
     return session
 
 
@@ -71,23 +71,23 @@ def _session_user_label(user_id: str, source: str) -> str:
 class AgentsMixin:
     def _agent_routes(self) -> list:
         return [
-            Route("/api/agents/{agent}/sessions", self._list_sessions, methods=["GET"]),
-            Route("/api/agents/{agent}/sessions/new", self._new_interactive_session, methods=["POST"]),
-            Route("/api/agents/{agent}/sessions/{session_id}/branch", self._branch, methods=["POST"]),
-            Route("/api/agents/{agent}/chat", self._chat, methods=["POST"]),
-            Route("/api/agents/{agent}/chat/cancel", self._cancel_chat, methods=["POST"]),
-            Route("/api/agents/{agent}/upload", self._upload, methods=["POST"]),
-            Route("/api/agents/{agent}/status", self._status, methods=["GET"]),
-            Route("/api/agents/{agent}/attachments", self._attachments, methods=["GET"]),
-            Route("/api/agents/{agent}/history", self._history, methods=["GET"]),
-            Route("/api/agents/{agent}/prompt-snapshot", self._prompt_snapshot, methods=["GET"]),
-            Route("/api/agents/{agent}/raw-messages", self._raw_messages, methods=["GET"]),
-            Route("/api/agents/{agent}/config", self._update_agent_config, methods=["PATCH"]),
-            Route("/api/agents/{agent}/compact", self._compact, methods=["POST"]),
-            Route("/api/agents/{agent}/respond", self._respond, methods=["POST"]),
-            Route("/api/agents/{agent}/unload-skill", self._unload_skill, methods=["POST"]),
-            Route("/api/agents/{agent}/effort-levels", self._effort_levels, methods=["GET"]),
-            Route("/api/agents/{agent}/commands/{command_name}", self._run_command, methods=["POST"]),
+            Route("/api/chat/sessions", self._list_sessions, methods=["GET"]),
+            Route("/api/chat/sessions/new", self._new_interactive_session, methods=["POST"]),
+            Route("/api/chat/sessions/{session_id}/branch", self._branch, methods=["POST"]),
+            Route("/api/chat", self._chat, methods=["POST"]),
+            Route("/api/chat/cancel", self._cancel_chat, methods=["POST"]),
+            Route("/api/chat/upload", self._upload, methods=["POST"]),
+            Route("/api/chat/status", self._status, methods=["GET"]),
+            Route("/api/chat/attachments", self._attachments, methods=["GET"]),
+            Route("/api/chat/history", self._history, methods=["GET"]),
+            Route("/api/chat/prompt-snapshot", self._prompt_snapshot, methods=["GET"]),
+            Route("/api/chat/raw-messages", self._raw_messages, methods=["GET"]),
+            Route("/api/runtime/config", self._update_runtime_config, methods=["PATCH"]),
+            Route("/api/chat/compact", self._compact, methods=["POST"]),
+            Route("/api/chat/respond", self._respond, methods=["POST"]),
+            Route("/api/chat/unload-skill", self._unload_skill, methods=["POST"]),
+            Route("/api/chat/effort-levels", self._effort_levels, methods=["GET"]),
+            Route("/api/commands/{command_name}", self._run_command, methods=["POST"]),
         ]
 
     def _permissions_runtime_path(self) -> Path:
@@ -136,7 +136,7 @@ class AgentsMixin:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"result": result})
 
-    def _session_busy(self, agent_name: str, session) -> bool:
+    def _session_busy(self, session) -> bool:
         """The one definition of busy, shared by the sessions payload, /status,
         and the /chat 409 guard - the server must never 409 a send while
         reporting the session idle. True when the store reports durable live
@@ -146,8 +146,8 @@ class AgentsMixin:
         if session.has_live_work:
             return True
         return any(
-            a == agent_name and sid == session.id and chat.task is not None and not chat.task.done()
-            for (a, _user, sid), chat in self._active_chats.items()
+            sid == session.id and chat.task is not None and not chat.task.done()
+            for (_user, sid), chat in self._active_chats.items()
         )
 
     async def _list_sessions(self, request: Request) -> JSONResponse:
@@ -165,14 +165,13 @@ class AgentsMixin:
         if q:
             # Search scans the FULL session set (the recency limit exists to
             # bound the sidebar payload, not to hide sessions from search).
-            all_sessions = adapter.session_store.search_sessions(adapter.agent_name, q, limit=limit)
+            all_sessions = adapter.session_store.search_sessions(q, limit=limit)
             if source:
                 all_sessions = [s for s in all_sessions if s.source == source]
             if status:
                 all_sessions = [s for s in all_sessions if s.status == status]
         else:
             all_sessions = adapter.session_store.list_sessions(
-                agent=adapter.agent_name,
                 source=source,
                 status=status,
                 parent_id=parent_id,
@@ -182,7 +181,7 @@ class AgentsMixin:
 
         from tsugite_daemon.session_store import SessionStatus
 
-        default_ids = adapter.session_store.default_primary_ids(adapter.agent_name)
+        default_ids = adapter.session_store.default_primary_ids()
         live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
 
         waiting_on = adapter.session_store.waiting_on_map()
@@ -221,7 +220,7 @@ class AgentsMixin:
                 "is_primary": s.is_primary,
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.
-                "busy": self._session_busy(adapter.agent_name, s),
+                "busy": self._session_busy(s),
                 # Same contract for compaction: the pill reads this flag (kept
                 # live by the compaction_started/finished broadcasts), never a
                 # progress label that happens to mention compaction.
@@ -259,7 +258,6 @@ class AgentsMixin:
 
         session_id = create_interactive_session(
             adapter.session_store,
-            adapter.agent_name,
             user_id,
             title=title,
             event_bus=self.event_bus,
@@ -286,7 +284,7 @@ class AgentsMixin:
             tokens = session.cumulative_tokens
             message_count = session.message_count
             session_metadata = session.metadata or {}
-            chat = self._active_chats.get((adapter.agent_name, user_id, session.id))
+            chat = self._active_chats.get((user_id, session.id))
             backend = chat.backend if chat else None
         else:
             tokens, message_count, session_metadata, backend = 0, 0, {}, None
@@ -299,60 +297,57 @@ class AgentsMixin:
                 "context_limit": (
                     adapter.session_store.get_session_context_limit(session.id)
                     if session
-                    else adapter.session_store.get_context_limit(adapter.agent_name)
+                    else adapter.session_store.get_context_limit()
                 ),
                 "threshold": (
                     adapter.session_store.get_session_compaction_threshold(session.id)
                     if session
-                    else adapter.session_store.get_compaction_threshold(adapter.agent_name)
+                    else adapter.session_store.get_compaction_threshold()
                 ),
                 "message_count": message_count,
-                "compacting": adapter.session_store.is_compacting(
-                    user_id, adapter.agent_name, session_id=session.id if session else None
-                ),
+                "compacting": adapter.session_store.is_compacting(user_id, session_id=session.id if session else None),
                 "metadata": session_metadata,
-                "busy": bool(session and self._session_busy(adapter.agent_name, session)),
+                "busy": bool(session and self._session_busy(session)),
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": attachments,
             }
         )
 
-    async def _update_agent_config(self, request: Request) -> JSONResponse:
+    async def _update_runtime_config(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
         if err:
             return err
 
         body = await request.json()
-        agent_name = request.path_params["agent"]
-        agent_config = adapter.agent_config
+        runtime = adapter.runtime
 
         if "model" in body:
             new_model = body["model"].strip() if body["model"] else None
             # Pin existing sessions to the current model before mutating the
-            # agent default so they don't silently switch on their next turn.
-            # The default change should only affect sessions created after it.
-            adapter.session_store.freeze_session_models_to_current(adapter.agent_name, agent_config.model)
-            agent_config.model = new_model
+            # default so they don't silently switch on their next turn. The
+            # default change should only affect sessions created after it.
+            adapter.session_store.freeze_session_models_to_current(runtime.model)
+            runtime.model = new_model
 
             from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT, get_context_limit
 
             if new_model:
                 context_limit = get_context_limit(new_model, fallback=DEFAULT_CONTEXT_LIMIT)
-                agent_config.context_limit = context_limit
+                runtime.context_limit = context_limit
             else:
                 context_limit = DEFAULT_CONTEXT_LIMIT
-                agent_config.context_limit = None
-            adapter.session_store.update_context_limit(adapter.agent_name, context_limit)
+                runtime.context_limit = None
+            adapter.session_store.update_context_limit(context_limit)
 
             if self.gateway:
                 from tsugite_daemon.config import save_daemon_config
 
+                self.gateway.config.default_model = new_model
+                self.gateway.config.default_context_limit = runtime.context_limit
                 save_daemon_config(self.gateway.config, self.gateway.config_path)
 
-        self.event_bus.emit("agent_status", {"agent": agent_name})
-        return JSONResponse(
-            {"status": "ok", "model": adapter.resolve_model(), "context_limit": agent_config.context_limit}
-        )
+        self.event_bus.emit("agent_status", {})
+        return JSONResponse({"status": "ok", "model": adapter.resolve_model(), "context_limit": runtime.context_limit})
 
     async def _attachments(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -405,7 +400,7 @@ class AgentsMixin:
         session_id = request.query_params.get("session_id")
         if session_id:
             return session_id
-        primary = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        primary = adapter.session_store.find_default_session(user_id)
         return primary.id if primary else None
 
     async def _history(self, request: Request) -> JSONResponse:
@@ -442,7 +437,6 @@ class AgentsMixin:
             return err
 
         user_id = adapter.resolve_http_user(request.query_params.get("user_id", "web-anonymous"))
-        agent_name = request.path_params["agent"]
 
         session_id = self._resolve_session_id(adapter, user_id, request)
         if session_id is None:
@@ -451,7 +445,7 @@ class AgentsMixin:
         snapshots = [e for e in events if e.get("type") == "prompt_snapshot"]
         breakdown = snapshots[-1].get("token_breakdown", {}) if snapshots else {}
 
-        backend_key = (agent_name, user_id, session_id)
+        backend_key = (user_id, session_id)
         chat = self._active_chats.get(backend_key)
         live_progress = chat.progress if chat else None
         if live_progress and live_progress.latest_prompt_messages:
@@ -519,7 +513,7 @@ class AgentsMixin:
         except (ValueError, TypeError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
-        self.event_bus.emit("agent_status", {"agent": request.path_params["agent"]})
+        self.event_bus.emit("agent_status", {})
         return JSONResponse({"session_id": branch.id})
 
     async def _compact(self, request: Request) -> JSONResponse:
@@ -540,13 +534,12 @@ class AgentsMixin:
         if session is None or session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
 
-        agent_name = request.path_params["agent"]
         old_conv_id = session.id
 
-        if not adapter.session_store.begin_compaction(user_id, adapter.agent_name, session_id=old_conv_id):
+        if not adapter.session_store.begin_compaction(user_id, session_id=old_conv_id):
             return JSONResponse({"error": "compaction already in progress"}, status_code=409)
 
-        adapter._broadcast_compaction("compaction_started", agent_name, old_conv_id)
+        adapter._broadcast_compaction("compaction_started", old_conv_id)
         new_session = None
         try:
             instructions = body.get("instructions")
@@ -558,13 +551,13 @@ class AgentsMixin:
             )
         except Exception as e:
             msg = str(e) or repr(e)
-            logger.exception("Compaction failed for agent %s", adapter.agent_name)
+            logger.exception("Compaction failed")
             return JSONResponse({"error": f"compaction failed: {msg}"}, status_code=500)
         finally:
-            adapter.session_store.end_compaction(user_id, adapter.agent_name, session_id=old_conv_id)
-            adapter._broadcast_compaction("compaction_finished", agent_name, old_conv_id)
+            adapter.session_store.end_compaction(user_id, session_id=old_conv_id)
+            adapter._broadcast_compaction("compaction_finished", old_conv_id)
 
-        self.event_bus.emit("agent_status", {"agent": agent_name})
+        self.event_bus.emit("agent_status", {})
         if new_session:
             self.event_bus.emit(
                 "session_update",
@@ -599,7 +592,7 @@ class AgentsMixin:
             return JSONResponse({"error": "name is required"}, status_code=400)
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
-        session = adapter.session_store.find_default_session(user_id, adapter.agent_name)
+        session = adapter.session_store.find_default_session(user_id)
         if session is None:
             return JSONResponse({"error": "no default session"}, status_code=404)
         # The suppression is the mechanism: a skill manager belongs to the run
@@ -630,17 +623,13 @@ class AgentsMixin:
         adapter that owns that session. Returns ``(adapter, body, err)``; on failure
         ``err`` is a JSONResponse and adapter/body are None.
 
-        Routing by the body's session_id (not just the URL agent) lets the web UI
-        open a session whose owning agent differs from the URL - e.g. a job's
-        session carrying the worker agent-file. Auth is still enforced in
-        ``_get_adapter``.
+        Auth is enforced in ``_get_adapter``.
         """
         try:
             body = await request.json()
         except Exception:
             body = None
-        session_id = body.get("session_id") if isinstance(body, dict) else None
-        adapter, err = self._get_adapter(request, fallback_session_id=session_id)
+        adapter, err = self._get_adapter(request)
         if err:
             return None, None, err
         if not isinstance(body, dict):
@@ -673,7 +662,7 @@ class AgentsMixin:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
 
         user_id = adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
-        logger.info("[%s] respond user_id=%s session_id=%s ask_id=%s", adapter.agent_name, user_id, session_id, ask_id)
+        logger.info("respond user_id=%s session_id=%s ask_id=%s", user_id, session_id, ask_id)
 
         # The still-blocking ask, resolved by its durable id.
         backend = resolve_pending_ask(ask_id)
@@ -728,7 +717,7 @@ class AgentsMixin:
         if err:
             return err
 
-        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        uploads_dir = adapter.runtime.workspace_dir / "uploads"
         uploads_dir.mkdir(parents=True, exist_ok=True)
 
         # Reject from the header BEFORE request.form() spools the whole
@@ -811,9 +800,8 @@ class AgentsMixin:
             return JSONResponse({"error": "message or uploaded_files is required"}, status_code=400)
 
         raw_user_id = body.get("user_id", "web-anonymous")
-        agent_name = adapter.agent_name
         user_id = adapter.resolve_http_user(raw_user_id)
-        logger.info("[%s] <- %s (http): %s", agent_name, user_id, message[:100])
+        logger.info("<- %s (http): %s", user_id, message[:100])
 
         reasoning_effort, err_resp = self._resolve_effort_or_400(adapter, body.get("reasoning_effort"))
         if err_resp:
@@ -822,7 +810,7 @@ class AgentsMixin:
         # Process uploaded files -- only accept filenames, resolve against uploads dir
         uploaded_attachments = []
         workspace_only_files = []
-        uploads_dir = adapter.agent_config.workspace_dir / "uploads"
+        uploads_dir = adapter.runtime.workspace_dir / "uploads"
         # A non-vision model can't read an inlined image; route its images to the
         # workspace-only path (saved + path hint) instead of dropping them.
         from tsugite.models import model_supports_vision
@@ -883,15 +871,13 @@ class AgentsMixin:
                 metadata["conv_id_override"] = target_session.id
 
         if target_session is None:
-            target_session = adapter.session_store.get_or_create_interactive(
-                user_id, adapter.agent_name, source=SessionSource.WEB.value
-            )
+            target_session = adapter.session_store.get_or_create_interactive(user_id, source=SessionSource.WEB.value)
         target_session_id = target_session.id
 
-        backend_key = (agent_name, user_id, target_session_id)
+        backend_key = (user_id, target_session_id)
         # Same predicate the sessions payload and /status report - the server
         # must not 409 a send while telling the sidebar the session is idle.
-        if self._session_busy(agent_name, target_session):
+        if self._session_busy(target_session):
             return JSONResponse(
                 {"error": "a turn is already running for this session", "code": "turn_in_flight"},
                 status_code=409,
@@ -918,7 +904,6 @@ class AgentsMixin:
         self._active_chats[backend_key] = chat_state
 
         async def run_agent():
-            from tsugite.agent_runner.helpers import set_current_daemon_agent
             from tsugite.cancellation import set_cancel_event
             from tsugite.interaction import set_interaction_backend
             from tsugite.permissions import Permissions, set_permissions
@@ -928,7 +913,6 @@ class AgentsMixin:
             # registry) so spawn/start-session tools resolve to an agent that has
             # a live adapter, not the agent-file config name. Rides the same
             # context copy asyncio.to_thread makes for the executor worker.
-            set_current_daemon_agent(adapter.agent_name)
             # Bind the approval permissions store into the run context alongside the
             # interaction backend, so the context detector (which runs via
             # asyncio.to_thread and inherits this context) can gate a web fetch on
@@ -936,7 +920,7 @@ class AgentsMixin:
             set_permissions(
                 Permissions(
                     runtime_path=self._permissions_runtime_path(),
-                    workspace_dir=adapter.agent_config.workspace_dir,
+                    workspace_dir=adapter.runtime.workspace_dir,
                 )
             )
             # Bind the cooperative cancel Event into the run context so the agent
@@ -952,12 +936,12 @@ class AgentsMixin:
                 # Only emit final_result if the EventBus didn't already
                 # (FinalAnswerEvent fires during handle_message for normal completions,
                 # but not for max_turns/error cases)
-                logger.info("[%s] -> %s (http): %s", adapter.agent_name, user_id, (response or "")[:100])
+                logger.info("-> %s (http): %s", user_id, (response or "")[:100])
                 if not progress.has_final:
                     progress._emit("final_result", {"result": response})
 
-                self.event_bus.emit("agent_status", {"agent": agent_name})
-                self.event_bus.emit("history_update", {"agent": agent_name, "session_id": target_session_id})
+                self.event_bus.emit("agent_status", {})
+                self.event_bus.emit("history_update", {"session_id": target_session_id})
 
                 try:
                     refreshed = adapter.session_store.get_session(target_session_id)
@@ -977,10 +961,10 @@ class AgentsMixin:
                         },
                     )
             except asyncio.CancelledError:
-                logger.info("[%s] Chat cancelled by user for %s", adapter.agent_name, user_id)
+                logger.info("Chat cancelled by user for %s", user_id)
                 progress._emit("cancelled", {"reason": "User cancelled"})
             except Exception as e:
-                logger.exception("[%s] Chat error", adapter.agent_name)
+                logger.exception("Chat error")
                 progress._emit("error", {"error": str(e)})
             finally:
                 self._active_chats.pop(backend_key, None)
@@ -1009,7 +993,7 @@ class AgentsMixin:
         user_id = adapter.resolve_http_user(raw_user_id)
         if not session_id:
             return JSONResponse({"error": "session_id is required"}, status_code=400)
-        backend_key = (adapter.agent_name, user_id, session_id)
+        backend_key = (user_id, session_id)
         chat = self._active_chats.get(backend_key)
         if chat and chat.task and not chat.task.done():
             # Signal the worker thread to stop at its next safe checkpoint (the real

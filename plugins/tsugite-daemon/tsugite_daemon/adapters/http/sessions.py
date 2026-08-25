@@ -48,14 +48,18 @@ class SessionsMixin:
     def _resolve_session_for_settings(
         self, request: Request
     ) -> tuple[Optional[HTTPAgentAdapter], Optional[str], Optional[JSONResponse]]:
-        """Look up (adapter, session_id) for a /api/sessions/{session_id}/settings call."""
+        """Authenticate, then look up (adapter, session_id) for a
+        /api/sessions/{session_id}/settings call."""
+        if err := self._check_auth(request):
+            return None, None, err
         session_id = request.path_params["session_id"]
-        for adapter in self.adapters.values():
+        adapter = self.adapter
+        if adapter is not None:
             try:
                 adapter.session_store.get_session(session_id)
                 return adapter, session_id, None
             except ValueError:
-                continue
+                pass
         return None, None, JSONResponse({"error": f"unknown session: {session_id}"}, status_code=404)
 
     def _resolve_effort_or_400(
@@ -72,11 +76,17 @@ class SessionsMixin:
             return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
 
     def _session_settings_payload(self, adapter: "HTTPAgentAdapter", session_id: str) -> dict:
+        """A session's runtime overrides plus the daemon defaults they fall back to."""
         session = adapter.session_store.get_session(session_id)
+        runtime = adapter.runtime
         return {
             "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
             "model": adapter.session_store.get_model_override(session_id),
-            "agent": session.agent,
+            "context_limit": session.context_limit,
+            "defaults": {
+                "model": runtime.model,
+                "context_limit": runtime.context_limit,
+            },
         }
 
     async def _session_settings_get(self, request: Request) -> JSONResponse:
@@ -116,13 +126,11 @@ class SessionsMixin:
                     return JSONResponse({"error": f"unknown model: {raw} ({exc})"}, status_code=400)
                 adapter.session_store.set_model_override(session_id, raw)
 
-        if "agent" in body:
-            name = body["agent"]
-            if not isinstance(name, str) or not name:
-                return JSONResponse({"error": "agent must be a non-empty string"}, status_code=400)
-            if name not in self.adapters:
-                return JSONResponse({"error": f"unknown agent: {name}"}, status_code=400)
-            adapter.session_store.set_agent_override(session_id, name)
+        if "context_limit" in body:
+            raw = body["context_limit"]
+            if raw is not None and (not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0):
+                return JSONResponse({"error": "context_limit must be a positive integer or null"}, status_code=400)
+            adapter.session_store.set_session_context_limit(session_id, raw)
 
         # A model/effort change broadcasts a session_update so the same chat open
         # in other tabs refreshes its chips live (one shape shared with /model,
@@ -153,7 +161,6 @@ class SessionsMixin:
                 "sessions": [
                     {
                         "id": s.id,
-                        "agent": s.agent,
                         "source": s.source,
                         "state": s.status,
                         "prompt": s.prompt or "",
@@ -178,17 +185,13 @@ class SessionsMixin:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
         prompt = body.get("prompt", "").strip()
-        agent = body.get("agent", "")
-        if not prompt or not agent:
-            return JSONResponse({"error": "prompt and agent are required"}, status_code=400)
-        if agent not in self.adapters:
-            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=400)
+        if not prompt:
+            return JSONResponse({"error": "prompt is required"}, status_code=400)
 
         from tsugite_daemon.session_store import Session, SessionSource
 
         session = Session(
             id=body.get("session_id", ""),
-            agent=agent,
             source=SessionSource.BACKGROUND.value,
             prompt=prompt,
             model=body.get("model"),
@@ -316,11 +319,10 @@ class SessionsMixin:
     async def _api_clear_primary(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
             return err
-        agent = request.query_params.get("agent")
         user_id = request.query_params.get("user_id")
-        if not agent or not user_id:
-            return JSONResponse({"error": "agent and user_id query params required"}, status_code=400)
-        self.session_runner.clear_primary_session(user_id, agent)
+        if not user_id:
+            return JSONResponse({"error": "user_id query param required"}, status_code=400)
+        self.session_runner.clear_primary_session(user_id)
         return JSONResponse({"ok": True})
 
     async def _api_mark_viewed(self, request: Request) -> JSONResponse:
@@ -382,7 +384,6 @@ class SessionsMixin:
         # still recognises it via metadata.job_id.
         new_session = Session(
             id="",
-            agent=old.agent,
             source=old.source or SessionSource.BACKGROUND.value,
             prompt=old.prompt,
             model=old.model,

@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
@@ -25,12 +25,12 @@ def session_store(tmp_path):
 
 @pytest.fixture
 def session_runner(session_store):
-    return SessionRunner(store=session_store, adapters={})
+    return SessionRunner(store=session_store, adapter=None)
 
 
 @pytest.fixture
 def server(tmp_workspace, session_store, session_runner, tmp_path):
-    agent_config = AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
     http_config = HTTPConfig(enabled=True, host="127.0.0.1", port=8374)
     webhook_store = WebhookStore(tmp_path / "webhooks.json")
 
@@ -43,16 +43,14 @@ def server(tmp_workspace, session_store, session_runner, tmp_path):
 
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
     srv = HTTPServer(
         config=http_config,
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     srv.session_runner = session_runner
@@ -74,7 +72,6 @@ def _create_session(store: SessionStore, *, title: str | None = None, suffix: st
     sid = f"s-{title or 'anon'}-{suffix}"
     s = Session(
         id=sid,
-        agent="test-agent",
         source=SessionSource.INTERACTIVE.value,
         user_id="web-anonymous",
         title=title,
@@ -214,7 +211,7 @@ class TestMarkViewedEndpoint:
 class TestNewSessionAcceptsTitle:
     def test_new_session_with_title(self, client, test_token, session_store):
         resp = client.post(
-            "/api/agents/test-agent/sessions/new",
+            "/api/chat/sessions/new",
             json={"user_id": "web-anonymous", "title": "Reading"},
             headers=auth(test_token),
         )
@@ -224,7 +221,7 @@ class TestNewSessionAcceptsTitle:
 
     def test_new_session_without_title_falls_back(self, client, test_token, session_store):
         resp = client.post(
-            "/api/agents/test-agent/sessions/new",
+            "/api/chat/sessions/new",
             json={"user_id": "web-anonymous"},
             headers=auth(test_token),
         )
@@ -237,7 +234,7 @@ class TestListSessionsExposesNewFields:
     def test_response_includes_pinned_and_unread_fields(self, client, test_token, session_store):
         sid = _create_session(session_store, title="t", suffix="1")
         session_store.set_pin(sid, True)
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth(test_token))
+        resp = client.get("/api/chat/sessions", headers=auth(test_token))
         assert resp.status_code == 200
         rows = resp.json()["sessions"]
         match = next(r for r in rows if r["id"] == sid)
@@ -249,7 +246,7 @@ class TestListSessionsExposesNewFields:
 
     def test_unread_true_when_no_view_recorded(self, client, test_token, session_store):
         sid = _create_session(session_store, title="t", suffix="1")
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth(test_token))
+        resp = client.get("/api/chat/sessions", headers=auth(test_token))
         match = next(r for r in resp.json()["sessions"] if r["id"] == sid)
         assert match["unread"] is True
 
@@ -258,14 +255,14 @@ class TestListSessionsExposesNewFields:
         # mark_viewed BEFORE last_active changes; since no further mutations happen,
         # last_active <= last_viewed_at and unread should be false.
         session_store.mark_viewed(sid, ts="2099-01-01T00:00:00+00:00")
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth(test_token))
+        resp = client.get("/api/chat/sessions", headers=auth(test_token))
         match = next(r for r in resp.json()["sessions"] if r["id"] == sid)
         assert match["unread"] is False
 
     def test_superseded_filtered_by_default(self, client, test_token, session_store):
         sid = _create_session(session_store, title="t", suffix="1")
         new = session_store.compact_session(sid)
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth(test_token))
+        resp = client.get("/api/chat/sessions", headers=auth(test_token))
         ids = [r["id"] for r in resp.json()["sessions"]]
         assert new.id in ids
         assert sid not in ids
@@ -274,7 +271,7 @@ class TestListSessionsExposesNewFields:
         sid = _create_session(session_store, title="t", suffix="1")
         new = session_store.compact_session(sid)
         resp = client.get(
-            "/api/agents/test-agent/sessions?include_superseded=true",
+            "/api/chat/sessions?include_superseded=true",
             headers=auth(test_token),
         )
         ids = [r["id"] for r in resp.json()["sessions"]]

@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.webhook_store import WebhookStore
 
 
@@ -22,7 +22,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -35,8 +35,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -60,9 +59,8 @@ def server(agent_config, mock_adapter, tmp_path, token_store):
     webhook_store = WebhookStore(tmp_path / "webhooks.json")
     return HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
 
@@ -99,7 +97,7 @@ def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_ada
             try:
                 with client.stream(
                     "POST",
-                    "/api/agents/test-agent/chat",
+                    "/api/chat",
                     json={"message": "hello", "user_id": "alice"},
                     headers={"Authorization": f"Bearer {test_token}"},
                 ) as resp:
@@ -116,7 +114,7 @@ def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_ada
         _wait_for_any_active_chat(server)
 
         resp2 = client.post(
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             json={"message": "second", "user_id": "alice"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -140,7 +138,7 @@ def test_sequential_chats_for_same_user_both_run(client, mock_adapter, test_toke
         for _ in range(2):
             with client.stream(
                 "POST",
-                "/api/agents/test-agent/chat",
+                "/api/chat",
                 json={"message": "hi", "user_id": "bob"},
                 headers={"Authorization": f"Bearer {test_token}"},
             ) as resp:
@@ -157,7 +155,6 @@ def _make_session(mock_adapter, sid: str, user_id: str):
 
     session = Session(
         id=sid,
-        agent=mock_adapter.agent_name,
         source=SessionSource.INTERACTIVE.value,
         user_id=user_id,
     )
@@ -170,7 +167,7 @@ def _wait_for_active_chats(server, *session_ids, timeout=5.0):
     races the chat threads' registration on slow CI workers."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        live = {key[2] for key in server._active_chats}
+        live = {key[1] for key in server._active_chats}
         if all(sid in live for sid in session_ids):
             return
         time.sleep(0.02)
@@ -199,7 +196,7 @@ def _start_chat_in_thread(client, test_token, *, session_id: str, user_id: str, 
         try:
             with client.stream(
                 "POST",
-                "/api/agents/test-agent/chat",
+                "/api/chat",
                 json={"message": message, "user_id": user_id, "session_id": session_id},
                 headers={"Authorization": f"Bearer {test_token}"},
             ) as resp:
@@ -271,7 +268,7 @@ def test_same_session_double_send_still_409s(client, mock_adapter, test_token, s
         _wait_for_active_chats(server, "sess-X")
 
         resp2 = client.post(
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             json={"message": "second", "user_id": "alice", "session_id": "sess-X"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -311,7 +308,7 @@ def test_cancel_chat_routes_by_session(client, mock_adapter, test_token, server)
         _wait_for_active_chats(server, "sess-A", "sess-B")
 
         resp = client.post(
-            "/api/agents/test-agent/chat/cancel",
+            "/api/chat/cancel",
             json={"user_id": "alice", "session_id": "sess-A"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -328,7 +325,7 @@ def test_cancel_chat_routes_by_session(client, mock_adapter, test_token, server)
 def test_cancel_chat_requires_session_id(client, test_token):
     """Cancel without session_id is ambiguous under per-session keying — 400."""
     resp = client.post(
-        "/api/agents/test-agent/chat/cancel",
+        "/api/chat/cancel",
         json={"user_id": "alice"},
         headers={"Authorization": f"Bearer {test_token}"},
     )
@@ -358,7 +355,7 @@ def test_cancel_chat_sets_cooperative_cancel_event(client, mock_adapter, test_to
         assert not chat.cancel_event.is_set()
 
         resp = client.post(
-            "/api/agents/test-agent/chat/cancel",
+            "/api/chat/cancel",
             json={"user_id": "alice", "session_id": "sess-COOP"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -386,11 +383,11 @@ def test_status_returns_correct_session_busy(client, mock_adapter, test_token, s
         _wait_for_active_chats(server, "sess-A")
 
         resp_a = client.get(
-            "/api/agents/test-agent/status?user_id=alice&session_id=sess-A",
+            "/api/chat/status?user_id=alice&session_id=sess-A",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         resp_b = client.get(
-            "/api/agents/test-agent/status?user_id=alice&session_id=sess-B",
+            "/api/chat/status?user_id=alice&session_id=sess-B",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp_a.status_code == 200

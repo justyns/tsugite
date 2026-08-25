@@ -1,4 +1,4 @@
-"""GET/PUT /api/agents/{agent}/hooks: read, validate, and write the agent
+"""GET/PUT /api/hooks: read, validate, and write the agent
 workspace's .tsugite/hooks.yaml through the daemon (saves apply on the next
 hook firing - the loader reads the file fresh every time)."""
 
@@ -41,12 +41,11 @@ def token(tmp_path):
 @pytest.fixture
 def client(tmp_path, workspace, token):
     store, _raw = token
-    fake_adapter = SimpleNamespace(agent_config=SimpleNamespace(workspace_dir=workspace))
+    fake_adapter = SimpleNamespace(runtime=SimpleNamespace(workspace_dir=workspace))
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8586),
-        adapters={"smokeagent": fake_adapter},
+        adapter=fake_adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=store,
     )
     return TestClient(server.app)
@@ -57,11 +56,11 @@ def _auth(token):
 
 
 def test_requires_auth(client):
-    assert client.get("/api/agents/smokeagent/hooks").status_code == 401
+    assert client.get("/api/hooks").status_code == 401
 
 
 def test_get_missing_file_reports_empty(client, token, workspace):
-    resp = client.get("/api/agents/smokeagent/hooks", headers=_auth(token))
+    resp = client.get("/api/hooks", headers=_auth(token))
     assert resp.status_code == 200
     body = resp.json()
     assert body["exists"] is False
@@ -72,7 +71,7 @@ def test_get_missing_file_reports_empty(client, token, workspace):
 
 
 def test_put_validates_and_writes(client, token, workspace):
-    resp = client.put("/api/agents/smokeagent/hooks", json={"raw": VALID}, headers=_auth(token))
+    resp = client.put("/api/hooks", json={"raw": VALID}, headers=_auth(token))
     assert resp.status_code == 200
     body = resp.json()
     assert body["exists"] is True
@@ -83,7 +82,7 @@ def test_put_validates_and_writes(client, token, workspace):
 
 
 def test_put_rejects_bad_yaml_without_writing(client, token, workspace):
-    resp = client.put("/api/agents/smokeagent/hooks", json={"raw": "hooks: [unclosed"}, headers=_auth(token))
+    resp = client.put("/api/hooks", json={"raw": "hooks: [unclosed"}, headers=_auth(token))
     assert resp.status_code == 400
     assert "invalid YAML" in resp.json()["error"]
     assert not (workspace / ".tsugite" / "hooks.yaml").exists()
@@ -92,14 +91,14 @@ def test_put_rejects_bad_yaml_without_writing(client, token, workspace):
 def test_put_rejects_schema_violation(client, token, workspace):
     # shell hooks require `run`.
     bad = "hooks:\n  post_tool:\n    - name: broken\n"
-    resp = client.put("/api/agents/smokeagent/hooks", json={"raw": bad}, headers=_auth(token))
+    resp = client.put("/api/hooks", json={"raw": bad}, headers=_auth(token))
     assert resp.status_code == 400
     assert "run" in resp.json()["error"]
     assert not (workspace / ".tsugite" / "hooks.yaml").exists()
 
 
 def test_put_requires_top_level_hooks_key(client, token):
-    resp = client.put("/api/agents/smokeagent/hooks", json={"raw": "post_tool: []"}, headers=_auth(token))
+    resp = client.put("/api/hooks", json={"raw": "post_tool: []"}, headers=_auth(token))
     assert resp.status_code == 400
     assert "hooks" in resp.json()["error"]
 
@@ -107,7 +106,7 @@ def test_put_requires_top_level_hooks_key(client, token):
 def test_get_surfaces_parse_error_of_existing_file(client, token, workspace):
     (workspace / ".tsugite").mkdir()
     (workspace / ".tsugite" / "hooks.yaml").write_text("hooks:\n  post_tool:\n    - name: broken\n")
-    resp = client.get("/api/agents/smokeagent/hooks", headers=_auth(token))
+    resp = client.get("/api/hooks", headers=_auth(token))
     assert resp.status_code == 200
     body = resp.json()
     assert body["exists"] is True

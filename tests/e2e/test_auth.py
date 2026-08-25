@@ -61,13 +61,12 @@ def test_invalid_token_does_not_grant_lasting_access(page, base_url):
     assert page.locator('[data-testid="auth-gate"]').is_visible()
 
 
-def test_agents_reachable(authenticated_page, base_url, e2e_auth_token):
+def test_runtime_reachable(authenticated_page, base_url, e2e_auth_token):
     """Basic connectivity smoke: a booted, authed app can reach the daemon's
-    agent roster and finds the fixture's configured agent."""
-    resp = authenticated_page.request.get(f"{base_url}/api/agents", headers=auth_headers(e2e_auth_token))
+    runtime info and sees the fixture's configured agent file."""
+    resp = authenticated_page.request.get(f"{base_url}/api/runtime", headers=auth_headers(e2e_auth_token))
     assert resp.ok
-    names = [a["name"] for a in resp.json()["agents"]]
-    assert "test-agent" in names
+    assert resp.json()["agent_file"]
 
 
 @pytest.mark.parametrize("view", VIEWS)

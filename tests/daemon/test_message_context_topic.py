@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tests.history_helpers import seed_history_session
@@ -36,8 +36,8 @@ def adapter(tmp_path):
     (ws / "agent.md").write_text("---\nname: test-agent\n---\n\nHi.\n")
 
     store = SessionStore(tmp_path / "store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md"))
-    return _StubAdapter("test-agent", config, store)
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md"))
+    return _StubAdapter(config, store)
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def channel_context():
 
 
 def _seed_session(adapter, **metadata) -> str:
-    session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("alice")
     if metadata:
         adapter.session_store.set_metadata_bulk(session.id, metadata)
     return session.id
@@ -122,7 +122,7 @@ class TestCompactionTopic:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         adapter.session_store.set_metadata_bulk(session.id, {"topic": "focus this week is plugin sandboxing"})
 
         storage = seed_history_session(session.id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
@@ -166,7 +166,7 @@ class TestCompactionTopic:
         history_dir = tmp_path / "history"
         history_dir.mkdir()
 
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         # No topic set.
 
         storage = seed_history_session(session.id, agent="test-agent", model="anthropic:claude-sonnet-4-5")

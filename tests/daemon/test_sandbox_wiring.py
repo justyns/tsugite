@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from tsugite_daemon.adapters.base import resolve_sandbox_exec_options
-from tsugite_daemon.config import AgentConfig, DaemonConfig, SandboxSettings
+from tsugite_daemon.config import DaemonConfig, SandboxSettings
 from tsugite_sandbox import BubblewrapSandbox
 
 from tsugite.options import ExecutionOptions
@@ -254,27 +254,33 @@ class TestResolveWorkspaceDir:
 
 class TestGatewaySessionSandboxResolver:
     """The terminal resolver must honor a session's inherited sandbox_override, not
-    just the target agent's config - else a terminal opened for a sandboxed child
-    session (whose agent has sandbox off) would run on the host."""
+    just the daemon's own config - else a terminal opened for a sandboxed child
+    session would run on the host when the daemon default has sandbox off."""
 
-    def _gateway(self, tmp_path, agents):
+    def _gateway(self, tmp_path, sandbox=None):
         from tsugite_daemon.config import DaemonConfig
         from tsugite_daemon.gateway import Gateway
         from tsugite_daemon.session_store import SessionStore
 
-        gw = Gateway(DaemonConfig(state_dir=tmp_path, agents=agents))
+        gw = Gateway(
+            DaemonConfig(
+                state_dir=tmp_path,
+                default_workspace_dir=tmp_path,
+                default_agent_file="default",
+                sandbox=sandbox,
+            )
+        )
         gw._session_store = SessionStore(tmp_path / "s.json")
         return gw
 
-    def test_inherited_override_wins_over_disabled_agent(self, tmp_path):
-        from tsugite_daemon.config import AgentConfig
+    def test_inherited_override_wins_over_disabled_default(self, tmp_path):
         from tsugite_daemon.session_store import Session, SessionSource
 
-        gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
+        gw = self._gateway(tmp_path)
         gw._session_store.create_session(
             Session(
                 id="child",
-                agent="plain",  # agent config has sandbox OFF
+                # the daemon default has sandbox OFF
                 source=SessionSource.SPAWNED.value,
                 metadata={"sandbox_override": {"enabled": True, "allow_domains": ["github.com"], "no_network": False}},
             )
@@ -283,55 +289,48 @@ class TestGatewaySessionSandboxResolver:
         assert ctx is not None
         assert ctx.allow_domains == ["github.com"]
 
-    def test_agent_config_used_when_no_override(self, tmp_path):
-        from tsugite_daemon.config import AgentConfig
+    def test_daemon_sandbox_used_when_no_override(self, tmp_path):
         from tsugite_daemon.session_store import Session, SessionSource
 
-        gw = self._gateway(
-            tmp_path,
-            {"boxed": AgentConfig(workspace_dir=tmp_path, agent_file="default", sandbox=SandboxSettings(enabled=True))},
-        )
-        gw._session_store.create_session(Session(id="s", agent="boxed", source=SessionSource.BACKGROUND.value))
+        gw = self._gateway(tmp_path, sandbox=SandboxSettings(enabled=True))
+        gw._session_store.create_session(Session(id="s", source=SessionSource.BACKGROUND.value))
         assert gw._resolve_session_sandbox("s") is not None
 
     def test_none_when_neither(self, tmp_path):
-        from tsugite_daemon.config import AgentConfig
         from tsugite_daemon.session_store import Session, SessionSource
 
-        gw = self._gateway(tmp_path, {"plain": AgentConfig(workspace_dir=tmp_path, agent_file="default")})
-        gw._session_store.create_session(Session(id="s", agent="plain", source=SessionSource.BACKGROUND.value))
+        gw = self._gateway(tmp_path)
+        gw._session_store.create_session(Session(id="s", source=SessionSource.BACKGROUND.value))
         assert gw._resolve_session_sandbox("s") is None
 
 
 class TestSandboxStartupCheck:
-    def _config(self, tmp_path, **agent_sandboxes):
-        agents = {
-            name: AgentConfig(workspace_dir=tmp_path, agent_file="default", sandbox=sb)
-            for name, sb in agent_sandboxes.items()
-        }
-        return DaemonConfig(state_dir=tmp_path, agents=agents)
+    def _config(self, tmp_path, sandbox):
+        return DaemonConfig(
+            state_dir=tmp_path,
+            default_workspace_dir=tmp_path,
+            default_agent_file="default",
+            sandbox=sandbox,
+        )
 
     def test_raises_when_sandbox_enabled_and_bwrap_missing(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
-        config = self._config(tmp_path, boxed=SandboxSettings(enabled=True))
+        config = self._config(tmp_path, SandboxSettings(enabled=True))
         with pytest.raises(RuntimeError, match="bwrap"):
-            check_sandbox_prerequisites(config)
-        # The error should name the offending agent so the operator can fix it.
-        with pytest.raises(RuntimeError, match="boxed"):
             check_sandbox_prerequisites(config)
 
     def test_ok_when_bwrap_available(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: True))
-        config = self._config(tmp_path, boxed=SandboxSettings(enabled=True))
+        config = self._config(tmp_path, SandboxSettings(enabled=True))
         check_sandbox_prerequisites(config)  # must not raise
 
     def test_ok_when_no_sandbox_enabled(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
         monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
-        config = self._config(tmp_path, plain=SandboxSettings(enabled=False))
+        config = self._config(tmp_path, SandboxSettings(enabled=False))
         check_sandbox_prerequisites(config)  # disabled sandbox => no requirement

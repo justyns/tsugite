@@ -153,9 +153,7 @@ async def test_cmd_job_valid_session_anchors_there_no_extra_session(stub_orchest
     from tsugite_daemon.session_store import Session, SessionSource
 
     adapter, store = _real_adapter(tmp_path)
-    store.create_session(
-        Session(id="sess-existing", agent="default", source=SessionSource.INTERACTIVE.value, user_id="user-1")
-    )
+    store.create_session(Session(id="sess-existing", source=SessionSource.INTERACTIVE.value, user_id="user-1"))
     await cmd_job(adapter=adapter, user_id="user-1", prompt="x", session_id="sess-existing")
 
     assert stub_orchestrator.calls[-1]["parent_session_id"] == "sess-existing"

@@ -3,6 +3,7 @@
 import logging
 import secrets
 from dataclasses import asdict, dataclass
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WebhookEntry:
     token: str
-    agent: str
     source: str
     created_at: str = ""
 
@@ -37,15 +37,15 @@ class WebhookStore:
         self._webhooks: dict[str, WebhookEntry] = {}
         self._load()
 
-    def add(self, agent: str, source: str, token: str | None = None) -> WebhookEntry:
+    def add(self, source: str, token: str | None = None) -> WebhookEntry:
         if token is None:
             token = secrets.token_urlsafe(32)
         if token in self._webhooks:
             raise ValueError(f"Webhook token already exists: {token[:8]}...")
-        entry = WebhookEntry(token=token, agent=agent, source=source)
+        entry = WebhookEntry(token=token, source=source)
         self._webhooks[token] = entry
         self._storage.upsert(token, asdict(entry))
-        logger.info("Added webhook for agent '%s' source '%s'", agent, source)
+        logger.info("Added webhook for source '%s'", source)
         return entry
 
     def remove(self, token: str) -> None:
@@ -63,9 +63,10 @@ class WebhookStore:
 
     def _load(self):
         entries, migrating = self._storage.load_or_migrate(self._path, "webhooks")
+        valid_fields = {f.name for f in dataclass_fields(WebhookEntry)}
         for entry_data in entries:
             try:
-                entry = WebhookEntry(**entry_data)
+                entry = WebhookEntry(**{k: v for k, v in entry_data.items() if k in valid_fields})
             except TypeError as e:
                 logger.error("Skipping malformed webhook entry: %s", e)
                 continue

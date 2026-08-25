@@ -9,7 +9,7 @@ workspace files auto-attached; a front-matter declaration still resolves.
 from pathlib import Path
 
 from tsugite_daemon.adapters.base import BaseAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 
@@ -33,8 +33,8 @@ def _workspace_with_identity(tmp_path: Path) -> Path:
 
 
 def _adapter(ws: Path, agent_file: str) -> _StubAdapter:
-    config = AgentConfig(workspace_dir=ws, agent_file=agent_file)
-    return _StubAdapter("test-agent", config, SessionStore(ws.parent / "store.json"))
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=agent_file)
+    return _StubAdapter(config, SessionStore(ws.parent / "store.json"))
 
 
 def test_extends_none_agent_without_attachments_gets_nothing(tmp_path):

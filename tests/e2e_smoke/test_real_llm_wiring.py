@@ -33,7 +33,7 @@ def test_browser_send_message_gets_real_response(smoke_authenticated_page, smoke
     """
     page = smoke_authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
-    session = smoke_session_store.get_or_create_interactive(user_id, "smoke-agent")
+    session = smoke_session_store.get_or_create_interactive(user_id)
     _select_session(page, session.id)
 
     page.locator("textarea#message-input").fill("Reply with one short word.")
@@ -56,7 +56,7 @@ def test_direct_chat_endpoint_returns_real_response(smoke_base_url, smoke_auth_t
 
     headers = {"Authorization": f"Bearer {smoke_auth_token}"}
     with requests.post(
-        f"{smoke_base_url}/api/agents/smoke-agent/chat",
+        f"{smoke_base_url}/api/chat",
         json={"message": "Reply with one short word.", "user_id": "smoke-direct"},
         headers=headers,
         timeout=120,
@@ -86,7 +86,7 @@ def test_streaming_progress_events_reach_browser(smoke_authenticated_page, smoke
     """Real streaming: a progress bubble appears in the DOM during a real turn."""
     page = smoke_authenticated_page
     user_id = page.evaluate("Alpine.store('app').userId")
-    session = smoke_session_store.get_or_create_interactive(user_id, "smoke-agent")
+    session = smoke_session_store.get_or_create_interactive(user_id)
     _select_session(page, session.id)
 
     page.locator("textarea#message-input").fill("Reply with exactly: ok.")

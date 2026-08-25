@@ -13,13 +13,12 @@ from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, 
 
 @pytest.fixture
 def store(tmp_path):
-    return SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
+    return SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
 
 
 def _make_session(store, *, sid, agent="test-agent", source=SessionSource.BACKGROUND.value, metadata=None):
     session = Session(
         id=sid,
-        agent=agent,
         source=source,
         status=SessionStatus.COMPLETED.value,
         metadata=metadata or {},
@@ -34,7 +33,7 @@ def _populate_state(store, sid):
     store.suppress_skill(sid, "skill-b")
     store.set_reasoning_effort(sid, "high")
     store.set_model_override(sid, "openai:gpt-4o-mini")
-    store.begin_compaction("user1", "test-agent", session_id=sid)
+    store.begin_compaction("user1", session_id=sid)
     store.append_event(sid, {"type": "user_input", "timestamp": "2026-05-15T00:00:00Z", "text": "hi"})
     store.session_progress_summary(sid)  # primes _progress_cache + _event_count_cache
 
@@ -77,7 +76,7 @@ def test_per_session_state_lives_on_session_and_drops_with_it(store):
     assert store.get_suppressed_skills(session.id) == set()
     assert store.get_reasoning_effort(session.id) is None
     assert store.get_model_override(session.id) is None
-    assert store.is_compacting("user1", "test-agent", session_id=session.id) is False
+    assert store.is_compacting("user1", session_id=session.id) is False
 
 
 def test_prune_background_purges_derived_indexes(store):
@@ -101,7 +100,6 @@ def test_prune_schedule_purges_derived_indexes(store):
     for sid in keep_ids:
         session = Session(
             id=sid,
-            agent="test-agent",
             source=SessionSource.SCHEDULE.value,
             status=SessionStatus.COMPLETED.value,
             parent_id=parent.id,
@@ -110,7 +108,6 @@ def test_prune_schedule_purges_derived_indexes(store):
 
     leaked = Session(
         id="sched-old",
-        agent="test-agent",
         source=SessionSource.SCHEDULE.value,
         status=SessionStatus.COMPLETED.value,
         parent_id=parent.id,
@@ -122,7 +119,6 @@ def test_prune_schedule_purges_derived_indexes(store):
 
     overflow = Session(
         id="sched-new",
-        agent="test-agent",
         source=SessionSource.SCHEDULE.value,
         status=SessionStatus.COMPLETED.value,
         parent_id=parent.id,
@@ -137,8 +133,8 @@ def test_recover_stale_sessions_clears_compacting_on_restart(tmp_path):
     the in-memory lock didn't survive, so the flag would otherwise stick forever."""
     path = tmp_path / "session_store.json"
     first = SessionStore(path)
-    session = first.get_or_create_interactive("alice", "test-agent")
-    first.begin_compaction("alice", "test-agent", session_id=session.id)
+    session = first.get_or_create_interactive("alice")
+    first.begin_compaction("alice", session_id=session.id)
     assert first.get_session(session.id).compacting is True
 
     second = SessionStore(path)

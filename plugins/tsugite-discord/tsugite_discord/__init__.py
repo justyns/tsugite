@@ -11,7 +11,7 @@ from typing import NamedTuple, Optional
 import discord
 from discord.ext import commands
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, CompositeUIHandler, SSEBroadcastHandler
-from tsugite_daemon.config import AgentConfig, DiscordBotConfig
+from tsugite_daemon.config import DiscordBotConfig, RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 from tsugite.events import (
@@ -477,17 +477,16 @@ class DiscordInteractionBackend:
 
 
 class DiscordAdapter(BaseAdapter):
-    """Discord bot adapter tied to a specific agent."""
+    """Discord bot adapter running the daemon's configured agent."""
 
     def __init__(
         self,
         bot_config: DiscordBotConfig,
-        agent_name: str,
-        agent_config: AgentConfig,
+        runtime: RuntimeDefaults,
         session_store: "SessionStore",
         identity_map: dict[str, str] | None = None,
     ):
-        super().__init__(agent_name, agent_config, session_store, identity_map=identity_map)
+        super().__init__(runtime, session_store, identity_map=identity_map)
         self.bot_config = bot_config
         self.active_progress_handlers: list[DiscordProgressHandler] = []
 
@@ -508,15 +507,14 @@ class DiscordAdapter(BaseAdapter):
                     await self.bot.tree.sync()
                 synced = len(self.bot.tree.get_commands())
                 logger.info(
-                    "Discord bot '%s' logged in as %s (agent: %s, %d app commands synced)",
+                    "Discord bot '%s' logged in as %s (%d app commands synced)",
                     bot_config.name,
                     self.bot.user,
-                    agent_name,
                     synced,
                 )
             except Exception as e:
                 logger.error("Failed to sync app commands for '%s': %s", bot_config.name, e)
-                logger.info("Discord bot '%s' logged in as %s (agent: %s)", bot_config.name, self.bot.user, agent_name)
+                logger.info("Discord bot '%s' logged in as %s", bot_config.name, self.bot.user)
 
         @self.bot.event
         async def on_error(event_method, *args, **kwargs):
@@ -625,13 +623,10 @@ class DiscordAdapter(BaseAdapter):
             existing = self.session_store.find_by_thread(thread_id)
             if existing:
                 return existing
-            parent_session = self.session_store.get_or_create_interactive(
-                user_id, self.agent_name, source=SessionSource.DISCORD.value
-            )
+            parent_session = self.session_store.get_or_create_interactive(user_id, source=SessionSource.DISCORD.value)
             parent_channel_id = getattr(message.channel, "parent_id", None)
             thread_session = Session(
                 id="",
-                agent=self.agent_name,
                 source=SessionSource.DISCORD.value,
                 user_id=user_id,
                 parent_id=parent_session.id,
@@ -647,19 +642,16 @@ class DiscordAdapter(BaseAdapter):
         if not is_dm and message.guild:
             return self.session_store.get_or_create_channel_session(
                 channel_id=str(message.channel.id),
-                agent=self.agent_name,
                 user_id=user_id,
                 source=SessionSource.DISCORD.value,
             )
 
         if self.bot_config.session_name:
             return self.session_store.get_or_create_named_session(
-                user_id, self.agent_name, self.bot_config.session_name, source=SessionSource.DISCORD.value
+                user_id, self.bot_config.session_name, source=SessionSource.DISCORD.value
             )
 
-        return self.session_store.get_or_create_interactive(
-            user_id, self.agent_name, source=SessionSource.DISCORD.value
-        )
+        return self.session_store.get_or_create_interactive(user_id, source=SessionSource.DISCORD.value)
 
     @staticmethod
     def _channel_display_name(channel) -> str:
@@ -713,7 +705,6 @@ class DiscordAdapter(BaseAdapter):
         )
         custom_logger = SimpleNamespace(ui_handler=CompositeUIHandler(progress, sse_handler))
 
-        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import set_interaction_backend
 
         interaction_backend = DiscordInteractionBackend(
@@ -724,7 +715,6 @@ class DiscordAdapter(BaseAdapter):
         set_interaction_backend(interaction_backend)
         # Expose the adapter's registered name so a spawn/start-session from a
         # Discord run resolves to an agent that has a live daemon adapter.
-        set_current_daemon_agent(self.agent_name)
 
         await progress.start_typing_loop()
         self.active_progress_handlers.append(progress)

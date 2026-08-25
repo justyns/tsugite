@@ -11,7 +11,6 @@ from tsugite.agent_runner.helpers import (  # noqa: F401
     get_allowed_agents,
     get_allowed_secrets,
     get_current_agent,
-    get_current_daemon_agent,
     get_display_console,
     get_sandbox_context,
     get_ui_handler,
@@ -23,7 +22,6 @@ from tsugite.agent_runner.helpers import (  # noqa: F401
     set_allowed_agents,
     set_allowed_secrets,
     set_current_agent,
-    set_current_daemon_agent,
     set_sandbox_context,
 )
 from tsugite.agent_runner.metrics import StepMetrics, display_step_metrics  # noqa: F401
@@ -57,8 +55,6 @@ __all__ = [
     "get_agent_info",
     "get_current_agent",
     "set_current_agent",
-    "get_current_daemon_agent",
-    "set_current_daemon_agent",
     "clear_current_agent",
     "get_allowed_agents",
     "set_allowed_agents",

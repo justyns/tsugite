@@ -123,26 +123,37 @@ async def _send_webhook(config, message: str) -> dict:
 
 
 def check_sandbox_prerequisites(config: DaemonConfig) -> None:
-    """Fail closed if any agent enabled sandboxing but bwrap is unavailable.
+    """Fail closed if sandboxing is enabled but bwrap is unavailable.
 
     Run once at daemon startup so a misconfigured host surfaces immediately
     instead of every sandboxed turn failing (or, worse, running unsandboxed).
     """
     from tsugite.core.sandbox import sandbox_available
 
-    enabled = sorted(name for name, agent in config.agents.items() if agent.sandbox and agent.sandbox.enabled)
-    if enabled and not sandbox_available():
+    if config.sandbox and config.sandbox.enabled and not sandbox_available():
         raise RuntimeError(
-            f"Sandbox enabled for agents {enabled} but 'bwrap' was not found on PATH. "
-            "Install bubblewrap, or set sandbox.enabled: false for these agents. "
+            "Sandbox enabled but 'bwrap' was not found on PATH. "
+            "Install bubblewrap, or set sandbox.enabled: false. "
             "(Sandboxing is Linux-only and needs user-namespace support.)"
         )
 
 
 # DaemonConfig sections that only take effect at boot: a change to any of them is
-# reported as restart_required. The rest (agents, notification_channels,
+# reported as restart_required. The rest (runtime defaults, notification_channels,
 # identity_links) are hot-reconciled. Exported so the coverage test checks the same
 # set reload_config uses instead of a hand-maintained copy.
+RUNTIME_DEFAULT_FIELDS = (
+    "default_workspace_dir",
+    "default_agent_file",
+    "default_model",
+    "default_compaction_model",
+    "default_context_limit",
+    "default_max_turns",
+    "timezone",
+    "auto_compact",
+)
+"""DaemonConfig fields that feed RuntimeDefaults; hot-reconciled on reload."""
+
 BOOT_ONLY_SECTIONS = (
     "http",
     "state_dir",
@@ -206,23 +217,27 @@ class Gateway:
         }
         self._identity_map = identity_map
 
-        # Build per-agent context limits
-        context_limits: dict[str, int] = {}
-        for agent_name, agent_config in self.config.agents.items():
-            context_limit = self._resolve_context_limit(agent_name, agent_config)
-            agent_config.context_limit = context_limit
-            context_limits[agent_name] = context_limit
+        runtime = self.config.runtime
+        runtime.context_limit = self._resolve_context_limit(runtime)
 
         # Single global session store. UI events live in the same per-session
         # JSONL as conversation history (XDG data dir, not the daemon state dir).
         session_store = SessionStore(
             self.config.state_dir / "session_store.json",
-            context_limits=context_limits,
+            default_context_limit=runtime.context_limit,
         )
         self._session_store = session_store
 
         tasks = []
-        http_adapters = {}
+        http_adapter = None
+
+        agent_path = resolve_agent_path(runtime.agent_file, runtime.workspace_dir)
+        if not agent_path:
+            raise ValueError(
+                f"Agent file '{runtime.agent_file}' not found. "
+                f"Searched in workspace '{runtime.workspace_dir}' and standard paths."
+            )
+        logger.info("Daemon runtime using agent: %s", agent_path)
 
         if self.config.discord_bots:
             try:
@@ -234,24 +249,10 @@ class Gateway:
                 ) from e
 
             for bot_config in self.config.discord_bots:
-                agent_name = bot_config.agent
-                if agent_name not in self.config.agents:
-                    raise ValueError(f"Discord bot '{bot_config.name}' references unknown agent '{agent_name}'")
-
-                agent_config = self.config.agents[agent_name]
-                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
-                if not agent_path:
-                    raise ValueError(
-                        f"Agent file '{agent_config.agent_file}' not found for bot '{bot_config.name}'. "
-                        f"Searched in workspace '{agent_config.workspace_dir}' and standard paths."
-                    )
-                logger.info("Bot '%s' using agent: %s", bot_config.name, agent_path)
-
                 self.adapters.append(
                     DiscordAdapter(
                         bot_config=bot_config,
-                        agent_name=agent_name,
-                        agent_config=agent_config,
+                        runtime=runtime,
                         session_store=session_store,
                         identity_map=identity_map,
                     )
@@ -265,18 +266,9 @@ class Gateway:
                     "HTTP support requires starlette and uvicorn. Install with: pip install tsugite-cli[daemon]"
                 ) from e
 
-            for agent_name, agent_config in self.config.agents.items():
-                agent_path = resolve_agent_path(agent_config.agent_file, agent_config.workspace_dir)
-                if not agent_path:
-                    logger.warning("Skipping HTTP agent '%s': agent file not found", agent_name)
-                    continue
-                logger.info("HTTP agent '%s' using agent: %s", agent_name, agent_path)
+            http_adapter = HTTPAgentAdapter(runtime, session_store, identity_map=identity_map)
 
-                http_adapters[agent_name] = HTTPAgentAdapter(
-                    agent_name, agent_config, session_store, identity_map=identity_map
-                )
-
-            if http_adapters:
+            if http_adapter:
                 from tsugite_daemon.auth import TOKENS_FILENAME, TokenStore
                 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -293,16 +285,14 @@ class Gateway:
 
                 self._http_server = HTTPServer(
                     self.config.http,
-                    http_adapters,
+                    http_adapter,
                     webhook_store,
-                    self.config.agents,
                     gateway=self,
                     token_store=self._token_store,
                 )
 
-                # Wire up event_bus on adapters so they can broadcast compaction state
-                for adapter in http_adapters.values():
-                    adapter.event_bus = self._http_server.event_bus
+                # Wire up event_bus on the adapter so it can broadcast compaction state
+                http_adapter.event_bus = self._http_server.event_bus
 
                 # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
                 try:
@@ -324,13 +314,13 @@ class Gateway:
         # Collect adapter start tasks
         tasks.extend(adapter.start() for adapter in self.adapters)
 
-        # Start scheduler (requires HTTP adapters to execute agents)
-        if http_adapters:
+        # Start scheduler (requires the HTTP adapter to execute runs)
+        if http_adapter:
             from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
 
             schedules_path = self.config.state_dir / "schedules.json"
             self._scheduler_adapter = SchedulerAdapter(
-                http_adapters,
+                http_adapter,
                 schedules_path,
                 self.config.notification_channels,
                 identity_map,
@@ -345,8 +335,7 @@ class Gateway:
             from tsugite.tools.schedule import set_scheduler
 
             channel_names = set(self.config.notification_channels.keys())
-            agent_names = set(http_adapters.keys())
-            set_scheduler(self._scheduler_adapter.scheduler, asyncio.get_running_loop(), channel_names, agent_names)
+            set_scheduler(self._scheduler_adapter.scheduler, asyncio.get_running_loop(), channel_names)
 
             logger.info("Scheduler enabled (schedules: %s)", schedules_path)
 
@@ -360,7 +349,7 @@ class Gateway:
             event_bus = self._http_server.event_bus if self._http_server else None
             self._session_runner = SessionRunner(
                 session_store,
-                http_adapters,
+                http_adapter,
                 event_bus=event_bus,
                 notification_channels=self.config.notification_channels,
             )
@@ -383,11 +372,10 @@ class Gateway:
             if self._http_server:
                 self._http_server.terminal_store = self._terminal_store
                 self._http_server.pty_manager = self._pty_manager
-            # Expose to adapters so the /run slash command can reach them.
-            for adapter in http_adapters.values():
-                adapter.terminal_store = self._terminal_store
-                adapter.pty_manager = self._pty_manager
-                adapter.terminal_state_change_callback = terminal_state_change_cb
+            # Expose to the adapter so the /run slash command can reach them.
+            http_adapter.terminal_store = self._terminal_store
+            http_adapter.pty_manager = self._pty_manager
+            http_adapter.terminal_state_change_callback = terminal_state_change_cb
 
             # Expose the same runtime to the agent-facing @terminal tools.
             from tsugite_pty.tools import set_terminal_runtime
@@ -416,19 +404,13 @@ class Gateway:
                 self._scheduler_adapter.set_session_runner(self._session_runner)
             logger.info("Session runner + Jobs orchestrator enabled")
 
-        # Start compaction scheduler for agents with auto_compact config
-        agents_with_auto_compact = {
-            name: cfg for name, cfg in self.config.agents.items() if cfg.auto_compact and cfg.auto_compact.schedule
-        }
-        if agents_with_auto_compact and http_adapters:
+        # Start compaction scheduler when auto_compact is configured
+        if runtime.auto_compact and runtime.auto_compact.schedule and http_adapter:
             from tsugite_daemon.compaction_scheduler import CompactionScheduler
 
-            self._compaction_scheduler = CompactionScheduler(agents_with_auto_compact, session_store, http_adapters)
+            self._compaction_scheduler = CompactionScheduler(runtime, session_store, http_adapter)
             tasks.append(self._compaction_scheduler.start())
-            logger.info(
-                "Compaction scheduler enabled for %d agent(s)",
-                len(agents_with_auto_compact),
-            )
+            logger.info("Compaction scheduler enabled (%s)", runtime.auto_compact.schedule)
 
         # Load adapter plugins
         from tsugite.plugins import load_adapter_plugins
@@ -443,7 +425,7 @@ class Gateway:
             plugin_config=self.config.plugins,
             session_store=session_store,
             identity_map=identity_map,
-            agents_config=self.config.agents,
+            runtime=runtime,
         )
         for info, adapter in plugin_results:
             # A plugin whose adapter is disabled or failed loses its page too: it
@@ -562,19 +544,18 @@ class Gateway:
             session = store.get_session(session_id)
         except Exception:
             return None
-        agent_cfg = self.config.agents.get(getattr(session, "agent", None))
         # Prefer an inherited override stamped on the session (a sandboxed parent's
-        # policy) over the target agent's own config, mirroring the chokepoint - else
-        # a terminal opened for a sandboxed child session whose agent has sandbox
-        # disabled would run on the host.
+        # policy) over the daemon default, mirroring the chokepoint - else a terminal
+        # opened for a sandboxed child session would run on the host when the daemon
+        # default has sandbox disabled.
         override = (getattr(session, "metadata", None) or {}).get("sandbox_override")
         if isinstance(override, dict):
             sb = SandboxSettings.model_validate(override)
         else:
-            sb = getattr(agent_cfg, "sandbox", None)
+            sb = self.config.sandbox
         if sb is None or not sb.enabled:
             return None
-        workspace = getattr(session, "workspace_override", None) or (agent_cfg.workspace_dir if agent_cfg else None)
+        workspace = getattr(session, "workspace_override", None) or self.config.default_workspace_dir
         return SandboxContext(
             allow_domains=list(sb.allow_domains),
             no_network=sb.no_network,
@@ -585,78 +566,53 @@ class Gateway:
         )
 
     @staticmethod
-    def _resolve_context_limit(agent_name: str, agent_config) -> int:
-        """The effective context limit for an agent: explicit config, else
-        auto-detected from the model, else the daemon default. Applied to the
-        config object at boot AND on reload - reload must enrich the freshly
-        loaded configs the same way, or the diff sees every agent as changed
-        and hot-swaps enriched configs for unenriched ones."""
+    def _resolve_context_limit(runtime) -> int:
+        """The effective default context limit: explicit config, else
+        auto-detected from the model, else the built-in default."""
         default_context_limit = 128000
-        if agent_config.context_limit:
-            return agent_config.context_limit
-        if agent_config.model:
+        if runtime.context_limit:
+            return runtime.context_limit
+        if runtime.model:
             from tsugite_daemon.memory import get_context_limit
 
-            limit = get_context_limit(agent_config.model, fallback=default_context_limit)
-            logger.info("[%s] Auto-detected context limit: %d tokens", agent_name, limit)
+            limit = get_context_limit(runtime.model, fallback=default_context_limit)
+            logger.info("Auto-detected context limit: %d tokens", limit)
             return limit
         return default_context_limit
 
     async def reload_config(self) -> dict:
         """Re-read the daemon YAML and hot-apply what can be applied at runtime.
 
-        Reconciled live: the HTTP agent set (added/removed agents; changed agent
-        configs hot-swap on the adapter, applying on each agent's NEXT run),
-        notification channels, and identity links (the map is mutated in place -
-        every adapter holds a reference). Boot-only sections (http, state_dir,
-        discord_bots, plugins, sandbox, logging) are compared and reported under
-        restart_required instead of silently ignored.
+        Reconciled live: the runtime defaults (hot-swapped on the adapter, applying
+        on its NEXT run), notification channels, and identity links (the map is
+        mutated in place - every adapter holds a reference). Boot-only sections
+        (http, state_dir, discord_bots, plugins, sandbox, logging) are compared and
+        reported under restart_required instead of silently ignored.
         """
         new = load_daemon_config(self.config_path)
-        result: dict = {"added": [], "removed": [], "updated": [], "skipped": [], "restart_required": []}
+        result: dict = {"updated": [], "restart_required": []}
 
-        # Enrich the fresh configs exactly like start() does, so the diff below
-        # compares like with like, and the session store learns new limits.
-        for name, cfg in new.agents.items():
-            cfg.context_limit = self._resolve_context_limit(name, cfg)
-            if self._session_store is not None:
-                self._session_store.update_context_limit(name, cfg.context_limit)
+        # Keep the session store's default limit in step with the reloaded config.
+        runtime = new.runtime
+        runtime.context_limit = self._resolve_context_limit(runtime)
+        if self._session_store is not None:
+            self._session_store.update_context_limit(runtime.context_limit)
 
-        # Every DaemonConfig section is hot-reconciled (agents, notification_channels,
-        # identity_links) or boot-only (BOOT_ONLY_SECTIONS); a coverage test asserts
-        # none is silently omitted (see test_config_reload).
+        # Every DaemonConfig section is hot-reconciled (runtime defaults,
+        # notification_channels, identity_links) or boot-only (BOOT_ONLY_SECTIONS); a
+        # coverage test asserts none is silently omitted (see test_config_reload).
         result["restart_required"] = [
             name for name in BOOT_ONLY_SECTIONS if getattr(self.config, name) != getattr(new, name)
         ]
 
-        if self._http_server:
-            from tsugite_daemon.adapters.http import HTTPAgentAdapter
+        if self._http_server and self._http_server.adapter is not None:
+            # BaseAdapter reads its runtime per run, so this applies on the next turn.
+            if self._http_server.adapter.runtime != runtime:
+                self._http_server.adapter.runtime = runtime
+                result["updated"].append("runtime")
 
-            adapters = self._http_server.adapters
-            for name, cfg in new.agents.items():
-                if name not in adapters:
-                    if not resolve_agent_path(cfg.agent_file, cfg.workspace_dir):
-                        logger.warning("Reload: skipping agent '%s': agent file not found", name)
-                        result["skipped"].append(name)
-                        continue
-                    adapter = HTTPAgentAdapter(name, cfg, self._session_store, identity_map=self._identity_map)
-                    adapter.event_bus = self._http_server.event_bus
-                    adapters[name] = adapter
-                    result["added"].append(name)
-                elif self.config.agents.get(name) != cfg:
-                    # Hot-swap the config object; BaseAdapter reads agent_config
-                    # per run, so this applies on the agent's next turn.
-                    adapters[name].agent_config = cfg
-                    result["updated"].append(name)
-            for name in list(adapters):
-                if name not in new.agents:
-                    adapters.pop(name)
-                    result["removed"].append(name)
-
-        # The HTTP server holds config.agents BY REFERENCE (agent_configs);
-        # mutate in place so both views stay coherent.
-        self.config.agents.clear()
-        self.config.agents.update(new.agents)
+        for field in RUNTIME_DEFAULT_FIELDS:
+            setattr(self.config, field, getattr(new, field))
         self.config.notification_channels = new.notification_channels
         self.config.identity_links = new.identity_links
         self._identity_map.clear()
@@ -665,9 +621,7 @@ class Gateway:
         )
 
         logger.info(
-            "Config reloaded: +%d agents, -%d, ~%d%s",
-            len(result["added"]),
-            len(result["removed"]),
+            "Config reloaded: ~%d%s",
             len(result["updated"]),
             f" (restart required for: {', '.join(result['restart_required'])})" if result["restart_required"] else "",
         )

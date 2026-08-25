@@ -9,13 +9,14 @@ which is duck-typed + error-isolated so one misbehaving plugin can't abort start
 """
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
-from tsugite_daemon.config import HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.plugin_wiring import attach_plugin_executors, attach_plugin_http
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -73,9 +74,8 @@ def test_token(token_store):
 def server(tmp_path, token_store):
     return HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={},
+        adapter=SimpleNamespace(runtime=RuntimeDefaults(workspace_dir=tmp_path, agent_file="default")),
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
 
@@ -116,8 +116,8 @@ def test_existing_daemon_routes_unaffected(server, test_token):
     client = TestClient(server.app)
     # Public health still open; authed core route still guarded + reachable with a token.
     assert client.get("/api/health").status_code == 200
-    assert client.get("/api/agents").status_code == 401
-    assert client.get("/api/agents", headers={"Authorization": f"Bearer {test_token}"}).status_code == 200
+    assert client.get("/api/runtime").status_code == 401
+    assert client.get("/api/runtime", headers={"Authorization": f"Bearer {test_token}"}).status_code == 200
 
 
 def test_public_and_authed_coexist_under_same_plugin(server, test_token):

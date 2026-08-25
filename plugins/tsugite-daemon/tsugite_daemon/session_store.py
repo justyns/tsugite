@@ -24,6 +24,9 @@ from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
 logger = logging.getLogger(__name__)
 
 
+SESSION_ID_LABEL = "session"
+"""Readable label baked into generated session ids."""
+
 SESSION_END_EVENT_TYPES = frozenset(
     {"session_complete", "session_error", "session_cancelled", "final_result", "error", "cancelled", "session_end"}
 )
@@ -212,7 +215,6 @@ FINISHED_STATUSES = (SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.valu
 @dataclass
 class Session:
     id: str
-    agent: str
     source: str = SessionSource.INTERACTIVE.value
     status: str = SessionStatus.ACTIVE.value
     parent_id: Optional[str] = None
@@ -261,7 +263,7 @@ class Session:
     # can finalize the orphaned turn (see _recover_stale_sessions).
     turn_in_flight: bool = False
     # Provider-reported context window for this session's model. None until the
-    # first turn reports it; consumers fall back to the agent-wide default via
+    # first turn reports it; consumers fall back to the daemon-wide default via
     # SessionStore.get_session_context_limit. Per-session so a compact-model
     # call (or any other secondary-model side effect) can't clobber the value
     # other sessions are reading.
@@ -338,27 +340,28 @@ class SessionStore:
     def __init__(
         self,
         store_path: Path,
-        context_limits: Optional[dict[str, int]] = None,
+        default_context_limit: int = DEFAULT_CONTEXT_LIMIT,
     ):
         self._path = store_path  # legacy JSON location; one-time migration source
         self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
-        # Per-agent context limits for compaction
-        self._context_limits: dict[str, int] = context_limits or {}
+        # Default context limit for compaction; sessions that report their own
+        # window override it via Session.context_limit.
+        self._default_context_limit = default_context_limit
 
         # Index: platform_thread_id -> session_id for fast thread lookup
         self._thread_index: dict[str, str] = {}
 
-        # Index: (channel_id, agent) -> session_id for channel session lookup
-        self._channel_index: dict[tuple[str, str], str] = {}
+        # Index: channel_id -> session_id for channel session lookup
+        self._channel_index: dict[str, str] = {}
 
-        # Per-(user_id, agent) compaction synchronization. Event is unset while
-        # compaction is in progress, set when done. Per-session compacting state
-        # is stored on Session itself (Session.compacting); this map only gates
-        # concurrent begin_compaction calls.
-        self._compaction_events: dict[tuple[str, str], threading.Event] = {}
+        # Per-user compaction synchronization. Event is unset while compaction is
+        # in progress, set when done. Per-session compacting state is stored on
+        # Session itself (Session.compacting); this map only gates concurrent
+        # begin_compaction calls.
+        self._compaction_events: dict[str, threading.Event] = {}
 
         # Fired with the session id after each turn ends, outside the lock.
         self._on_turn_end: Optional[Callable[[str], None]] = None
@@ -384,18 +387,18 @@ class SessionStore:
 
     # ── Context limit management ──
 
-    def get_context_limit(self, agent: str) -> int:
-        return self._context_limits.get(agent, DEFAULT_CONTEXT_LIMIT)
+    def get_context_limit(self) -> int:
+        return self._default_context_limit
 
-    def get_compaction_threshold(self, agent: str) -> int:
-        return int(self.get_context_limit(agent) * 0.8)
+    def get_compaction_threshold(self) -> int:
+        return int(self.get_context_limit() * 0.8)
 
-    def update_context_limit(self, agent: str, limit: int) -> None:
-        self._context_limits[agent] = limit
+    def update_context_limit(self, limit: int) -> None:
+        self._default_context_limit = limit
 
     def get_session_context_limit(self, session_id: str) -> int:
         """Return the session's tracked context window, falling back to the
-        agent-wide default when the session hasn't completed a turn yet.
+        daemon-wide default when the session hasn't completed a turn yet.
         """
         with self._lock:
             session = self._sessions.get(session_id)
@@ -403,7 +406,7 @@ class SessionStore:
                 return DEFAULT_CONTEXT_LIMIT
             if session.context_limit is not None:
                 return session.context_limit
-            return self._context_limits.get(session.agent, DEFAULT_CONTEXT_LIMIT)
+            return self._default_context_limit
 
     def update_session_context_limit(self, session_id: str, limit: int) -> None:
         with self._lock:
@@ -422,7 +425,7 @@ class SessionStore:
 
     # ── Compaction locking ──
 
-    def begin_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> bool:
+    def begin_compaction(self, user_id: str, session_id: str | None = None) -> bool:
         """Try to start compaction. Returns True if this caller should compact.
 
         If another caller is already compacting this session, returns False.
@@ -430,7 +433,7 @@ class SessionStore:
         is also scoped via Session.compacting.
         """
         with self._lock:
-            key = (user_id, agent)
+            key = user_id
             if key in self._compaction_events:
                 return False
             self._compaction_events[key] = threading.Event()
@@ -441,10 +444,10 @@ class SessionStore:
                     self._persist(session)
             return True
 
-    def end_compaction(self, user_id: str, agent: str, session_id: str | None = None) -> None:
+    def end_compaction(self, user_id: str, session_id: str | None = None) -> None:
         """Signal that compaction is complete. Wakes all waiters."""
         with self._lock:
-            key = (user_id, agent)
+            key = user_id
             event = self._compaction_events.pop(key, None)
             if session_id:
                 session = self._sessions.get(session_id)
@@ -454,25 +457,25 @@ class SessionStore:
         if event:
             event.set()
 
-    def wait_for_compaction(self, user_id: str, agent: str, timeout: float = 300) -> bool:
+    def wait_for_compaction(self, user_id: str, timeout: float = 300) -> bool:
         """Block until an in-progress compaction finishes. Returns True if done, False on timeout."""
         with self._lock:
-            event = self._compaction_events.get((user_id, agent))
+            event = self._compaction_events.get(user_id)
         if event is None:
             return True
         return event.wait(timeout=timeout)
 
-    def is_compacting(self, user_id: str, agent: str, session_id: str | None = None) -> bool:
+    def is_compacting(self, user_id: str, session_id: str | None = None) -> bool:
         """Check if a session is currently being compacted.
 
         With session_id: per-session answer from Session.compacting.
-        Without: per-(user, agent) lock state.
+        Without: per-user lock state.
         """
         with self._lock:
             if session_id is not None:
                 session = self._sessions.get(session_id)
                 return bool(session and session.compacting)
-            return (user_id, agent) in self._compaction_events
+            return user_id in self._compaction_events
 
     # ── Per-session skill / model / effort state (lives on Session) ──
 
@@ -532,12 +535,11 @@ class SessionStore:
             session = self._sessions.get(session_id)
             return session.reasoning_effort if session else None
 
-    def freeze_session_models_to_current(self, agent: str, current_model: str | None) -> None:
-        """Pin every active, non-superseded session for `agent` that doesn't
-        already have a `model_override` to `current_model`. Used when the agent
-        default model is about to change, so existing sessions stay on whatever
-        model they were resolving to instead of silently switching on their
-        next turn.
+    def freeze_session_models_to_current(self, current_model: str | None) -> None:
+        """Pin every active, non-superseded session without a `model_override`
+        to `current_model`. Used when the daemon default model is about to
+        change, so existing sessions stay on whatever model they were resolving
+        to instead of silently switching on their next turn.
 
         No-op when `current_model` is falsy (nothing to pin to).
         """
@@ -546,8 +548,6 @@ class SessionStore:
         with self._lock:
             changed = []
             for session in self._sessions.values():
-                if session.agent != agent:
-                    continue
                 if session.status in FINISHED_STATUSES:
                     continue
                 if session.superseded_by:
@@ -570,24 +570,13 @@ class SessionStore:
             session = self._sessions.get(session_id)
             return session.model_override if session else None
 
-    def set_agent_override(self, session_id: str, value: str | None) -> None:
-        """Update the agent associated with a session.
-
-        Unlike model/effort, the agent is stored on the Session itself (it
-        determines which adapter handles future turns), so we mutate the
-        session record directly. Returns silently if the session is unknown.
-
-        TODO: We're allowing changing the agent, but I'm not sure if that's going to just
-              confuse the llm in the middle of a session?  Will need to test.
-        """
+    def set_session_context_limit(self, session_id: str, limit: int | None) -> None:
+        """Pin this session's context window; None falls back to the daemon default."""
         with self._lock:
             session = self._sessions.get(session_id)
-            if not session or not value:
-                return
-            if session.agent == value:
-                return
-            session.agent = value
-            self._persist(session)
+            if session:
+                session.context_limit = limit
+                self._persist(session)
 
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
@@ -611,83 +600,67 @@ class SessionStore:
 
     # ── Interactive session management ──
 
-    def get_or_create_interactive(
-        self, user_id: str, agent: str, source: str = SessionSource.INTERACTIVE.value
-    ) -> Session:
+    def get_or_create_interactive(self, user_id: str, source: str = SessionSource.INTERACTIVE.value) -> Session:
         """Return the user's primary session, or create a fresh default one.
 
         `source` stamps only newly created sessions; an existing primary keeps
         the source it was created with.
         """
-        return self.find_default_session(user_id, agent) or self.create_default_session(user_id, agent, source=source)
+        return self.find_default_session(user_id) or self.create_default_session(user_id, source=source)
 
-    def default_primary_ids(self, agent: str) -> dict:
-        """Return {user_id: session_id} for all primary sessions for this agent."""
+    def _live_sessions_locked(self, user_id: Optional[str] = None):
+        """Every session that is still routable: not finished, not superseded,
+        optionally scoped to one user. Caller must hold self._lock."""
+        for s in self._sessions.values():
+            if user_id is not None and s.user_id != user_id:
+                continue
+            if s.superseded_by is not None or s.status in FINISHED_STATUSES:
+                continue
+            yield s
+
+    @staticmethod
+    def _latest(sessions) -> Optional[Session]:
+        return max(sessions, key=lambda s: s.last_active, default=None)
+
+    def default_primary_ids(self) -> dict:
+        """Return {user_id: session_id} for all primary sessions."""
         with self._lock:
-            return {
-                s.user_id: s.id
-                for s in self._sessions.values()
-                if s.agent == agent
-                and s.user_id
-                and s.is_primary
-                and s.superseded_by is None
-                and s.status not in FINISHED_STATUSES
-            }
+            return {s.user_id: s.id for s in self._live_sessions_locked() if s.user_id and s.is_primary}
 
-    def _find_by_metadata_locked(self, user_id: str, agent: str, key: str, value: str) -> Optional[Session]:
-        candidates = [
-            s
-            for s in self._sessions.values()
-            if s.user_id == user_id
-            and s.agent == agent
-            and s.superseded_by is None
-            and s.status not in FINISHED_STATUSES
-            and s.metadata.get(key) == value
-        ]
-        return max(candidates, key=lambda s: s.last_active, default=None)
+    def _find_by_metadata_locked(self, user_id: str, key: str, value: str) -> Optional[Session]:
+        return self._latest(s for s in self._live_sessions_locked(user_id) if s.metadata.get(key) == value)
 
-    def _find_named_session_locked(self, user_id: str, agent: str, name: str) -> Optional[Session]:
-        return self._find_by_metadata_locked(user_id, agent, METADATA_SESSION_NAME, name)
+    def _find_named_session_locked(self, user_id: str, name: str) -> Optional[Session]:
+        return self._find_by_metadata_locked(user_id, METADATA_SESSION_NAME, name)
 
-    def find_named_session(self, user_id: str, agent: str, name: str) -> Optional[Session]:
+    def find_named_session(self, user_id: str, name: str) -> Optional[Session]:
         """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
         with self._lock:
-            return self._find_named_session_locked(user_id, agent, name)
+            return self._find_named_session_locked(user_id, name)
 
-    def find_incident_session(self, user_id: str, agent: str, incident_key: str) -> Optional[Session]:
+    def find_incident_session(self, user_id: str, incident_key: str) -> Optional[Session]:
         with self._lock:
-            return self._find_by_metadata_locked(user_id, agent, METADATA_INCIDENT_KEY, incident_key)
+            return self._find_by_metadata_locked(user_id, METADATA_INCIDENT_KEY, incident_key)
 
-    def _find_primary_session_locked(self, user_id: str, agent: str) -> Optional[Session]:
+    def _find_primary_session_locked(self, user_id: str) -> Optional[Session]:
         """Lock-held variant of find_primary_session. Caller must hold self._lock."""
-        candidates = [
-            s
-            for s in self._sessions.values()
-            if s.user_id == user_id
-            and s.agent == agent
-            and s.superseded_by is None
-            and s.status not in FINISHED_STATUSES
-            and s.is_primary
-        ]
-        return max(candidates, key=lambda s: s.last_active, default=None)
+        return self._latest(s for s in self._live_sessions_locked(user_id) if s.is_primary)
 
-    def find_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
-        """Return the user's primary session for this agent, or None."""
+    def find_primary_session(self, user_id: str) -> Optional[Session]:
+        """Return the user's primary session, or None."""
         with self._lock:
-            return self._find_primary_session_locked(user_id, agent)
+            return self._find_primary_session_locked(user_id)
 
-    def find_default_session(self, user_id: str, agent: str) -> Optional[Session]:
+    def find_default_session(self, user_id: str) -> Optional[Session]:
         """Canonical lookup for where a default request should land."""
-        return self.find_primary_session(user_id, agent)
+        return self.find_primary_session(user_id)
 
-    def _demote_primaries_locked(
-        self, user_id: str, agent: str, *, except_id: Optional[str] = None
-    ) -> Optional[Session]:
-        """Clear primary flag from all (user, agent) sessions except `except_id`. Returns the last one cleared.
+    def _demote_primaries_locked(self, user_id: str, *, except_id: Optional[str] = None) -> Optional[Session]:
+        """Clear primary flag from all of the user's sessions except `except_id`. Returns the last one cleared.
         Persists every demoted session itself, so callers only persist their own target."""
         cleared: Optional[Session] = None
         for s in self._sessions.values():
-            if s.user_id == user_id and s.agent == agent and s.id != except_id and s.is_primary:
+            if s.user_id == user_id and s.id != except_id and s.is_primary:
                 s.metadata.pop(METADATA_PRIMARY_FLAG, None)
                 self._persist(s)
                 cleared = s
@@ -696,18 +669,16 @@ class SessionStore:
     def create_default_session(
         self,
         user_id: str,
-        agent: str,
         *,
         title: Optional[str] = None,
         source: str = SessionSource.INTERACTIVE.value,
     ) -> Session:
         """Create a fresh interactive session and mark it primary."""
         with self._lock:
-            conv_id = generate_session_id(agent)
-            self._demote_primaries_locked(user_id, agent)
+            conv_id = generate_session_id(SESSION_ID_LABEL)
+            self._demote_primaries_locked(user_id)
             session = Session(
                 id=conv_id,
-                agent=agent,
                 source=source,
                 user_id=user_id,
                 title=title,
@@ -718,7 +689,7 @@ class SessionStore:
             return session
 
     def set_primary_session(self, session_id: str) -> Session:
-        """Mark `session_id` as primary, demoting any prior primary for the same (user, agent)."""
+        """Mark `session_id` as primary, demoting any prior primary for the same user."""
         with self._lock:
             if session_id not in self._sessions:
                 raise ValueError(f"Session '{session_id}' not found")
@@ -727,33 +698,32 @@ class SessionStore:
                 raise ValueError(f"Cannot promote finished session '{session_id}' to primary")
             if target.superseded_by:
                 raise ValueError(f"Cannot promote superseded session '{session_id}' to primary")
-            self._demote_primaries_locked(target.user_id, target.agent, except_id=target.id)
+            self._demote_primaries_locked(target.user_id, except_id=target.id)
             target.metadata[METADATA_PRIMARY_FLAG] = True
             self._persist(target)
             return target
 
-    def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
-        """Remove the primary flag from any session for (user_id, agent). Returns the cleared session, if any."""
+    def clear_primary_session(self, user_id: str) -> Optional[Session]:
+        """Remove the primary flag from any of the user's sessions. Returns the cleared session, if any."""
         with self._lock:
-            return self._demote_primaries_locked(user_id, agent)
+            return self._demote_primaries_locked(user_id)
 
     def get_or_create_named_session(
-        self, user_id: str, agent: str, name: str, source: str = SessionSource.INTERACTIVE.value
+        self, user_id: str, name: str, source: str = SessionSource.INTERACTIVE.value
     ) -> Session:
-        """Resolve a named-route session for (user_id, agent), creating one if absent.
+        """Resolve a named-route session for (user_id, name), creating one if absent.
 
         The session_name lives in metadata and is preserved across compaction so the
         named route follows the successor session automatically.
         """
         with self._lock:
-            existing = self._find_named_session_locked(user_id, agent, name)
+            existing = self._find_named_session_locked(user_id, name)
             if existing:
                 return existing
 
-            conv_id = f"daemon_{agent}_{user_id}_{name}_{uuid4().hex[:6]}"
+            conv_id = f"daemon_{user_id}_{name}_{uuid4().hex[:6]}"
             session = Session(
                 id=conv_id,
-                agent=agent,
                 source=source,
                 user_id=user_id,
                 title=f"{name.title()} Session",
@@ -777,13 +747,12 @@ class SessionStore:
 
         The source session is unchanged (not superseded). The branch gets the forked
         history (provider state scrubbed) plus its own sidebar entry mirroring the
-        source's agent/user/runtime settings.
+        source's user/runtime settings.
         """
         with self._lock:
             source = self._sessions.get(session_id)
             if not source:
                 raise ValueError(f"Session '{session_id}' not found")
-            agent = source.agent
             src = source.source
             user_id = source.user_id
             title = source.title
@@ -797,7 +766,6 @@ class SessionStore:
 
         branch = Session(
             id=new_id,
-            agent=agent,
             source=src,
             user_id=user_id,
             metadata={**preserved, "branched_from": session_id},
@@ -823,10 +791,9 @@ class SessionStore:
                 # two live successors. Callers should resolve the successor first.
                 raise ValueError(f"Session '{session_id}' was already compacted into '{old_session.superseded_by}'")
 
-            new_id = generate_session_id(old_session.agent)
+            new_id = generate_session_id(old_session.agent_file or SESSION_ID_LABEL)
             new_session = Session(
                 id=new_id,
-                agent=old_session.agent,
                 source=old_session.source,
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
@@ -865,7 +832,7 @@ class SessionStore:
                 self._thread_index[thread_id] = new_id
             channel_id = new_session.metadata.get("channel_id")
             if channel_id:
-                self._channel_index[(channel_id, new_session.agent)] = new_id
+                self._channel_index[channel_id] = new_id
 
             # Mark old session as completed and superseded so it stops appearing in
             # the default sidebar list (the new session is the live continuation).
@@ -968,7 +935,7 @@ class SessionStore:
             if session.source == SessionSource.SCHEDULE.value and session.parent_id:
                 self._prune_schedule_sessions(session.parent_id)
             elif session.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value):
-                self._prune_background_sessions(session.agent)
+                self._prune_background_sessions()
 
             self._persist(session)
             return session
@@ -1015,13 +982,12 @@ class SessionStore:
             if s.status in (SessionStatus.COMPLETED.value, SessionStatus.FAILED.value):
                 self._purge_session_state(s.id)
 
-    def _prune_background_sessions(self, agent: str) -> None:
+    def _prune_background_sessions(self) -> None:
         """Remove oldest completed background/spawned sessions beyond MAX_BACKGROUND_SESSIONS. Must hold lock."""
         children = [
             s
             for s in self._sessions.values()
-            if s.agent == agent
-            and s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
+            if s.source in (SessionSource.BACKGROUND.value, SessionSource.SPAWNED.value)
             and s.status in FINISHED_STATUSES
         ]
         if len(children) <= self.MAX_BACKGROUND_SESSIONS:
@@ -1064,16 +1030,16 @@ class SessionStore:
         with self._cache_lock:
             self._progress_cache.pop(session_id, None)
 
-    def _pinned_for_agent(self, agent: str, exclude_id: Optional[str] = None) -> list[Session]:
-        """Return pinned sessions for an agent, sorted by current pin_position (None last)."""
+    def _pinned_sessions(self, exclude_id: Optional[str] = None) -> list[Session]:
+        """Return pinned sessions, sorted by current pin_position (None last)."""
         return sorted(
-            [s for s in self._sessions.values() if s.agent == agent and s.pinned and s.id != exclude_id],
+            [s for s in self._sessions.values() if s.pinned and s.id != exclude_id],
             key=lambda s: s.pin_position if s.pin_position is not None else 0,
         )
 
     def set_pin(self, session_id: str, pinned: bool, position: Optional[int] = None) -> Session:
         """Pin or unpin a session. Pinning appends to the end unless position is given;
-        unpinning densifies the remaining pinned sessions for the same agent.
+        unpinning densifies the remaining pinned sessions.
         """
         with self._lock:
             session = self._sessions.get(session_id)
@@ -1088,10 +1054,10 @@ class SessionStore:
             session.pinned = pinned
             if not pinned:
                 session.pin_position = None
-                for i, s in enumerate(self._pinned_for_agent(session.agent)):
+                for i, s in enumerate(self._pinned_sessions()):
                     s.pin_position = i
             else:
-                others = self._pinned_for_agent(session.agent, exclude_id=session_id)
+                others = self._pinned_sessions(exclude_id=session_id)
                 insert_at = len(others) if position is None else max(0, min(position, len(others)))
                 session.pin_position = insert_at
                 for i, s in enumerate(others):
@@ -1099,7 +1065,7 @@ class SessionStore:
 
             session.last_active = datetime.now(timezone.utc).isoformat()
             # Pin/unpin repositions sibling pins too - persist the whole pin set.
-            self._persist(session, *self._pinned_for_agent(session.agent, exclude_id=session_id))
+            self._persist(session, *self._pinned_sessions(exclude_id=session_id))
             return session
 
     def reorder_pins(self, ordered_ids: list[str]) -> list[Session]:
@@ -1230,7 +1196,6 @@ class SessionStore:
 
     def list_sessions(
         self,
-        agent: Optional[str] = None,
         source: Optional[str] = None,
         parent_id: Optional[str] = None,
         status: Optional[str] = None,
@@ -1245,8 +1210,7 @@ class SessionStore:
             results = [
                 s
                 for s in self._sessions.values()
-                if (not agent or s.agent == agent)
-                and (not source or s.source == source)
+                if (not source or s.source == source)
                 and (not parent_id or s.parent_id == parent_id)
                 and (not status or s.status == status)
                 and (not user_id or s.user_id == user_id)
@@ -1263,7 +1227,7 @@ class SessionStore:
                 results = head
             return results
 
-    def search_sessions(self, agent: Optional[str], q: str, limit: int = 50) -> list[Session]:
+    def search_sessions(self, q: str, limit: int = 50) -> list[Session]:
         """Case-insensitive substring search over ALL sessions - title, id,
         prompt, and string metadata values (topic etc.) - ignoring the recency
         window that bounds list_sessions. A hit on a superseded session
@@ -1275,8 +1239,6 @@ class SessionStore:
         with self._lock:
             hits = []
             for s in self._sessions.values():
-                if agent and s.agent != agent:
-                    continue
                 meta_text = " ".join(str(v) for v in (s.metadata or {}).values() if isinstance(v, (str, int, float)))
                 text = " ".join(filter(None, [s.title, s.id, s.prompt, meta_text])).lower()
                 if needle in text:
@@ -1292,15 +1254,13 @@ class SessionStore:
             results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
             return results[:limit]
 
-    def list_interactive_by_agent(self, agent: str) -> list[Session]:
-        """Return all active interactive sessions for a given agent."""
+    def list_interactive(self) -> list[Session]:
+        """Return all active interactive sessions."""
         with self._lock:
             return [
                 s
                 for s in self._sessions.values()
-                if s.agent == agent
-                and s.source == SessionSource.INTERACTIVE.value
-                and s.status == SessionStatus.ACTIVE.value
+                if s.source == SessionSource.INTERACTIVE.value and s.status == SessionStatus.ACTIVE.value
             ]
 
     # ── Event log: unified with conversation history ──
@@ -1496,10 +1456,10 @@ class SessionStore:
     # ── Channel session index ──
 
     def get_or_create_channel_session(
-        self, channel_id: str, agent: str, user_id: str, source: str = SessionSource.INTERACTIVE.value
+        self, channel_id: str, user_id: str, source: str = SessionSource.INTERACTIVE.value
     ) -> Session:
         with self._lock:
-            key = (channel_id, agent)
+            key = channel_id
             is_replacement = False
             if key in self._channel_index:
                 session_id = self._channel_index[key]
@@ -1509,12 +1469,9 @@ class SessionStore:
                         return existing
                     is_replacement = True
 
-            conv_id = (
-                f"channel_{agent}_{channel_id}_{uuid4().hex[:6]}" if is_replacement else f"channel_{agent}_{channel_id}"
-            )
+            conv_id = f"channel_{channel_id}_{uuid4().hex[:6]}" if is_replacement else f"channel_{channel_id}"
             session = Session(
                 id=conv_id,
-                agent=agent,
                 source=source,
                 user_id=user_id,
                 metadata={"channel_id": channel_id},
@@ -1561,10 +1518,10 @@ class SessionStore:
             self._sessions[session.id] = session
 
         # Rebuild indexes. Legacy stores have no is_primary flag; stamp it on the
-        # most-recently-active interactive session per (user, agent) to preserve
+        # most-recently-active interactive session per user to preserve
         # the user's existing default-routing across the upgrade.
-        primary_candidates: dict[tuple[str, str], str] = {}
-        already_primary_keys: set[tuple[str, str]] = set()
+        primary_candidates: dict[str, str] = {}
+        already_primary_keys: set[str] = set()
         for sid, session in self._sessions.items():
             if (
                 session.source == SessionSource.INTERACTIVE.value
@@ -1572,7 +1529,7 @@ class SessionStore:
                 and session.superseded_by is None
                 and session.status not in FINISHED_STATUSES
             ):
-                key = (session.user_id, session.agent)
+                key = session.user_id
                 if session.is_primary:
                     already_primary_keys.add(key)
                 existing_id = primary_candidates.get(key)
@@ -1583,7 +1540,7 @@ class SessionStore:
                 self._thread_index[thread_id] = sid
             channel_id = session.metadata.get("channel_id") if session.metadata else None
             if channel_id:
-                self._channel_index[(channel_id, session.agent)] = sid
+                self._channel_index[channel_id] = sid
         stamped = False
         for key, sid in primary_candidates.items():
             if key not in already_primary_keys:
@@ -1709,7 +1666,6 @@ class SessionStore:
             sessions_dir = agent_dir / "daemon_sessions" if agent_dir.is_dir() else None
             if not sessions_dir or not sessions_dir.is_dir():
                 continue
-            agent_name = agent_dir.name
             for path in sessions_dir.glob("*.json"):
                 try:
                     data = json.loads(path.read_text())
@@ -1719,7 +1675,6 @@ class SessionStore:
                         continue
                     session = Session(
                         id=conv_id,
-                        agent=agent_name,
                         source=SessionSource.INTERACTIVE.value,
                         user_id=user_id,
                         created_at=data.get("created_at", ""),
@@ -1741,7 +1696,6 @@ class SessionStore:
                 for sid, sdata in data.get("sessions", {}).items():
                     session = Session(
                         id=sid,
-                        agent=sdata.get("agent", "unknown"),
                         source=SessionSource.BACKGROUND.value,
                         status=sdata.get("state", SessionStatus.COMPLETED.value),
                         prompt=sdata.get("prompt"),
@@ -1765,7 +1719,6 @@ class SessionStore:
 
 def create_interactive_session(
     session_store,
-    agent_name: str,
     user_id: str,
     title=None,
     event_bus=None,
@@ -1778,11 +1731,10 @@ def create_interactive_session(
     Jobs-tab host-session path, so session provisioning can't drift between them.
     Returns the new session id.
     """
-    session_id = generate_session_id(agent_name)
+    session_id = generate_session_id(SESSION_ID_LABEL)
     session_store.create_session(
         Session(
             id=session_id,
-            agent=agent_name,
             source=source,
             user_id=user_id,
             title=title or None,

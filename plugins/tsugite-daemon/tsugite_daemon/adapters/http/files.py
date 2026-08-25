@@ -34,12 +34,11 @@ class FilesMixin:
 
         Routes through `iter_agent_search_paths` so the search order + dedup
         logic match every other site (find_agent_file, repl_completer, etc.).
-        Workspace agent dirs come from configured agents and feed in as
+        Workspace agent dirs come from the daemon workspace and feed in as
         extra_project_dirs.
         """
-        extra_project_dirs: list[Path] = []
-        for cfg in self.agent_configs.values():
-            extra_project_dirs.extend([cfg.workspace_dir / ".tsugite", cfg.workspace_dir / "agents"])
+        ws = self.adapter.runtime.workspace_dir
+        extra_project_dirs: list[Path] = [ws / ".tsugite", ws / "agents"]
         return [
             (entry.path, entry.source.value, entry.readonly)
             for entry in iter_agent_search_paths(extra_project_dirs=extra_project_dirs)
@@ -152,7 +151,7 @@ class FilesMixin:
     def _get_allowed_skill_dirs(self) -> list[tuple[Path, str, bool]]:
         """Return (directory, source_label, is_readonly) for all skill directories.
 
-        Mirrors agent-time skill discovery: builtins, each agent's workspace
+        Mirrors agent-time skill discovery: builtins, the daemon workspace
         skills, the global user dir, plus the shared `config.skill_paths` roots.
         Shared roots are exposed read-only since they are a repo that should not
         be edited through one agent's UI.
@@ -160,12 +159,12 @@ class FilesMixin:
         builtin = get_builtin_skills_path()
         dirs: list[tuple[Path, str, bool]] = [(builtin, "builtin", True)]
         seen: set[Path] = {builtin.resolve()}
-        for cfg in self.agent_configs.values():
-            for subdir in [cfg.workspace_dir / ".tsugite" / "skills", cfg.workspace_dir / "skills"]:
-                resolved = subdir.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
-                    dirs.append((subdir, "project", False))
+        ws = self.adapter.runtime.workspace_dir
+        for subdir in [ws / ".tsugite" / "skills", ws / "skills"]:
+            resolved = subdir.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                dirs.append((subdir, "project", False))
         global_dir = Path.home() / ".config" / "tsugite" / "skills"
         seen.add(global_dir.resolve())
         dirs.append((global_dir, "global", False))

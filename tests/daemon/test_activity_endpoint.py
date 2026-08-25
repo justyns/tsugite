@@ -27,9 +27,9 @@ def at(clock: str) -> str:
 @pytest.fixture
 def session_store(tmp_path):
     store = SessionStore(tmp_path / "session_store.json")
-    store.create_session(Session(id="chat-1", agent="demo", title="Morning triage"))
-    store.create_session(Session(id="chat-2", agent="demo", title="Deploy check"))
-    store.create_session(Session(id="run-1", agent="watcher", prompt="poll the feeds"))
+    store.create_session(Session(id="chat-1", title="Morning triage"))
+    store.create_session(Session(id="chat-2", title="Deploy check"))
+    store.create_session(Session(id="run-1", prompt="poll the feeds"))
     return store
 
 
@@ -74,9 +74,7 @@ def job_store(tmp_path):
 
 @pytest.fixture
 def scheduler():
-    entry = ScheduleEntry(
-        id="feeds", agent="watcher", prompt="poll the feeds", schedule_type="cron", cron_expr="*/5 * * * *"
-    )
+    entry = ScheduleEntry(id="feeds", prompt="poll the feeds", schedule_type="cron", cron_expr="*/5 * * * *")
     entry.run_history = [
         {"timestamp": at("08:00:00"), "status": "success", "error": None, "session_id": "run-0"},
         {"timestamp": at("09:00:00"), "status": "error", "error": "timed out", "session_id": "run-1"},
@@ -113,9 +111,8 @@ def test_token(token_store):
 def server(tmp_path, session_store, job_store, scheduler, token_store, history):
     s = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8484),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
     s.job_store = job_store
@@ -287,9 +284,8 @@ def test_missing_subsystems_degrade_to_an_empty_feed(tmp_path, token_store, test
     """No runner / jobs / scheduler wired (a bare test server): 200 with nothing, not 503."""
     s = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8485),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
     resp = TestClient(s.app).get("/api/activity", headers={"Authorization": f"Bearer {test_token}"})

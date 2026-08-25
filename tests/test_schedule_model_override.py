@@ -14,7 +14,7 @@ def _make_scheduler_adapter(tmp_path, agent_name="bot"):
     adapter_mock.handle_message = AsyncMock(return_value="done")
 
     sa = SchedulerAdapter(
-        adapters={agent_name: adapter_mock},
+        adapter=adapter_mock,
         # A real path: the scheduler's storage layer rejects mocks (a MagicMock
         # here used to materialize junk files named after the mock's repr).
         schedules_path=tmp_path / "schedules.json",
@@ -40,7 +40,7 @@ class TestSchedulerAdapterMetadata:
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
 
         entry = ScheduleEntry(
-            id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", model="openai:gpt-4o-mini"
+            id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", model="openai:gpt-4o-mini"
         )
         await sa._run_agent(entry)
 
@@ -51,7 +51,7 @@ class TestSchedulerAdapterMetadata:
     async def test_model_override_absent_when_none(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
 
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         await sa._run_agent(entry)
 
         ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
@@ -78,9 +78,7 @@ class TestSchedulerAdapterMaxTurnsMetadata:
     async def test_max_turns_set_in_metadata(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
 
-        entry = ScheduleEntry(
-            id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", max_turns=40
-        )
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", max_turns=40)
         await sa._run_agent(entry)
 
         ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
@@ -90,7 +88,7 @@ class TestSchedulerAdapterMaxTurnsMetadata:
     async def test_max_turns_absent_when_none(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
 
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         await sa._run_agent(entry)
 
         ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
@@ -118,7 +116,7 @@ class TestSchedulerAdapterFireTiming:
     @pytest.mark.asyncio
     async def test_actual_fire_time_present(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         await sa._run_agent(entry)
 
         ctx = adapter_mock.handle_message.call_args[1]["channel_context"]
@@ -130,7 +128,7 @@ class TestSchedulerAdapterFireTiming:
     @pytest.mark.asyncio
     async def test_scheduled_for_threaded_through(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         entry.last_scheduled_for = "2026-05-04T09:00:00+00:00"
 
         await sa._run_agent(entry)
@@ -141,7 +139,7 @@ class TestSchedulerAdapterFireTiming:
     @pytest.mark.asyncio
     async def test_scheduled_for_absent_when_unset(self, tmp_path):
         sa, adapter_mock = _make_scheduler_adapter(tmp_path)
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         # last_scheduled_for unset (manual fire, replay, etc.)
         await sa._run_agent(entry)
 

@@ -21,7 +21,7 @@ def store(tmp_path):
 
 
 def _make_session(store: SessionStore, user_id: str = "u1") -> Session:
-    s = Session(id="sess-1", agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id=user_id)
+    s = Session(id="sess-1", source=SessionSource.INTERACTIVE.value, user_id=user_id)
     store.create_session(s)
     return s
 

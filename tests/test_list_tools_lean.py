@@ -30,7 +30,6 @@ def _wire_sessions(monkeypatch, sessions):
 def test_list_sessions_omits_heavy_fields_but_keeps_summary(monkeypatch):
     session = Session(
         id="sess-1",
-        agent="bot",
         source=SessionSource.BACKGROUND.value,
         status=SessionStatus.COMPLETED.value,
         prompt="p" * 500,
@@ -45,7 +44,6 @@ def test_list_sessions_omits_heavy_fields_but_keeps_summary(monkeypatch):
 
     assert set(row.keys()) == {
         "id",
-        "agent",
         "source",
         "status",
         "title",

@@ -86,9 +86,8 @@ def client(tmp_path, token):
     store, _raw = token
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8587),
-        adapters={"smokeagent": SimpleNamespace()},
+        adapter=SimpleNamespace(),
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=store,
     )
     return TestClient(server.app)

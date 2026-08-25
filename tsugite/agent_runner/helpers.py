@@ -175,43 +175,6 @@ def reset_current_agent(token: contextvars.Token) -> None:
     _current_agent_var.reset(token)
 
 
-# The daemon can register an agent adapter under a name that differs from the
-# agent file's own config name (the registry key is the daemon-config agent
-# name, which need not equal agent_config.name). Only the registered name has a
-# live adapter, so spawn/start-session tools must default their target agent to
-# THAT name rather than the agent-file config name.
-#
-# Set by the daemon in the async request handler before the run; the value must
-# reach the code-execution worker thread through the context asyncio.to_thread
-# copies.
-_current_daemon_agent_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "current_daemon_agent", default=None
-)
-
-
-def set_current_daemon_agent(name: Optional[str]) -> None:
-    """Record the daemon adapter's registered name for the current run.
-
-    Spawn/start-session tools prefer this over the agent-file config name so a
-    spawned session resolves to an agent that actually has a daemon adapter.
-    """
-    _current_daemon_agent_var.set(name)
-
-
-def get_current_daemon_agent() -> Optional[str]:
-    """Return the daemon adapter's registered name for the current run, or None."""
-    return _current_daemon_agent_var.get()
-
-
-def resolve_run_agent() -> str:
-    """Resolve the agent a spawned run should target.
-
-    Prefers the daemon adapter's registered name (the key that actually has a live
-    adapter) over the agent-file config name, falling back to "default".
-    """
-    return get_current_daemon_agent() or get_current_agent() or "default"
-
-
 def resolve_current_agent(explicit: Optional[str] = None, default: str = "default") -> str:
     """Resolve agent name: explicit value > current agent context > default."""
     if explicit is not None:

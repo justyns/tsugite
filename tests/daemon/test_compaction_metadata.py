@@ -10,7 +10,7 @@ def store(tmp_path):
 
 
 def _compacted(store, metadata):
-    s = Session(id="s-1", agent="agent-x", source=SessionSource.INTERACTIVE.value, user_id="u1", metadata=metadata)
+    s = Session(id="s-1", source=SessionSource.INTERACTIVE.value, user_id="u1", metadata=metadata)
     store.create_session(s)
     return store.compact_session(s.id)
 

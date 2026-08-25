@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionStore
 
 
@@ -29,8 +29,8 @@ def workspace_dir(tmp_path):
 
 
 def _make_adapter(workspace_dir, session_store):
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
-    return _StubAdapter("test-agent", agent_config, session_store)
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
+    return _StubAdapter(agent_config, session_store)
 
 
 # ── Context population ──
@@ -40,7 +40,7 @@ class TestBuildAgentContext:
     def test_active_sessions_populated(self, workspace_dir, tmp_store):
         adapter = _make_adapter(workspace_dir, tmp_store)
         # Create a running session
-        running = Session(id="sess-1", agent="worker", source="background", status="running", prompt="Do work")
+        running = Session(id="sess-1", source="background", status="running", prompt="Do work")
         tmp_store.create_session(running)
 
         ctx = ChannelContext(source="scheduler", channel_id=None, user_id="test", reply_to="test", metadata={})
@@ -48,14 +48,12 @@ class TestBuildAgentContext:
 
         assert len(result["active_sessions"]) == 1
         assert result["active_sessions"][0]["id"] == "sess-1"
-        assert result["active_sessions"][0]["agent"] == "worker"
 
     def test_recent_completions_populated(self, workspace_dir, tmp_store):
         adapter = _make_adapter(workspace_dir, tmp_store)
         # Create a recently completed session
         completed = Session(
             id="sess-2",
-            agent="worker",
             source="background",
             status="completed",
             result="Done!",
@@ -73,9 +71,7 @@ class TestBuildAgentContext:
     def test_old_completions_excluded(self, workspace_dir, tmp_store):
         adapter = _make_adapter(workspace_dir, tmp_store)
         old_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        completed = Session(
-            id="sess-old", agent="worker", source="background", status="completed", last_active=old_time
-        )
+        completed = Session(id="sess-old", source="background", status="completed", last_active=old_time)
         tmp_store.create_session(completed)
 
         ctx = ChannelContext(source="scheduler", channel_id=None, user_id="test", reply_to="test", metadata={})
@@ -87,7 +83,7 @@ class TestBuildAgentContext:
         adapter = _make_adapter(workspace_dir, tmp_store)
         # Session completed 8 minutes ago
         ts = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
-        completed = Session(id="sess-3", agent="worker", source="background", status="completed", last_active=ts)
+        completed = Session(id="sess-3", source="background", status="completed", last_active=ts)
         tmp_store.create_session(completed)
 
         # Default window (10 min) should include it
@@ -149,7 +145,7 @@ class TestSchedulerMinInterval:
 
         path = tmp_path / "schedules.json"
         scheduler = Scheduler(path, run_callback=AsyncMock())
-        entry = ScheduleEntry(id="hb", agent="orch", prompt="go", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="hb", prompt="go", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
 
         with pytest.raises(ValueError, match="fires every"):
@@ -160,7 +156,7 @@ class TestSchedulerMinInterval:
 
         path = tmp_path / "schedules.json"
         scheduler = Scheduler(path, run_callback=AsyncMock())
-        entry = ScheduleEntry(id="hb", agent="orch", prompt="go", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="hb", prompt="go", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
 
         result = scheduler.update("hb", cron_expr="*/3 * * * *")
@@ -179,9 +175,9 @@ class TestSessionReply:
         mock_adapter = MagicMock()
         mock_adapter.handle_message = AsyncMock(return_value="response text")
 
-        runner = SessionRunner(store=tmp_store, adapters={"worker": mock_adapter})
+        runner = SessionRunner(store=tmp_store, adapter=mock_adapter)
 
-        session = Session(id="sess-reply", agent="worker", source="background", status="completed", prompt="task")
+        session = Session(id="sess-reply", source="background", status="completed", prompt="task")
         tmp_store.create_session(session)
 
         result = asyncio.run(runner.reply_to_session("sess-reply", "follow up"))
@@ -199,9 +195,9 @@ class TestSessionReply:
 
         from tsugite_daemon.session_runner import SessionRunner
 
-        runner = SessionRunner(store=tmp_store, adapters={})
+        runner = SessionRunner(store=tmp_store, adapter=None)
 
-        session = Session(id="sess-no-adapter", agent="ghost", source="background", status="completed", prompt="task")
+        session = Session(id="sess-no-adapter", source="background", status="completed", prompt="task")
         tmp_store.create_session(session)
 
         with pytest.raises(ValueError, match="No adapter"):

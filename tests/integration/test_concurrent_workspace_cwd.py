@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http import HTTPAgentAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tsugite.cli.helpers import get_workspace_dir
@@ -31,7 +31,7 @@ def session_store(tmp_path):
 
 
 def _make_adapter(name: str, workspace: Path, store: SessionStore) -> HTTPAgentAdapter:
-    cfg = AgentConfig(workspace_dir=workspace, agent_file="default")
+    cfg = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
     return HTTPAgentAdapter(name, cfg, store)
 
 

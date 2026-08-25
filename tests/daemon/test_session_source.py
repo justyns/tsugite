@@ -4,7 +4,7 @@ each session by origin.
 
 Covers: the new enum values, threading `source` through every session-creation
 path, backward-compatible load of legacy 'interactive' records, the ?source=
-filter, and untouched serialization on GET /api/agents/{agent}/sessions.
+filter, and untouched serialization on GET /api/chat/sessions.
 """
 
 from types import SimpleNamespace
@@ -14,7 +14,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import (
     Session,
     SessionSource,
@@ -39,38 +39,38 @@ def store(tmp_path):
 
 
 def test_get_or_create_interactive_defaults_to_interactive(store):
-    s = store.get_or_create_interactive("u1", "agent-x")
+    s = store.get_or_create_interactive("u1")
     assert s.source == SessionSource.INTERACTIVE.value
 
 
 def test_get_or_create_interactive_stamps_source(store):
-    s = store.get_or_create_interactive("u1", "agent-x", source=SessionSource.WEB.value)
+    s = store.get_or_create_interactive("u1", source=SessionSource.WEB.value)
     assert s.source == "web"
 
 
 def test_create_default_session_defaults_to_interactive(store):
-    assert store.create_default_session("u1", "agent-x").source == SessionSource.INTERACTIVE.value
+    assert store.create_default_session("u1").source == SessionSource.INTERACTIVE.value
 
 
 def test_create_default_session_stamps_source(store):
-    assert store.create_default_session("u1", "agent-x", source=SessionSource.DISCORD.value).source == "discord"
+    assert store.create_default_session("u1", source=SessionSource.DISCORD.value).source == "discord"
 
 
 def test_get_or_create_named_session_defaults_to_interactive(store):
-    assert store.get_or_create_named_session("u1", "agent-x", "discord").source == SessionSource.INTERACTIVE.value
+    assert store.get_or_create_named_session("u1", "discord").source == SessionSource.INTERACTIVE.value
 
 
 def test_get_or_create_named_session_stamps_source(store):
-    s = store.get_or_create_named_session("u1", "agent-x", "discord", source=SessionSource.DISCORD.value)
+    s = store.get_or_create_named_session("u1", "discord", source=SessionSource.DISCORD.value)
     assert s.source == "discord"
 
 
 def test_get_or_create_channel_session_defaults_to_interactive(store):
-    assert store.get_or_create_channel_session("chan-1", "agent-x", "u1").source == SessionSource.INTERACTIVE.value
+    assert store.get_or_create_channel_session("chan-1", "u1").source == SessionSource.INTERACTIVE.value
 
 
 def test_get_or_create_channel_session_stamps_source(store):
-    s = store.get_or_create_channel_session("chan-1", "agent-x", "u1", source=SessionSource.DISCORD.value)
+    s = store.get_or_create_channel_session("chan-1", "u1", source=SessionSource.DISCORD.value)
     assert s.source == "discord"
 
 
@@ -89,16 +89,14 @@ def test_create_interactive_session_stamps_source(store):
 
 def test_persisted_interactive_session_loads(tmp_path):
     path = tmp_path / "session_store.json"
-    SessionStore(path).create_session(Session(id="legacy-1", agent="agent-x", source="interactive", user_id="u1"))
+    SessionStore(path).create_session(Session(id="legacy-1", source="interactive", user_id="u1"))
     reloaded = SessionStore(path)
     assert reloaded.get_session("legacy-1").source == "interactive"
 
 
 def test_persisted_new_source_value_loads(tmp_path):
     path = tmp_path / "session_store.json"
-    SessionStore(path).create_session(
-        Session(id="web-1", agent="agent-x", source=SessionSource.WEB.value, user_id="u1")
-    )
+    SessionStore(path).create_session(Session(id="web-1", source=SessionSource.WEB.value, user_id="u1"))
     reloaded = SessionStore(path)
     assert reloaded.get_session("web-1").source == "web"
 
@@ -107,10 +105,10 @@ def test_persisted_new_source_value_loads(tmp_path):
 
 
 def test_list_sessions_filters_by_new_source(store):
-    store.create_session(Session(id="w1", agent="agent-x", source=SessionSource.WEB.value, user_id="u1"))
-    store.create_session(Session(id="d1", agent="agent-x", source=SessionSource.DISCORD.value, user_id="u1"))
-    assert [s.id for s in store.list_sessions(agent="agent-x", source="web")] == ["w1"]
-    assert [s.id for s in store.list_sessions(agent="agent-x", source="discord")] == ["d1"]
+    store.create_session(Session(id="w1", source=SessionSource.WEB.value, user_id="u1"))
+    store.create_session(Session(id="d1", source=SessionSource.DISCORD.value, user_id="u1"))
+    assert [s.id for s in store.list_sessions(source="web")] == ["w1"]
+    assert [s.id for s in store.list_sessions(source="discord")] == ["d1"]
 
 
 # ── web creation paths (real HTTP call sites) ──
@@ -123,22 +121,21 @@ def web_client(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     store = SessionStore(tmp_path / "session_store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=ws, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        adapter = HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
+        adapter = HTTPAgentAdapter(runtime=config, session_store=store)
     token_store = TokenStore(tmp_path / "tokens.json")
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=None,
-        agent_configs={"test-agent": config},
         token_store=token_store,
     )
     from tsugite_daemon.session_runner import SessionRunner
 
-    server.session_runner = SessionRunner(store=store, adapters={"test-agent": adapter})
+    server.session_runner = SessionRunner(store=store, adapter=adapter)
     return TestClient(server.app), raw, adapter
 
 
@@ -151,7 +148,7 @@ def test_web_chat_stamps_web_source(web_client):
     with patch.object(adapter, "handle_message", side_effect=quick_handle):
         with client.stream(
             "POST",
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             json={"message": "hi", "user_id": "web-anon"},
             headers={"Authorization": f"Bearer {token}"},
         ) as resp:
@@ -159,7 +156,7 @@ def test_web_chat_stamps_web_source(web_client):
             for _ in resp.iter_bytes():
                 pass
 
-    sessions = adapter.session_store.list_sessions(agent="test-agent")
+    sessions = adapter.session_store.list_sessions()
     assert sessions, "chat should have created a session"
     assert all(s.source == "web" for s in sessions)
 
@@ -167,7 +164,7 @@ def test_web_chat_stamps_web_source(web_client):
 def test_web_sessions_new_stamps_web_source(web_client):
     client, token, adapter = web_client
     resp = client.post(
-        "/api/agents/test-agent/sessions/new",
+        "/api/chat/sessions/new",
         json={"user_id": "web-anon"},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -178,13 +175,9 @@ def test_web_sessions_new_stamps_web_source(web_client):
 
 def test_sessions_endpoint_serializes_new_source_untouched(web_client):
     client, token, adapter = web_client
-    adapter.session_store.create_session(
-        Session(id="w1", agent="test-agent", source=SessionSource.WEB.value, user_id="web-anon")
-    )
-    adapter.session_store.create_session(
-        Session(id="d1", agent="test-agent", source=SessionSource.DISCORD.value, user_id="12345")
-    )
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    adapter.session_store.create_session(Session(id="w1", source=SessionSource.WEB.value, user_id="web-anon"))
+    adapter.session_store.create_session(Session(id="d1", source=SessionSource.DISCORD.value, user_id="12345"))
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     rows = {r["id"]: r for r in resp.json()["sessions"]}
     assert rows["w1"]["source"] == "web"
@@ -195,9 +188,7 @@ def test_api_sessions_endpoint_serializes_new_source_untouched(web_client):
     """The other listing surface, GET /api/sessions (sessions.py), must also
     pass the raw source string through with no enum coercion."""
     client, token, adapter = web_client
-    adapter.session_store.create_session(
-        Session(id="w2", agent="test-agent", source=SessionSource.WEB.value, user_id="web-anon")
-    )
+    adapter.session_store.create_session(Session(id="w2", source=SessionSource.WEB.value, user_id="web-anon"))
     resp = client.get("/api/sessions", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     rows = {r["id"]: r for r in resp.json()["sessions"]}
@@ -217,14 +208,13 @@ def discord_adapter(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     store = SessionStore(tmp_path / "session_store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=ws, agent_file="default")
     bot_config = DiscordBotConfig(name="b", agent="test-agent", token_secret="dummy")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
         return DiscordAdapter(
             bot_config=bot_config,
-            agent_name="test-agent",
-            agent_config=config,
+            runtime=config,
             session_store=store,
         )
 

@@ -26,7 +26,7 @@ def _make_scheduler_adapter(tmp_path, agent_name="bot"):
     adapter_mock = AsyncMock()
     adapter_mock.handle_message = AsyncMock(return_value="done")
     sa = SchedulerAdapter(
-        adapters={agent_name: adapter_mock},
+        adapter=adapter_mock,
         schedules_path=tmp_path / "schedules.json",
     )
     return sa, adapter_mock
@@ -35,7 +35,7 @@ def _make_scheduler_adapter(tmp_path, agent_name="bot"):
 @pytest.mark.asyncio
 async def test_run_agent_stamps_schedule_id_in_metadata(tmp_path):
     sa, adapter_mock = _make_scheduler_adapter(tmp_path)
-    entry = ScheduleEntry(id="morning-report", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+    entry = ScheduleEntry(id="morning-report", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
 
     await sa._run_agent(entry)
 

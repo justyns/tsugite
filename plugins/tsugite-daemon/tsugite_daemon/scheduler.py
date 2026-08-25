@@ -44,7 +44,6 @@ def validate_delivery(delivery_mode: str, delivery_kind: str) -> None:
 @dataclass
 class ScheduleEntry:
     id: str
-    agent: str
     prompt: str
     schedule_type: str  # "cron" | "once"
     cron_expr: str | None = None
@@ -331,7 +330,7 @@ class Scheduler:
             return
 
         async with entry.lock:
-            logger.info("Firing schedule '%s' (type=%s, agent=%s)", entry.id, entry.execution_type, entry.agent)
+            logger.info("Firing schedule '%s' (type=%s)", entry.id, entry.execution_type)
             run_conv_id = None
             try:
                 if entry.execution_type == "script":

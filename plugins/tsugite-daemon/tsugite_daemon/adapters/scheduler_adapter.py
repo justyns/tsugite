@@ -59,7 +59,7 @@ def _resolve_originating(entry: ScheduleEntry, store) -> Session | None:
     return store.resolve_live(sid) if sid else None
 
 
-def resolve_target_session(entry: ScheduleEntry, user_id: str | None, store, agent: str) -> Session | None:
+def resolve_target_session(entry: ScheduleEntry, user_id: str | None, store) -> Session | None:
     """Resolve `entry.target_session` to a concrete Session, or None to skip injection.
 
     See ScheduleEntry.target_session for the legal value forms.
@@ -68,26 +68,25 @@ def resolve_target_session(entry: ScheduleEntry, user_id: str | None, store, age
     if spec == TARGET_SESSION_NONE:
         return None
     if spec is None:
-        return store.find_primary_session(user_id, agent) or _resolve_originating(entry, store)
+        return store.find_primary_session(user_id) or _resolve_originating(entry, store)
     if spec == TARGET_SESSION_PRIMARY:
-        return store.find_primary_session(user_id, agent)
+        return store.find_primary_session(user_id)
     if spec == TARGET_SESSION_ORIGINATING:
         return _resolve_originating(entry, store)
     if spec.startswith(TARGET_SESSION_NAME_PREFIX):
-        return store.find_named_session(user_id, agent, spec[len(TARGET_SESSION_NAME_PREFIX) :])
+        return store.find_named_session(user_id, spec[len(TARGET_SESSION_NAME_PREFIX) :])
     return store.resolve_live(spec)
 
 
-def _incident_session(entry: ScheduleEntry, user_id: str, store, agent: str, event_bus=None) -> Session:
+def _incident_session(entry: ScheduleEntry, user_id: str, store, event_bus=None) -> Session:
     key = entry.incident_key or entry.id
-    existing = store.find_incident_session(user_id, agent, key)
+    existing = store.find_incident_session(user_id, key)
     if existing:
         return existing
 
     title = entry.incident_title or f"Incident: {entry.id}"
     session_id = create_interactive_session(
         store,
-        agent,
         user_id,
         title=title,
         event_bus=event_bus,
@@ -97,33 +96,31 @@ def _incident_session(entry: ScheduleEntry, user_id: str, store, agent: str, eve
     return store.get_session(session_id)
 
 
-def resolve_delivery_sessions(
-    entry: ScheduleEntry, user_ids: list[str], store, agent: str, event_bus=None
-) -> list[Session]:
+def resolve_delivery_sessions(entry: ScheduleEntry, user_ids: list[str], store, event_bus=None) -> list[Session]:
     mode = entry.delivery_mode
     if mode == DELIVERY_MODE_PARENT:
         candidates = [_resolve_originating(entry, store)]
     elif mode == DELIVERY_MODE_NEW or (mode == DELIVERY_MODE_AUTO and entry.delivery_kind == DELIVERY_KIND_NEEDS_ACK):
-        candidates = [_incident_session(entry, user_ids[0], store, agent, event_bus)]
+        candidates = [_incident_session(entry, user_ids[0], store, event_bus)]
     else:
-        candidates = [resolve_target_session(entry, user_id, store, agent) for user_id in user_ids]
+        candidates = [resolve_target_session(entry, user_id, store) for user_id in user_ids]
 
     return list({s.id: s for s in candidates if s is not None}.values())
 
 
 class SchedulerAdapter:
-    """Integrates the Scheduler with the daemon, executing agents via existing adapters."""
+    """Integrates the Scheduler with the daemon, executing runs via the daemon adapter."""
 
     def __init__(
         self,
-        adapters: dict[str, BaseAdapter],
+        adapter: BaseAdapter,
         schedules_path: Path,
         notification_channels: dict[str, NotificationChannelConfig] | None = None,
         identity_map: dict[str, str] | None = None,
         token_store: TokenStore | None = None,
         tsugite_api_url: str = "",
     ):
-        self._adapters = adapters
+        self._adapter = adapter
         self._notification_channels = notification_channels or {}
         self._identity_map = identity_map or {}
         self._token_store = token_store
@@ -191,7 +188,7 @@ class SchedulerAdapter:
         return self._identity_map.get(f"discord:{config.user_id}", config.user_id)
 
     def _run_adapter(self, entry: ScheduleEntry) -> BaseAdapter | None:
-        return self._adapters.get(entry.agent) or next(iter(self._adapters.values()), None)
+        return self._adapter
 
     def _create_run_session(self, entry: ScheduleEntry) -> tuple[str, bool]:
         """Create a Session record for a schedule run.
@@ -213,7 +210,6 @@ class SchedulerAdapter:
             return conv_id, False
         sched_session = Session(
             id=conv_id,
-            agent=entry.agent,
             source=SessionSource.SCHEDULE.value,
             status=SessionStatus.RUNNING.value,
             parent_id=entry.id,
@@ -270,19 +266,19 @@ class SchedulerAdapter:
             except Exception as e:
                 logger.error("Notification for script schedule '%s' failed: %s", entry.id, e)
 
-        adapter = self._adapters.get(entry.agent)
+        adapter = self._adapter
         if entry.inject_history and adapter:
             await self._deliver_result(adapter, entry, result, resolved_channels)
 
         return RunResult(output=result)
 
     async def _run_agent(self, entry: ScheduleEntry) -> RunResult:
-        adapter = self._adapters.get(entry.agent)
+        adapter = self._adapter
         if not adapter:
-            raise ValueError(f"No adapter found for agent '{entry.agent}'")
-        logger.info("Schedule '%s' executing agent '%s': %s", entry.id, entry.agent, entry.prompt[:100])
+            raise ValueError("No adapter available to run schedules")
+        logger.info("Schedule '%s' executing: %s", entry.id, entry.prompt[:100])
         conv_id, opened_session = self._create_run_session(entry)
-        user_id = f"scheduler:{entry.agent}"
+        user_id = "scheduler"
         metadata = {
             "schedule_id": entry.id,
             "running_tasks": self.scheduler.get_running_ids(),
@@ -307,7 +303,7 @@ class SchedulerAdapter:
         # Issue a temporary token for this scheduled task
         temp_token = ""
         if self._token_store:
-            temp_token = self._token_store.issue(agent=entry.agent, schedule_id=entry.id)
+            temp_token = self._token_store.issue(schedule_id=entry.id)
         metadata["tsugite_url"] = self._tsugite_api_url
         metadata["tsugite_token"] = temp_token
 
@@ -321,13 +317,9 @@ class SchedulerAdapter:
 
         resolved_channels = self._resolve_channels(entry.notify) if entry.notify else []
 
-        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
         set_interaction_backend(NonInteractiveBackend())
-        # Expose the adapter's registered name so a spawn/start-session from a
-        # scheduled run resolves to an agent that has a live daemon adapter.
-        set_current_daemon_agent(adapter.agent_name)
 
         ctx = notify_context(resolved_channels) if (entry.notify_tool and resolved_channels) else nullcontext()
         try:
@@ -364,7 +356,7 @@ class SchedulerAdapter:
                 self._token_store.revoke(temp_token)
 
         self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
-        logger.info("Schedule '%s' agent '%s' completed", entry.id, entry.agent)
+        logger.info("Schedule '%s' completed", entry.id)
 
         await self._publish_result(adapter, entry, result[:_MAX_RESULT_CHARS], resolved_channels)
         await self._handle_on_complete(entry, result)
@@ -463,7 +455,7 @@ class SchedulerAdapter:
         originating = _resolve_originating(entry, adapter.session_store)
         if originating and originating.user_id:
             return [originating.user_id]
-        owners = sorted(adapter.session_store.default_primary_ids(adapter.agent_name))
+        owners = sorted(adapter.session_store.default_primary_ids())
         if len(owners) > 1:
             logger.debug(
                 "Schedule '%s' names no user and %d could be meant; delivering only to a named session",
@@ -488,9 +480,7 @@ class SchedulerAdapter:
             logger.debug("Schedule '%s' has no session runner; skipping delivery", entry.id)
             return
         recipients = self._delivery_recipients(adapter, entry, resolved_channels)
-        sessions = resolve_delivery_sessions(
-            entry, recipients, adapter.session_store, adapter.agent_name, adapter.event_bus
-        )
+        sessions = resolve_delivery_sessions(entry, recipients, adapter.session_store, adapter.event_bus)
         if not sessions:
             logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
             return

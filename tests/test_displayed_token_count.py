@@ -29,12 +29,12 @@ from tsugite_daemon.session_store import SessionStore
 
 @pytest.fixture
 def store(tmp_path):
-    return SessionStore(tmp_path / "session_store.json", context_limits={"agent": 200_000})
+    return SessionStore(tmp_path / "session_store.json", default_context_limit=200_000)
 
 
 @pytest.fixture
 def session(store):
-    return store.get_or_create_interactive("test-user", "agent")
+    return store.get_or_create_interactive("test-user")
 
 
 def test_prompt_snapshot_total_replaces_stale_cumulative_tokens(store, session):

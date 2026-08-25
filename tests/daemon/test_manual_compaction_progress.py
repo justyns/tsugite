@@ -5,8 +5,8 @@ Both user-initiated compaction paths must thread a progress callback into
 compaction_started / compaction_progress / compaction_finished stream the
 automatic (token-threshold / prompt-too-long) paths already emit:
 
-- the web UI Compact button -> POST /api/agents/{agent}/compact
-- the /compact slash command -> POST /api/agents/{agent}/commands/compact
+- the web UI Compact button -> POST /api/chat/compact
+- the /compact slash command -> POST /api/commands/compact
 
 Without the callback, users clicking Compact or typing /compact only ever see
 the bare "preparing to compact..." fallback while the phase-aware renderer
@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.webhook_store import WebhookStore
 
 
@@ -63,7 +63,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -72,13 +72,12 @@ def adapter(agent_config, tmp_path):
 
     from tsugite.workspace import WorkspaceNotFoundError
 
-    session_store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
+    session_store = SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
 
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -109,16 +108,15 @@ def admin_token(token_store):
 def client(adapter, agent_config, tmp_path, token_store):
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     return TestClient(server.app)
 
 
 def _seed_default_session(adapter, user_id: str) -> str:
-    session = adapter.session_store.get_or_create_interactive(user_id, "test-agent")
+    session = adapter.session_store.get_or_create_interactive(user_id)
     adapter.session_store.update_token_count(session.id, 100)
     return session.id
 
@@ -132,14 +130,14 @@ def _progress_payloads(bus: _RecordingBus) -> list[dict]:
 
 
 def test_compact_button_emits_compaction_progress(client, adapter, bus, admin_token):
-    """POST /api/agents/{agent}/compact (the web UI Compact button) must
+    """POST /api/chat/compact (the web UI Compact button) must
     broadcast compaction_progress phase events, not just started/finished."""
     user_id = "compact-button-user"
     session_id = _seed_default_session(adapter, user_id)
 
     with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=_fake_compact_session_factory())):
         resp = client.post(
-            "/api/agents/test-agent/compact",
+            "/api/chat/compact",
             content=json.dumps({"user_id": user_id}),
             headers=_auth(admin_token),
         )
@@ -161,19 +159,18 @@ def test_compact_button_emits_compaction_progress(client, adapter, bus, admin_to
     assert started_idx < first_progress_idx < finished_idx
 
     for payload in _progress_payloads(bus):
-        assert payload["agent"] == "test-agent"
         assert payload["session_id"] == session_id
 
 
 def test_compact_command_emits_compaction_progress(client, adapter, bus, admin_token):
-    """POST /api/agents/{agent}/commands/compact (the /compact slash command)
+    """POST /api/commands/compact (the /compact slash command)
     must broadcast the same compaction_progress phase events."""
     user_id = "compact-command-user"
     session_id = _seed_default_session(adapter, user_id)
 
     with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=_fake_compact_session_factory())):
         resp = client.post(
-            "/api/agents/test-agent/commands/compact",
+            "/api/commands/compact",
             content=json.dumps({"user_id": user_id, "message": "focus on the schema"}),
             headers=_auth(admin_token),
         )
@@ -194,5 +191,4 @@ def test_compact_command_emits_compaction_progress(client, adapter, bus, admin_t
     assert started_idx < first_progress_idx < finished_idx
 
     for payload in _progress_payloads(bus):
-        assert payload["agent"] == "test-agent"
         assert payload["session_id"] == session_id

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
@@ -47,13 +47,11 @@ def bus():
 
 @pytest.fixture
 def runner(store, bus):
-    return SessionRunner(store=store, adapters={}, event_bus=bus)
+    return SessionRunner(store=store, adapter=None, event_bus=bus)
 
 
 def _session(store: SessionStore, sid: str = "s1", **kwargs) -> str:
-    store.create_session(
-        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="alice", **kwargs)
-    )
+    store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="alice", **kwargs))
     return sid
 
 
@@ -197,14 +195,14 @@ class TestObligationSurvivesTheRecencyCap:
     def test_a_card_outside_the_window_is_still_listed(self, store, runner):
         sid = self._seed(store, runner, newer=5)
 
-        ids = [s.id for s in store.list_sessions(agent="test-agent", limit=3)]
+        ids = [s.id for s in store.list_sessions(limit=3)]
 
         assert sid in ids, "the recency window evicted a session with an unanswered card"
 
     def test_the_window_still_bounds_sessions_with_nothing_outstanding(self, store, runner):
         self._seed(store, runner, newer=5)
 
-        rows = store.list_sessions(agent="test-agent", limit=3)
+        rows = store.list_sessions(limit=3)
 
         assert len([s for s in rows if not s.needs_attention]) == 3
 
@@ -214,7 +212,7 @@ class TestObligationSurvivesTheRecencyCap:
         sid = _session(store, "fresh-obligation")
         runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack")
 
-        rows = store.list_sessions(agent="test-agent", limit=3)
+        rows = store.list_sessions(limit=3)
 
         assert [s.id for s in rows].count(sid) == 1
 
@@ -223,7 +221,7 @@ class TestObligationSurvivesTheRecencyCap:
 
         runner.clear_attention(sid)
 
-        ids = [s.id for s in store.list_sessions(agent="test-agent", limit=3)]
+        ids = [s.id for s in store.list_sessions(limit=3)]
         assert sid not in ids
 
 
@@ -299,7 +297,7 @@ class TestFanoutDoesNotBlockTheLoop:
         set_notifier(notifier, asyncio.get_running_loop())
         try:
             channels = {"push": MagicMock()}
-            runner = SessionRunner(store=store, adapters={}, event_bus=bus, notification_channels=channels)
+            runner = SessionRunner(store=store, adapter=None, event_bus=bus, notification_channels=channels)
             sid = _session(store)
             store.begin_turn(sid)
             runner.deliver_to_session(
@@ -379,7 +377,7 @@ class TestIncidentSessions:
         incident = _session(store, "incident")
         store.update_session(incident, metadata={"incident_key": "disk-full"})
 
-        found = store.find_incident_session("alice", "test-agent", "disk-full")
+        found = store.find_incident_session("alice", "disk-full")
 
         assert found is not None and found.id == incident
 
@@ -389,13 +387,13 @@ class TestIncidentSessions:
         gone = _session(store, "gone")
         store.update_session(gone, metadata={"incident_key": "disk-full"}, superseded_by="elsewhere")
 
-        assert store.find_incident_session("alice", "test-agent", "disk-full") is None
+        assert store.find_incident_session("alice", "disk-full") is None
 
     def test_unknown_key_finds_nothing(self, store):
         sid = _session(store)
         store.update_session(sid, metadata={"incident_key": "disk-full"})
 
-        assert store.find_incident_session("alice", "test-agent", "other-key") is None
+        assert store.find_incident_session("alice", "other-key") is None
 
     def test_incident_key_is_not_agent_writable(self, store):
         sid = _session(store)
@@ -419,7 +417,7 @@ class TestExternalFanout:
         return {"push": NotificationChannelConfig(type="web-push")}
 
     def test_needs_ack_notifies_once_with_a_deep_link(self, store, bus, channels):
-        runner = SessionRunner(store=store, adapters={}, event_bus=bus, notification_channels=channels)
+        runner = SessionRunner(store=store, adapter=None, event_bus=bus, notification_channels=channels)
         sid = _session(store)
 
         with patch("tsugite_daemon.session_runner.send_notification_nowait") as send:
@@ -442,7 +440,7 @@ class TestExternalFanout:
     def test_an_unaddressed_delivery_does_not_ping_every_configured_channel(self, store, bus, channels):
         """The registry is not the audience: a card names the channels it pings, so
         one landing in another person's session cannot reach this one's."""
-        runner = SessionRunner(store=store, adapters={}, event_bus=bus, notification_channels=channels)
+        runner = SessionRunner(store=store, adapter=None, event_bus=bus, notification_channels=channels)
         sid = _session(store)
 
         with patch("tsugite_daemon.session_runner.send_notification_nowait") as send:
@@ -451,7 +449,7 @@ class TestExternalFanout:
         assert send.call_count == 0
 
     def test_fyi_does_not_notify(self, store, bus, channels):
-        runner = SessionRunner(store=store, adapters={}, event_bus=bus, notification_channels=channels)
+        runner = SessionRunner(store=store, adapter=None, event_bus=bus, notification_channels=channels)
         sid = _session(store)
 
         with patch("tsugite_daemon.session_runner.send_notification_nowait") as send:
@@ -460,7 +458,7 @@ class TestExternalFanout:
         assert send.call_count == 0
 
     def test_a_dead_channel_does_not_break_the_delivery(self, store, bus, channels):
-        runner = SessionRunner(store=store, adapters={}, event_bus=bus, notification_channels=channels)
+        runner = SessionRunner(store=store, adapter=None, event_bus=bus, notification_channels=channels)
         sid = _session(store)
 
         with patch("tsugite_daemon.session_runner.send_notification_nowait", side_effect=RuntimeError("channel down")):
@@ -488,7 +486,7 @@ def adapter(tmp_path, store, runner, monkeypatch):
     ws = tmp_path / "workspace"
     ws.mkdir()
     (ws / "agent.md").write_text("---\nname: agent\n---\n\nHi.\n")
-    adapter = _StubAdapter("test-agent", AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md")), store)
+    adapter = _StubAdapter(RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md")), store)
 
     monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: ws / "agent.md")
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
@@ -529,7 +527,7 @@ class TestRepliesDoNotDischargeAnObligation:
 def server(tmp_path, store, runner):
     ws = tmp_path / "http-workspace"
     ws.mkdir()
-    agent_config = AgentConfig(workspace_dir=ws, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=ws, agent_file="default")
 
     from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
     from tsugite_daemon.auth import TokenStore
@@ -538,13 +536,12 @@ def server(tmp_path, store, runner):
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
-        adapter = HTTPAgentAdapter(agent_name="test-agent", agent_config=agent_config, session_store=store)
+        adapter = HTTPAgentAdapter(runtime=agent_config, session_store=store)
 
     srv = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8379),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={"test-agent": agent_config},
         token_store=TokenStore(tmp_path / "tokens.json"),
     )
     srv.session_runner = runner
@@ -567,7 +564,7 @@ class TestHTTPSurface:
         sid = _session(store)
         runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack")
 
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth)
+        resp = client.get("/api/chat/sessions", headers=auth)
 
         assert resp.status_code == 200
         rows = {r["id"]: r for r in resp.json()["sessions"]}
@@ -661,7 +658,7 @@ class TestPerCardObligations:
         runner.deliver_to_session(sid, "build finished", source="job", kind="fyi")
         outstanding = [e["delivery_id"] for e in _deliveries(store, sid) if e["kind"] == "needs_ack"]
 
-        resp = client.get("/api/agents/test-agent/sessions", headers=auth)
+        resp = client.get("/api/chat/sessions", headers=auth)
 
         row = {r["id"]: r for r in resp.json()["sessions"]}[sid]
         assert row["pending_deliveries"] == outstanding
@@ -706,7 +703,7 @@ def context_adapter(tmp_path, store, runner, monkeypatch):
     ws = tmp_path / "ctx-workspace"
     ws.mkdir()
     (ws / "agent.md").write_text("---\nname: agent\n---\n\nHi.\n")
-    adapter = _StubAdapter("test-agent", AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md")), store)
+    adapter = _StubAdapter(RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md")), store)
     return adapter
 
 
@@ -921,13 +918,13 @@ class TestHeldDeliveriesSurviveADaemonDeath:
     def test_a_card_held_mid_turn_is_still_owed_after_a_restart(self, tmp_path, history_dir):
         path = tmp_path / "restart_store.json"
         store = SessionStore(path)
-        runner = SessionRunner(store=store, adapters={}, event_bus=None)
+        runner = SessionRunner(store=store, adapter=None, event_bus=None)
         sid = _session(store)
         store.begin_turn(sid)
         runner.deliver_to_session(sid, "rent is due", source="schedule", kind="needs_ack")
 
         reopened = SessionStore(path)
-        SessionRunner(store=reopened, adapters={}, event_bus=None)
+        SessionRunner(store=reopened, adapter=None, event_bus=None)
 
         assert reopened.get_session(sid).needs_attention is True
         assert len(_deliveries(reopened, sid)) == 1

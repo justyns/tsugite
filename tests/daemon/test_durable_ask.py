@@ -19,7 +19,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -70,8 +70,8 @@ def persist_adapter(tmp_path, monkeypatch):
     ws.mkdir()
     (ws / "agent.md").write_text("---\nname: test-agent\n---\n\nHi.\n")
     store = SessionStore(tmp_path / "store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md"))
-    adapter = _StubAdapter("test-agent", config, store)
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md"))
+    adapter = _StubAdapter(config, store)
 
     async def _noop_auto_title(*_a, **_k):
         return None
@@ -106,7 +106,7 @@ class TestMessagePersistence:
             return [Attachment.context("gate", "Gate", "gated")]
 
         register_context_provider(ContextProvider(key="gate", label="Gate", detect=detect))
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
 
         task = asyncio.create_task(
             adapter.handle_message(user_id="alice", message="hello there", channel_context=_cc())
@@ -148,7 +148,7 @@ class TestMessagePersistence:
             return _fake_result()
 
         monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent_like_runner)
-        session = adapter.session_store.get_or_create_interactive("bob", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("bob")
 
         await adapter.handle_message(user_id="bob", message="just a message", channel_context=_cc())
 
@@ -203,7 +203,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -216,8 +216,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -237,9 +236,8 @@ def server(agent_config, mock_adapter, tmp_path, test_token):
     webhook_store = WebhookStore(tmp_path / "webhooks.json")
     return HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
 
@@ -254,7 +252,7 @@ def _auth(test_token):
 
 
 def _make_session(mock_adapter, sid: str, user_id: str = "alice"):
-    session = Session(id=sid, agent=mock_adapter.agent_name, source=SessionSource.INTERACTIVE.value, user_id=user_id)
+    session = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id=user_id)
     mock_adapter.session_store.create_session(session)
     return session
 
@@ -270,7 +268,7 @@ class TestRespondByAskId:
         _PENDING_ASKS["ask-live0001"] = backend
         try:
             resp = client.post(
-                "/api/agents/test-agent/respond",
+                "/api/chat/respond",
                 json={
                     "user_id": "alice",
                     "session_id": "sess-none",
@@ -289,7 +287,7 @@ class TestRespondByAskId:
         """ask_id is required: the legacy (agent, user, session) fallback is gone,
         so a respond with no ask_id is a 400, not a triple-keyed lookup or 404."""
         resp = client.post(
-            "/api/agents/test-agent/respond",
+            "/api/chat/respond",
             json={"user_id": "alice", "session_id": "sess-Z", "response": "hi"},
             headers=_auth(test_token),
         )
@@ -306,7 +304,7 @@ class TestRespondByAskId:
         )
 
         resp = client.post(
-            "/api/agents/test-agent/respond",
+            "/api/chat/respond",
             json={"user_id": "alice", "session_id": sid, "ask_id": "ask-stale001", "response": "Deny"},
             headers=_auth(test_token),
         )
@@ -325,7 +323,7 @@ class TestRespondByAskId:
         _make_session(mock_adapter, sid)
 
         resp = client.post(
-            "/api/agents/test-agent/respond",
+            "/api/chat/respond",
             json={"user_id": "alice", "session_id": sid, "ask_id": "ask-nope0001", "response": "x"},
             headers=_auth(test_token),
         )

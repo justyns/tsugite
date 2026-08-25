@@ -16,9 +16,8 @@ from tsugite.providers.model_registry import get_model_info
 def _models_by_id(tmp_path):
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
     )
     body = TestClient(server.app).get("/api/models").json()
     return {m["id"]: m for m in body["models"]}

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.memory import _llm_complete
 from tsugite_daemon.session_store import SessionStore
 
@@ -134,8 +134,8 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
 
     initial_limit = 1_000_000  # sonnet 1m
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=initial_limit)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
@@ -143,9 +143,9 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = initial_limit
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
     recent_events = [
@@ -155,7 +155,7 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     async def fake_summarize_with_pollution(messages, model=None, max_context_tokens=None, progress_callback=None):
         # Simulate the bug: something during summarization writes the smaller
         # compact-model context_window onto the agent's tracked limits.
-        store.update_context_limit("test-agent", 200_000)
+        store.update_context_limit(200_000)
         agent_config.context_limit = 200_000
         return "Summary"
 
@@ -172,9 +172,7 @@ async def test_compact_session_preserves_context_limit(workspace_dir, tmp_path):
     ):
         await adapter._compact_session(conv_id)
 
-    assert store.get_context_limit("test-agent") == initial_limit, (
-        "session_store context_limit was polluted by compaction"
-    )
+    assert store.get_context_limit() == initial_limit, "session_store context_limit was polluted by compaction"
     assert agent_config.context_limit == initial_limit, "agent_config context_limit was polluted by compaction"
 
 
@@ -194,8 +192,8 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
 
     initial_limit = 1_000_000
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=initial_limit)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
@@ -203,9 +201,9 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = initial_limit
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
     recent_events = [
@@ -219,7 +217,7 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
         # Simulate the issue: something between summarize_session's restore and
         # _compact_session's return clobbers the agent-wide limit. Post-compact
         # hooks, _count_tokens, or any future bookkeeping call could trigger it.
-        store.update_context_limit("test-agent", 200_000)
+        store.update_context_limit(200_000)
         agent_config.context_limit = 200_000
         return []
 
@@ -236,7 +234,7 @@ async def test_compact_session_restores_when_mutation_happens_after_summarize(wo
     ):
         await adapter._compact_session(conv_id)
 
-    assert store.get_context_limit("test-agent") == initial_limit, (
+    assert store.get_context_limit() == initial_limit, (
         "session_store context_limit was polluted by a post-summarize compaction step"
     )
     assert agent_config.context_limit == initial_limit, (
@@ -253,8 +251,8 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
 
     initial_limit = 1_000_000
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": initial_limit})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=initial_limit)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     storage = seed_history_session(conv_id, agent="test-agent", model="anthropic:claude-sonnet-4-5")
@@ -262,9 +260,9 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         storage.record("user_input", text=f"message {i}")
         storage.record("model_response", raw_content=f"reply {i}")
 
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = initial_limit
-    adapter = _StubAdapter("test-agent", agent_config, store)
+    adapter = _StubAdapter(agent_config, store)
 
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(2)]
     recent_events = [
@@ -272,7 +270,7 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
     ]
 
     async def failing_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
-        store.update_context_limit("test-agent", 200_000)
+        store.update_context_limit(200_000)
         agent_config.context_limit = 200_000
         raise RuntimeError("simulated summarization failure")
 
@@ -290,5 +288,5 @@ async def test_compact_session_restores_even_on_summarize_failure(workspace_dir,
         with pytest.raises(RuntimeError, match="simulated summarization failure"):
             await adapter._compact_session(conv_id)
 
-    assert store.get_context_limit("test-agent") == initial_limit
+    assert store.get_context_limit() == initial_limit
     assert agent_config.context_limit == initial_limit

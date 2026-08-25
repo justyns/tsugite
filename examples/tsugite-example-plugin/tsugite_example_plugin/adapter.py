@@ -101,7 +101,7 @@ class ExampleAdapter(BaseAdapter):
         logger.info("example adapter stopped")
 
 
-def create_adapter(*, config, agents_config, session_store, identity_map):
+def create_adapter(*, config, runtime, session_store, identity_map):
     """Adapter factory (the tsugite.adapters entry point). `config` is the
     daemon.yaml plugins.example dict. Return None to stay disabled - the gateway
     skips a None, so `enabled` is a real opt-in switch."""

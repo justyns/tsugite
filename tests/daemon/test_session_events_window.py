@@ -9,7 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
@@ -21,10 +21,10 @@ def adapter(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     store = SessionStore(tmp_path / "session_store.json")
-    config = AgentConfig(workspace_dir=workspace, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        return HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
+        return HTTPAgentAdapter(runtime=config, session_store=store)
 
 
 @pytest.fixture
@@ -33,19 +33,16 @@ def client_and_token(adapter, tmp_path):
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8375),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=None,
-        agent_configs={"test-agent": adapter.agent_config},
         token_store=token_store,
     )
-    server.session_runner = SessionRunner(store=adapter.session_store, adapters={"test-agent": adapter})
+    server.session_runner = SessionRunner(store=adapter.session_store, adapter=adapter)
     return TestClient(server.app), raw
 
 
 def _seed(adapter, sid, n):
-    adapter.session_store.create_session(
-        Session(id=sid, agent="test-agent", source=SessionSource.INTERACTIVE.value, user_id="u1")
-    )
+    adapter.session_store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="u1"))
     for i in range(n):
         adapter.session_store.append_event(sid, {"type": "info", "message": f"m{i}"})
     return sid

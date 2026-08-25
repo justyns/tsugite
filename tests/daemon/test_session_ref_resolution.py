@@ -48,7 +48,7 @@ def runner(store, adapter):
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
-    r = SessionRunner(store, {"bot": adapter})
+    r = SessionRunner(store, adapter)
     session_tools.set_session_runner(r, loop)
     yield r
     session_tools.set_session_runner(None)
@@ -58,7 +58,7 @@ def runner(store, adapter):
 
 
 def _chat(store: SessionStore, sid: str = "chat1") -> Session:
-    return store.create_session(Session(id=sid, agent="bot", source=SessionSource.INTERACTIVE.value, user_id="alice"))
+    return store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="alice"))
 
 
 def _calling_session(sid: str | None):

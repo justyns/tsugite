@@ -8,7 +8,7 @@ import pytest
 import tsugite_daemon
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEProgressHandler
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.scheduler import RunResult, ScheduleEntry, Scheduler
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -24,7 +24,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -43,8 +43,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
         return adapter
@@ -53,7 +52,7 @@ def mock_adapter(agent_config, tmp_path):
 @pytest.fixture
 def webhook_store(tmp_path):
     store = WebhookStore(tmp_path / "webhooks.json")
-    store.add(agent="test-agent", source="forgejo", token="whk_test")
+    store.add(source="forgejo", token="whk_test")
     return store
 
 
@@ -77,9 +76,8 @@ def test_token(token_store):
 def server(http_config, mock_adapter, webhook_store, agent_config, token_store):
     return HTTPServer(
         config=http_config,
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
 
@@ -95,7 +93,6 @@ class TestHealthEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert "test-agent" in data["agents"]
 
     def test_health_no_auth_required(self, client):
         resp = client.get("/api/health")
@@ -120,39 +117,31 @@ class TestExecutorsEndpoint:
         assert resp.status_code == 401
 
 
-class TestAgentsEndpoint:
-    def test_list_agents_with_auth(self, client, test_token):
-        resp = client.get("/api/agents", headers={"Authorization": f"Bearer {test_token}"})
+class TestRuntimeEndpoint:
+    def test_runtime_with_auth(self, client, test_token):
+        resp = client.get("/api/runtime", headers={"Authorization": f"Bearer {test_token}"})
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["agents"]) == 1
-        assert data["agents"][0]["name"] == "test-agent"
+        assert data["agent_file"] == "default"
+        assert "workspace_dir" in data
 
-    def test_list_agents_unauthorized(self, client):
-        resp = client.get("/api/agents")
+    def test_runtime_unauthorized(self, client):
+        resp = client.get("/api/runtime")
         assert resp.status_code == 401
 
-    def test_list_agents_wrong_token(self, client):
-        resp = client.get("/api/agents", headers={"Authorization": "Bearer wrong"})
+    def test_runtime_wrong_token(self, client):
+        resp = client.get("/api/runtime", headers={"Authorization": "Bearer wrong"})
         assert resp.status_code == 401
 
 
 class TestChatEndpoint:
-    def test_chat_unknown_agent(self, client, test_token):
-        resp = client.post(
-            "/api/agents/nonexistent/chat",
-            json={"message": "hello"},
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        assert resp.status_code == 404
-
     def test_chat_no_auth(self, client):
-        resp = client.post("/api/agents/test-agent/chat", json={"message": "hello"})
+        resp = client.post("/api/chat", json={"message": "hello"})
         assert resp.status_code == 401
 
     def test_chat_empty_message(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             json={"message": ""},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -160,7 +149,7 @@ class TestChatEndpoint:
 
     def test_chat_invalid_json(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             content=b"not json",
             headers={"Authorization": f"Bearer {test_token}", "Content-Type": "application/json"},
         )
@@ -174,7 +163,6 @@ class TestChatEndpoint:
         successor = store.create_session(
             Session(
                 id="successor-1",
-                agent="test-agent",
                 source=SessionSource.INTERACTIVE.value,
                 status=SessionStatus.ACTIVE.value,
                 user_id="web-anonymous",
@@ -183,7 +171,6 @@ class TestChatEndpoint:
         old = store.create_session(
             Session(
                 id="old-compacted",
-                agent="test-agent",
                 source=SessionSource.INTERACTIVE.value,
                 status=SessionStatus.COMPLETED.value,
                 superseded_by=successor.id,
@@ -208,7 +195,7 @@ class TestChatEndpoint:
             patch.object(server.event_bus, "emit", side_effect=capture),
         ):
             resp = client.post(
-                "/api/agents/test-agent/chat",
+                "/api/chat",
                 json={"message": "hello", "session_id": old.id},
                 headers={"Authorization": f"Bearer {test_token}"},
             )
@@ -229,14 +216,13 @@ class TestChatEndpoint:
 
         store = mock_adapter.session_store
         # User's older interactive session, still visible in sidebar.
-        target = store.get_or_create_interactive("web-anonymous", "test-agent")
+        target = store.get_or_create_interactive("web-anonymous")
         target_id = target.id
         # User clicked "New Session" - a fresh interactive becomes the primary default,
         # displacing `target` as where chats with no explicit session_id land.
         newer = store.create_session(
             Session(
                 id="newer-default-session",
-                agent="test-agent",
                 source=SessionSource.INTERACTIVE.value,
                 status=SessionStatus.ACTIVE.value,
                 user_id="web-anonymous",
@@ -244,7 +230,7 @@ class TestChatEndpoint:
             )
         )
         store.set_primary_session(newer.id)
-        assert store.get_or_create_interactive("web-anonymous", "test-agent").id == newer.id
+        assert store.get_or_create_interactive("web-anonymous").id == newer.id
         assert target_id != newer.id
 
         recorded: list[dict] = []
@@ -264,7 +250,7 @@ class TestChatEndpoint:
             patch.object(server.event_bus, "emit", side_effect=capture),
         ):
             resp = client.post(
-                "/api/agents/test-agent/chat",
+                "/api/chat",
                 json={"message": "hello", "session_id": target_id},
                 headers={"Authorization": f"Bearer {test_token}"},
             )
@@ -280,7 +266,7 @@ class TestChatEndpoint:
 
 
 class TestAgentSessionsEndpoint:
-    """GET /api/agents/{agent}/sessions exposes progress for running sessions."""
+    """GET /api/chat/sessions exposes progress for running sessions."""
 
     def test_running_session_includes_progress(self, client, mock_adapter, test_token):
         from tsugite_daemon.session_store import Session, SessionSource, SessionStatus
@@ -289,7 +275,6 @@ class TestAgentSessionsEndpoint:
         session = store.create_session(
             Session(
                 id="sched_test_1",
-                agent="test-agent",
                 source=SessionSource.SCHEDULE.value,
                 status=SessionStatus.RUNNING.value,
                 prompt="do the thing",
@@ -299,7 +284,7 @@ class TestAgentSessionsEndpoint:
         store.append_event(session.id, {"type": "tool_result", "tool": "bash", "success": True})
 
         resp = client.get(
-            "/api/agents/test-agent/sessions",
+            "/api/chat/sessions",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -312,7 +297,7 @@ class TestAgentSessionsEndpoint:
 
     def _sessions_row(self, client, test_token, session_id):
         resp = client.get(
-            "/api/agents/test-agent/sessions",
+            "/api/chat/sessions",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -326,7 +311,6 @@ class TestAgentSessionsEndpoint:
         session = store.create_session(
             Session(
                 id="compacted_successor",
-                agent="test-agent",
                 source=SessionSource.INTERACTIVE.value,
                 status=SessionStatus.ACTIVE.value,
                 user_id="u",
@@ -366,7 +350,6 @@ class TestAgentSessionsEndpoint:
         session = store.create_session(
             Session(
                 id="sched_done",
-                agent="test-agent",
                 source=SessionSource.SCHEDULE.value,
                 status=SessionStatus.COMPLETED.value,
                 prompt="done already",
@@ -374,7 +357,7 @@ class TestAgentSessionsEndpoint:
         )
 
         resp = client.get(
-            "/api/agents/test-agent/sessions",
+            "/api/chat/sessions",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -383,19 +366,12 @@ class TestAgentSessionsEndpoint:
 
 
 class TestEffortLevelsEndpoint:
-    """GET /api/agents/{agent}/effort-levels returns the resolved model's effort list."""
-
-    def test_unknown_agent(self, client, test_token):
-        resp = client.get(
-            "/api/agents/nope/effort-levels",
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        assert resp.status_code == 404
+    """GET /api/chat/effort-levels returns the resolved model's effort list."""
 
     def test_returns_levels_for_claude_code_model(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
+        mock_adapter.runtime.model = "claude_code:opus"
         resp = client.get(
-            "/api/agents/test-agent/effort-levels",
+            "/api/chat/effort-levels",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -403,9 +379,9 @@ class TestEffortLevelsEndpoint:
         assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
 
     def test_returns_null_for_non_reasoning_model(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "anthropic:claude-3-opus-20240229"
+        mock_adapter.runtime.model = "anthropic:claude-3-opus-20240229"
         resp = client.get(
-            "/api/agents/test-agent/effort-levels",
+            "/api/chat/effort-levels",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -413,12 +389,12 @@ class TestEffortLevelsEndpoint:
 
     def test_resolves_against_session_model_override(self, client, mock_adapter, test_token):
         # Agent default supports xhigh; the session overrides to a model that does not.
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-eff", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff")
         mock_adapter.session_store.set_model_override(session.id, "openai:o3")
 
         resp = client.get(
-            f"/api/agents/test-agent/effort-levels?session_id={session.id}",
+            f"/api/chat/effort-levels?session_id={session.id}",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -427,11 +403,11 @@ class TestEffortLevelsEndpoint:
         assert data["supported_effort_levels"] == ["low", "medium", "high"]
 
     def test_without_override_falls_back_to_agent_default(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-eff-fallback", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-fallback")
 
         resp = client.get(
-            f"/api/agents/test-agent/effort-levels?session_id={session.id}",
+            f"/api/chat/effort-levels?session_id={session.id}",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -440,10 +416,10 @@ class TestEffortLevelsEndpoint:
         assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
 
     def test_unknown_session_id_falls_back_to_agent_default(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
+        mock_adapter.runtime.model = "claude_code:opus"
 
         resp = client.get(
-            "/api/agents/test-agent/effort-levels?session_id=does-not-exist",
+            "/api/chat/effort-levels?session_id=does-not-exist",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -462,9 +438,19 @@ class TestSessionSettingsEndpoint:
         )
         assert resp.status_code == 404
 
+    def test_requires_auth(self, client, mock_adapter):
+        """Both verbs sit behind the bearer check. They were briefly reachable
+        unauthenticated, which let anyone repoint a session's runtime settings."""
+        session = mock_adapter.session_store.get_or_create_interactive("user-a")
+
+        assert client.get(f"/api/sessions/{session.id}/settings").status_code == 401
+        assert (
+            client.patch(f"/api/sessions/{session.id}/settings", json={"reasoning_effort": "high"}).status_code == 401
+        )
+
     def test_patch_then_get(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-a", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-a")
 
         resp = client.patch(
             f"/api/sessions/{session.id}/settings",
@@ -482,8 +468,8 @@ class TestSessionSettingsEndpoint:
         assert resp.json()["reasoning_effort"] == "high"
 
     def test_patch_invalid_value_returns_400(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-b", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-b")
 
         resp = client.patch(
             f"/api/sessions/{session.id}/settings",
@@ -496,8 +482,8 @@ class TestSessionSettingsEndpoint:
         assert "xhigh" in body["supported"]
 
     def test_patch_null_clears_value(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-c", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-c")
         mock_adapter.session_store.set_reasoning_effort(session.id, "max")
 
         resp = client.patch(
@@ -511,8 +497,8 @@ class TestSessionSettingsEndpoint:
     def test_patch_effort_validates_against_model_override(self, client, mock_adapter, test_token):
         # Agent default lacks xhigh; the session overrides to a model that has it.
         # The effort PATCH must validate against the override, not the agent default.
-        mock_adapter.agent_config.model = "openai:o3"
-        session = mock_adapter.session_store.get_or_create_interactive("user-eff-patch", "test-agent")
+        mock_adapter.runtime.model = "openai:o3"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-patch")
         mock_adapter.session_store.set_model_override(session.id, "claude_code:opus")
 
         resp = client.patch(
@@ -526,8 +512,8 @@ class TestSessionSettingsEndpoint:
     def test_patch_broadcasts_settings_update(self, client, server, mock_adapter, test_token):
         # A model/effort change must broadcast a session_update so the same chat
         # open in other tabs refreshes its model/effort chips live.
-        mock_adapter.agent_config.model = "claude_code:opus"
-        session = mock_adapter.session_store.get_or_create_interactive("user-bcast", "test-agent")
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-bcast")
 
         recorded: list[dict] = []
         original_emit = server.event_bus.emit
@@ -551,12 +537,12 @@ class TestSessionSettingsEndpoint:
 
 
 class TestChatReasoningEffortOverride:
-    """POST /api/agents/{agent}/chat accepts and validates reasoning_effort."""
+    """POST /api/chat accepts and validates reasoning_effort."""
 
     def test_invalid_value_returns_400(self, client, mock_adapter, test_token):
-        mock_adapter.agent_config.model = "claude_code:opus"
+        mock_adapter.runtime.model = "claude_code:opus"
         resp = client.post(
-            "/api/agents/test-agent/chat",
+            "/api/chat",
             json={"message": "hi", "reasoning_effort": "ultra"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -565,13 +551,13 @@ class TestChatReasoningEffortOverride:
 
 
 class TestChatContextMetadata:
-    """POST /api/agents/{agent}/chat threads context_metadata onto the ChannelContext."""
+    """POST /api/chat threads context_metadata onto the ChannelContext."""
 
     def _capture_channel_context(self, client, server, test_token, body):
         handle = AsyncMock(return_value="ok")
-        with patch.object(type(server.adapters["test-agent"]), "handle_message", new=handle):
+        with patch.object(type(server.adapter), "handle_message", new=handle):
             resp = client.post(
-                "/api/agents/test-agent/chat",
+                "/api/chat",
                 json=body,
                 headers={"Authorization": f"Bearer {test_token}"},
             )
@@ -590,15 +576,15 @@ class TestChatContextMetadata:
 
 
 class TestUnloadSkillEndpoint:
-    """POST /api/agents/{agent}/unload-skill suppresses a skill for the session."""
+    """POST /api/chat/unload-skill suppresses a skill for the session."""
 
     def _headers(self, token):
         return {"Authorization": f"Bearer {token}"}
 
     def test_unload_skill_happy_path(self, client, test_token, mock_adapter):
-        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
+        session = mock_adapter.session_store.create_default_session("alice")
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
             headers=self._headers(test_token),
         )
@@ -610,10 +596,10 @@ class TestUnloadSkillEndpoint:
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
 
     def test_unload_skill_is_idempotent(self, client, test_token, mock_adapter):
-        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
+        session = mock_adapter.session_store.create_default_session("alice")
         for _ in range(3):
             resp = client.post(
-                "/api/agents/test-agent/unload-skill",
+                "/api/chat/unload-skill",
                 json={"user_id": "alice", "name": "skill-a"},
                 headers=self._headers(test_token),
             )
@@ -621,10 +607,10 @@ class TestUnloadSkillEndpoint:
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a"}
 
     def test_unload_multiple_skills(self, client, test_token, mock_adapter):
-        session = mock_adapter.session_store.create_default_session("alice", "test-agent")
+        session = mock_adapter.session_store.create_default_session("alice")
         for name in ("skill-a", "skill-b", "skill-c"):
             resp = client.post(
-                "/api/agents/test-agent/unload-skill",
+                "/api/chat/unload-skill",
                 json={"user_id": "alice", "name": name},
                 headers=self._headers(test_token),
             )
@@ -632,10 +618,10 @@ class TestUnloadSkillEndpoint:
         assert mock_adapter.session_store.get_suppressed_skills(session.id) == {"skill-a", "skill-b", "skill-c"}
 
     def test_unload_skill_isolated_per_user(self, client, test_token, mock_adapter):
-        alice_session = mock_adapter.session_store.create_default_session("alice", "test-agent")
-        bob_session = mock_adapter.session_store.create_default_session("bob", "test-agent")
+        alice_session = mock_adapter.session_store.create_default_session("alice")
+        bob_session = mock_adapter.session_store.create_default_session("bob")
         client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
             headers=self._headers(test_token),
         )
@@ -644,7 +630,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_missing_name(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice"},
             headers=self._headers(test_token),
         )
@@ -653,7 +639,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_empty_name(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": ""},
             headers=self._headers(test_token),
         )
@@ -661,7 +647,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_non_string_name(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": 42},
             headers=self._headers(test_token),
         )
@@ -669,7 +655,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_invalid_json(self, client, test_token):
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             content=b"not json",
             headers={**self._headers(test_token), "Content-Type": "application/json"},
         )
@@ -677,7 +663,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_unknown_agent(self, client, test_token):
         resp = client.post(
-            "/api/agents/nonexistent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
             headers=self._headers(test_token),
         )
@@ -685,7 +671,7 @@ class TestUnloadSkillEndpoint:
 
     def test_unload_skill_no_auth(self, client):
         resp = client.post(
-            "/api/agents/test-agent/unload-skill",
+            "/api/chat/unload-skill",
             json={"user_id": "alice", "name": "skill-a"},
         )
         assert resp.status_code == 401
@@ -752,7 +738,7 @@ class TestHistoryEndpoint:
 
     def test_history_empty_for_new_user(self, client, test_token):
         resp = client.get(
-            "/api/agents/test-agent/history?user_id=brand-new-user",
+            "/api/chat/history?user_id=brand-new-user",
             headers={"Authorization": f"Bearer {test_token}"},
         )
         assert resp.status_code == 200
@@ -760,27 +746,20 @@ class TestHistoryEndpoint:
         assert data["events"] == []
         assert "conversation_id" in data
 
-    def test_history_unknown_agent(self, client, test_token):
-        resp = client.get(
-            "/api/agents/nonexistent/history?user_id=someone",
-            headers={"Authorization": f"Bearer {test_token}"},
-        )
-        assert resp.status_code == 404
-
     def test_history_unauthorized(self, client):
-        resp = client.get("/api/agents/test-agent/history?user_id=someone")
+        resp = client.get("/api/chat/history?user_id=someone")
         assert resp.status_code == 401
 
     def test_history_returns_event_stream(self, client, test_token, mock_adapter, tmp_path):
         """The history endpoint returns the raw event log (session_start, user_input, model_response, ...)."""
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")
         storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="hello")
         storage.record("model_response", raw_content="hi", usage={"total_tokens": 5})
         storage.record("session_end", status="success")
 
         resp = client.get(
-            "/api/agents/test-agent/history?user_id=web-anonymous",
+            "/api/chat/history?user_id=web-anonymous",
             headers={"Authorization": f"Bearer {test_token}"},
         )
 
@@ -793,7 +772,7 @@ class TestHistoryEndpoint:
 
     def test_history_includes_ui_events(self, client, test_token, mock_adapter, tmp_path):
         """UI events from the live session event log appear as their own events in history."""
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")
         storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="hello")
         storage.record("model_response", raw_content="hi")
@@ -804,7 +783,7 @@ class TestHistoryEndpoint:
         )
 
         resp = client.get(
-            "/api/agents/test-agent/history?user_id=web-anonymous",
+            "/api/chat/history?user_id=web-anonymous",
             headers={"Authorization": f"Bearer {test_token}"},
         )
 
@@ -816,7 +795,7 @@ class TestHistoryEndpoint:
 
     def test_history_preserves_execution_result(self, client, test_token, mock_adapter, tmp_path):
         """Code execution events round-trip through the endpoint with output, error, duration."""
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")
         storage = seed_history_session(session.id, agent="test-agent", model="test")
         storage.record("user_input", text="go")
         storage.record("model_response", raw_content="```python-exec\nprint('hi')\n```")
@@ -824,7 +803,7 @@ class TestHistoryEndpoint:
         storage.record("model_response", raw_content="Done.")
 
         resp = client.get(
-            "/api/agents/test-agent/history?user_id=web-anonymous",
+            "/api/chat/history?user_id=web-anonymous",
             headers={"Authorization": f"Bearer {test_token}"},
         )
 
@@ -842,7 +821,7 @@ class TestBranchEndpoint:
     def test_branch_creates_independent_session(self, client, test_token, mock_adapter):
         from tsugite.history import get_history_backend
 
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")
         backend = get_history_backend()
         hist = backend.create("test-agent", "test", session_id=session.id)
         hist.record("user_input", text="original question")
@@ -850,7 +829,7 @@ class TestBranchEndpoint:
         cut_id = next(e.id for e in backend.load(session.id).load_events() if e.type == "model_response")
 
         resp = client.post(
-            f"/api/agents/test-agent/sessions/{session.id}/branch",
+            f"/api/chat/sessions/{session.id}/branch",
             json={"at_event_id": cut_id, "label": "alt path"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -867,9 +846,9 @@ class TestBranchEndpoint:
         assert btypes == ["session_start", "user_input", "model_response"]
 
     def test_branch_requires_at_event_id(self, client, test_token, mock_adapter):
-        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous", "test-agent")
+        session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")
         resp = client.post(
-            f"/api/agents/test-agent/sessions/{session.id}/branch",
+            f"/api/chat/sessions/{session.id}/branch",
             json={},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -1073,7 +1052,6 @@ class TestSchedulesEndpoint:
         sched.add(
             ScheduleEntry(
                 id="job1",
-                agent="test-agent",
                 prompt="hi",
                 schedule_type="cron",
                 cron_expr="0 9 * * *",
@@ -1138,7 +1116,7 @@ class TestSchedulesEndpoint:
 class TestWorkspaceSaveEndpoint:
     def _put(self, client, test_token, path, content):
         return client.put(
-            "/api/agents/test-agent/workspace/content",
+            "/api/workspace/content",
             json={"path": path, "content": content},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -1183,7 +1161,7 @@ class TestWorkspaceRawEndpoint:
 
     def _get(self, client, test_token, path):
         return client.get(
-            "/api/agents/test-agent/workspace/raw",
+            "/api/workspace/raw",
             params={"path": path},
             headers={"Authorization": f"Bearer {test_token}"},
         )
@@ -1219,7 +1197,7 @@ class TestWorkspaceRawEndpoint:
 
     def test_requires_auth(self, client, tmp_workspace):
         (tmp_workspace / "x.png").write_bytes(self.IMG_BYTES)
-        resp = client.get("/api/agents/test-agent/workspace/raw", params={"path": "x.png"})
+        resp = client.get("/api/workspace/raw", params={"path": "x.png"})
         assert resp.status_code == 401
 
     def test_oversize_is_413(self, client, test_token, tmp_workspace, monkeypatch):
@@ -1234,7 +1212,7 @@ class TestWorkspaceRawEndpoint:
 class TestWorkspaceListEndpoint:
     def _get(self, client, test_token, query=""):
         return client.get(
-            f"/api/agents/test-agent/workspace{query}",
+            f"/api/workspace{query}",
             headers={"Authorization": f"Bearer {test_token}"},
         )
 
@@ -1304,7 +1282,6 @@ class TestHTTPConfig:
     def test_webhook_entry(self):
         from tsugite_daemon.webhook_store import WebhookEntry
 
-        wh = WebhookEntry(token="whk_test", agent="myagent", source="github")
+        wh = WebhookEntry(token="whk_test", source="github")
         assert wh.token == "whk_test"
-        assert wh.agent == "myagent"
         assert wh.source == "github"

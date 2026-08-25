@@ -346,7 +346,6 @@ class JobsOrchestrator:
             worker_meta["delegation_files"] = list(job.delegation_files)
         session = Session(
             id="",
-            agent=self._resolve_adapter_key(job.parent_session_id),
             source=SessionSource.SPAWNED.value,
             prompt=prompt,
             # Sidebar label; without it the UI falls back to the raw session id.
@@ -891,10 +890,8 @@ class JobsOrchestrator:
         self._schedule_timeout(job.id, job.timeout_minutes)
 
         verifier_prompt = _build_verifier_prompt(job, worker_output=result_str, prose_acs=prose_acs)
-        verifier_adapter_key = self._resolve_adapter_key(job.parent_session_id)
         verifier_session = Session(
             id="",
-            agent=verifier_adapter_key,
             source=SessionSource.SPAWNED.value,
             prompt=verifier_prompt,
             title=f"{job.id} · verifier",
@@ -1484,45 +1481,12 @@ class JobsOrchestrator:
             logger.info("Reconciled %d orphaned job-host session(s) from previous daemon run", reconciled)
         return reconciled
 
-    def _resolve_adapter_key(self, parent_session_id: str) -> str:
-        """Resolve the daemon adapter key to run a Job worker under, so it stays on
-        the same agent (credentials, tools, model defaults) as whoever spawned it.
-
-        Precedence: the adapter running the spawning turn (set in the run context),
-        then the parent session's stored agent IF it names a registered adapter,
-        then the sole registered adapter. A session's stored agent can be the
-        agent-file's config name rather than the adapter key (they differ when a
-        daemon agent uses an agent_file of another name), so it is only trusted when
-        it actually resolves. Tolerates a SessionStore raising ValueError on missing
-        sessions.
-        """
-        from tsugite.agent_runner.helpers import get_current_daemon_agent
-
-        adapters = getattr(self._runner, "_adapters", {})
-        live = get_current_daemon_agent()
-        if live and live in adapters:
-            return live
-        parent = self._get_parent_session(parent_session_id)
-        if parent is not None and parent.agent in adapters:
-            return parent.agent
-        if len(adapters) == 1:
-            return next(iter(adapters))
-        # Parent's agent didn't resolve and there's no single unambiguous adapter
-        # to fall back to (none registered, or several and none matched): keep the
-        # parent's name so the caller still surfaces a clear "No adapter for agent
-        # 'X'" instead of silently running the worker under an arbitrary agent.
-        return parent.agent if parent is not None else "default"
-
     def _resolve_parent_sandbox_override(self, parent_session_id: str) -> Optional[dict]:
-        """Resolve the parent session's agent sandbox config as an override dict,
-        or None when that agent isn't sandboxed. Lets /job-created jobs inherit
-        the agent's sandbox even though there's no running-agent context."""
-        parent = self._get_parent_session(parent_session_id)
-        adapters = getattr(self._runner, "_adapters", {})
-        adapter = adapters.get(parent.agent) if parent is not None else None
-        if adapter is None and adapters:
-            adapter = next(iter(adapters.values()))
-        sb = getattr(getattr(adapter, "agent_config", None), "sandbox", None)
+        """Resolve the daemon's sandbox config as an override dict, or None when
+        sandboxing is off. Lets /job-created jobs inherit the sandbox even though
+        there's no running-agent context."""
+        adapter = getattr(self._runner, "_adapter", None)
+        sb = getattr(getattr(adapter, "runtime", None), "sandbox", None)
         if sb is None or not sb.enabled:
             return None
         return {
@@ -1536,21 +1500,17 @@ class JobsOrchestrator:
 
     def _resolve_workspace_root(self, parent_session_id: str) -> Optional[Path]:
         """Workspace root a relative --repo is interpreted against: the parent
-        session's workspace_override, else its adapter's configured workspace_dir.
+        session's workspace_override, else the daemon's configured workspace_dir.
 
         Returns None when nothing is resolvable, so a relative path falls back to
-        the daemon CWD (prior behaviour). Mirrors _resolve_adapter_key's tolerance
-        of a real SessionStore raising ValueError on a missing session.
+        the daemon CWD. Tolerates a real SessionStore raising ValueError on a
+        missing session.
         """
         parent = self._get_parent_session(parent_session_id)
         if parent is not None and getattr(parent, "workspace_override", None):
             return Path(parent.workspace_override)
-        adapters = getattr(self._runner, "_adapters", {})
-        adapter = adapters.get(parent.agent) if parent is not None else None
-        if adapter is None and adapters:
-            adapter = next(iter(adapters.values()))
-        agent_config = getattr(adapter, "agent_config", None)
-        workspace_dir = getattr(agent_config, "workspace_dir", None)
+        adapter = getattr(self._runner, "_adapter", None)
+        workspace_dir = getattr(getattr(adapter, "runtime", None), "workspace_dir", None)
         return Path(workspace_dir) if workspace_dir is not None else None
 
     def _emit_job_event(self, job: Optional[Job]) -> None:

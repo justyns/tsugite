@@ -14,9 +14,8 @@ from tsugite_daemon.webhook_store import WebhookStore
 def _server(tmp_path, **http_kwargs):
     return HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374, **http_kwargs),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
     )
 
 

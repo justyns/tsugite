@@ -17,16 +17,14 @@ def _entry_to_dict(entry):
 _scheduler = None
 _loop = None
 _channel_names: set[str] = set()
-_agent_names: set[str] = set()
 
 
-def set_scheduler(scheduler, loop=None, channel_names=None, agent_names=None):
+def set_scheduler(scheduler, loop=None, channel_names=None):
     """Called by the daemon to set/clear the scheduler reference."""
-    global _scheduler, _loop, _channel_names, _agent_names
+    global _scheduler, _loop, _channel_names
     _scheduler = scheduler
     _loop = loop
     _channel_names = channel_names or set()
-    _agent_names = agent_names or set()
 
 
 def _call(fn, *args, **kwargs):
@@ -57,19 +55,6 @@ def _validate_notify(notify, notify_tool: bool) -> Optional[list[str]]:
     return notify
 
 
-def _validate_agent(agent: str) -> None:
-    """Validate agent name against registered daemon adapters."""
-    if _agent_names and agent not in _agent_names:
-        raise ValueError(f"Unknown agent '{agent}'. Available: {', '.join(sorted(_agent_names))}")
-
-
-def _resolve_agent(agent: Optional[str]) -> str:
-    """Resolve agent name, falling back to the current agent or 'default'."""
-    from tsugite.agent_runner.helpers import resolve_current_agent
-
-    return resolve_current_agent(agent)
-
-
 def _resolve_target_session(target_session: Optional[str], current_session_id: Optional[str]) -> Optional[str]:
     """Resolved at creation, not fire time: a schedule fires in its own session,
     where there is no current chat.
@@ -86,7 +71,6 @@ def _resolve_target_session(target_session: Optional[str], current_session_id: O
 def schedule_create(
     id: str,
     prompt: str = "",
-    agent: Optional[str] = None,
     cron: Optional[str] = None,
     run_at: Optional[str] = None,
     timezone: str = "UTC",
@@ -116,7 +100,6 @@ def schedule_create(
     Args:
         id: Unique schedule name (e.g., "daily-backup")
         prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script".
-        agent: Agent name configured in daemon. Defaults to the current agent if omitted.
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
         timezone: IANA timezone (default: UTC)
@@ -164,8 +147,6 @@ def schedule_create(
             raise ValueError("Provide at least one of 'prompt' or 'agent_file'")
 
     notify = _validate_notify(notify, notify_tool)
-    agent = _resolve_agent(agent)
-    _validate_agent(agent)
 
     originating_session_id = get_current_session_id()
     target_session = _resolve_target_session(target_session, originating_session_id)
@@ -174,7 +155,6 @@ def schedule_create(
 
     entry = ScheduleEntry(
         id=id,
-        agent=agent,
         prompt=prompt,
         schedule_type="once" if run_at else "cron",
         cron_expr=cron,
@@ -207,7 +187,7 @@ def schedule_list() -> list:
     """List all configured schedules with their status.
 
     Returns:
-        List of schedules with id, agent, type, enabled, next_run, last_status.
+        List of schedules with id, type, enabled, next_run, last_status.
         Per-run history is omitted to keep the result small; fetch it for one
         schedule with schedule_status(id).
     """
@@ -412,7 +392,6 @@ def schedule_status(id: str, history_limit: int = 10) -> dict:
     running_ids = _call(_scheduler.get_running_ids)
     return {
         "id": entry.id,
-        "agent": entry.agent,
         "is_running": entry.id in running_ids,
         "last_status": entry.last_status,
         "last_run": entry.last_run,
@@ -428,9 +407,7 @@ def schedule_status(id: str, history_limit: int = 10) -> dict:
 def _get_running_tasks_snapshot():
     """Collect running task details in a single scheduler-thread call."""
     running_ids = _scheduler.get_running_ids()
-    return [
-        {"id": e.id, "agent": e.agent, "prompt": e.prompt[:200]} for rid in running_ids if (e := _scheduler.get(rid))
-    ]
+    return [{"id": e.id, "prompt": e.prompt[:200]} for rid in running_ids if (e := _scheduler.get(rid))]
 
 
 @tool(require_daemon=True)
@@ -438,7 +415,7 @@ def list_running_tasks() -> list:
     """List all currently running schedule tasks.
 
     Returns:
-        List of dicts with id, agent, and prompt (truncated) for each running task
+        List of dicts with id and prompt (truncated) for each running task
     """
     return _call(_get_running_tasks_snapshot)
 
@@ -447,7 +424,6 @@ def list_running_tasks() -> list:
 @deny_when_sandboxed
 def background_task(
     prompt: str = "",
-    agent: Optional[str] = None,
     notify: Optional[list[str]] = None,
     notify_tool: bool = False,
     inject_history: bool = False,
@@ -473,7 +449,6 @@ def background_task(
 
     Args:
         prompt: Clear, self-contained instruction for the background agent. Optional when execution_type is "script".
-        agent: Agent name to run. Defaults to the current agent.
         notify: Notification channels for result delivery. Required for auto-reply.
         notify_tool: If true, gives the background agent the notify_user tool.
         inject_history: If true, inject raw result into user session (in addition to auto-reply).
@@ -502,8 +477,6 @@ def background_task(
         raise ValueError("on_complete must be {'action': 'reply'}")
 
     notify = _validate_notify(notify, notify_tool)
-    agent = _resolve_agent(agent)
-    _validate_agent(agent)
 
     from tsugite_daemon.scheduler import ScheduleEntry
     from tsugite_daemon.session_runner import get_current_chain_depth
@@ -525,7 +498,6 @@ def background_task(
 
     entry = ScheduleEntry(
         id=task_id,
-        agent=agent,
         prompt=prompt,
         schedule_type="once",
         run_at=run_at,

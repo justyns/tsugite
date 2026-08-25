@@ -22,13 +22,12 @@ def store(tmp_path):
 
 @pytest.fixture
 def sample_session():
-    return Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="do stuff")
+    return Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="do stuff")
 
 
 def test_create_and_get_session(store, sample_session):
     store.create_session(sample_session)
     got = store.get_session("s1")
-    assert got.agent == "default"
     assert got.status == SessionStatus.RUNNING.value or got.status == sample_session.status
 
 
@@ -51,14 +50,10 @@ def test_update_session(store, sample_session):
 
 def test_list_sessions_filter(store):
     store.create_session(
-        Session(
-            id="a", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.RUNNING.value, prompt="p"
-        )
+        Session(id="a", source=SessionSource.BACKGROUND.value, status=SessionStatus.RUNNING.value, prompt="p")
     )
     store.create_session(
-        Session(
-            id="b", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p"
-        )
+        Session(id="b", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p")
     )
     assert len(store.list_sessions()) == 2
     assert len(store.list_sessions(status=SessionStatus.RUNNING.value)) == 1
@@ -70,24 +65,20 @@ def test_list_sessions_filter(store):
 def test_persistence_roundtrip(tmp_path):
     path = tmp_path / "session_store.json"
     store1 = SessionStore(path)
-    store1.create_session(Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hi"))
+    store1.create_session(Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="hi"))
 
     store2 = SessionStore(path)
-    assert store2.get_session("s1").agent == "default"
+    assert store2.get_session("s1").prompt == "hi"
 
 
 def test_stale_session_recovery(tmp_path):
     path = tmp_path / "session_store.json"
     store1 = SessionStore(path)
     store1.create_session(
-        Session(
-            id="s1", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.RUNNING.value, prompt="p"
-        )
+        Session(id="s1", source=SessionSource.BACKGROUND.value, status=SessionStatus.RUNNING.value, prompt="p")
     )
     store1.create_session(
-        Session(
-            id="s2", agent="x", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p"
-        )
+        Session(id="s2", source=SessionSource.BACKGROUND.value, status=SessionStatus.COMPLETED.value, prompt="p")
     )
 
     # Simulate daemon restart
@@ -319,8 +310,8 @@ def test_session_progress_summary_missing_session(store):
 def mock_adapter():
     adapter = MagicMock()
     adapter.handle_message = AsyncMock(return_value="done")
-    adapter.agent_config = MagicMock()
-    adapter.agent_config.workspace_dir = Path("/tmp/test")
+    adapter.runtime = MagicMock()
+    adapter.runtime.workspace_dir = Path("/tmp/test")
     adapter._resolve_agent_path = MagicMock(return_value=Path("/tmp/test/agent.md"))
     adapter.workspace_attachments = []
     adapter.session_store = MagicMock()
@@ -333,10 +324,10 @@ async def test_session_runner_start_and_complete(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    adapters = {"default": mock_adapter}
+    adapters = mock_adapter
     runner = SessionRunner(store, adapters)
 
-    session = Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="test task")
+    session = Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="test task")
     result = runner.start_session(session)
     assert result.status == SessionStatus.RUNNING.value
     assert store.get_session("s1").status == SessionStatus.RUNNING.value
@@ -361,9 +352,9 @@ async def test_session_runner_cancel(tmp_path, mock_adapter):
     mock_adapter.handle_message = slow_handler
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    session = Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="slow task")
+    session = Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="slow task")
     runner.start_session(session)
     await asyncio.sleep(0.1)
 
@@ -380,16 +371,16 @@ async def test_session_runner_failure(tmp_path):
 
     adapter = MagicMock()
     adapter.handle_message = AsyncMock(side_effect=RuntimeError("boom"))
-    adapter.agent_config = MagicMock()
-    adapter.agent_config.workspace_dir = Path("/tmp/test")
+    adapter.runtime = MagicMock()
+    adapter.runtime.workspace_dir = Path("/tmp/test")
     adapter._resolve_agent_path = MagicMock(return_value=Path("/tmp/test/agent.md"))
     adapter.workspace_attachments = []
     adapter.session_store = MagicMock()
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": adapter})
+    runner = SessionRunner(store, adapter)
 
-    session = Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="fail task")
+    session = Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="fail task")
     runner.start_session(session)
     await asyncio.sleep(0.5)
 
@@ -411,9 +402,9 @@ async def test_session_runner_notify_callback(tmp_path, mock_adapter):
         notify_called.set()
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter}, notify_callback=on_complete)
+    runner = SessionRunner(store, mock_adapter, notify_callback=on_complete)
 
-    session = Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="notify test")
+    session = Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="notify test")
     runner.start_session(session)
     await asyncio.wait_for(notify_called.wait(), timeout=2.0)
 
@@ -426,9 +417,9 @@ async def test_session_runner_event_logging(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    session = Session(id="s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="log test")
+    session = Session(id="s1", source=SessionSource.BACKGROUND.value, prompt="log test")
     runner.start_session(session)
     await asyncio.sleep(0.5)
 
@@ -446,9 +437,9 @@ async def test_session_tools_start(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    session = Session(id="tool-s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hello")
+    session = Session(id="tool-s1", source=SessionSource.BACKGROUND.value, prompt="hello")
     result = runner.start_session(session)
     assert result.status == SessionStatus.RUNNING.value
     assert result.id == "tool-s1"
@@ -463,9 +454,9 @@ async def test_session_tools_list(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    runner.start_session(Session(id="tool-s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hello"))
+    runner.start_session(Session(id="tool-s1", source=SessionSource.BACKGROUND.value, prompt="hello"))
     sessions = store.list_sessions()
     assert len(sessions) >= 1
     await asyncio.sleep(0.5)
@@ -476,11 +467,10 @@ async def test_session_tools_status(tmp_path, mock_adapter):
     from tsugite_daemon.session_runner import SessionRunner
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    runner.start_session(Session(id="tool-s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hello"))
-    session = store.get_session("tool-s1")
-    assert session.agent == "default"
+    runner.start_session(Session(id="tool-s1", source=SessionSource.BACKGROUND.value, prompt="hello"))
+    assert store.get_session("tool-s1").prompt == "hello"
     await asyncio.sleep(0.5)
 
 
@@ -497,9 +487,9 @@ async def test_session_tools_cancel(tmp_path, mock_adapter):
     mock_adapter.handle_message = slow_handler
 
     store = SessionStore(tmp_path / "session_store.json")
-    runner = SessionRunner(store, {"default": mock_adapter})
+    runner = SessionRunner(store, mock_adapter)
 
-    runner.start_session(Session(id="tool-s1", agent="default", source=SessionSource.BACKGROUND.value, prompt="hello"))
+    runner.start_session(Session(id="tool-s1", source=SessionSource.BACKGROUND.value, prompt="hello"))
     await asyncio.sleep(0.1)
 
     runner.cancel_session("tool-s1")

@@ -22,7 +22,6 @@ def session_with_events(store):
     """Create a session and add some events to it."""
     session = Session(
         id="test-session-1",
-        agent="odyn",
         source=SessionSource.BACKGROUND.value,
         status=SessionStatus.COMPLETED.value,
         prompt="Do something useful",
@@ -47,8 +46,8 @@ def session_with_events(store):
 
 class TestUpdatedSinceFilter:
     def test_list_sessions_no_filter(self, store):
-        s1 = Session(id="s1", agent="a", last_active="2026-03-15T10:00:00+00:00")
-        s2 = Session(id="s2", agent="a", last_active="2026-03-15T12:00:00+00:00")
+        s1 = Session(id="s1", last_active="2026-03-15T10:00:00+00:00")
+        s2 = Session(id="s2", last_active="2026-03-15T12:00:00+00:00")
         store.create_session(s1)
         store.create_session(s2)
 
@@ -56,9 +55,9 @@ class TestUpdatedSinceFilter:
         assert len(result) == 2
 
     def test_list_sessions_updated_since(self, store):
-        s1 = Session(id="s1", agent="a", last_active="2026-03-15T10:00:00+00:00")
-        s2 = Session(id="s2", agent="a", last_active="2026-03-15T12:00:00+00:00")
-        s3 = Session(id="s3", agent="a", last_active="2026-03-15T14:00:00+00:00")
+        s1 = Session(id="s1", last_active="2026-03-15T10:00:00+00:00")
+        s2 = Session(id="s2", last_active="2026-03-15T12:00:00+00:00")
+        s3 = Session(id="s3", last_active="2026-03-15T14:00:00+00:00")
         store.create_session(s1)
         store.create_session(s2)
         store.create_session(s3)
@@ -68,15 +67,15 @@ class TestUpdatedSinceFilter:
         assert ids == {"s2", "s3"}
 
     def test_list_sessions_updated_since_none_match(self, store):
-        s1 = Session(id="s1", agent="a", last_active="2026-03-15T10:00:00+00:00")
+        s1 = Session(id="s1", last_active="2026-03-15T10:00:00+00:00")
         store.create_session(s1)
 
         result = store.list_sessions(updated_since="2026-03-15T23:00:00+00:00")
         assert len(result) == 0
 
     def test_list_sessions_updated_since_combined_with_status(self, store):
-        s1 = Session(id="s1", agent="a", status="completed", last_active="2026-03-15T12:00:00+00:00")
-        s2 = Session(id="s2", agent="a", status="running", last_active="2026-03-15T12:00:00+00:00")
+        s1 = Session(id="s1", status="completed", last_active="2026-03-15T12:00:00+00:00")
+        s2 = Session(id="s2", status="running", last_active="2026-03-15T12:00:00+00:00")
         store.create_session(s1)
         store.create_session(s2)
 

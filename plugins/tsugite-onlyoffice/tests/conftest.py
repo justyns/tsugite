@@ -60,7 +60,7 @@ def adapter(documents_dir, secrets_backend):
             "documents_dir": str(documents_dir),
             "agent_name": AGENT_NAME,
         },
-        agents_config={},
+        runtime=None,
         session_store=None,
         identity_map={},
     )
@@ -88,9 +88,8 @@ def http_server(adapter, token_store, tmp_path):
 
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={},
+        adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={},
         token_store=token_store,
     )
     # tools.py registers this at import; the gateway reads the registry and passes

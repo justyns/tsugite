@@ -37,8 +37,7 @@ class WebhooksMixin:
         if err := self._check_auth(request):
             return err
         webhooks = [
-            {"token": w.token, "agent": w.agent, "source": w.source, "created_at": w.created_at}
-            for w in self.webhook_store.list()
+            {"token": w.token, "source": w.source, "created_at": w.created_at} for w in self.webhook_store.list()
         ]
         return JSONResponse({"webhooks": webhooks})
 
@@ -50,10 +49,9 @@ class WebhooksMixin:
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
-        agent = body.get("agent", "")
         source = body.get("source", "")
-        if not agent or not source:
-            return JSONResponse({"error": "agent and source are required"}, status_code=400)
+        if not source:
+            return JSONResponse({"error": "source is required"}, status_code=400)
         # The source lands in inbox filenames - restrict it to a safe slug so a
         # slash/.. can't escape (or break) the inbox directory on delivery.
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", source):
@@ -61,18 +59,14 @@ class WebhooksMixin:
                 {"error": "source must be 1-64 chars of letters, digits, dot, underscore, or dash"},
                 status_code=400,
             )
-        if agent not in self.agent_configs:
-            return JSONResponse({"error": f"unknown agent: {agent}"}, status_code=400)
-
         try:
-            entry = self.webhook_store.add(agent=agent, source=source, token=body.get("token"))
+            entry = self.webhook_store.add(source=source, token=body.get("token"))
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
         return JSONResponse(
             {
                 "token": entry.token,
-                "agent": entry.agent,
                 "source": entry.source,
                 "created_at": entry.created_at,
             },
@@ -99,9 +93,6 @@ class WebhooksMixin:
 
         logger.info("Received webhook [%s] from %s", token[:8], client_ip)
 
-        if webhook.agent not in self.agent_configs:
-            return JSONResponse({"error": "webhook agent not configured"}, status_code=500)
-
         try:
             raw = await request.body()
         except Exception:
@@ -118,15 +109,13 @@ class WebhooksMixin:
         if isinstance(payload_data, dict):
             event_type = payload_data.get("event") or payload_data.get("type") or payload_data.get("action") or ""
         logger.info(
-            "Webhook [%s] source: %s | event: %s | agent: %s",
+            "Webhook [%s] source: %s | event: %s",
             token[:8],
             webhook.source,
             event_type or "unknown",
-            webhook.agent,
         )
 
-        agent_config = self.agent_configs[webhook.agent]
-        inbox_dir = agent_config.workspace_dir / "inbox" / "webhooks"
+        inbox_dir = self.adapter.runtime.workspace_dir / "inbox" / "webhooks"
         inbox_dir.mkdir(parents=True, exist_ok=True)
 
         now = datetime.now(timezone.utc)
@@ -137,7 +126,6 @@ class WebhooksMixin:
         filename = f"{now.strftime('%Y%m%dT%H%M%S')}-{safe_source}-{uuid4().hex[:8]}.json"
         envelope = {
             "source": webhook.source,
-            "agent": webhook.agent,
             "received_at": now.isoformat(),
             "headers": {k: v for k, v in request.headers.items() if k.lower() != "authorization"},
             "payload": payload_data,

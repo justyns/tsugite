@@ -1,6 +1,6 @@
 """Tests for POST /api/jobs - the structured job-creation endpoint.
 
-Distinct from POST /api/agents/{agent}/commands/job (the generic command
+Distinct from POST /api/commands/job (the generic command
 dispatcher, which returns a free-text string with no job_id). This route calls
 JobsOrchestrator.create_and_start_job directly and returns job.to_payload() so
 the caller gets the job_id synchronously.
@@ -14,7 +14,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.job_store import Job
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
@@ -29,7 +29,7 @@ def tmp_workspace(tmp_path):
 
 @pytest.fixture
 def agent_config(tmp_workspace):
-    return AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    return RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
 
 
 @pytest.fixture
@@ -40,8 +40,7 @@ def mock_adapter(agent_config, tmp_path):
     with patch("tsugite.workspace.Workspace") as mock_ws_cls:
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         return HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
@@ -76,9 +75,8 @@ class _FakeOrchestrator:
 def server(mock_adapter, agent_config, token_store, tmp_path):
     s = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8486),
-        adapters={"test-agent": mock_adapter},
+        adapter=mock_adapter,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     s.jobs_orchestrator = _FakeOrchestrator(
@@ -104,9 +102,8 @@ class TestCreateJobAuth:
     def test_503_when_orchestrator_unavailable(self, mock_adapter, agent_config, token_store, test_token, tmp_path):
         s = HTTPServer(
             config=HTTPConfig(enabled=True, host="127.0.0.1", port=8487),
-            adapters={"test-agent": mock_adapter},
+            adapter=mock_adapter,
             webhook_store=WebhookStore(tmp_path / "webhooks.json"),
-            agent_configs={"test-agent": agent_config},
             token_store=token_store,
         )
         # jobs_orchestrator left None
@@ -171,10 +168,6 @@ class TestCreateJobValidation:
         resp = client.post("/api/jobs", headers=_auth(test_token), json={"agent": "test-agent", "task": "x"})
         assert resp.status_code == 400
         assert "user_id" in resp.json()["error"]
-
-    def test_unknown_agent_is_404(self, client, test_token):
-        resp = client.post("/api/jobs", headers=_auth(test_token), json={"agent": "nope", "user_id": "u1", "task": "x"})
-        assert resp.status_code == 404
 
     def test_orchestrator_valueerror_is_400(self, server, test_token):
         server.jobs_orchestrator = _FakeOrchestrator(raise_exc=ValueError("Unknown job executor: 'bogus'"))

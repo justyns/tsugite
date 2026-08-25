@@ -32,7 +32,7 @@ def _run_schedule_list(entries):
 def test_schedule_list_omits_run_history_but_keeps_summary():
     from tsugite_daemon.scheduler import ScheduleEntry
 
-    entry = ScheduleEntry(id="daily", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+    entry = ScheduleEntry(id="daily", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
     entry.run_history = [
         {"timestamp": "2026-01-01T00:00:00+00:00", "status": "success", "error": None, "session_id": "s"}
     ] * 20

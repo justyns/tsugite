@@ -26,45 +26,43 @@ def scheduler(schedules_path, run_callback):
 
 class TestScheduleEntry:
     def test_cron_entry(self):
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hello", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hello", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.schedule_type == "cron"
         assert entry.enabled is True
         assert entry.created_at  # auto-set
 
     def test_once_entry(self):
-        entry = ScheduleEntry(
-            id="test", agent="bot", prompt="hello", schedule_type="once", run_at="2099-01-01T00:00:00Z"
-        )
+        entry = ScheduleEntry(id="test", prompt="hello", schedule_type="once", run_at="2099-01-01T00:00:00Z")
         assert entry.schedule_type == "once"
 
     def test_invalid_type(self):
         with pytest.raises(ValueError, match="schedule_type must be"):
-            ScheduleEntry(id="test", agent="bot", prompt="hello", schedule_type="bad")
+            ScheduleEntry(id="test", prompt="hello", schedule_type="bad")
 
     def test_cron_requires_expr(self):
         with pytest.raises(ValueError, match="cron_expr required"):
-            ScheduleEntry(id="test", agent="bot", prompt="hello", schedule_type="cron")
+            ScheduleEntry(id="test", prompt="hello", schedule_type="cron")
 
     def test_once_requires_run_at(self):
         with pytest.raises(ValueError, match="run_at required"):
-            ScheduleEntry(id="test", agent="bot", prompt="hello", schedule_type="once")
+            ScheduleEntry(id="test", prompt="hello", schedule_type="once")
 
 
 class TestSchedulerCRUD:
     def test_add_and_list(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         assert len(scheduler.list()) == 1
         assert scheduler.get("job1").id == "job1"
 
     def test_add_duplicate_raises(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         with pytest.raises(ValueError, match="already exists"):
             scheduler.add(entry)
 
     def test_remove(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         scheduler.remove("job1")
         assert len(scheduler.list()) == 0
@@ -74,7 +72,7 @@ class TestSchedulerCRUD:
             scheduler.remove("nonexistent")
 
     def test_enable_disable(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         scheduler.disable("job1")
         assert not scheduler.get("job1").enabled
@@ -82,7 +80,7 @@ class TestSchedulerCRUD:
         assert scheduler.get("job1").enabled
 
     def test_invalid_cron_rejected(self, scheduler):
-        entry = ScheduleEntry(id="bad", agent="bot", prompt="hi", schedule_type="cron", cron_expr="not-a-cron")
+        entry = ScheduleEntry(id="bad", prompt="hi", schedule_type="cron", cron_expr="not-a-cron")
         with pytest.raises(ValueError, match="Invalid cron"):
             scheduler.add(entry)
 
@@ -90,14 +88,13 @@ class TestSchedulerCRUD:
 class TestSchedulerPersistence:
     def test_save_and_load(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         sched1.add(entry)
 
         # Load from same file
         sched2 = Scheduler(schedules_path, run_callback)
         sched2._load()
         assert len(sched2.list()) == 1
-        assert sched2.get("job1").agent == "bot"
 
     def test_load_missing_file(self, tmp_path, run_callback):
         sched = Scheduler(tmp_path / "does-not-exist.json", run_callback)
@@ -114,7 +111,7 @@ class TestSchedulerPersistence:
         """Saves go write-through to daemon.db; no legacy JSON is written and a
         fresh Scheduler over the same dir sees the entry with no shutdown."""
         sched = Scheduler(schedules_path, run_callback)
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         sched.add(entry)
 
         assert not schedules_path.exists(), "legacy schedules.json must not be written"
@@ -125,7 +122,7 @@ class TestSchedulerPersistence:
 
 class TestNextRunComputation:
     def test_cron_next_run_is_future(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         stored = scheduler.get("job1")
         assert stored.next_run is not None
@@ -134,20 +131,19 @@ class TestNextRunComputation:
 
     def test_once_future(self, scheduler):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
         assert scheduler.get("job1").next_run is not None
 
     def test_once_past_returns_none(self, scheduler):
         past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="once", run_at=past)
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=past)
         scheduler.add(entry)
         assert scheduler.get("job1").next_run is None
 
     def test_cron_with_timezone(self, scheduler):
         entry = ScheduleEntry(
             id="job1",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -163,7 +159,7 @@ CHICAGO = ZoneInfo("America/Chicago")
 
 def _fire_time(scheduler, run_at, **kw):
     """Add a one-off schedule and return the UTC instant it resolved to."""
-    scheduler.add(ScheduleEntry(id="s", agent="bot", prompt="hi", schedule_type="once", run_at=run_at, **kw))
+    scheduler.add(ScheduleEntry(id="s", prompt="hi", schedule_type="once", run_at=run_at, **kw))
     return datetime.fromisoformat(scheduler.get("s").next_run)
 
 
@@ -192,7 +188,6 @@ class TestNaiveDatetimesHonorEntryTimezone:
         scheduler.add(
             ScheduleEntry(
                 id="c",
-                agent="bot",
                 prompt="hi",
                 schedule_type="cron",
                 cron_expr="0 9 * * *",
@@ -208,7 +203,6 @@ class TestNaiveDatetimesHonorEntryTimezone:
         scheduler.add(
             ScheduleEntry(
                 id="e",
-                agent="bot",
                 prompt="hi",
                 schedule_type="cron",
                 cron_expr="*/5 * * * *",
@@ -225,13 +219,12 @@ class TestNaiveDatetimesHonorEntryTimezone:
 class TestSchedulerExecution:
     @pytest.mark.asyncio
     async def test_fire_schedule_success(self, scheduler, run_callback):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
         run_callback.assert_awaited_once()
         called_entry = run_callback.call_args[0][0]
-        assert called_entry.agent == "bot"
         assert called_entry.prompt == "hi"
         assert called_entry.id == "job1"
         stored = scheduler.get("job1")
@@ -241,7 +234,7 @@ class TestSchedulerExecution:
     @pytest.mark.asyncio
     async def test_fire_schedule_error(self, scheduler, run_callback):
         run_callback.side_effect = RuntimeError("agent crashed")
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
@@ -259,7 +252,7 @@ class TestSchedulerExecution:
             status="error",
             error="model answered with unexecuted tool-call markup; no code ran",
         )
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
@@ -271,7 +264,7 @@ class TestSchedulerExecution:
     @pytest.mark.asyncio
     async def test_once_auto_removed(self, scheduler, run_callback):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
@@ -283,7 +276,6 @@ class TestSchedulerExecution:
     async def test_misfire_grace(self, scheduler):
         entry = ScheduleEntry(
             id="job1",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -303,21 +295,19 @@ class TestSchedulerExecution:
 
 class TestSchedulerUpdate:
     def test_update_prompt(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="old", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="old", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         scheduler.update("job1", prompt="new prompt")
         assert scheduler.get("job1").prompt == "new prompt"
 
     def test_update_cron_expr(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         scheduler.update("job1", cron_expr="30 8 * * *")
         assert scheduler.get("job1").cron_expr == "30 8 * * *"
 
     def test_update_notify_tool(self, scheduler):
-        entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", notify=["discord"]
-        )
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", notify=["discord"])
         scheduler.add(entry)
         scheduler.update("job1", notify_tool=True)
         assert scheduler.get("job1").notify_tool is True
@@ -326,7 +316,7 @@ class TestSchedulerUpdate:
 class TestSchedulerCleanup:
     def test_cleanup_removes_disabled_once(self, scheduler):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(id="oneshot", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        entry = ScheduleEntry(id="oneshot", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
         # Simulate fired: disable + clear next_run
         scheduler.get("oneshot").enabled = False
@@ -338,7 +328,7 @@ class TestSchedulerCleanup:
         assert len(scheduler.list()) == 0
 
     def test_cleanup_skips_cron(self, scheduler):
-        entry = ScheduleEntry(id="cron1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="cron1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         scheduler.disable("cron1")
 
@@ -348,7 +338,7 @@ class TestSchedulerCleanup:
 
     def test_cleanup_skips_enabled_once(self, scheduler):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(id="pending", agent="bot", prompt="hi", schedule_type="once", run_at=future)
+        entry = ScheduleEntry(id="pending", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
 
         removed = scheduler.cleanup()
@@ -362,13 +352,13 @@ class TestSchedulerCleanup:
 
 class TestModelField:
     def test_model_defaults_none(self):
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.model is None
 
     def test_model_serialization_roundtrip(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
         entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", model="openai:gpt-4o-mini"
+            id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", model="openai:gpt-4o-mini"
         )
         sched1.add(entry)
 
@@ -378,7 +368,7 @@ class TestModelField:
 
     def test_model_none_serialization_roundtrip(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         sched1.add(entry)
 
         sched2 = Scheduler(schedules_path, run_callback)
@@ -390,7 +380,6 @@ class TestScriptEntry:
     def test_script_entry_creation(self):
         entry = ScheduleEntry(
             id="test",
-            agent="bot",
             prompt="",
             schedule_type="cron",
             cron_expr="0 * * * *",
@@ -405,7 +394,6 @@ class TestScriptEntry:
         with pytest.raises(ValueError, match="command required"):
             ScheduleEntry(
                 id="test",
-                agent="bot",
                 prompt="",
                 schedule_type="cron",
                 cron_expr="0 * * * *",
@@ -416,7 +404,6 @@ class TestScriptEntry:
         with pytest.raises(ValueError, match="execution_type must be"):
             ScheduleEntry(
                 id="test",
-                agent="bot",
                 prompt="hi",
                 schedule_type="cron",
                 cron_expr="0 * * * *",
@@ -424,7 +411,7 @@ class TestScriptEntry:
             )
 
     def test_agent_defaults(self):
-        entry = ScheduleEntry(id="test", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="test", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.execution_type == "agent"
         assert entry.command is None
         assert entry.script_timeout == 60
@@ -432,7 +419,6 @@ class TestScriptEntry:
     def test_custom_script_timeout(self):
         entry = ScheduleEntry(
             id="test",
-            agent="bot",
             prompt="",
             schedule_type="cron",
             cron_expr="0 * * * *",
@@ -452,7 +438,6 @@ class TestScriptDispatch:
 
         entry = ScheduleEntry(
             id="s1",
-            agent="bot",
             prompt="",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -474,7 +459,6 @@ class TestScriptDispatch:
 
         entry = ScheduleEntry(
             id="a1",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -492,7 +476,6 @@ class TestScriptDispatch:
 
         entry = ScheduleEntry(
             id="s1",
-            agent="bot",
             prompt="",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -511,7 +494,6 @@ class TestScriptPersistence:
         sched1 = Scheduler(schedules_path, run_callback)
         entry = ScheduleEntry(
             id="script1",
-            agent="bot",
             prompt="",
             schedule_type="cron",
             cron_expr="0 * * * *",
@@ -531,7 +513,7 @@ class TestScriptPersistence:
     def test_backward_compat_agent_entry(self, schedules_path, run_callback):
         """Old entries without execution_type fields load fine with defaults."""
         sched1 = Scheduler(schedules_path, run_callback)
-        entry = ScheduleEntry(id="old1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="old1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         sched1.add(entry)
 
         sched2 = Scheduler(schedules_path, run_callback)
@@ -579,9 +561,7 @@ class TestAutoExpiry:
     @pytest.mark.asyncio
     async def test_expires_at_disables(self, scheduler, run_callback):
         past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", expires_at=past
-        )
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", expires_at=past)
         scheduler.add(entry)
         scheduler._fire_due_schedules()
 
@@ -596,7 +576,6 @@ class TestAutoExpiry:
         future_expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         entry = ScheduleEntry(
             id="job1",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -614,9 +593,7 @@ class TestAutoExpiry:
 
     @pytest.mark.asyncio
     async def test_max_runs_disables(self, scheduler, run_callback):
-        entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", max_runs=2
-        )
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", max_runs=2)
         scheduler.add(entry)
 
         # Fire twice
@@ -635,9 +612,7 @@ class TestAutoExpiry:
     @pytest.mark.asyncio
     async def test_run_count_not_incremented_on_error(self, scheduler, run_callback):
         run_callback.side_effect = RuntimeError("boom")
-        entry = ScheduleEntry(
-            id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", max_runs=2
-        )
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", max_runs=2)
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
@@ -646,7 +621,7 @@ class TestAutoExpiry:
 
     @pytest.mark.asyncio
     async def test_enable_clears_disabled_reason(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.get("job1").enabled = False
         scheduler.get("job1").disabled_reason = "expired"
@@ -662,7 +637,6 @@ class TestAutoExpiry:
         expires = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         entry = ScheduleEntry(
             id="job1",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="*/5 * * * *",
@@ -683,7 +657,7 @@ class TestAutoExpiry:
 
 class TestAutoCleanup:
     def test_cleanup_removes_disabled_with_reason(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.get("job1").enabled = False
         scheduler.get("job1").disabled_reason = "expired"
@@ -693,7 +667,7 @@ class TestAutoCleanup:
         assert "job1" in removed
 
     def test_cleanup_skips_manually_disabled_cron(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.disable("job1")
 
@@ -708,7 +682,7 @@ class TestAgentSkippedError:
         from tsugite.agent_runner.models import AgentSkippedError
 
         run_callback.side_effect = AgentSkippedError("run_if guard")
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         await scheduler._fire_schedule(scheduler.get("job1"))
 
@@ -724,7 +698,7 @@ class TestSchedulerHardening:
     create, and missed one-offs are reaped instead of becoming zombies."""
 
     def test_rejected_update_leaves_entry_untouched(self, scheduler):
-        entry = ScheduleEntry(id="tz", agent="bot", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="tz", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
         scheduler.add(entry)
         with pytest.raises(ValueError):
             scheduler.update("tz", timezone="America/Chicgo")
@@ -735,7 +709,7 @@ class TestSchedulerHardening:
 
     def test_add_rejects_invalid_timezone(self, scheduler):
         entry = ScheduleEntry(
-            id="tz2", agent="bot", prompt="p", schedule_type="cron", cron_expr="0 9 * * *", timezone="Mars/Olympus"
+            id="tz2", prompt="p", schedule_type="cron", cron_expr="0 9 * * *", timezone="Mars/Olympus"
         )
         with pytest.raises(ValueError, match="timezone"):
             scheduler.add(entry)
@@ -743,7 +717,7 @@ class TestSchedulerHardening:
 
     def test_add_rejects_invalid_expires_at(self, scheduler):
         entry = ScheduleEntry(
-            id="exp", agent="bot", prompt="p", schedule_type="cron", cron_expr="0 9 * * *", expires_at="next friday"
+            id="exp", prompt="p", schedule_type="cron", cron_expr="0 9 * * *", expires_at="next friday"
         )
         with pytest.raises(ValueError, match="expires_at"):
             scheduler.add(entry)
@@ -752,7 +726,7 @@ class TestSchedulerHardening:
         """Defense in depth: a legacy/hand-edited entry with a bad expires_at
         must be auto-disabled, not crash _fire_due_schedules (which killed the
         whole scheduler task)."""
-        entry = ScheduleEntry(id="bad", agent="bot", prompt="p", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="bad", prompt="p", schedule_type="cron", cron_expr="* * * * *")
         scheduler._schedules["bad"] = entry  # bypass add() validation, like a bad record on disk
         entry.expires_at = "next friday"
         entry.next_run = "2000-01-01T00:00:00+00:00"  # due now
@@ -761,7 +735,7 @@ class TestSchedulerHardening:
         assert "invalid" in (scheduler.get("bad").disabled_reason or "")
 
     def test_add_enforces_min_cron_interval(self, scheduler):
-        entry = ScheduleEntry(id="fast", agent="bot", prompt="p", schedule_type="cron", cron_expr="* * * * *")
+        entry = ScheduleEntry(id="fast", prompt="p", schedule_type="cron", cron_expr="* * * * *")
         with pytest.raises(ValueError, match="minimum interval"):
             scheduler.add(entry)
 
@@ -771,7 +745,7 @@ class TestSchedulerHardening:
 
         recent_past = (datetime.now(tz.utc) - timedelta(seconds=60)).isoformat()
         entry = ScheduleEntry(
-            id="late", agent="bot", prompt="p", schedule_type="once", run_at=recent_past, misfire_grace_seconds=300
+            id="late", prompt="p", schedule_type="once", run_at=recent_past, misfire_grace_seconds=300
         )
         scheduler._schedules["late"] = entry
         next_run = scheduler._compute_next_run_iso(entry)
@@ -785,9 +759,7 @@ class TestSchedulerHardening:
         from datetime import timezone as tz
 
         old = (datetime.now(tz.utc) - timedelta(hours=2)).isoformat()
-        entry = ScheduleEntry(
-            id="zombie", agent="bot", prompt="p", schedule_type="once", run_at=old, misfire_grace_seconds=300
-        )
+        entry = ScheduleEntry(id="zombie", prompt="p", schedule_type="once", run_at=old, misfire_grace_seconds=300)
         scheduler._schedules["zombie"] = entry
         entry.next_run = old  # was armed when the daemon died
         scheduler._fire_due_schedules()
@@ -799,12 +771,11 @@ class TestSchedulerHardening:
         from datetime import datetime, timedelta
         from datetime import timezone as tz
 
-        good = ScheduleEntry(id="good", agent="bot", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
-        bad_tz = ScheduleEntry(id="badtz", agent="bot", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
+        good = ScheduleEntry(id="good", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
+        bad_tz = ScheduleEntry(id="badtz", prompt="p", schedule_type="cron", cron_expr="0 9 * * *")
         bad_tz.timezone = "Mars/Olympus"
         missed = ScheduleEntry(
             id="missed",
-            agent="bot",
             prompt="p",
             schedule_type="once",
             run_at=(datetime.now(tz.utc) - timedelta(hours=3)).isoformat(),
@@ -835,7 +806,7 @@ class TestRepeatedFailureNotification:
         return cb
 
     def _entry(self, **kw):
-        return ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **kw)
+        return ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **kw)
 
     @pytest.mark.asyncio
     async def test_notifies_once_at_threshold_then_suppresses_until_success(self, schedules_path, failing_callback):
@@ -887,7 +858,7 @@ async def test_overlapping_fire_does_not_corrupt_drift_metadata(scheduler):
     """When a fire is due but the previous run is still in progress, the overlap must be
     suppressed WITHOUT overwriting last_scheduled_for to the dropped fire's planned time
     (which would mislead the adapter's drift detection)."""
-    scheduler.add(ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *"))
+    scheduler.add(ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *"))
     e = scheduler.get("job1")
 
     # Simulate the previous run still holding the lock.

@@ -17,13 +17,12 @@ def _get_channel_context(mock):
 
 class TestAgentFileField:
     def test_defaults_to_none(self):
-        entry = ScheduleEntry(id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.agent_file is None
 
     def test_explicit_value(self):
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -34,7 +33,6 @@ class TestAgentFileField:
     def test_serialization_roundtrip(self):
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -48,7 +46,6 @@ class TestAgentFileField:
         """Old schedule data without agent_file should still load."""
         data = {
             "id": "old",
-            "agent": "bot",
             "prompt": "hi",
             "schedule_type": "cron",
             "cron_expr": "0 9 * * *",
@@ -76,14 +73,14 @@ class TestRunAgentWithAgentFile:
         from tsugite_daemon.session_store import SessionStore
 
         adapter = MagicMock(spec=BaseAdapter)
-        adapter.agent_config = MagicMock()
-        adapter.agent_config.workspace_dir = Path("/workspace")
+        adapter.runtime = MagicMock()
+        adapter.runtime.workspace_dir = Path("/workspace")
         adapter.agent_name = "bot"
         adapter.handle_message = AsyncMock(return_value="result")
         adapter._workspace = None
         adapter._resolve_agent_path = lambda agent_file=None: resolve_agent_path(
-            agent_file or adapter.agent_config.agent_file,
-            adapter.agent_config.workspace_dir,
+            agent_file or adapter.runtime.agent_file,
+            adapter.runtime.workspace_dir,
             adapter._workspace,
         )
         adapter.session_store = SessionStore(tmp_path / "session_store.json")
@@ -92,7 +89,7 @@ class TestRunAgentWithAgentFile:
     @pytest.fixture
     def scheduler_adapter(self, tmp_path, adapter):
         return SchedulerAdapter(
-            adapters={"bot": adapter},
+            adapter=adapter,
             schedules_path=tmp_path / "schedules.json",
         )
 
@@ -103,7 +100,6 @@ class TestRunAgentWithAgentFile:
 
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -118,14 +114,13 @@ class TestRunAgentWithAgentFile:
 
     @pytest.mark.asyncio
     async def test_plus_prefix_resolved(self, adapter, scheduler_adapter, tmp_path):
-        adapter.agent_config.workspace_dir = tmp_path
+        adapter.runtime.workspace_dir = tmp_path
         agent_file = tmp_path / "agents" / "custom.md"
         agent_file.parent.mkdir(parents=True, exist_ok=True)
         agent_file.write_text("---\nname: custom\n---\nHello")
 
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -140,14 +135,13 @@ class TestRunAgentWithAgentFile:
 
     @pytest.mark.asyncio
     async def test_relative_path_resolved_against_workspace(self, adapter, scheduler_adapter, tmp_path):
-        adapter.agent_config.workspace_dir = tmp_path
+        adapter.runtime.workspace_dir = tmp_path
         agent_file = tmp_path / "agents" / "custom.md"
         agent_file.parent.mkdir(parents=True, exist_ok=True)
         agent_file.write_text("---\nname: custom\n---\nHello")
 
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -164,7 +158,6 @@ class TestRunAgentWithAgentFile:
     async def test_missing_file_raises(self, adapter, scheduler_adapter):
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -178,7 +171,6 @@ class TestRunAgentWithAgentFile:
     async def test_no_agent_file_no_override(self, adapter, scheduler_adapter):
         entry = ScheduleEntry(
             id="t",
-            agent="bot",
             prompt="hi",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -203,12 +195,12 @@ def _make_base_adapter(tmp_path, **overrides):
     """Build a minimal BaseAdapter mock for handle_message tests."""
     adapter = _ConcreteAdapter.__new__(_ConcreteAdapter)
     adapter.agent_name = "test"
-    adapter.agent_config = MagicMock()
-    adapter.agent_config.workspace_dir = tmp_path
-    adapter.agent_config.agent_file = "default"
-    adapter.agent_config.model = None
-    adapter.agent_config.max_turns = None
-    adapter.agent_config.context_limit = 128000
+    adapter.runtime = MagicMock()
+    adapter.runtime.workspace_dir = tmp_path
+    adapter.runtime.agent_file = "default"
+    adapter.runtime.model = None
+    adapter.runtime.max_turns = None
+    adapter.runtime.context_limit = 128000
     adapter.session_store = MagicMock()
     adapter.session_store.needs_compaction.return_value = False
     adapter.session_store.is_compacting.return_value = False

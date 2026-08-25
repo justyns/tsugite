@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http import HTTPAgentAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionStore
 
@@ -54,19 +54,17 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
     NonInteractiveBackend."""
     ws_parent, ws_child = workspaces
     parent_adapter = HTTPAgentAdapter(
-        "parent-agent",
-        AgentConfig(workspace_dir=ws_parent, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_parent, agent_file="default"),
         session_store,
     )
     child_adapter = HTTPAgentAdapter(
-        "child-agent",
-        AgentConfig(workspace_dir=ws_child, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_child, agent_file="default"),
         session_store,
     )
 
     runner = SessionRunner(
         store=session_store,
-        adapters={"child-agent": child_adapter},
+        adapter=child_adapter,
     )
 
     parent_backend = MagicMock(spec=NonInteractiveBackend)
@@ -84,7 +82,6 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
             # the backend that the parent still sees.
             child_session = Session(
                 id="",
-                agent="child-agent",
                 prompt="child hi",
                 model=None,
                 agent_file=None,
@@ -139,13 +136,11 @@ async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, works
     not leak into the other's context."""
     ws_a, ws_b = workspaces
     adapter_a = HTTPAgentAdapter(
-        "agent-a",
-        AgentConfig(workspace_dir=ws_a, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_a, agent_file="default"),
         session_store,
     )
     adapter_b = HTTPAgentAdapter(
-        "agent-b",
-        AgentConfig(workspace_dir=ws_b, agent_file="default"),
+        RuntimeDefaults(workspace_dir=ws_b, agent_file="default"),
         session_store,
     )
 

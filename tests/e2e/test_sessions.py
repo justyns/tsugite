@@ -14,7 +14,6 @@ from .helpers import E2E_USER_ID, wait_for_authed
 def _seed_session(store, title: str) -> Session:
     session = Session(
         id=generate_session_id("test-agent"),
-        agent="test-agent",
         source=SessionSource.INTERACTIVE.value,
         user_id=E2E_USER_ID,
         title=title,

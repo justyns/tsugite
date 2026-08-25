@@ -15,13 +15,13 @@ from starlette.routing import Route
 class HooksConfigMixin:
     def _hooks_routes(self) -> list:
         return [
-            Route("/api/agents/{agent}/hooks", self._get_hooks_config, methods=["GET"]),
-            Route("/api/agents/{agent}/hooks", self._save_hooks_config, methods=["PUT"]),
+            Route("/api/hooks", self._get_hooks_config, methods=["GET"]),
+            Route("/api/hooks", self._save_hooks_config, methods=["PUT"]),
         ]
 
     @staticmethod
     def _hooks_path(adapter) -> Path:
-        return Path(adapter.agent_config.workspace_dir) / ".tsugite" / "hooks.yaml"
+        return Path(adapter.runtime.workspace_dir) / ".tsugite" / "hooks.yaml"
 
     @staticmethod
     def _parse_hooks_yaml(raw: str) -> tuple[Optional[dict], Optional[str]]:

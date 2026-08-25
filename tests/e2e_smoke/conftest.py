@@ -21,7 +21,7 @@ import pytest
 import uvicorn
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -76,7 +76,7 @@ def smoke_workspace(smoke_tmp):
 
 @pytest.fixture(scope="session")
 def smoke_session_store(smoke_tmp):
-    return SessionStore(smoke_tmp / "sessions.json", context_limits={"smoke-agent": 128000})
+    return SessionStore(smoke_tmp / "sessions.json", default_context_limit=128000)
 
 
 @pytest.fixture(scope="session")
@@ -111,15 +111,14 @@ You are a terse helper. Answer with a single short sentence.
 
 @pytest.fixture(scope="session")
 def smoke_adapter(smoke_workspace, smoke_session_store, smoke_agent_file):
-    agent_config = AgentConfig(workspace_dir=smoke_workspace, agent_file=str(smoke_agent_file))
+    agent_config = RuntimeDefaults(workspace_dir=smoke_workspace, agent_file=str(smoke_agent_file))
 
     with patch("tsugite.workspace.Workspace") as mock_ws:
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            agent_name="smoke-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=smoke_session_store,
         )
     # Crucial: NO mock-chat tripwire here. Real handle_message stays in place.
@@ -130,13 +129,11 @@ def smoke_adapter(smoke_workspace, smoke_session_store, smoke_agent_file):
 def smoke_server(smoke_tmp, smoke_workspace, smoke_adapter, smoke_token_store, smoke_agent_file):
     port = _free_port()
     config = HTTPConfig(enabled=True, host="127.0.0.1", port=port)
-    agent_config = AgentConfig(workspace_dir=smoke_workspace, agent_file=str(smoke_agent_file))
 
     server = HTTPServer(
         config=config,
-        adapters={"smoke-agent": smoke_adapter},
+        adapter=smoke_adapter,
         webhook_store=WebhookStore(smoke_tmp / "webhooks.json"),
-        agent_configs={"smoke-agent": agent_config},
         token_store=smoke_token_store,
     )
 

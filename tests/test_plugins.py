@@ -77,14 +77,14 @@ class TestLoadAdapterPlugins:
 
         session_store = MagicMock()
         identity_map = {"user1": "agent1"}
-        agents_config = {"assistant": {}}
+        runtime = None
 
         with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
             results = load_adapter_plugins(
                 plugin_config={"slack": {"token": "xoxb-123"}},
                 session_store=session_store,
                 identity_map=identity_map,
-                agents_config=agents_config,
+                runtime=runtime,
             )
 
         assert len(results) == 1
@@ -93,7 +93,7 @@ class TestLoadAdapterPlugins:
         assert adapter is mock_adapter
         factory.assert_called_once_with(
             config={"token": "xoxb-123"},
-            agents_config=agents_config,
+            runtime=runtime,
             session_store=session_store,
             identity_map=identity_map,
         )
@@ -106,7 +106,7 @@ class TestLoadAdapterPlugins:
                 plugin_config={"slack": {"enabled": False}},
                 session_store=MagicMock(),
                 identity_map={},
-                agents_config={},
+                runtime=None,
             )
 
         ep.load.assert_not_called()
@@ -123,7 +123,7 @@ class TestLoadAdapterPlugins:
                 plugin_config={},
                 session_store=MagicMock(),
                 identity_map={},
-                agents_config={},
+                runtime=None,
             )
 
         info, adapter = results[0]

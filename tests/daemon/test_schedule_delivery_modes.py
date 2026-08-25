@@ -26,7 +26,7 @@ def store(tmp_path, history_dir):
 
 @pytest.fixture
 def runner(store):
-    return SessionRunner(store=store, adapters={}, event_bus=None)
+    return SessionRunner(store=store, adapter=None, event_bus=None)
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def adapter(store):
 def sched_adapter(tmp_path, adapter, runner, request):
     channels = getattr(request, "param", {})
     sa = SchedulerAdapter(
-        adapters={"bot": adapter},
+        adapter=adapter,
         schedules_path=tmp_path / "schedules.json",
         notification_channels=channels,
     )
@@ -67,13 +67,13 @@ def tool_loop():
 
 
 def _entry(**kwargs) -> ScheduleEntry:
-    defaults = dict(id="backup-watch", agent="bot", prompt="check backups", schedule_type="cron", cron_expr="0 9 * * *")
+    defaults = dict(id="backup-watch", prompt="check backups", schedule_type="cron", cron_expr="0 9 * * *")
     defaults.update(kwargs)
     return ScheduleEntry(**defaults)
 
 
 def _chat(store: SessionStore, sid: str = "chat1", user_id: str = "alice") -> Session:
-    return store.create_session(Session(id=sid, agent="bot", source=SessionSource.INTERACTIVE.value, user_id=user_id))
+    return store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id=user_id))
 
 
 async def _drain_tasks() -> None:
@@ -87,9 +87,9 @@ def _deliveries(store: SessionStore, sid: str) -> list[dict]:
     return [e for e in store.read_events(sid) if e["type"] == "delivery"]
 
 
-def _resolve_one(entry: ScheduleEntry, user_id: str, store: SessionStore, agent: str) -> Session | None:
+def _resolve_one(entry: ScheduleEntry, user_id: str, store: SessionStore) -> Session | None:
     """The single session a one-recipient run delivers into."""
-    sessions = resolve_delivery_sessions(entry, [user_id], store, agent)
+    sessions = resolve_delivery_sessions(entry, [user_id], store)
     return sessions[0] if sessions else None
 
 
@@ -114,7 +114,7 @@ def mock_scheduler(tool_loop):
     sched.add.side_effect = lambda entry: entry
     sched.get.return_value = _entry(id="t1")
     sched.update.side_effect = lambda sid, **fields: _entry(id=sid, **fields)
-    set_scheduler(sched, tool_loop, agent_names={"bot"})
+    set_scheduler(sched, tool_loop)
     return sched
 
 
@@ -147,7 +147,7 @@ class TestResolveDeliverySession:
         chat = _chat(store)
         entry = _entry(originating_session_id=chat.id)
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.id == chat.id
 
@@ -157,7 +157,7 @@ class TestResolveDeliverySession:
         spawner = _chat(store, "spawner-chat")
         entry = _entry(delivery_mode="parent_session", originating_session_id=spawner.id)
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.id == spawner.id
 
@@ -165,7 +165,7 @@ class TestResolveDeliverySession:
         chat = _chat(store)
         entry = _entry(delivery_mode="new_session", originating_session_id=chat.id)
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.id != chat.id
         assert resolved.source == SessionSource.SCHEDULE.value
@@ -174,7 +174,7 @@ class TestResolveDeliverySession:
         chat = _chat(store)
         entry = _entry(delivery_mode="auto", delivery_kind="fyi", originating_session_id=chat.id)
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.id == chat.id
 
@@ -182,7 +182,7 @@ class TestResolveDeliverySession:
         chat = _chat(store)
         entry = _entry(delivery_mode="auto", delivery_kind="needs_ack", originating_session_id=chat.id)
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.id != chat.id
         assert resolved.metadata.get("type") == "ops"
@@ -194,11 +194,10 @@ class TestResolveDeliverySession:
             incident_title="Backups failing",
         )
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.title == "Backups failing"
         assert resolved.user_id == "alice"
-        assert resolved.agent == "bot"
         assert resolved.metadata["type"] == "ops"
         assert resolved.metadata["topic"] == "Backups failing"
         assert resolved.metadata["incident_key"] == "backup-disk-2"
@@ -209,14 +208,14 @@ class TestResolveDeliverySession:
         rest of the system reads a session's provenance from."""
         entry = _entry(delivery_mode="new_session")
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
-        assert re.fullmatch(r"\d{8}_\d{6}_bot_[0-9a-f]{6}", resolved.id)
+        assert re.fullmatch(r"\d{8}_\d{6}_session_[0-9a-f]{6}", resolved.id)
 
     def test_incident_title_defaults_to_the_schedule(self, store):
         entry = _entry(delivery_mode="new_session")
 
-        resolved = _resolve_one(entry, "alice", store, "bot")
+        resolved = _resolve_one(entry, "alice", store)
         assert resolved is not None
         assert resolved.title == "Incident: backup-watch"
         assert resolved.metadata["incident_key"] == entry.id
@@ -224,8 +223,8 @@ class TestResolveDeliverySession:
     def test_incident_key_dedupes_across_resolutions(self, store):
         entry = _entry(delivery_mode="new_session", incident_key="backup-disk-2")
 
-        first = _resolve_one(entry, "alice", store, "bot")
-        second = _resolve_one(entry, "alice", store, "bot")
+        first = _resolve_one(entry, "alice", store)
+        second = _resolve_one(entry, "alice", store)
         assert first is not None and second is not None
         assert first.id == second.id
         assert len(_incident_sessions(store)) == 1
@@ -235,19 +234,19 @@ class TestResolveDeliverySession:
         opening one per firing."""
         entry = _entry(delivery_mode="new_session")
 
-        first = _resolve_one(entry, "alice", store, "bot")
-        second = _resolve_one(entry, "alice", store, "bot")
+        first = _resolve_one(entry, "alice", store)
+        second = _resolve_one(entry, "alice", store)
         assert first is not None and second is not None
         assert first.id == second.id
         assert first.metadata["incident_key"] == entry.id
 
     def test_a_finished_incident_does_not_absorb_the_next_one(self, store):
         entry = _entry(delivery_mode="new_session", incident_key="backup-disk-2")
-        first = _resolve_one(entry, "alice", store, "bot")
+        first = _resolve_one(entry, "alice", store)
         assert first is not None
         store.update_session(first.id, status=SessionStatus.COMPLETED.value)
 
-        second = _resolve_one(entry, "alice", store, "bot")
+        second = _resolve_one(entry, "alice", store)
         assert second is not None
         assert second.id != first.id
 
@@ -341,7 +340,6 @@ class TestToolPassthrough:
         result = schedule_create(
             id="t1",
             prompt="hi",
-            agent="bot",
             cron="0 9 * * *",
             delivery_mode="new_session",
             delivery_kind="needs_ack",
@@ -355,7 +353,7 @@ class TestToolPassthrough:
         from tsugite.tools.schedule import schedule_create
 
         with pytest.raises(ValueError, match="delivery_mode"):
-            schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *", delivery_mode="telepathy")
+            schedule_create(id="t1", prompt="hi", cron="0 9 * * *", delivery_mode="telepathy")
 
     def test_update_passes_delivery_fields(self, mock_scheduler):
         from tsugite.tools.schedule import schedule_update
@@ -379,7 +377,7 @@ class TestToolPassthrough:
 
         scheduler = Scheduler(tmp_path / "real-schedules.json", AsyncMock())
         scheduler.add(_entry(id="t1"))
-        set_scheduler(scheduler, tool_loop, agent_names={"bot"})
+        set_scheduler(scheduler, tool_loop)
 
         with pytest.raises(ValueError, match="delivery_kind"):
             schedule_update(id="t1", delivery_kind="shout")
@@ -405,9 +403,7 @@ class TestRepeatedFailureDelivery:
 
     @pytest.mark.asyncio
     async def test_crossing_the_failure_threshold_delivers_a_needs_ack_card(self, sched_adapter, store):
-        target = store.create_session(
-            Session(id="ops", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="")
-        )
+        target = store.create_session(Session(id="ops", source=SessionSource.INTERACTIVE.value, user_id=""))
         entry = _entry(target_session=target.id, notify_on_failure=2, consecutive_failures=2)
 
         sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
@@ -420,9 +416,7 @@ class TestRepeatedFailureDelivery:
 
     @pytest.mark.asyncio
     async def test_below_the_threshold_delivers_nothing(self, sched_adapter, store):
-        target = store.create_session(
-            Session(id="ops", agent="bot", source=SessionSource.INTERACTIVE.value, user_id="")
-        )
+        target = store.create_session(Session(id="ops", source=SessionSource.INTERACTIVE.value, user_id=""))
         entry = _entry(target_session=target.id, notify_on_failure=2, consecutive_failures=1)
 
         sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
@@ -438,7 +432,7 @@ class TestScheduleTargetsTheCallingChat:
         from tsugite.tools.schedule import schedule_create
 
         with _calling_session("chat1"):
-            result = schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *")
+            result = schedule_create(id="t1", prompt="hi", cron="0 9 * * *")
 
         assert result["originating_session_id"] == "chat1"
 
@@ -446,7 +440,7 @@ class TestScheduleTargetsTheCallingChat:
         from tsugite.tools.schedule import schedule_create
 
         with _calling_session("chat1"):
-            result = schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="current")
+            result = schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="current")
 
         assert result["target_session"] == "chat1"
 
@@ -454,13 +448,13 @@ class TestScheduleTargetsTheCallingChat:
         from tsugite.tools.schedule import schedule_create
 
         with _calling_session(None), pytest.raises(ValueError, match="current"):
-            schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="current")
+            schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="current")
 
     def test_background_task_records_the_calling_session(self, mock_scheduler):
         from tsugite.tools.schedule import background_task
 
         with _calling_session("chat1"):
-            background_task(prompt="dig into the logs", agent="bot")
+            background_task(prompt="dig into the logs")
 
         assert mock_scheduler.add.call_args[0][0].originating_session_id == "chat1"
 
@@ -468,7 +462,7 @@ class TestScheduleTargetsTheCallingChat:
         from tsugite.tools.schedule import background_task
 
         with _calling_session("chat1"):
-            background_task(prompt="dig into the logs", agent="bot", target_session="current")
+            background_task(prompt="dig into the logs", target_session="current")
 
         assert mock_scheduler.add.call_args[0][0].target_session == "chat1"
 
@@ -478,9 +472,7 @@ class TestScheduleTargetsTheCallingChat:
 
         chat = _chat(store)
         with _calling_session(chat.id):
-            schedule_create(
-                id="backup-watch", prompt="check backups", agent="bot", cron="0 9 * * *", target_session="originating"
-            )
+            schedule_create(id="backup-watch", prompt="check backups", cron="0 9 * * *", target_session="originating")
         entry = mock_scheduler.add.call_args[0][0]
 
         await sched_adapter._run_agent(entry)
@@ -508,9 +500,7 @@ class TestDeliveryFollowsCompaction:
 
         chat = _chat(store)
         with _calling_session(chat.id):
-            schedule_create(
-                id="backup-watch", prompt="check backups", agent="bot", cron="0 9 * * *", target_session="current"
-            )
+            schedule_create(id="backup-watch", prompt="check backups", cron="0 9 * * *", target_session="current")
         entry = mock_scheduler.add.call_args[0][0]
         second = _compact_twice(store, chat.id)
 
@@ -520,7 +510,7 @@ class TestDeliveryFollowsCompaction:
 
     @pytest.mark.asyncio
     async def test_a_named_target_reaches_the_live_session(self, store, sched_adapter):
-        named = store.get_or_create_named_session("alice", "bot", "daily")
+        named = store.get_or_create_named_session("alice", "daily")
         store.update_session(named.id, user_id="alice")
         second = _compact_twice(store, named.id)
         entry = _entry(target_session="name:daily", originating_session_id=named.id)

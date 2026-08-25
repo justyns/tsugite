@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext  # noqa: F401
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 
@@ -32,8 +32,8 @@ def adapter(tmp_path):
     (ws / "agent.md").write_text("---\nname: test-agent\n---\n\nHi.\n")
 
     store = SessionStore(tmp_path / "store.json")
-    config = AgentConfig(workspace_dir=ws, agent_file=str(ws / "agent.md"))
-    return _StubAdapter("test-agent", config, store)
+    config = RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md"))
+    return _StubAdapter(config, store)
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def channel_context():
 
 
 def _seed_session(adapter, age: timedelta | None = None) -> str:
-    session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+    session = adapter.session_store.get_or_create_interactive("alice")
     if age is not None:
         session.created_at = (datetime.now(timezone.utc) - age).isoformat()
     return session.id
@@ -83,13 +83,13 @@ class TestSessionStartedRendering:
         assert dt_pos < ss_pos
 
     def test_missing_created_at_omits_element(self, adapter, channel_context):
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         session.created_at = ""
         rendered = adapter._build_message_context("hello", channel_context, "alice")
         assert "<session_started>" not in rendered
 
     def test_unparseable_created_at_omits_element(self, adapter, channel_context):
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         session.created_at = "not-a-real-datetime"
         rendered = adapter._build_message_context("hello", channel_context, "alice")
         assert "<session_started>" not in rendered
@@ -102,14 +102,14 @@ class TestLastActiveRendering:
     """
 
     def test_aged_last_active_renders_relative(self, adapter, channel_context):
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         session.last_active = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         rendered = adapter._build_message_context("hello", channel_context, "alice")
         assert "<last_active>" in rendered
         assert "3 days ago" in rendered
 
     def test_last_active_after_session_started(self, adapter, channel_context):
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         session.last_active = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         rendered = adapter._build_message_context("hello", channel_context, "alice")
         ss_pos = rendered.index("<session_started>")
@@ -117,7 +117,7 @@ class TestLastActiveRendering:
         assert ss_pos < la_pos
 
     def test_missing_last_active_omits_element(self, adapter, channel_context):
-        session = adapter.session_store.get_or_create_interactive("alice", "test-agent")
+        session = adapter.session_store.get_or_create_interactive("alice")
         session.last_active = ""
         rendered = adapter._build_message_context("hello", channel_context, "alice")
         assert "<last_active>" not in rendered

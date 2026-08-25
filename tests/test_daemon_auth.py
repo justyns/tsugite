@@ -104,16 +104,16 @@ class TestAdminTokens:
 class TestTempTokens:
     def test_issue_and_validate(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
-        raw = store.issue(agent="my-agent", schedule_id="daily-report")
+        raw = store.issue(schedule_id="daily-report")
 
         assert raw.startswith("tsu_")
         valid, identity = store.validate(raw)
         assert valid is True
-        assert identity == "my-agent:daily-report"
+        assert identity == "schedule:daily-report"
 
     def test_revoke_temp_token(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
-        raw = store.issue(agent="agent", schedule_id="sched")
+        raw = store.issue(schedule_id="sched")
 
         store.revoke(raw)
         valid, _ = store.validate(raw)
@@ -121,7 +121,7 @@ class TestTempTokens:
 
     def test_temp_token_expiry(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
-        raw = store.issue(agent="agent", schedule_id="sched", ttl=1)
+        raw = store.issue(schedule_id="sched", ttl=1)
 
         valid, _ = store.validate(raw)
         assert valid is True
@@ -135,9 +135,9 @@ class TestTempTokens:
 
     def test_cleanup_expired(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
-        store.issue(agent="a", schedule_id="s", ttl=1)
-        store.issue(agent="b", schedule_id="s", ttl=1)
-        store.issue(agent="c", schedule_id="s", ttl=3600)
+        store.issue(schedule_id="s", ttl=1)
+        store.issue(schedule_id="s", ttl=1)
+        store.issue(schedule_id="s", ttl=3600)
 
         expired_time = datetime.now(timezone.utc) + timedelta(seconds=2)
         with patch("tsugite_daemon.auth.datetime") as mock_dt:
@@ -149,14 +149,14 @@ class TestTempTokens:
     def test_temp_tokens_not_persisted(self, tmp_path):
         path = tmp_path / "tokens.json"
         store = TokenStore(path)
-        store.issue(agent="agent", schedule_id="sched")
+        store.issue(schedule_id="sched")
 
         store2 = TokenStore(path)
         assert not any(not t.persistent for t in store2._tokens.values())
 
     def test_issue_default_ttl(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json", default_ttl_seconds=600)
-        raw = store.issue(agent="a", schedule_id="s")
+        raw = store.issue(schedule_id="s")
 
         h = store._hash(raw)
         t = store._tokens[h]
@@ -200,7 +200,7 @@ class TestCrossProcessVisibility:
     def test_reload_preserves_in_memory_temp_tokens(self, tmp_path):
         path = tmp_path / "tokens.json"
         daemon = TokenStore(path)
-        temp_raw = daemon.issue(agent="agent", schedule_id="sched")
+        temp_raw = daemon.issue(schedule_id="sched")
 
         cli = TokenStore(path)
         cli.create_admin_token(name="new-admin")
@@ -208,14 +208,14 @@ class TestCrossProcessVisibility:
         daemon.validate("unknown-token")
         valid, identity = daemon.validate(temp_raw)
         assert valid is True
-        assert identity == "agent:sched"
+        assert identity == "schedule:sched"
 
 
 class TestMixedValidation:
     def test_admin_and_temp_coexist(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
         _t, admin_raw = store.create_admin_token(name="admin")
-        temp_raw = store.issue(agent="agent", schedule_id="sched")
+        temp_raw = store.issue(schedule_id="sched")
 
         valid, identity = store.validate(admin_raw)
         assert valid is True
@@ -223,12 +223,12 @@ class TestMixedValidation:
 
         valid, identity = store.validate(temp_raw)
         assert valid is True
-        assert identity == "agent:sched"
+        assert identity == "schedule:sched"
 
     def test_revoked_admin_doesnt_affect_temp(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
         _t, admin_raw = store.create_admin_token(name="admin")
-        temp_raw = store.issue(agent="agent", schedule_id="sched")
+        temp_raw = store.issue(schedule_id="sched")
 
         store.revoke_admin_token("admin")
 
@@ -237,7 +237,7 @@ class TestMixedValidation:
 
         valid, identity = store.validate(temp_raw)
         assert valid is True
-        assert identity == "agent:sched"
+        assert identity == "schedule:sched"
 
 
 class TestSqliteTokenStorage:
@@ -284,7 +284,7 @@ class TestCliTokensPathResolution:
         state_dir in daemon.yaml previously left the CLI writing to the XDG
         default, and the daemon could never see created tokens."""
         cfg = tmp_path / "daemon.yaml"
-        cfg.write_text(f"state_dir: {tmp_path / 'custom-state'}\nagents: {{}}\n")
+        cfg.write_text(f"state_dir: {tmp_path / 'custom-state'}\ndefault_workspace_dir: {tmp_path}\n")
 
         from tsugite.cli.daemon import _get_tokens_path
 

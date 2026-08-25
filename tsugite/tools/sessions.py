@@ -56,7 +56,6 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
 @tool(require_daemon=True)
 def start_session(
     prompt: str,
-    agent: Optional[str] = None,
     model: Optional[str] = None,
     agent_file: Optional[str] = None,
     session_id: Optional[str] = None,
@@ -69,7 +68,6 @@ def start_session(
 
     Args:
         prompt: Task instruction for the agent session.
-        agent: Agent name configured in daemon. Defaults to the current agent.
         model: Optional model override.
         agent_file: Agent file name or path.
         session_id: Custom session ID. Auto-generated if not provided.
@@ -81,13 +79,8 @@ def start_session(
     """
     from tsugite_daemon.session_store import Session, SessionSource
 
-    if agent is None:
-        from tsugite.agent_runner.helpers import resolve_run_agent
-
-        agent = resolve_run_agent()
-
     # Inherit the sandbox: a sandboxed agent's spawned session must stay
-    # sandboxed regardless of the target agent's own config.
+    # sandboxed regardless of the target agent file's own config.
     from tsugite.agent_runner.helpers import sandbox_context_to_override
 
     metadata = {}
@@ -97,7 +90,6 @@ def start_session(
 
     session = Session(
         id=session_id or "",
-        agent=agent,
         source=SessionSource.BACKGROUND.value,
         prompt=prompt,
         model=model,
@@ -154,7 +146,6 @@ def session_acknowledge(delivery_id: Optional[str] = None, session_id: Optional[
 def list_sessions(
     source: Optional[str] = None,
     status: Optional[str] = None,
-    agent: Optional[str] = None,
     parent_id: Optional[str] = None,
 ) -> list:
     """List agent sessions with optional filters.
@@ -162,15 +153,13 @@ def list_sessions(
     Args:
         source: Filter by source type (interactive, schedule, webhook, background, spawned)
         status: Filter by status (active, running, completed, failed, etc.)
-        agent: Filter by agent name
         parent_id: Filter by parent session/schedule ID
 
     Returns:
-        List of sessions with id, agent, source, status, created_at
+        List of sessions with id, source, status, created_at
     """
     sessions = _call(
         _session_runner.store.list_sessions,
-        agent=agent,
         source=source,
         status=status,
         parent_id=parent_id,
@@ -178,7 +167,6 @@ def list_sessions(
     return [
         {
             "id": s.id,
-            "agent": s.agent,
             "source": s.source,
             "status": s.status,
             "title": s.title,

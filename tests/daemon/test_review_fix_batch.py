@@ -46,7 +46,7 @@ async def test_send_web_push_does_not_let_claims_mutation_leak(monkeypatch, tmp_
 
 
 def _mk(store, sid):
-    s = Session(id=sid, agent="a", source=SessionSource.INTERACTIVE.value, user_id="u")
+    s = Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="u")
     store.create_session(s)
     return s
 

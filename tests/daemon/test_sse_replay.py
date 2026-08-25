@@ -11,7 +11,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer, SSEBroadcaster, sse_stream
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 
@@ -72,17 +72,16 @@ def server_client(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     store = SessionStore(tmp_path / "session_store.json")
-    config = AgentConfig(workspace_dir=workspace, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        adapter = HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=store)
+        adapter = HTTPAgentAdapter(runtime=config, session_store=store)
     token_store = TokenStore(tmp_path / "tokens.json")
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=None,
-        agent_configs={"test-agent": config},
         token_store=token_store,
     )
     return server, TestClient(server.app), {"Authorization": f"Bearer {raw}"}

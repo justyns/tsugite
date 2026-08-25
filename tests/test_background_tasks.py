@@ -46,7 +46,7 @@ def tool_loop():
 class TestFireNow:
     @pytest.mark.asyncio
     async def test_fires_enabled_entry(self, scheduler, run_callback):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.fire_now("job1")
 
@@ -57,7 +57,7 @@ class TestFireNow:
         assert run_callback.call_args[0][0].id == "job1"
 
     def test_rejects_disabled_entry(self, scheduler):
-        entry = ScheduleEntry(id="job1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)
         scheduler.disable("job1")
         with pytest.raises(ValueError, match="disabled"):
@@ -70,20 +70,16 @@ class TestFireNow:
 
 class TestAutoReplyField:
     def test_defaults_to_false(self):
-        entry = ScheduleEntry(id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.auto_reply is False
 
     def test_explicit_true(self):
-        entry = ScheduleEntry(
-            id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True
-        )
+        entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True)
         assert entry.auto_reply is True
 
     def test_serialization_roundtrip(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
-        entry = ScheduleEntry(
-            id="j1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True
-        )
+        entry = ScheduleEntry(id="j1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True)
         sched1.add(entry)
 
         sched2 = Scheduler(schedules_path, run_callback)
@@ -94,7 +90,7 @@ class TestAutoReplyField:
         """Schedules saved before auto_reply existed should default to False."""
         from dataclasses import asdict
 
-        entry = ScheduleEntry(id="t", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         data = asdict(entry)
         del data["auto_reply"]
         restored = ScheduleEntry(**data)
@@ -102,33 +98,24 @@ class TestAutoReplyField:
 
 
 class TestScheduleCreateValidation:
-    def test_rejects_unknown_agent(self, tool_loop):
-        from tsugite.tools.schedule import schedule_create, set_scheduler
-
-        mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
-
-        with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
-            schedule_create(id="test", prompt="hi", agent="nonexistent", cron="0 9 * * *")
-
     def test_target_session_passed_through(self, tool_loop):
         from tsugite.tools.schedule import schedule_create, set_scheduler
 
         mock_sched = MagicMock()
         mock_sched.add.side_effect = lambda entry: entry
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
-        result = schedule_create(id="t1", prompt="hi", agent="bot", cron="0 9 * * *", target_session="primary")
+        result = schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="primary")
         assert result["target_session"] == "primary"
 
     def test_schedule_update_target_session(self, tool_loop):
         from tsugite.tools.schedule import schedule_update, set_scheduler
 
         mock_sched = MagicMock()
-        existing = ScheduleEntry(id="t1", agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
+        existing = ScheduleEntry(id="t1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         mock_sched.get.return_value = existing
         mock_sched.update.side_effect = lambda sid, **fields: ScheduleEntry(
-            id=sid, agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
+            id=sid, prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
         )
         set_scheduler(mock_sched, tool_loop)
 
@@ -142,7 +129,7 @@ class TestScheduleCreateValidation:
 
         mock_sched = MagicMock()
         mock_sched.update.side_effect = lambda sid, **fields: ScheduleEntry(
-            id=sid, agent="bot", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
+            id=sid, prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", **fields
         )
         set_scheduler(mock_sched, tool_loop)
 
@@ -167,7 +154,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             result = background_task(prompt="list files", notify=["my-discord"])
@@ -180,7 +167,6 @@ class TestBackgroundTaskTool:
         assert added_entry.prompt == "list files"
         assert added_entry.auto_reply is True
         assert added_entry.schedule_type == "once"
-        assert added_entry.agent == "bot"
 
         mock_sched.fire_now.assert_called_once_with(result["id"])
 
@@ -188,19 +174,10 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"discord-dm"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"discord-dm"})
 
         with pytest.raises(ValueError, match="Unknown notification"):
             background_task(prompt="test", notify=["nonexistent"])
-
-    def test_rejects_unknown_agent(self, tool_loop):
-        from tsugite.tools.schedule import background_task, set_scheduler
-
-        mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
-
-        with pytest.raises(ValueError, match="Unknown agent 'nonexistent'"):
-            background_task(prompt="test", agent="nonexistent")
 
     def test_default_target_session_is_originating_when_on_complete_set(self, tool_loop):
         """on_complete tasks must default target_session='originating' so completion replies still land in the spawning session."""
@@ -209,7 +186,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         set_current_session_id("session-xyz")
         try:
@@ -231,7 +208,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             background_task(prompt="x", notify=["my-discord"], target_session="primary")
@@ -243,7 +220,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             background_task(prompt="x", notify=["my-discord"])
@@ -262,7 +239,7 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
     mock_adapter.handle_message = AsyncMock(return_value="Here's a summary of the results.")
     return (
         SchedulerAdapter(
-            adapters={"bot": mock_adapter},
+            adapter=mock_adapter,
             schedules_path=Path("/tmp/test-schedules.json"),
             notification_channels=notification_channels or {},
             identity_map=identity_map or {},
@@ -281,7 +258,6 @@ class TestAutoReply:
 
         entry = ScheduleEntry(
             id="bg-test",
-            agent="bot",
             prompt="list files",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -309,7 +285,6 @@ class TestAutoReply:
 
         entry = ScheduleEntry(
             id="bg-test",
-            agent="bot",
             prompt="test",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -338,7 +313,6 @@ class TestAutoReply:
 
         entry = ScheduleEntry(
             id="cron-job",
-            agent="bot",
             prompt="test",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -369,7 +343,6 @@ class TestAutoReply:
 
         entry = ScheduleEntry(
             id="bg-fail",
-            agent="bot",
             prompt="test",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -394,7 +367,6 @@ class TestAgentExecutionErrorNotification:
 
         entry = ScheduleEntry(
             id="bg-fail",
-            agent="bot",
             prompt="do something",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -422,7 +394,6 @@ class TestAgentExecutionErrorNotification:
 
         entry = ScheduleEntry(
             id="bg-fail",
-            agent="bot",
             prompt="do something",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -443,7 +414,6 @@ class TestAgentExecutionErrorNotification:
 
         entry = ScheduleEntry(
             id="bg-fail",
-            agent="bot",
             prompt="do something",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -464,7 +434,7 @@ class TestBackgroundTaskMaxTurns:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             result = background_task(prompt="test", notify=["my-discord"], max_turns=5)
@@ -477,7 +447,7 @@ class TestBackgroundTaskMaxTurns:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"}, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop, channel_names={"my-discord"})
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             background_task(prompt="test", notify=["my-discord"])
@@ -512,7 +482,6 @@ class TestPartialOutputOnMaxTurns:
 
         entry = ScheduleEntry(
             id="bg-partial",
-            agent="bot",
             prompt="do something",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -540,7 +509,6 @@ class TestPartialOutputOnMaxTurns:
 
         entry = ScheduleEntry(
             id="bg-no-partial",
-            agent="bot",
             prompt="do something",
             schedule_type="once",
             run_at="2099-01-01T00:00:00Z",
@@ -580,7 +548,6 @@ class TestSchedulerStatusUpdates:
 
         entry = ScheduleEntry(
             id="cron-ok",
-            agent="bot",
             prompt="do work",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -601,7 +568,6 @@ class TestSchedulerStatusUpdates:
 
         entry = ScheduleEntry(
             id="cron-skipped",
-            agent="bot",
             prompt="maybe do work",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -624,7 +590,6 @@ class TestSchedulerStatusUpdates:
 
         entry = ScheduleEntry(
             id="cron-boom",
-            agent="bot",
             prompt="do work",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -647,7 +612,6 @@ class TestSchedulerStatusUpdates:
 
         entry = ScheduleEntry(
             id="cron-update-fail",
-            agent="bot",
             prompt="do work",
             schedule_type="cron",
             cron_expr="0 9 * * *",
@@ -671,11 +635,11 @@ class TestPartialHistoryOnError:
 
         mock_adapter = MagicMock(spec=BaseAdapter)
         mock_adapter.agent_name = "bot"
-        mock_adapter.agent_config = MagicMock()
-        mock_adapter.agent_config.model = "test-model"
-        mock_adapter.agent_config.max_turns = None
-        mock_adapter.agent_config.workspace = None
-        mock_adapter.agent_config.workspace_dir = tmp_path
+        mock_adapter.runtime = MagicMock()
+        mock_adapter.runtime.model = "test-model"
+        mock_adapter.runtime.max_turns = None
+        mock_adapter.runtime.workspace = None
+        mock_adapter.runtime.workspace_dir = tmp_path
         mock_adapter.session_store = MagicMock()
         mock_adapter.session_store.needs_compaction.return_value = False
         mock_adapter.session_store.is_compacting.return_value = False

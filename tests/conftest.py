@@ -68,14 +68,12 @@ def clear_agent_context():
         clear_allowed_agents,
         clear_current_agent,
         set_allowed_secrets,
-        set_current_daemon_agent,
     )
 
     def _reset():
         clear_current_agent()
         clear_allowed_agents()
         set_allowed_secrets(None)
-        set_current_daemon_agent(None)
 
     _reset()
     yield

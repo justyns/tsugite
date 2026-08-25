@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
@@ -25,12 +25,12 @@ def session_store(tmp_path):
 
 @pytest.fixture
 def session_runner(session_store):
-    return SessionRunner(store=session_store, adapters={})
+    return SessionRunner(store=session_store, adapter=None)
 
 
 @pytest.fixture
 def server(tmp_workspace, session_store, session_runner, tmp_path):
-    agent_config = AgentConfig(workspace_dir=tmp_workspace, agent_file="default")
+    agent_config = RuntimeDefaults(workspace_dir=tmp_workspace, agent_file="default")
     http_config = HTTPConfig(enabled=True, host="127.0.0.1", port=8377)
     webhook_store = WebhookStore(tmp_path / "webhooks.json")
 
@@ -43,16 +43,14 @@ def server(tmp_workspace, session_store, session_runner, tmp_path):
 
         mock_ws_cls.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            agent_name="test-agent",
-            agent_config=agent_config,
+            runtime=agent_config,
             session_store=session_store,
         )
 
     srv = HTTPServer(
         config=http_config,
-        adapters={"test-agent": adapter},
+        adapter=adapter,
         webhook_store=webhook_store,
-        agent_configs={"test-agent": agent_config},
         token_store=token_store,
     )
     srv.session_runner = session_runner
@@ -73,7 +71,6 @@ def client(server):
 def _create_session(store: SessionStore, sid: str, user_id: str = "web-anonymous") -> str:
     s = Session(
         id=sid,
-        agent="test-agent",
         source=SessionSource.INTERACTIVE.value,
         user_id=user_id,
     )
@@ -113,7 +110,7 @@ class TestClearPrimaryEndpoint:
         session_store.set_primary_session(sid)
 
         resp = client.post(
-            "/api/sessions/clear-primary?agent=test-agent&user_id=web-anonymous",
+            "/api/sessions/clear-primary?user_id=web-anonymous",
             headers=auth(test_token),
         )
         assert resp.status_code == 200
@@ -122,7 +119,7 @@ class TestClearPrimaryEndpoint:
 
     def test_no_op_when_nothing_primary(self, client, test_token):
         resp = client.post(
-            "/api/sessions/clear-primary?agent=test-agent&user_id=web-anonymous",
+            "/api/sessions/clear-primary?user_id=web-anonymous",
             headers=auth(test_token),
         )
         assert resp.status_code == 200

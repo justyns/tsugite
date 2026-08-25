@@ -15,7 +15,7 @@ import pytest
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import AgentConfig, HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_runner import (
     MAX_CHAIN_DEPTH,
     SessionRunner,
@@ -62,21 +62,18 @@ def adapter():
 
 @pytest.fixture
 def runner(store, adapter):
-    return SessionRunner(store, {"default": adapter})
+    return SessionRunner(store, adapter)
 
 
 def _listener(store: SessionStore, sid: str, **kwargs) -> str:
     """Create an idle session that can receive a notification."""
-    store.create_session(
-        Session(id=sid, agent="default", source=SessionSource.INTERACTIVE.value, user_id="alice", **kwargs)
-    )
+    store.create_session(Session(id=sid, source=SessionSource.INTERACTIVE.value, user_id="alice", **kwargs))
     return sid
 
 
 def _worker(sid: str = "child", **kwargs) -> Session:
     return Session(
         id=sid,
-        agent="default",
         source=SessionSource.BACKGROUND.value,
         prompt="do the thing",
         title="Do the thing",
@@ -335,14 +332,14 @@ def test_runner_add_notify_session_broadcasts(store):
 def test_start_session_tool_passes_notify_sessions(store, adapter):
     from tsugite.tools import sessions as sessions_tools
 
-    runner = SessionRunner(store, {"default": adapter})
+    runner = SessionRunner(store, adapter)
     started = {}
 
     with (
         patch.object(sessions_tools, "_session_runner", runner),
         patch.object(sessions_tools, "_call", lambda fn, *a, **kw: started.setdefault("session", a[0])),
     ):
-        sessions_tools.start_session(prompt="go", agent="default", notify_sessions=["watcher-a"])
+        sessions_tools.start_session(prompt="go", notify_sessions=["watcher-a"])
 
     assert started["session"].notify_sessions == ["watcher-a"]
 
@@ -380,10 +377,10 @@ def http_adapter(tmp_path, history_dir):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     session_store = SessionStore(tmp_path / "http_store.json")
-    config = AgentConfig(workspace_dir=workspace, agent_file="default")
+    config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
     with patch("tsugite.workspace.Workspace") as mock_ws:
         mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
-        return HTTPAgentAdapter(agent_name="test-agent", agent_config=config, session_store=session_store)
+        return HTTPAgentAdapter(runtime=config, session_store=session_store)
 
 
 @pytest.fixture
@@ -392,16 +389,15 @@ def client_and_token(http_adapter, tmp_path):
     _t, raw = token_store.create_admin_token(name="t")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapters={"test-agent": http_adapter},
+        adapter=http_adapter,
         webhook_store=None,
-        agent_configs={"test-agent": http_adapter.agent_config},
         token_store=token_store,
     )
     return TestClient(server.app), raw
 
 
 def _rows(client, token) -> dict:
-    resp = client.get("/api/agents/test-agent/sessions", headers={"Authorization": f"Bearer {token}"})
+    resp = client.get("/api/chat/sessions", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     return {r["id"]: r for r in resp.json()["sessions"]}
 
@@ -409,11 +405,10 @@ def _rows(client, token) -> dict:
 def test_sessions_payload_carries_waiting_on(http_adapter, client_and_token):
     client, token = client_and_token
     store = http_adapter.session_store
-    store.create_session(Session(id="watcher", agent="test-agent", source=SessionSource.INTERACTIVE.value))
+    store.create_session(Session(id="watcher", source=SessionSource.INTERACTIVE.value))
     store.create_session(
         Session(
             id="worker",
-            agent="test-agent",
             source=SessionSource.BACKGROUND.value,
             status=SessionStatus.RUNNING.value,
             notify_sessions=["watcher"],
@@ -428,11 +423,10 @@ def test_sessions_payload_carries_waiting_on(http_adapter, client_and_token):
 def test_waiting_on_clears_when_the_worker_finishes(http_adapter, client_and_token):
     client, token = client_and_token
     store = http_adapter.session_store
-    store.create_session(Session(id="watcher", agent="test-agent", source=SessionSource.INTERACTIVE.value))
+    store.create_session(Session(id="watcher", source=SessionSource.INTERACTIVE.value))
     store.create_session(
         Session(
             id="worker",
-            agent="test-agent",
             source=SessionSource.BACKGROUND.value,
             status=SessionStatus.RUNNING.value,
             notify_sessions=["watcher"],
@@ -487,7 +481,7 @@ def test_add_notify_session_rejects_an_unknown_target(store):
 def test_add_notify_session_rejects_another_users_session(store):
     """A notify target starts a turn in that chat, so it stays within one person."""
     _listener(store, "src")
-    store.create_session(Session(id="theirs", agent="default", source=SessionSource.INTERACTIVE.value, user_id="bob"))
+    store.create_session(Session(id="theirs", source=SessionSource.INTERACTIVE.value, user_id="bob"))
 
     with pytest.raises(ValueError, match="another user"):
         store.add_notify_session("src", "theirs")

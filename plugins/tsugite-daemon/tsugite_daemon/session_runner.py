@@ -102,13 +102,13 @@ class SessionRunner:
     def __init__(
         self,
         store: SessionStore,
-        adapters: dict,
+        adapter,
         notify_callback: Optional[NotifyCallback] = None,
         event_bus=None,
         notification_channels: Optional[dict] = None,
     ):
         self._store = store
-        self._adapters = adapters
+        self._adapter = adapter
         self._event_bus = event_bus
         self._notification_channels = notification_channels or {}
         store.set_turn_end_listener(self._on_turn_end)
@@ -152,7 +152,7 @@ class SessionRunner:
             self._event_bus.emit("session_update", {"action": "created", "id": session.id})
 
         progress = LoggingProgressHandler(self._store, session.id, broadcaster=self._event_bus)
-        progress._emit("session_start", {"agent": session.agent, "prompt": session.prompt[:200]})
+        progress._emit("session_start", {"prompt": session.prompt[:200]})
 
         loop = asyncio.get_running_loop()
         task = loop.create_task(self._run_session(session, progress))
@@ -162,14 +162,13 @@ class SessionRunner:
         return session
 
     async def _run_session(self, session: Session, progress: LoggingProgressHandler) -> None:
-        adapter = self._adapters.get(session.agent)
+        adapter = self._adapter
         if not adapter:
             self._store.update_session(
-                session.id, status=SessionStatus.FAILED.value, error=f"No adapter for agent '{session.agent}'"
+                session.id, status=SessionStatus.FAILED.value, error="No adapter available to run sessions"
             )
             return
 
-        from tsugite.agent_runner.helpers import set_current_daemon_agent
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
 
         custom_logger = SimpleNamespace(ui_handler=progress)
@@ -201,7 +200,7 @@ class SessionRunner:
             )
             from tsugite.models import model_supports_vision
 
-            effective_model = session.model or adapter.agent_config.model
+            effective_model = session.model or adapter.runtime.model
             supports_vision = model_supports_vision(effective_model) if effective_model else True
             inline_files, hint_files = partition_delegation_files([Path(p) for p in delegation_files], supports_vision)
             uploaded = materialize_delegation_attachments(inline_files)
@@ -219,10 +218,6 @@ class SessionRunner:
 
         set_current_session_id(session.id)
         set_interaction_backend(NonInteractiveBackend())
-        # session.agent is the adapter key just resolved above, so a nested spawn
-        # inherits a name that still has a live adapter. Runs in this task's own
-        # copied context, so no bleed into sibling sessions.
-        set_current_daemon_agent(session.agent)
 
         try:
             result = await adapter.handle_message(
@@ -242,7 +237,7 @@ class SessionRunner:
             progress._emit("session_complete", {"result_preview": result_str[:500]})
             if self._event_bus:
                 self._event_bus.emit("session_update", {"action": "completed", "id": session.id})
-                self._event_bus.emit("agent_status", {"agent": session.agent})
+                self._event_bus.emit("agent_status", {})
             logger.info("Session '%s' completed", session.id)
 
             await self._dispatch_completion(updated, result_str)
@@ -344,8 +339,8 @@ class SessionRunner:
             self._event_bus.emit("session_update", {"action": "primary_set", "id": session_id})
         return session
 
-    def clear_primary_session(self, user_id: str, agent: str) -> Optional[Session]:
-        cleared = self._store.clear_primary_session(user_id, agent)
+    def clear_primary_session(self, user_id: str) -> Optional[Session]:
+        cleared = self._store.clear_primary_session(user_id)
         if self._event_bus:
             self._event_bus.emit(
                 "session_update",
@@ -509,11 +504,11 @@ class SessionRunner:
         metadata: dict | None = None,
     ) -> str:
         """Send a follow-up message to an existing session."""
-        session = self._store.get_session(session_id)
+        self._store.get_session(session_id)
 
-        adapter = self._adapters.get(session.agent)
+        adapter = self._adapter
         if not adapter:
-            raise ValueError(f"No adapter for agent '{session.agent}' (session '{session_id}')")
+            raise ValueError(f"No adapter available to run session '{session_id}'")
 
         meta = {"conv_id_override": session_id, "session_id": session_id}
         if metadata:
@@ -527,17 +522,12 @@ class SessionRunner:
             metadata=meta,
         )
 
-        from tsugite.agent_runner.helpers import get_current_daemon_agent, set_current_daemon_agent
-
         # Set the current session ContextVar so tools that fall back to
         # get_current_session_id() (e.g. session_metadata, scratchpad,
-        # return_value) resolve correctly during the reply turn. session.agent is
-        # the adapter key resolved above, so a spawn during this reply turn also
-        # resolves to a live adapter. Restore both on exit so we don't bleed into
-        # the caller's context (this runs in the caller's context, not a fresh task).
+        # return_value) resolve correctly during the reply turn. Restored on exit
+        # so we don't bleed into the caller's context (this runs in the caller's
+        # context, not a fresh task).
         token = _current_session_id.set(session_id)
-        prev_daemon_agent = get_current_daemon_agent()
-        set_current_daemon_agent(session.agent)
         try:
             result = await adapter.handle_message(
                 user_id=f"session:{session_id}",
@@ -546,9 +536,8 @@ class SessionRunner:
             )
         finally:
             _current_session_id.reset(token)
-            set_current_daemon_agent(prev_daemon_agent)
 
         self._store.update_session(session_id)
         if self._event_bus:
-            self._event_bus.emit("history_update", {"agent": session.agent, "session_id": session_id})
+            self._event_bus.emit("history_update", {"session_id": session_id})
         return result

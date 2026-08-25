@@ -111,7 +111,6 @@ async def test_ladder_escalates_on_verifier_exhaustion(store, runner, orchestrat
         await orchestrator.on_session_complete(
             Session(
                 id=wid,
-                agent="default",
                 source="spawned",
                 status=SessionStatus.COMPLETED.value,
                 metadata={"job_id": job.id},
@@ -134,7 +133,6 @@ async def test_ladder_escalates_on_verifier_exhaustion(store, runner, orchestrat
         await orchestrator.on_session_complete(
             Session(
                 id=wid,
-                agent="default",
                 source="spawned",
                 status=SessionStatus.COMPLETED.value,
                 metadata={"job_id": job.id},
@@ -154,9 +152,7 @@ async def test_ladder_escalates_on_infra_failure_without_burning_budget(store, r
         model_ladder=["claude_code:haiku", "anthropic:claude-opus-4-8"],
     )
     wid = store.get(job.id).worker_session_id
-    failed = Session(
-        id=wid, agent="default", source="spawned", status=SessionStatus.FAILED.value, metadata={"job_id": job.id}
-    )
+    failed = Session(id=wid, source="spawned", status=SessionStatus.FAILED.value, metadata={"job_id": job.id})
     failed.error = "429 rate limit exceeded, please retry later"
     await orchestrator.on_session_complete(failed, "")
 
@@ -176,9 +172,7 @@ async def test_non_infra_worker_failure_does_not_escalate(store, runner, orchest
         model_ladder=["claude_code:haiku", "claude_code:opus"],
     )
     wid = store.get(job.id).worker_session_id
-    failed = Session(
-        id=wid, agent="default", source="spawned", status=SessionStatus.FAILED.value, metadata={"job_id": job.id}
-    )
+    failed = Session(id=wid, source="spawned", status=SessionStatus.FAILED.value, metadata={"job_id": job.id})
     failed.error = "SyntaxError in generated code"
     await orchestrator.on_session_complete(failed, "")
     assert store.get(job.id).state == JobState.ERRORED.value, "a genuine failure must not silently burn the ladder"

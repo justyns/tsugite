@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.scheduler_adapter import MAX_CHAIN_DEPTH, SchedulerAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.scheduler import ScheduleEntry
 from tsugite_daemon.session_runner import (
     SessionRunner,
@@ -28,7 +28,7 @@ from tsugite.agent_runner.models import AgentExecutionResult
 
 @pytest.fixture
 def session_store(tmp_path):
-    return SessionStore(tmp_path / "session_store.json", context_limits={"bot": 128000})
+    return SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def _make_sa(session_runner=None) -> tuple[SchedulerAdapter, MagicMock]:
     mock_adapter.handle_message = AsyncMock(return_value="done")
     mock_adapter.resolve_model = MagicMock(return_value="test-model")
     sa = SchedulerAdapter(
-        adapters={"bot": mock_adapter},
+        adapter=mock_adapter,
         schedules_path=Path("/tmp/test-schedules.json"),
     )
     if session_runner:
@@ -57,7 +57,6 @@ def _make_sa(session_runner=None) -> tuple[SchedulerAdapter, MagicMock]:
 def _make_entry(on_complete=None, originating_session_id=None, chain_depth=0, **kw) -> ScheduleEntry:
     return ScheduleEntry(
         id=kw.get("id", "bg-test"),
-        agent="bot",
         prompt=kw.get("prompt", "do work"),
         schedule_type="once",
         run_at="2099-01-01T00:00:00Z",
@@ -70,7 +69,6 @@ def _make_entry(on_complete=None, originating_session_id=None, chain_depth=0, **
 def _create_session(session_store, session_id="session-abc"):
     session = Session(
         id=session_id,
-        agent="bot",
         source=SessionSource.INTERACTIVE.value,
         status=SessionStatus.ACTIVE.value,
     )
@@ -307,7 +305,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
@@ -325,7 +323,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
@@ -340,7 +338,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
@@ -352,7 +350,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
@@ -365,7 +363,7 @@ class TestBackgroundTaskTool:
         from tsugite.tools.schedule import background_task, set_scheduler
 
         mock_sched = MagicMock()
-        set_scheduler(mock_sched, tool_loop, agent_names={"bot"})
+        set_scheduler(mock_sched, tool_loop)
 
         with patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"):
             background_task(prompt="test")
@@ -439,9 +437,9 @@ class TestHandleMessageSetsSessionId:
 
     @pytest.fixture
     def adapter(self, tmp_path):
-        store = SessionStore(tmp_path / "sessions.json", context_limits={"bot": 128000})
-        config = AgentConfig(workspace_dir=tmp_path, agent_file="default")
-        return _StubAdapter("bot", config, store)
+        store = SessionStore(tmp_path / "sessions.json", default_context_limit=128000)
+        config = RuntimeDefaults(workspace_dir=tmp_path, agent_file="default")
+        return _StubAdapter(config, store)
 
     @pytest.mark.asyncio
     async def test_sets_session_id_when_not_preset(self, adapter, tmp_path):

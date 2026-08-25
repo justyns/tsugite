@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter
-from tsugite_daemon.config import AgentConfig
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tests.history_helpers import seed_history_session
@@ -44,8 +44,8 @@ class _RecordingBus:
 
 
 def _make_adapter(workspace_dir, session_store):
-    agent_config = AgentConfig(workspace_dir=workspace_dir, agent_file="default")
-    return _StubAdapter("test-agent", agent_config, session_store)
+    agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
+    return _StubAdapter(agent_config, session_store)
 
 
 @pytest.fixture
@@ -59,8 +59,8 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")
@@ -116,12 +116,9 @@ async def test_run_compaction_broadcasts_counts_and_phase(workspace_dir, tmp_pat
     summarizing = next(p for p in progress_payloads if p["phase"] == "summarizing")
     assert summarizing["chunk_index"] == 1
     assert summarizing["chunk_total"] == 1
-    for p in progress_payloads:
-        assert p["agent"] == "test-agent"
-
     # Every compaction event must carry session_id so the UI can scope the
-    # spinner to the actual compacting session (bug 297). Without it, all
-    # sessions in the agent see the indicator.
+    # spinner to the actual compacting session. Without it, every open session
+    # would show the indicator.
     for event_type, payload in bus.events:
         if event_type.startswith("compaction_"):
             assert payload.get("session_id") == conv_id, (
@@ -136,8 +133,8 @@ async def test_run_compaction_finishes_even_with_no_event_bus(workspace_dir, tmp
     history_dir = tmp_path / "history"
     history_dir.mkdir()
 
-    store = SessionStore(tmp_path / "session_store.json", context_limits={"test-agent": 128_000})
-    session = store.get_or_create_interactive("test-user", "test-agent")
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=128_000)
+    session = store.get_or_create_interactive("test-user")
     conv_id = session.id
 
     storage = seed_history_session(conv_id, agent="test-agent", model="openai:gpt-4o-mini")

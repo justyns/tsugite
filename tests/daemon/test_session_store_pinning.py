@@ -15,7 +15,6 @@ def _make(store: SessionStore, *, agent: str = "agent-x", user_id: str = "u1", t
     sid = f"s-{datetime.now(timezone.utc).isoformat()}-{title or 'anon'}"
     s = Session(
         id=sid,
-        agent=agent,
         source=SessionSource.INTERACTIVE.value,
         user_id=user_id,
         title=title,
@@ -29,7 +28,7 @@ def _make(store: SessionStore, *, agent: str = "agent-x", user_id: str = "u1", t
 
 class TestSchemaFields:
     def test_session_has_pin_and_view_fields_with_defaults(self):
-        s = Session(id="x", agent="a")
+        s = Session(id="x")
         assert s.pinned is False
         assert s.pin_position is None
         assert s.last_viewed_at == ""
@@ -179,14 +178,14 @@ class TestCompactionTransfersPinAndTitle:
     def test_list_sessions_filters_superseded_by_default(self, store):
         s = _make(store, title="t")
         new = store.compact_session(s.id)
-        ids = [r.id for r in store.list_sessions(agent=s.agent)]
+        ids = [r.id for r in store.list_sessions()]
         assert new.id in ids
         assert s.id not in ids
 
     def test_list_sessions_can_include_superseded(self, store):
         s = _make(store, title="t")
         new = store.compact_session(s.id)
-        ids = [r.id for r in store.list_sessions(agent=s.agent, include_superseded=True)]
+        ids = [r.id for r in store.list_sessions(include_superseded=True)]
         assert new.id in ids
         assert s.id in ids
 
@@ -213,13 +212,13 @@ class TestListSessionsPinExemption:
         """A pin idle for weeks must still be returned when limit truncates -
         pins are persistent navigation, not recency-ranked rows."""
         old_pin, _ = self._seed(store, n_recent=5)
-        result = store.list_sessions(agent="agent-x", limit=3)
+        result = store.list_sessions(limit=3)
         ids = [s.id for s in result]
         assert old_pin.id in ids, "recency limit evicted a pinned session"
 
     def test_limit_still_bounds_unpinned_sessions(self, store):
         old_pin, _ = self._seed(store, n_recent=5)
-        result = store.list_sessions(agent="agent-x", limit=3)
+        result = store.list_sessions(limit=3)
         unpinned = [s for s in result if not s.pinned]
         assert len(unpinned) == 3, "limit must keep bounding the non-pinned tail"
 
@@ -231,5 +230,5 @@ class TestListSessionsPinExemption:
         for i in range(3):
             s = _make(store, title=f"r{i}")
             s.last_active = f"2026-07-04T10:{i:02d}:00+00:00"
-        result = store.list_sessions(agent="agent-x", limit=3)
+        result = store.list_sessions(limit=3)
         assert sum(1 for s in result if s.id == fresh_pin.id) == 1
