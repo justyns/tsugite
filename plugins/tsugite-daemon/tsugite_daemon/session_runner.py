@@ -504,7 +504,7 @@ class SessionRunner:
         metadata: dict | None = None,
     ) -> str:
         """Send a follow-up message to an existing session."""
-        self._store.get_session(session_id)
+        self._store.get_session(session_id)  # raises if the session is unknown
 
         adapter = self._adapter
         if not adapter:
