@@ -67,18 +67,16 @@ def _append_resource_block(body: str, skill_dir: Path, resources: List[str]) -> 
     if not resources:
         return body
 
+    from tsugite.prompt_xml import El, Raw
+
     shown = resources[:_MAX_RESOURCES_LISTED]
-    lines: List[str] = [
-        body.rstrip(),
-        "",
-        f'<skill_resources dir="{skill_dir}">',
-    ]
-    lines.extend(f"- {path}" for path in shown)
+    listing = [f"- {path}" for path in shown]
     remaining = len(resources) - len(shown)
     if remaining > 0:
-        lines.append(f"- ... (+{remaining} more)")
-    lines.append("</skill_resources>")
-    return "\n".join(lines) + "\n"
+        listing.append(f"- ... (+{remaining} more)")
+
+    block = El("skill_resources", [Raw("\n".join(listing))], {"dir": skill_dir}).render()
+    return f"{body.rstrip()}\n\n{block}\n"
 
 
 def _skill_wants_jinja(frontmatter: Dict, skill_name: str) -> bool:

@@ -182,3 +182,26 @@ def test_daemon_progress_consumer_reads_the_dict():
     _apply_event_to_progress(progress, event_to_ui_dict(Event(type="tool_invocation", ts=TS, data={"name": "grep"})))
     assert progress["tool_count"] == 1
     assert progress["last_event_time"].startswith("2026-01-01")
+
+
+class TestInjectedBlockIds:
+    """quoteattr switches to single quotes when a value holds a double quote."""
+
+    def test_double_quoted_id(self):
+        from tsugite.history.ui_events import split_injected_context
+
+        blocks, rest = split_injected_context('<scheduled_task id="task-1">ran</scheduled_task>\nhi')
+        assert blocks[0]["id"] == "task-1"
+        assert rest == "hi"
+
+    def test_single_quoted_id(self):
+        from tsugite.history.ui_events import split_injected_context
+
+        blocks, _ = split_injected_context("<scheduled_task id='ta\"sk'>ran</scheduled_task>")
+        assert blocks[0]["id"] == 'ta"sk'
+
+    def test_id_absent(self):
+        from tsugite.history.ui_events import split_injected_context
+
+        blocks, _ = split_injected_context("<scheduled_task>ran</scheduled_task>")
+        assert "id" not in blocks[0]

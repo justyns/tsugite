@@ -25,7 +25,8 @@ from .models import Event
 # ``environment`` appears only in older histories but must keep normalizing.
 _INJECTED_TAGS = ("message_context", "environment", "background_task_complete", "scheduled_task", "client_context")
 _INJECTED_RES = {tag: re.compile(rf"<{tag}(\s[^>]*)?>(.*?)</{tag}>", re.DOTALL) for tag in _INJECTED_TAGS}
-_ID_RE = re.compile(r'id="([^"]+)"')
+# Single quotes because quoteattr falls back to them when the value holds a `"`.
+_ID_RE = re.compile(r"""id=(?:"([^"]*)"|'([^']*)')""")
 
 
 def split_injected_context(text: str) -> Tuple[List[Dict[str, str]], str]:
@@ -46,7 +47,7 @@ def split_injected_context(text: str) -> Tuple[List[Dict[str, str]], str]:
                 block = {"tag": tag}
                 id_m = _ID_RE.search(m.group(1) or "")
                 if id_m:
-                    block["id"] = id_m.group(1)
+                    block["id"] = id_m.group(1) if id_m.group(1) is not None else id_m.group(2)
                 block["body"] = (m.group(2) or "").strip()
                 blocks.append(block)
                 body = body[m.end() :]

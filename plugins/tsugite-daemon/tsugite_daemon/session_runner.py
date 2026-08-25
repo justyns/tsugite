@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Coroutine, Optional
 from uuid import uuid4
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import quoteattr
 
 from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
@@ -83,10 +83,12 @@ _COMPLETION_SOURCES = {
 
 
 def build_completion_message(session: Session, status: str, summary: str) -> str:
+    from tsugite.prompt_xml import El
+
     body = ""
     if summary:
         tag = "error" if status == SessionStatus.FAILED.value else "result"
-        body = f"<{tag}>\n{escape(summary)}\n</{tag}>\n"
+        body = El(tag, [summary]).render() + "\n"
     return (
         f"<session_finished id={quoteattr(session.id)} status={quoteattr(status)}"
         f" title={quoteattr(session.title or '')}>\n{body}</session_finished>"

@@ -14,7 +14,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional
 from uuid import uuid4
-from xml.sax.saxutils import escape, quoteattr
 
 from tsugite.core.record_store import SqliteCollectionStorage
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
@@ -315,19 +314,27 @@ def render_pending_deliveries_xml(session: Session) -> str:
     if not session.pending_deliveries:
         return ""
 
-    lines = ["  <pending_deliveries>"]
+    from tsugite.prompt_xml import El
+
+    deliveries = []
     for item in session.pending_deliveries:
-        parts = [f"id={quoteattr(item['id'])}", f"source={quoteattr(item.get('source') or '')}"]
-        if item.get("title"):
-            parts.append(f"title={quoteattr(item['title'])}")
-        if item.get("timestamp"):
-            parts.append(f"at={quoteattr(item['timestamp'])}")
         message = item.get("message") or ""
         if len(message) > PENDING_DELIVERY_MESSAGE_CHARS:
             message = message[:PENDING_DELIVERY_MESSAGE_CHARS] + "…"
-        lines.append(f"    <delivery {' '.join(parts)}>{escape(message)}</delivery>")
-    lines.append("  </pending_deliveries>")
-    return "\n".join(lines)
+        deliveries.append(
+            El(
+                "delivery",
+                [message],
+                {
+                    "id": item["id"],
+                    "source": item.get("source") or "",
+                    "title": item.get("title") or None,
+                    "at": item.get("timestamp") or None,
+                },
+                inline=True,
+            )
+        )
+    return El("pending_deliveries", deliveries).render(indent="  ", level=1)
 
 
 class SessionStore:

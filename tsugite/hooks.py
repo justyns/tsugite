@@ -66,11 +66,9 @@ class Block:
 
 def render_blocks(blocks: list[Block]) -> str:
     """Render context blocks to an XML-tagged string for the prompt."""
-    parts = []
-    for b in blocks:
-        attrs = "".join(f' {k}="{v}"' for k, v in b.attributes.items())
-        parts.append(f"<{b.tag}{attrs}>\n{b.body}\n</{b.tag}>")
-    return "\n".join(parts)
+    from tsugite.prompt_xml import El, Raw, render_fragments
+
+    return render_fragments(El(b.tag, [Raw(b.body)], dict(b.attributes)) for b in blocks)
 
 
 def collect_context_blocks(blocks: Optional[list], rag_context: Optional[str] = None) -> list[Block]:

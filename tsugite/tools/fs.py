@@ -46,21 +46,28 @@ def _wrap_file_metadata(
     except Exception:
         return body
 
+    from tsugite.prompt_xml import El, Raw
+
     tz = local_tz()
-    mtime_iso = datetime.fromtimestamp(stats.st_mtime, tz=tz).isoformat()
-    attrs = [
-        f'path="{path}"',
-        f'modified="{_format_mtime(file_path, mtime=stats.st_mtime)}"',
-        f'mtime="{mtime_iso}"',
-        f'size_bytes="{stats.st_size}"',
-    ]
+    lines = None
     if start_line is not None or end_line is not None:
         eff_start = start_line if start_line is not None else 1
         end_label = end_line if end_line is not None else (total_lines if total_lines is not None else "end")
         if total_lines is not None and isinstance(end_label, int):
             end_label = min(end_label, total_lines)  # don't advertise lines past EOF
-        attrs.append(f'lines="{eff_start}-{end_label}"')
-    return f"<file {' '.join(attrs)}>\n{body}\n</file>"
+        lines = f"{eff_start}-{end_label}"
+
+    return El(
+        "file",
+        [Raw(body)],
+        {
+            "path": path,
+            "modified": _format_mtime(file_path, mtime=stats.st_mtime),
+            "mtime": datetime.fromtimestamp(stats.st_mtime, tz=tz).isoformat(),
+            "size_bytes": stats.st_size,
+            "lines": lines,
+        },
+    ).render()
 
 
 @tool
