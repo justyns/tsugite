@@ -33,26 +33,23 @@ def build_context_el(
 ) -> Optional[El]:
     """The `<context>` element, or None when there is nothing to say.
 
-    Attachments the model cannot read inline are handed to `on_media`, which
-    returns a provider-native content block (or None to drop them).
+    Attachments the model cannot read inline go to `on_media`, which collects them
+    as provider-native content blocks; providers that pass none drop them.
     `skill_char_limit` clips skill bodies for providers that re-send the block
     every turn.
     """
-    attachments = list(attachments)
-    skills = list(skills)
-    if not attachments and not skills:
-        return None
+    attachments = list(attachments)  # scanned for untrusted, then rendered
 
     children: list = []
     if any(getattr(a, "untrusted", False) for a in attachments):
-        children.append(El("note", [Raw(UNTRUSTED_NOTE)], inline=True))
+        children.append(El("note", [UNTRUSTED_NOTE], inline=True))
 
     for att in attachments:
         attrs = attachment_attrs(att)
         if att.content_type == AttachmentContentType.TEXT:
             children.append(El("attachment", [Raw(att.content)], attrs))
         elif att.content_type == AttachmentContentType.IMAGE and not supports_vision:
-            children.append(El("attachment", [Raw(f"[Image: {att.name}]")], attrs, inline=True))
+            children.append(El("attachment", [f"[Image: {att.name}]"], attrs, inline=True))
         elif on_media is not None:
             on_media(att)
 
@@ -70,13 +67,13 @@ def build_context_el(
                 El(
                     "skill_expiring",
                     [
-                        Raw(
-                            f"This skill will auto-unload in {remaining} turn(s) unless referenced. "
-                            f'Call load_skill("{skill.name}") to renew, or unload_skill("{skill.name}") to drop now.'
-                        )
+                        f"This skill will auto-unload in {remaining} turn(s) unless referenced. "
+                        f'Call load_skill("{skill.name}") to renew, or unload_skill("{skill.name}") to drop now.'
                     ],
                     {"name": skill.name, "turns_remaining": remaining},
                 )
             )
 
-    return El("context", children)
+    # Emptiness follows what rendered, not what came in: attachments the model
+    # cannot read inline add no child.
+    return El("context", children) if children else None

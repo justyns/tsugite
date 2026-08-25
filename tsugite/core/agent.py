@@ -1295,13 +1295,22 @@ class TsugiteAgent:
 
     def _build_budget_tag(self, turn_num: int) -> str:
         """Build XML budget tag showing turn and token usage for the LLM."""
+        from tsugite.prompt_xml import El
+
         turn = turn_num + 1
-        parts = [f'turn="{turn}"', f'max_turns="{self.max_turns}"']
-        if self.total_tokens > 0:
-            parts.append(f'tokens_used="{self.total_tokens}"')
-        if self.max_turns - turn <= 2:
-            parts.append('warning="approaching turn limit, wrap up soon"')
-        return f"\n<tsugite_budget {' '.join(parts)} />"
+        return (
+            "\n"
+            + El(
+                "tsugite_budget",
+                attrs={
+                    "turn": turn,
+                    "max_turns": self.max_turns,
+                    "tokens_used": self.total_tokens or None,
+                    "warning": "approaching turn limit, wrap up soon" if self.max_turns - turn <= 2 else None,
+                },
+                void=True,
+            ).render()
+        )
 
     @property
     def reported_cost(self) -> float | None:

@@ -9,9 +9,10 @@ from tsugite.attachments.base import (
     Attachment,
     AttachmentContentType,
     AttachmentHandler,
-    format_attachment_open_tag,
+    attachment_attrs,
 )
 from tsugite.attachments.url import GenericURLHandler
+from tsugite.prompt_xml import El
 
 
 def _att(**kw) -> Attachment:
@@ -20,21 +21,26 @@ def _att(**kw) -> Attachment:
     return Attachment(**base)
 
 
+def _open_tag(att: Attachment) -> str:
+    return El("attachment", ["body"], attachment_attrs(att)).render().split("\n")[0]
+
+
 def test_attachment_defaults_trusted():
     assert _att().untrusted is False
 
 
 def test_open_tag_marks_untrusted():
-    assert format_attachment_open_tag(_att(name="p", untrusted=True)) == '<attachment name="p" untrusted="true">'
+    assert _open_tag(_att(name="p", untrusted=True)) == '<attachment name="p" untrusted="true">'
 
 
 def test_open_tag_omits_flag_when_trusted():
-    assert format_attachment_open_tag(_att(name="p")) == '<attachment name="p">'
+    assert _open_tag(_att(name="p")) == '<attachment name="p">'
 
 
 def test_open_tag_composes_mode_and_untrusted():
-    tag = format_attachment_open_tag(_att(name="p", mode="index", untrusted=True))
-    assert tag == '<attachment name="p" mode="index" untrusted="true">'
+    assert (
+        _open_tag(_att(name="p", mode="index", untrusted=True)) == '<attachment name="p" mode="index" untrusted="true">'
+    )
 
 
 class _FakeResp:

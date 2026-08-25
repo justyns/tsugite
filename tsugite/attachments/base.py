@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Optional, Union
-from xml.sax.saxutils import quoteattr
 
 
 class AttachmentContentType(Enum):
@@ -111,19 +110,6 @@ class Attachment:
 def attachment_attrs(att: "Attachment") -> dict:
     """Attributes for an attachment's `<attachment>` tag, `None` values omitted."""
     return {"name": att.name, "mode": att.mode, "untrusted": "true" if att.untrusted else None}
-
-
-def format_attachment_open_tag(att: "Attachment") -> str:
-    """Format the opening `<attachment ...>` XML tag for an attachment.
-
-    Includes a `mode="..."` attribute when `att.mode` is set and `untrusted="true"`
-    when the content is untrusted. Attribute values are XML-escaped so
-    quotes/angle-brackets in attachment names don't break parsing.
-    """
-    name_attr = quoteattr(att.name)
-    mode_attr = f" mode={quoteattr(att.mode)}" if att.mode else ""
-    untrusted_attr = ' untrusted="true"' if att.untrusted else ""
-    return f"<attachment name={name_attr}{mode_attr}{untrusted_attr}>"
 
 
 class AttachmentHandler(ABC):

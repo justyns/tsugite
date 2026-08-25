@@ -204,6 +204,18 @@ This skill will auto-unload in 2 turn(s) unless referenced. Call load_skill("fad
 <attachment name="pic.png">[Image: pic.png]</attachment>
 </context>
 
+======== agent/budget
+
+<tsugite_budget turn="1" max_turns="10" />
+
+======== agent/budget-tokens
+
+<tsugite_budget turn="3" max_turns="10" tokens_used="1234" />
+
+======== agent/budget-warning
+
+<tsugite_budget turn="9" max_turns="10" tokens_used="50" warning="approaching turn limit, wrap up soon" />
+
 ======== agent/multi-block
 
 <tsugite_multi_block_warning dropped="2" total="3">Your response contained 3 ```python-exec blocks. Only block 1 was executed; blocks 2..3 were dropped silently. If those blocks contained work that still needs to happen, re-emit them in your next response — exactly one ```python-exec block per turn. Do not assume the dropped blocks ran.</tsugite_multi_block_warning>

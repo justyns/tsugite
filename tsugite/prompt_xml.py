@@ -12,8 +12,9 @@ choice instead of a missing call.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Union
+from typing import Any, Iterable, Optional, Union
 from xml.sax.saxutils import escape, quoteattr
 
 __all__ = ["El", "Raw", "render_fragments"]
@@ -45,37 +46,66 @@ class El:
     void: bool = False
 
     def render(self, indent: str = "", level: int = 0) -> str:
+        out: list[str] = []
+        self._write(out, indent, level)
+        return "".join(out)
+
+    def _write(self, out: list[str], indent: str, level: int) -> None:
+        """Append this element's fragments to `out`.
+
+        Fragments accumulate in one flat list and are joined once, so a large
+        attachment body is copied once rather than once per enclosing element.
+        """
         pad = indent * level
-        attrs = "".join(f" {k}={quoteattr(str(v))}" for k, v in self.attrs.items() if v is not None)
+        out.append(f"{pad}<{self.tag}")
+        if self.attrs:
+            for key, value in self.attrs.items():
+                if value is not None:
+                    out.append(f" {key}={_quote(value)}")
 
         if self.void:
-            return f"{pad}<{self.tag}{attrs} />"
+            out.append(" />")
+            return
 
-        parts = [_render_child(c, indent, level + 1, self.inline) for c in self.children if c is not None]
-        if not parts:
-            return f"{pad}<{self.tag}{attrs}></{self.tag}>"
+        children = [c for c in self.children if c is not None]
+        if not children:
+            out.append(f"></{self.tag}>")
+            return
 
+        out.append(">")
         if self.inline:
-            return f"{pad}<{self.tag}{attrs}>{''.join(parts)}</{self.tag}>"
-        body = "\n".join(parts)
-        return f"{pad}<{self.tag}{attrs}>\n{body}\n{pad}</{self.tag}>"
+            for child in children:
+                _write_child(child, out, indent, 0)
+            out.append(f"</{self.tag}>")
+            return
+
+        for child in children:
+            out.append("\n")
+            _write_child(child, out, indent, level + 1)
+        out.append(f"\n{pad}</{self.tag}>")
 
 
-def _render_child(child: Child, indent: str, level: int, inline: bool) -> str:
+# quoteattr walks the string several times; most attribute values are clean
+# identifiers, paths and counts, where it returns the value in plain quotes.
+# Newlines, tabs and carriage returns belong here too - quoteattr turns those
+# into numeric entities.
+_needs_attr_escape = re.compile('[&<>"\n\r\t]').search
+
+
+def _quote(value: Any) -> str:
+    text = str(value)
+    return quoteattr(text) if _needs_attr_escape(text) else f'"{text}"'
+
+
+def _write_child(child: Child, out: list[str], indent: str, level: int) -> None:
     if isinstance(child, El):
-        return child.render(indent, 0 if inline else level)
-    if isinstance(child, Raw):
-        return child.text
-    return escape(str(child))
+        child._write(out, indent, level)
+    elif isinstance(child, Raw):
+        out.append(child.text)
+    else:
+        out.append(escape(str(child)))
 
 
-def render_fragments(items: Iterable[Union[El, Raw, str, None]], sep: str = "\n") -> str:
-    """Join top-level items. Observations are several sibling blocks, not one root."""
-    parts = []
-    for item in items:
-        if item is None:
-            continue
-        text = item.render() if isinstance(item, El) else (item.text if isinstance(item, Raw) else str(item))
-        if text:
-            parts.append(text)
-    return sep.join(parts)
+def render_fragments(items: Iterable[Optional[El]]) -> str:
+    """Join sibling elements. Some blocks are a run of siblings, not one root."""
+    return "\n".join(el.render() for el in items if el is not None)

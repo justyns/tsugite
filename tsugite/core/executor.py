@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runt
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
-from tsugite.prompt_xml import El, Raw
+from tsugite.prompt_xml import El
 from tsugite.secrets.redaction import redact_sensitive_obj
 
 PPRINT_WIDTH = 100
@@ -128,10 +128,9 @@ def build_execution_result(
 
     Callers mask secrets before handing values in.
     """
-    from xml.sax.saxutils import escape
 
-    def _pairs(mapping: Dict[str, str]) -> Raw:
-        return Raw(", ".join(f"{escape(k)}={escape(v)}" for k, v in mapping.items()))
+    def _pairs(mapping: Dict[str, str]) -> str:
+        return ", ".join(f"{k}={v}" for k, v in mapping.items())
 
     children = [El("output", [output], inline=True)]
     if error:

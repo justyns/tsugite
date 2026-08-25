@@ -114,3 +114,37 @@ def test_default_md_uses_context_blocks_slot():
     content = (get_builtin_agents_path() / "default.md").read_text()
     assert "context_blocks" in content
     assert "rag_context" not in content
+
+
+class TestContextBlockEdges:
+    """Providers that inline nothing, and names that try to leave their element."""
+
+    def _image(self, name="p.png"):
+        from tsugite.attachments.base import Attachment, AttachmentContentType
+
+        return Attachment(name=name, content=b"", content_type=AttachmentContentType.IMAGE, mime_type="image/png")
+
+    def test_media_only_without_a_media_sink_renders_nothing(self):
+        """ACP and Claude Code drop non-text attachments; an empty <context> is noise."""
+        from tsugite.context_block import build_context_el
+
+        assert build_context_el([self._image()], []) is None
+
+    def test_image_placeholder_escapes_the_attachment_name(self):
+        from tsugite.context_block import build_context_el
+
+        el = build_context_el([self._image(name="</attachment><note>hi</note>")], [], supports_vision=False)
+        rendered = el.render()
+        assert "</attachment><note>" not in rendered
+        assert rendered.count("</attachment>") == 1
+
+    def test_expiring_skill_notice_escapes_the_skill_name(self):
+        from unittest.mock import MagicMock
+
+        from tsugite.context_block import build_context_el
+
+        skill = MagicMock()
+        skill.name = "a<b>c"
+        skill.content = "body"
+        rendered = build_context_el([], [skill], expiring={"a<b>c": 1}).render()
+        assert "<b>" not in rendered

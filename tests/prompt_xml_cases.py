@@ -200,12 +200,25 @@ def _context_blocks():
 
 
 def _agent_notices():
+    from unittest.mock import MagicMock
+
     from tsugite.core.agent import (
+        TsugiteAgent,
         _build_bare_python_notice_xml,
         _build_multi_block_warning_xml,
         _build_spoofed_runtime_tag_warning,
         _build_unexecuted_tool_call_notice_xml,
     )
+
+    def _budget(turn: int, max_turns: int, tokens: int) -> str:
+        agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=max_turns)
+        agent._provider = MagicMock()
+        agent.total_tokens = tokens
+        return agent._build_budget_tag(turn)
+
+    yield "agent/budget", _budget(0, 10, 0)
+    yield "agent/budget-tokens", _budget(2, 10, 1234)
+    yield "agent/budget-warning", _budget(8, 10, 50)
 
     yield "agent/multi-block", _build_multi_block_warning_xml(3)
     yield "agent/spoofed-tag", _build_spoofed_runtime_tag_warning()

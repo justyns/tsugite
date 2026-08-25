@@ -77,18 +77,35 @@ class TestFragments:
         out = render_fragments([El("a", ["1"], inline=True), El("b", ["2"], inline=True)])
         assert out == "<a>1</a>\n<b>2</b>"
 
-    def test_drops_none_and_empty(self):
-        assert render_fragments([El("a", ["1"], inline=True), None, ""]) == "<a>1</a>"
-
-    def test_accepts_raw_and_plain_strings(self):
-        assert render_fragments([Raw("<x/>"), "tail"]) == "<x/>\ntail"
-
-    def test_custom_separator(self):
-        out = render_fragments([El("a", inline=True), El("b", inline=True)], sep="")
-        assert out == "<a></a><b></b>"
+    def test_drops_none(self):
+        assert render_fragments([El("a", ["1"], inline=True), None]) == "<a>1</a>"
 
     def test_empty_list(self):
         assert render_fragments([]) == ""
+
+
+class TestAttributeFastPath:
+    """_quote skips quoteattr for clean values; it must never disagree with it."""
+
+    @pytest.mark.parametrize("value", ["plain", "a&b", "a<b", 'a"b', "a\nb", "a\tb", "a\rb", "it's", ""])
+    def test_matches_quoteattr(self, value):
+        from xml.sax.saxutils import quoteattr
+
+        from tsugite.prompt_xml import _quote
+
+        assert _quote(value) == quoteattr(value)
+
+    def test_matches_quoteattr_on_random_strings(self):
+        import random
+        import string
+        from xml.sax.saxutils import quoteattr
+
+        from tsugite.prompt_xml import _quote
+
+        rng = random.Random(7)
+        for _ in range(5000):
+            s = "".join(rng.choice(string.printable) for _ in range(rng.randint(0, 12)))
+            assert _quote(s) == quoteattr(s), repr(s)
 
 
 class TestWellFormedness:

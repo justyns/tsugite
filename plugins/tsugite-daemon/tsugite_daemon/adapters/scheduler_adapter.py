@@ -1,4 +1,4 @@
-"""Scheduler adapter — bridges the Scheduler into the daemon Gateway."""
+"""Scheduler adapter: bridges the Scheduler into the daemon Gateway."""
 
 import asyncio
 import logging
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.exceptions import AgentExecutionError
+from tsugite.prompt_xml import El, Raw
 from tsugite.tools.notify import notify_context, send_notification
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.auth import TokenStore
@@ -47,8 +48,6 @@ def build_task_complete_message(task_id: str, chain_depth: int, prompt: str, res
     closing tag would otherwise cut the card short and spill into the chat as
     though the user had typed it.
     """
-    from tsugite.prompt_xml import El
-
     prompt_summary = prompt[:200] + ("…" if len(prompt) > 200 else "")
     return El(
         "background_task_complete",
@@ -399,14 +398,20 @@ class SchedulerAdapter:
 
             canonical = self._resolve_canonical_user(config)
 
-            synthetic_message = (
-                f'<background_task id="{entry.id}">\n'
-                "This task ran in the background. Process the result and provide a "
-                "concise, human-friendly summary to the user.\n\n"
-                f"Original prompt: {entry.prompt}\n\n"
-                f"Result:\n{truncated_result}\n"
-                "</background_task>"
-            )
+            # Body stays verbatim: this card is prose the model reads, and unlike
+            # <background_task_complete> nothing peels it back off the history.
+            synthetic_message = El(
+                "background_task",
+                [
+                    Raw(
+                        "This task ran in the background. Process the result and provide a "
+                        "concise, human-friendly summary to the user.\n\n"
+                        f"Original prompt: {entry.prompt}\n\n"
+                        f"Result:\n{truncated_result}"
+                    )
+                ],
+                {"id": entry.id},
+            ).render()
 
             channel_context = ChannelContext(
                 source="background_task",
