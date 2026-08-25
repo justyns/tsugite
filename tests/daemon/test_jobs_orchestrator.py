@@ -1255,6 +1255,33 @@ def test_render_jobs_context_xml_truncates_prompt_and_error(store):
     assert "y" * 200 in xml
 
 
+def test_render_jobs_context_xml_escapes_ampersands(store):
+    """Job prompts and errors must be XML-escaped, ampersand included.
+
+    An unescaped `&` makes the block invalid XML, and a prompt that already
+    contains an entity (`&amp;`) round-trips back to a bare `&`.
+    """
+    import xml.etree.ElementTree as ET
+
+    job = store.add(Job(id="", parent_session_id="parent-A", prompt='fix A & B <urgent> "now"'))
+    store.update_state(job.id, JobState.RUNNING.value)
+    store.update_state(job.id, JobState.VERIFYING.value)
+    store.update_state(job.id, JobState.STUCK.value)
+    store.update(job.id, error="failed: X & Y")
+
+    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
+
+    xml = render_jobs_context_xml(store, "parent-A")
+
+    ET.fromstring(xml)  # must be well-formed
+
+    parsed = ET.fromstring(xml)
+    el = parsed.find(".//job")
+    assert el is not None
+    assert el.get("prompt") == 'fix A & B <urgent> "now"'
+    assert el.get("error") == "failed: X & Y"
+
+
 @pytest.mark.asyncio
 async def test_notify_true_fires_reply_to_session_on_terminal(store, runner, orchestrator):
     """If job.notify=True, the orchestrator should schedule a reply_to_session

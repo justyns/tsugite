@@ -17,6 +17,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
+from xml.sax.saxutils import quoteattr
 
 from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_prompts import (
@@ -1585,24 +1586,22 @@ def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: 
         prompt_short = (job.prompt or "")[:80]
         if len(job.prompt or "") > 80:
             prompt_short += "…"
-        prompt_escaped = prompt_short.replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
         ts_key = "created_at" if is_active else "resolved_at"
         ts_val = job.created_at if is_active else (job.resolved_at or job.updated_at)
         parts = [
-            f'id="{job.id}"',
-            f'state="{job.state}"',
-            f'prompt="{prompt_escaped}"',
-            f'{ts_key}="{ts_val or ""}"',
+            f"id={quoteattr(job.id)}",
+            f"state={quoteattr(job.state)}",
+            f"prompt={quoteattr(prompt_short)}",
+            f"{ts_key}={quoteattr(ts_val or '')}",
         ]
         if job.worker_session_id:
-            parts.append(f'worker_session_id="{job.worker_session_id}"')
+            parts.append(f"worker_session_id={quoteattr(job.worker_session_id)}")
         if job.verifier_session_id:
-            parts.append(f'verifier_session_id="{job.verifier_session_id}"')
+            parts.append(f"verifier_session_id={quoteattr(job.verifier_session_id)}")
         if job.verify_attempts:
             parts.append(f'verify_attempts="{job.verify_attempts}"')
         if job.error and job.state in (JobState.STUCK.value, JobState.ERRORED.value):
-            err_short = job.error.splitlines()[0][:200].replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
-            parts.append(f'error="{err_short}"')
+            parts.append(f"error={quoteattr(job.error.splitlines()[0][:200])}")
         return " ".join(parts)
 
     lines = ["  <jobs>"]
