@@ -99,26 +99,15 @@ class ACPProvider:
         await self._session.start(cwd=workspace_cwd(), resume_session_id=self._resume_session)
 
     def _build_first_prompt(self, messages: list[dict]) -> list[TextContentBlock]:
-        from tsugite.attachments.base import AttachmentContentType, format_attachment_open_tag
+        from tsugite.context_block import build_context_el
 
         parts: list[str] = []
 
         include_context = not self._resume_session or self._resume_after_compaction
-        if include_context and (self._attachments or self._skills):
-            ctx: list[str] = []
-            for att in self._attachments:
-                if getattr(att, "content_type", None) != AttachmentContentType.TEXT:
-                    continue
-                ctx.append(format_attachment_open_tag(att))
-                ctx.append(att.content)
-                ctx.append("</attachment>")
-            for skill in self._skills:
-                content = getattr(skill, "content", "")
-                if len(content) > 4000:
-                    content = content[:4000] + "\n... (truncated)"
-                ctx.append(f'<skill_content name="{skill.name}">\n{content}\n</skill_content>')
-            if ctx:
-                parts.append("<context>\n" + "\n".join(ctx) + "\n</context>")
+        if include_context:
+            context = build_context_el(self._attachments, self._skills, skill_char_limit=4000)
+            if context is not None:
+                parts.append(context.render())
 
         if self._previous_messages and not self._resume_session:
             history = "\n\n".join(

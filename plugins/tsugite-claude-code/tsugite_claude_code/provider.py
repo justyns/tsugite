@@ -307,24 +307,12 @@ class ClaudeCodeProvider:
         parts = []
 
         include_context = not self._resume_session or self._resume_after_compaction
-        if include_context and (self._attachments or self._skills):
-            from tsugite.attachments.base import AttachmentContentType, format_attachment_open_tag
+        if include_context:
+            from tsugite.context_block import build_context_el
 
-            context_parts = []
-            for att in self._attachments:
-                if att.content_type == AttachmentContentType.TEXT:
-                    context_parts.append(format_attachment_open_tag(att))
-                    context_parts.append(att.content)
-                    context_parts.append("</attachment>")
-            for skill in self._skills:
-                content = skill.content
-                if len(content) > 4000:
-                    content = content[:4000] + "\n... (truncated)"
-                context_parts.append(f'<skill_content name="{skill.name}">')
-                context_parts.append(content)
-                context_parts.append("</skill_content>")
-            if context_parts:
-                parts.append("<context>\n" + "\n".join(context_parts) + "\n</context>\n")
+            context = build_context_el(self._attachments, self._skills, skill_char_limit=4000)
+            if context is not None:
+                parts.append(context.render() + "\n")
 
         if self._previous_messages and not self._resume_session:
             budget = self._get_history_budget()
