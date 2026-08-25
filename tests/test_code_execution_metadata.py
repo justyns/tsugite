@@ -89,3 +89,23 @@ async def test_non_serializable_return_value_stored_as_repr(tmp_path: Path):
     data = _code_exec_event(storage)
     assert data["return_value_type"] == "set"
     assert isinstance(data["return_value_repr"], str)
+
+
+@pytest.mark.asyncio
+async def test_state_keys_record_the_type_mapping_and_replay(tmp_path: Path):
+    """state_keys keeps name -> "type(size)" so replay renders <state> as the live turn did."""
+    from tsugite.history import events_to_messages
+
+    storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
+    agent = _agent(storage)
+    _patch(agent, return_value=_resp("```python-exec\nstate['count'] = [1, 2, 3]\nreturn_value('ok')\n```"))
+
+    await agent.run("persist something")
+
+    data = _code_exec_event(storage)
+    assert isinstance(data["state_keys"], dict)
+    assert data["state_keys"]["count"] == "list(3 items)"
+
+    replayed = "\n".join(m["content"] for m in events_to_messages(list(storage.iter_events())))
+    assert "<state>count=list(3 items)</state>" in replayed
+    assert "<return_value>'ok'</return_value>" in replayed

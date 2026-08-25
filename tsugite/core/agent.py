@@ -737,7 +737,9 @@ class TsugiteAgent:
         rv = exec_result.return_value
         return_value_repr = mask(repr(rv))[:RETURN_VALUE_REPR_MAX] if rv is not None else None
         return_value_type = type(rv).__name__ if rv is not None else None
-        state_keys = list(exec_result.state_keys) if exec_result.state_keys else None
+        # The name -> "type(size)" mapping, so replay can render <state> the way
+        # the live turn did. Older events hold a bare list of names.
+        state_keys = {k: mask(v) for k, v in exec_result.state_keys.items()} or None
 
         def _mask_str(v):
             return mask(v) if isinstance(v, str) else v

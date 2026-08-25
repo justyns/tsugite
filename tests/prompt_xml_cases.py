@@ -59,6 +59,14 @@ def _history_blocks():
     yield "history/execution", _execution_xml({"output": NASTY, "error": None, "duration_ms": 7})
     yield "history/execution-error", _execution_xml({"output": "", "error": f"bad {AMP}"})
     yield (
+        "history/execution-state-and-return",
+        _execution_xml({"output": "o", "state_keys": {"s": "int"}, "return_value_repr": f"'{AMP}'"}),
+    )
+    yield (
+        "history/execution-legacy-state-list",
+        _execution_xml({"output": "o", "state_keys": ["s", "t"]}),
+    )
+    yield (
         "history/delivery",
         _delivery_xml({"source": QUOTED, "kind": "alert", "title": ANGLE, "message": NASTY}),
     )

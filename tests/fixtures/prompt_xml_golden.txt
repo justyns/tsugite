@@ -57,6 +57,18 @@
 <error>bad A &amp; B</error>
 </tsugite_execution_result>
 
+======== history/execution-state-and-return
+<tsugite_execution_result status="success">
+<output>o</output>
+<state>s=int</state>
+<return_value>'A &amp; B'</return_value>
+</tsugite_execution_result>
+
+======== history/execution-legacy-state-list
+<tsugite_execution_result status="success">
+<output>o</output>
+</tsugite_execution_result>
+
 ======== history/delivery
 <tsugite_delivery source='say "hi"' kind="alert">
 <note>This card arrived on its own and was not sent by the user. Only act on it if the user refers to it.</note>

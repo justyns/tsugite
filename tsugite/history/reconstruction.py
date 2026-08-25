@@ -184,9 +184,16 @@ def _execution_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
     from tsugite.core.executor import build_execution_result, truncate_observation
 
     output, truncated = truncate_observation(data.get("output") or "")
+
+    # Only newer events keep the name -> "type(size)" mapping the live observation
+    # showed; older ones store a bare list of names and render no <state> at all.
+    stored_state = data.get("state_keys")
+
     return build_execution_result(
         output=output,
         error=data.get("error"),
+        state_keys=stored_state if isinstance(stored_state, dict) else None,
+        return_value=data.get("return_value_repr"),
         duration_ms=data.get("duration_ms"),
         truncated=truncated,
         ts=_format_event_ts(ts),
