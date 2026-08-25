@@ -1007,14 +1007,7 @@ class TsugiteAgent:
         Returns:
             Formatted content block for the provider, or None if invalid
         """
-        if attachment.content_type == AttachmentContentType.TEXT:
-            # Text attachment - wrap in XML tags
-            return {
-                "type": "text",
-                "text": f"<Attachment: {attachment.name}>\n{attachment.content}\n</Attachment: {attachment.name}>",
-            }
-
-        elif attachment.content_type == AttachmentContentType.IMAGE:
+        if attachment.content_type == AttachmentContentType.IMAGE:
             # Image attachment
             if attachment.source_url:
                 # URL reference

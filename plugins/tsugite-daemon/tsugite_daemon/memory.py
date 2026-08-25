@@ -432,6 +432,8 @@ _ATTACHMENT_BLOCK = re.compile(
     r"<attachment\b([^>]*)>.*?</attachment>",
     re.DOTALL,
 )
+# Only histories recorded before the context block took over text attachments
+# carry this shape; nothing emits it now.
 _NAMED_ATTACHMENT_BLOCK = re.compile(
     r"<Attachment:\s*([^>]+?)>(.*?)</Attachment:\s*\1\s*>",
     re.DOTALL,

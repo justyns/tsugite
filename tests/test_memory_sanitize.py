@@ -168,8 +168,8 @@ class TestSanitizeIdempotence:
 
 
 class TestSanitizeCapitalAttachmentForm:
-    """The `<Attachment: name>...</Attachment: name>` format used by
-    `_format_attachment` (capital A, colon, name) must also be elided.
+    """The `<Attachment: name>...</Attachment: name>` format carried by older
+    histories (capital A, colon, name) must also be elided.
     """
 
     def test_strips_capital_attachment_block(self):
