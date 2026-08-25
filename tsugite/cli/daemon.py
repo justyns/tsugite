@@ -200,19 +200,13 @@ def _config_to_dict(config) -> dict:
     return {
         "state_dir": str(config.state_dir),
         "log_level": config.log_level,
-        "agents": {
-            name: {
-                "workspace_dir": str(agent_cfg.workspace_dir),
-                "agent_file": agent_cfg.agent_file,
-            }
-            for name, agent_cfg in config.agents.items()
-        },
+        "default_workspace_dir": str(config.default_workspace_dir),
+        "default_agent_file": config.default_agent_file,
         "discord_bots": [
             {
                 "name": bot.name,
                 **({"token_secret": bot.token_secret} if bot.token_secret else {}),
                 **({"token_file": str(bot.token_file)} if bot.token_file else {}),
-                "agent": bot.agent,
                 "command_prefix": bot.command_prefix,
                 "dm_policy": bot.dm_policy,
                 "allow_from": bot.allow_from,
@@ -328,28 +322,21 @@ def init_daemon(
     if dm_policy == "allowlist":
         allowed_users = _prompt_allowed_users(style)
 
-    # Use bot name as the agent config key for clarity
-    agent_config_name = bot_name
-
     if existing_config and not force:
         config_data = _config_to_dict(existing_config)
     else:
         config_data = {
             "state_dir": str(get_xdg_data_path("daemon")),
             "log_level": "info",
-            "agents": {},
             "discord_bots": [],
         }
 
-    config_data["agents"][agent_config_name] = {
-        "workspace_dir": str(workspace_path),
-        "agent_file": agent_file,
-    }
+    config_data["default_workspace_dir"] = str(workspace_path)
+    config_data["default_agent_file"] = agent_file
 
     bot_config = {
         "name": bot_name,
         "token_file": token_file,
-        "agent": agent_config_name,
         "command_prefix": command_prefix,
         "dm_policy": dm_policy,
     }
@@ -402,20 +389,19 @@ def _daemon_request(method: str, host: str, port: int, path: str, token: Optiona
 
 @daemon_app.command("sessions")
 def list_sessions(
-    agent: str = typer.Argument(help="Agent name"),
     host: str = HOST_OPTION,
     port: int = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
-    """List active sessions for a daemon agent."""
-    data = _daemon_request("GET", host, port, f"/api/agents/{agent}/sessions", token)
+    """List active daemon sessions."""
+    data = _daemon_request("GET", host, port, "/api/chat/sessions", token)
 
     sessions = data.get("sessions", [])
     if not sessions:
-        console.print(f"No sessions for [cyan]{agent}[/cyan]")
+        console.print("No active sessions")
         return
 
-    console.print(f"[bold]Sessions for {agent}:[/bold]\n")
+    console.print("[bold]Sessions:[/bold]\n")
     for s in sessions:
         label = s.get("label", s["user_id"])
         conv_id = s.get("conversation_id", "")
@@ -428,7 +414,6 @@ def list_sessions(
 
 @daemon_app.command("compact")
 def compact_session(
-    agent: str = typer.Argument(help="Agent name"),
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID to compact"),
     host: str = HOST_OPTION,
     port: int = PORT_OPTION,
@@ -439,12 +424,12 @@ def compact_session(
         "POST",
         host,
         port,
-        f"/api/agents/{agent}/compact",
+        "/api/chat/compact",
         token,
         json={"user_id": user_id},
         timeout=120,
     )
-    console.print(f"[green]✓[/green] Session compacted for [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
+    console.print(f"[green]✓[/green] Session compacted for user [cyan]{user_id}[/cyan]")
     console.print(f"  old: {data['old_conversation_id']}")
     console.print(f"  new: {data['new_conversation_id']}")
 
@@ -471,18 +456,17 @@ def session_set_primary(
 
 @session_app.command("clear-primary")
 def session_clear_primary(
-    agent: str = typer.Option(..., "--agent", "-a", help="Agent name"),
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID"),
     host: str = HOST_OPTION,
     port: int = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
-    """Remove the primary flag from any session for (user, agent)."""
+    """Remove the primary flag from any of the user's sessions."""
     from urllib.parse import urlencode
 
-    path = f"/api/sessions/clear-primary?{urlencode({'agent': agent, 'user_id': user_id})}"
+    path = f"/api/sessions/clear-primary?{urlencode({'user_id': user_id})}"
     _daemon_request("POST", host, port, path, token)
-    console.print(f"[green]✓[/green] Cleared primary for agent [cyan]{agent}[/cyan] user [cyan]{user_id}[/cyan]")
+    console.print(f"[green]✓[/green] Cleared primary for user [cyan]{user_id}[/cyan]")
 
 
 @session_app.command("list")
@@ -503,12 +487,11 @@ def session_list(
     table = Table(show_header=True, header_style="bold")
     table.add_column("Primary", justify="center")
     table.add_column("ID", style="cyan")
-    table.add_column("Agent")
     table.add_column("Title")
     table.add_column("State")
     for s in sessions:
         primary = "★" if s.get("is_primary") else ""
-        table.add_row(primary, s["id"], s.get("agent", ""), s.get("title") or "", s.get("state", ""))
+        table.add_row(primary, s["id"], s.get("title") or "", s.get("state", ""))
     console.print(table)
 
 
@@ -549,7 +532,6 @@ def schedule_list(
 
     table = Table(title="Schedules")
     table.add_column("ID", style="cyan")
-    table.add_column("Agent")
     table.add_column("Type")
     table.add_column("Schedule")
     table.add_column("Enabled")
@@ -565,7 +547,7 @@ def schedule_list(
         elif status == "success":
             status = f"[green]{status}[/green]"
         next_run = s.get("next_run") or "-"
-        table.add_row(s["id"], s["agent"], s["schedule_type"], sched_str, enabled, next_run, status)
+        table.add_row(s["id"], s["schedule_type"], sched_str, enabled, next_run, status)
 
     console.print(table)
 
@@ -573,7 +555,6 @@ def schedule_list(
 @schedule_app.command("add")
 def schedule_add(
     schedule_id: str = typer.Argument(help="Unique schedule name"),
-    agent: str = typer.Option(..., "--agent", "-a", help="Agent name"),
     prompt: str = typer.Option(..., "--prompt", "-p", help="Prompt to send"),
     cron: Optional[str] = typer.Option(None, "--cron", help="Cron expression (5 fields)"),
     at: Optional[str] = typer.Option(None, "--at", help="ISO datetime for one-off task"),
@@ -603,7 +584,6 @@ def schedule_add(
 
     body = {
         "id": schedule_id,
-        "agent": agent,
         "prompt": prompt,
         "schedule_type": "once" if at else "cron",
         "timezone": tz,

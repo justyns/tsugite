@@ -43,7 +43,7 @@ def test_default_matches_the_address_the_daemon_serves():
     [
         ["daemon", "schedule", "list"],
         ["daemon", "session", "list"],
-        ["daemon", "sessions", "myagent"],
+        ["daemon", "sessions"],
     ],
 )
 def test_zero_flag_command_targets_the_served_port(argv):

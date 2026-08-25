@@ -246,9 +246,7 @@ def run(
     ),
     no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
     new_session: bool = typer.Option(False, "--new-session", help="Start fresh session (ignore workspace session)"),
-    daemon_agent: Optional[str] = typer.Option(
-        None, "--daemon", "-d", help="Join active daemon session for specified agent"
-    ),
+    join_daemon: bool = typer.Option(False, "--daemon", "-d", help="Join the daemon's most recent session"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run agent code in bubblewrap sandbox"),
     no_sandbox: bool = typer.Option(False, "--no-sandbox", help="Disable sandbox (overrides config)"),
     allow_domain: Optional[List[str]] = typer.Option(
@@ -273,7 +271,7 @@ def run(
         tsu run --continue "prompt"  # Continue latest conversation (auto-detect agent)
         tsu run +assistant --continue "prompt"  # Continue latest with specific agent
         tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
-        tsu run --daemon odyn "follow up message"  # Join daemon session for agent 'odyn'
+        tsu run --daemon "follow up message"  # Join the daemon's most recent session
     """
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.console import get_stderr_console
@@ -380,17 +378,13 @@ def run(
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
 
     daemon_metadata = None
-    if daemon_agent:
+    if join_daemon:
         from tsugite.history import get_history_backend
 
         try:
             from tsugite_daemon.config import load_daemon_config
 
-            daemon_config = load_daemon_config()
-            if daemon_agent not in daemon_config.agents:
-                stderr_console.print(f"[red]Agent '{daemon_agent}' not found in daemon config[/red]")
-                raise typer.Exit(1)
-
+            load_daemon_config()
         except ModuleNotFoundError as e:
             stderr_console.print(
                 "[red]The daemon battery is not installed.[/red] Install it with: pip install tsugite-cli[daemon]"
@@ -401,30 +395,15 @@ def run(
             stderr_console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
             raise typer.Exit(1)
 
-        # Find latest session for this agent
         user_id = os.environ.get("USER", "cli-user")
 
-        # Search for daemon-managed sessions for this agent
-        latest_conv_id = None
-        backend = get_history_backend()
-        for sid in backend.list_sessions():
-            try:
-                meta = backend.get_meta(sid)
-                if meta and meta.data.get("agent") == daemon_agent:
-                    latest_conv_id = sid
-                    break
-            except Exception:
-                continue
-
+        latest_conv_id = next(iter(get_history_backend().list_sessions(limit=1)), None)
         if latest_conv_id:
             stderr_console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
             history_opts.continue_id = latest_conv_id
         else:
-            stderr_console.print(f"[yellow]No active daemon session found for '{daemon_agent}'[/yellow]")
+            stderr_console.print("[yellow]No active daemon session found[/yellow]")
             stderr_console.print("[dim]Creating new daemon-managed session...[/dim]")
-
-        # Override agent with daemon agent
-        args = [f"+{daemon_agent}"] + args
 
         # Build CLI metadata for history
         from datetime import datetime, timezone
@@ -435,7 +414,6 @@ def run(
             "user_id": user_id,
             "reply_to": "cli",
             "is_daemon_managed": True,
-            "daemon_agent": daemon_agent,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
