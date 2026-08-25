@@ -15,7 +15,7 @@ cc_driver = "tsugite_cc_driver.adapter:create_adapter"
 ```
 
 ```python
-def create_adapter(*, config, agents_config, session_store, identity_map):
+def create_adapter(*, config, runtime, session_store, identity_map):
     cfg = CCDriverConfig(**(config or {}))
     return CCDriverAdapter(cfg, session_store=session_store, identity_map=identity_map)
 ```

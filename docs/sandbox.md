@@ -18,10 +18,10 @@ tsu run +default "task" --sandbox --pass-env MY_TOOL_CONFIG   # expose a specifi
 
 ## Daemon
 
-The daemon doesn't sandbox anything by default.  Turn it on in `daemon.yaml`, globally and/or per agent.  A per-agent `sandbox:` block overrides the global one field by field.
+The daemon doesn't sandbox anything by default.  Turn it on in `daemon.yaml` with a `sandbox:` block.
 
 ```yaml
-sandbox:                              # global default for every agent
+sandbox:
   enabled: true
   allow_domains: ["github.com", "pypi.org"]
   # no_network: true                  # cut network entirely instead
@@ -32,22 +32,15 @@ sandbox:                              # global default for every agent
                                       # agent code can't read host secrets; reach secrets via
                                       # the get_secret tool, not pass_env.
 
-agents:
-  researcher:
-    workspace_dir: ~/work/research
-    agent_file: researcher            # uses the global sandbox
-  ops:
-    workspace_dir: ~/work/ops
-    agent_file: ops
-    sandbox:
-      enabled: false                  # this one runs unsandboxed
+default_workspace_dir: ~/work/research
+default_agent_file: researcher
 ```
 
-When an agent is sandboxed, the things it can run stay inside the sandbox:
+When sandboxing is on, the things the agent runs stay inside the sandbox:
 
 - per-turn python code exec
 - tools (except scheduling tools, see below)
 - spawned agents and jobs
 - pty sessions
 
-The scheduling tools (`schedule_create`, `background_task`, `schedule_run`, and friends) are refused while sandboxed, because they set up work that runs later, outside the sandboxed turn.  Run those agents unsandboxed if they need to schedule.
+The scheduling tools (`schedule_create`, `background_task`, `schedule_run`, and friends) are refused while sandboxed, because they set up work that runs later, outside the sandboxed turn.  Run the daemon unsandboxed if it needs to schedule.
