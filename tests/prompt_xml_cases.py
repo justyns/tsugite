@@ -148,6 +148,57 @@ def _daemon_blocks():
     yield "daemon/session-finished-no-summary", build_completion_message(finished, "completed", "")
 
 
+def _context_blocks():
+    from unittest.mock import MagicMock
+
+    from tsugite.attachments.base import Attachment, AttachmentContentType
+    from tsugite.core.agent import TsugiteAgent
+
+    def _agent(vision: bool = True):
+        agent = TsugiteAgent(model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=1)
+        agent._provider = MagicMock()
+        agent._provider.get_model_info = MagicMock(return_value=MagicMock(supports_vision=vision))
+        return agent
+
+    def _text(name, content, untrusted=False):
+        return Attachment(
+            name=name,
+            content=content,
+            content_type=AttachmentContentType.TEXT,
+            mime_type="text/plain",
+            untrusted=untrusted,
+        )
+
+    def _skill(name, content):
+        s = MagicMock()
+        s.name = name
+        s.content = content
+        return s
+
+    agent = _agent()
+    yield (
+        "context/text-attachments",
+        agent._build_context_block([_text("notes.md", "body <b> & co"), _text(QUOTED, AMP)], [])[0]["text"],
+    )
+
+    agent = _agent()
+    yield (
+        "context/untrusted-note",
+        agent._build_context_block([_text("page.html", ANGLE, untrusted=True)], [])[0]["text"],
+    )
+
+    agent = _agent()
+    yield "context/skills", agent._build_context_block([], [_skill("my-skill", f"do {AMP}")])[0]["text"]
+
+    agent = _agent()
+    agent.expiring_skills = {"fading": 2}
+    yield "context/skill-expiring", agent._build_context_block([], [_skill("fading", "content")])[0]["text"]
+
+    agent = _agent(vision=False)
+    image = Attachment(name="pic.png", content=b"", content_type=AttachmentContentType.IMAGE, mime_type="image/png")
+    yield "context/image-without-vision", agent._build_context_block([image], [])[0]["text"]
+
+
 def _agent_notices():
     from tsugite.core.agent import (
         _build_bare_python_notice_xml,
@@ -171,6 +222,7 @@ def all_cases() -> list[tuple[str, str]]:
         _skill_resources,
         _hook_blocks,
         _daemon_blocks,
+        _context_blocks,
         _agent_notices,
     ):
         cases.extend(producer())

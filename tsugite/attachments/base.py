@@ -108,6 +108,11 @@ class Attachment:
         return md
 
 
+def attachment_attrs(att: "Attachment") -> dict:
+    """Attributes for an attachment's `<attachment>` tag, `None` values omitted."""
+    return {"name": att.name, "mode": att.mode, "untrusted": "true" if att.untrusted else None}
+
+
 def format_attachment_open_tag(att: "Attachment") -> str:
     """Format the opening `<attachment ...>` XML tag for an attachment.
 
