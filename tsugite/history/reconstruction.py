@@ -181,36 +181,16 @@ def _event_to_message(event: Event, executed: bool = False) -> Optional[Dict[str
 
 def _execution_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
     """Build the <tsugite_execution_result> envelope from event data."""
-    from tsugite.core.executor import MAX_EXECUTION_OUTPUT_KB
+    from tsugite.core.executor import build_execution_result, truncate_observation
 
-    output = data.get("output") or ""
-    error = data.get("error")
-    duration_ms = data.get("duration_ms")
-
-    # Mirror the live ExecutionResult.to_xml truncation: the full output is stored in the
-    # event, but the live turn only showed the first MAX_EXECUTION_OUTPUT_KB. Replaying it
-    # in full would re-inflate context and diverge from what the model saw.
-    truncated = False
-    max_bytes = MAX_EXECUTION_OUTPUT_KB * 1024
-    if len(output) > max_bytes:
-        output = output[:max_bytes]
-        truncated = True
-
-    status = "error" if error else "success"
-    attrs = f'status="{status}"'
-    if duration_ms:
-        attrs += f' duration_ms="{duration_ms}"'
-    if truncated:
-        attrs += ' truncated="true"'
-    ts_str = _format_event_ts(ts)
-    if ts_str:
-        attrs += f' ts="{ts_str}"'
-
-    parts = [f"<tsugite_execution_result {attrs}>", f"<output>{escape(output)}</output>"]
-    if error:
-        parts.append(f"<error>{escape(error)}</error>")
-    parts.append("</tsugite_execution_result>")
-    return "\n".join(parts)
+    output, truncated = truncate_observation(data.get("output") or "")
+    return build_execution_result(
+        output=output,
+        error=data.get("error"),
+        duration_ms=data.get("duration_ms"),
+        truncated=truncated,
+        ts=_format_event_ts(ts),
+    ).render()
 
 
 def _delivery_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
@@ -238,12 +218,9 @@ def _format_error_xml(data: Dict[str, Any]) -> str:
         "Format Error: " + reason + ". You must respond with exactly ONE ```python-exec "
         "code block per response. Combine all code into a single block."
     )
-    return (
-        '<tsugite_execution_result status="error">\n'
-        "<output></output>\n"
-        f"<error>{escape(msg)}</error>\n"
-        "</tsugite_execution_result>"
-    )
+    from tsugite.core.executor import build_execution_result
+
+    return build_execution_result(output="", error=msg).render()
 
 
 def _compaction_user_block(event: Event) -> str:

@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runt
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
+from tsugite.prompt_xml import El, Raw
 from tsugite.secrets.redaction import redact_sensitive_obj
 
 PPRINT_WIDTH = 100
@@ -97,6 +98,67 @@ def _jsonable_call_args(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return safe
 
 
+def truncate_observation(text: str, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> tuple[str, bool]:
+    """Clip text to the observation cap, returning (text, was_truncated).
+
+    Replay clips the same way: the event holds the full output but the live turn
+    only showed this much, so replaying it whole would diverge from what the
+    model saw.
+    """
+    max_bytes = max_output_kb * 1024
+    if len(text) > max_bytes:
+        return text[:max_bytes], True
+    return text, False
+
+
+def build_execution_result(
+    *,
+    output: str,
+    error: Optional[str] = None,
+    traceback: Optional[str] = None,
+    truncated_to: Optional[str] = None,
+    variables_set: Optional[Dict[str, str]] = None,
+    state_keys: Optional[Dict[str, str]] = None,
+    return_value: Optional[str] = None,
+    duration_ms: Optional[int] = None,
+    truncated: bool = False,
+    ts: Optional[str] = None,
+) -> El:
+    """The `<tsugite_execution_result>` envelope, shared by the live turn and replay.
+
+    Callers mask secrets before handing values in.
+    """
+    from xml.sax.saxutils import escape
+
+    def _pairs(mapping: Dict[str, str]) -> Raw:
+        return Raw(", ".join(f"{escape(k)}={escape(v)}" for k, v in mapping.items()))
+
+    children = [El("output", [output], inline=True)]
+    if error:
+        children.append(El("error", [error], inline=True))
+        if traceback:
+            children.append(El("traceback", [traceback], inline=True))
+    if truncated_to:
+        children.append(El("truncated_to", [truncated_to], inline=True))
+    if variables_set:
+        children.append(El("variables_set", [_pairs(variables_set)], inline=True))
+    if state_keys:
+        children.append(El("state", [_pairs(state_keys)], inline=True))
+    if return_value is not None:
+        children.append(El("return_value", [return_value], inline=True))
+
+    return El(
+        "tsugite_execution_result",
+        children,
+        {
+            "status": "error" if error else "success",
+            "duration_ms": duration_ms or None,
+            "truncated": "true" if truncated else None,
+            "ts": ts or None,
+        },
+    )
+
+
 @dataclass
 class ExecutionResult:
     """Result from code execution."""
@@ -123,58 +185,36 @@ class ExecutionResult:
 
     def to_xml(self, duration_ms: int = 0, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> str:
         """Render the result as the XML observation replayed to the model."""
-        from xml.sax.saxutils import escape
-
         from tsugite.secrets.registry import get_registry
 
         _mask = get_registry().mask
 
         # Check for truncation first (before building attrs)
-        output = _mask(self.output or "")
-        max_bytes = max_output_kb * 1024
-        if len(output) > max_bytes:
-            output = output[:max_bytes]
-            self.truncated = True
+        output, clipped = truncate_observation(_mask(self.output or ""), max_output_kb)
+        self.truncated = self.truncated or clipped
 
         # An explicit return_value() is the other way a turn hands back megabytes;
         # the last-expression path prints instead, so it already rides `output`.
         return_value = None if self.return_value is None else _mask(str(self.return_value))
-        if return_value is not None and len(return_value) > max_bytes:
-            return_value = return_value[:max_bytes]
-            self.truncated = True
-
-        status = "error" if self.error else "success"
-        attrs = f'status="{status}"'
-        if duration_ms:
-            attrs += f' duration_ms="{duration_ms}"'
-        if self.truncated:
-            attrs += ' truncated="true"'
-
-        parts = [f"<tsugite_execution_result {attrs}>"]
-        parts.append(f"<output>{escape(output)}</output>")
-
-        if self.error:
-            parts.append(f"<error>{escape(_mask(self.error))}</error>")
-            if self.stderr:
-                tb_lines = _mask(self.stderr).strip().split("\n")[-10:]
-                parts.append(f"<traceback>{escape(chr(10).join(tb_lines))}</traceback>")
-
-        if self.truncated_to:
-            parts.append(f"<truncated_to>{escape(self.truncated_to)}</truncated_to>")
-
-        if self.variables_set:
-            var_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.variables_set.items())
-            parts.append(f"<variables_set>{var_list}</variables_set>")
-
-        if self.state_keys:
-            state_list = ", ".join(f"{escape(k)}={escape(_mask(v))}" for k, v in self.state_keys.items())
-            parts.append(f"<state>{state_list}</state>")
-
         if return_value is not None:
-            parts.append(f"<return_value>{escape(return_value)}</return_value>")
+            return_value, clipped = truncate_observation(return_value, max_output_kb)
+            self.truncated = self.truncated or clipped
 
-        parts.append("</tsugite_execution_result>")
-        return "\n".join(parts)
+        traceback = None
+        if self.error and self.stderr:
+            traceback = "\n".join(_mask(self.stderr).strip().split("\n")[-10:])
+
+        return build_execution_result(
+            output=output,
+            error=_mask(self.error) if self.error else None,
+            traceback=traceback,
+            truncated_to=self.truncated_to,
+            variables_set={k: _mask(v) for k, v in self.variables_set.items()} or None,
+            state_keys={k: _mask(v) for k, v in self.state_keys.items()} or None,
+            return_value=return_value,
+            duration_ms=duration_ms,
+            truncated=self.truncated,
+        ).render()
 
 
 @runtime_checkable
