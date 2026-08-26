@@ -279,7 +279,6 @@ class Session:
     notify_sessions: list[str] = field(default_factory=list)
 
     title: Optional[str] = None
-    scratchpad: str = ""
 
     pinned: bool = False
     pin_position: Optional[int] = None
@@ -894,7 +893,6 @@ class SessionStore:
                 user_id=old_session.user_id,
                 parent_id=old_session.parent_id,
                 metadata={k: v for k, v in old_session.metadata.items() if k in COMPACTION_PRESERVED_METADATA_KEYS},
-                scratchpad=old_session.scratchpad,
                 title=old_session.title,
                 pinned=old_session.pinned,
                 pin_position=old_session.pin_position,

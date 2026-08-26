@@ -374,6 +374,7 @@ class AgentPreparer:
             "is_daemon": context.get("is_daemon", False),
             "is_scheduled": context.get("is_scheduled", False),
             "schedule_id": context.get("schedule_id", ""),
+            "conversation_id": context.get("conversation_id", ""),
             "has_notify_tool": context.get("has_notify_tool", False),
             "running_tasks": context.get("running_tasks", []),
             "tsugite_url": context.get("tsugite_url", ""),

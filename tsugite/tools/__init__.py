@@ -263,7 +263,6 @@ def get_tools_by_category(category: str) -> List[str]:
 _OPTIONAL_CATEGORIES = {
     "schedule",
     "notify",
-    "scratchpad",
     "sessions",
     "jobs",
     "secrets",
@@ -444,7 +443,6 @@ def _ensure_tools_loaded():
     from . import jobs as jobs  # noqa: E402, F401
     from . import notify as notify  # noqa: E402, F401
     from . import schedule as schedule  # noqa: E402, F401
-    from . import scratchpad as scratchpad  # noqa: E402, F401
     from . import secrets as secrets  # noqa: E402, F401
     from . import sessions as sessions  # noqa: E402, F401
     from . import shell as shell  # noqa: E402, F401

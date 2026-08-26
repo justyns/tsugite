@@ -27,7 +27,6 @@ tools:
   - run
   - "@secrets"
   - "@schedule"
-  - "@scratchpad"
   - "@sessions"
   - "@jobs"
   - "@terminal"

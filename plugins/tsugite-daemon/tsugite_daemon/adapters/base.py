@@ -542,6 +542,10 @@ class BaseAdapter(ABC):
         # Session context
         ctx["is_session"] = channel_context.source == "session"
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
+        # The conversation this turn belongs to, for every source. `session_id` is
+        # only set for source="session", so a chat template keys per-conversation
+        # paths off this instead.
+        ctx["conversation_id"] = conv_id or ""
         ctx["is_channel_session"] = bool(meta.get("channel_session"))
         # Derived from actual wiring: a daemon without the session runner /
         # orchestrator / PTY runtime (e.g. Discord-only, HTTP disabled) must not
@@ -604,7 +608,6 @@ class BaseAdapter(ABC):
         session_topic_xml = ""
         session_alias_xml = ""
         session_meta_xml = ""
-        scratchpad_xml = ""
         session: Optional[Session] = None
 
         meta = channel_context.metadata or {}
@@ -641,8 +644,6 @@ class BaseAdapter(ABC):
                 if user_meta:
                     entries = "\n".join(f"    {k}={v}" for k, v in user_meta.items())
                     session_meta_xml = f"\n  <session_metadata>\n{entries}\n  </session_metadata>"
-            if session.scratchpad:
-                scratchpad_xml = f"\n  <scratchpad>\n{session.scratchpad}\n  </scratchpad>"
         except Exception:
             tokens_used = 0
 
@@ -675,7 +676,7 @@ class BaseAdapter(ABC):
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_alias_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}{deliveries_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_alias_xml}{session_meta_xml}{jobs_xml}{deliveries_xml}
 </message_context>
 
 {message}"""

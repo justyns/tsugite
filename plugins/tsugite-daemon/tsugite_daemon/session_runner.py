@@ -552,10 +552,9 @@ class SessionRunner:
         )
 
         # Set the current session ContextVar so tools that fall back to
-        # get_current_session_id() (e.g. session_metadata, scratchpad,
-        # return_value) resolve correctly during the reply turn. Restored on exit
-        # so we don't bleed into the caller's context (this runs in the caller's
-        # context, not a fresh task).
+        # get_current_session_id() (e.g. session_metadata, return_value) resolve
+        # correctly during the reply turn. Restored on exit so we don't bleed into
+        # the caller's context (this runs in the caller's context, not a fresh task).
         token = _current_session_id.set(session_id)
         try:
             result = await adapter.handle_message(

@@ -79,6 +79,7 @@ These are always available in templates:
 {{ is_daemon }}           # True if running in daemon mode
 {{ is_scheduled }}        # True if triggered by scheduler
 {{ is_subagent }}         # True if spawned by another agent
+{{ conversation_id }}     # Conversation this turn belongs to (daemon; "" in CLI)
 {{ parent_agent }}        # Parent agent name (if subagent)
 {{ tools }}               # List of configured tool names
 {{ chat_history }}        # Previous messages (chat mode)

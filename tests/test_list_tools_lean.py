@@ -5,7 +5,7 @@ schedule's run_history into the listing; at scale that blew past the exec-output
 cap and got truncated mid-object into a malformed blob (see
 test_schedule_list_trim). The other list tools already hand-build a lean
 projection, but their backing records DO carry unbounded free-form fields
-(Session.scratchpad/result/metadata, a conversation's full assistant response).
+(Session.result/metadata, a conversation's full assistant response).
 The cheapest way to reintroduce the bug is to "simplify" one of these to
 asdict(record) / **summary. These guards lock the lean shape so that regression
 fails loudly; full detail stays in session_status(id) / read_conversation(id).
@@ -35,7 +35,6 @@ def test_list_sessions_omits_heavy_fields_but_keeps_summary(monkeypatch):
         prompt="p" * 500,
         title="nightly run",
     )
-    session.scratchpad = "s" * 10_000
     session.result = "r" * 10_000
     session.metadata = {"blob": "m" * 10_000}
 
@@ -51,7 +50,7 @@ def test_list_sessions_omits_heavy_fields_but_keeps_summary(monkeypatch):
         "created_at",
         "parent_id",
     }, "list view must expose only the lean projection, not the full Session dict"
-    for heavy in ("scratchpad", "result", "metadata"):
+    for heavy in ("result", "metadata"):
         assert heavy not in row, f"list view must not dump per-session {heavy}"
     assert len(row["prompt"]) == 200, "prompt must be truncated to 200 chars"
     assert row["status"] == SessionStatus.COMPLETED.value

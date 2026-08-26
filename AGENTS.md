@@ -129,7 +129,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Code execution via `LocalExecutor`
 
 8. **Tool System** (`tsugite/tools/`)
-   - Tool registry with built-in tools (fs, http, shell, agents, skills, history, interactive) plus optional categories (notify, schedule, scratchpad, sessions, secrets, tmux — gated by `_OPTIONAL_CATEGORIES` in `tools/__init__.py`)
+   - Tool registry with built-in tools (fs, http, shell, agents, skills, history, interactive) plus optional categories (notify, schedule, sessions, secrets, tmux — gated by `_OPTIONAL_CATEGORIES` in `tools/__init__.py`)
    - Custom shell tools (config-based command wrappers in `tools/shell_tools.py`)
    - Tool expansion supports globs (`*_search`), categories (`@fs`), and exclusions (`-delete_file`)
 
