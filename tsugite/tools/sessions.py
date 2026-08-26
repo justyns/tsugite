@@ -29,11 +29,25 @@ def get_current_session_id():
     return _get()
 
 
+def _resolve_ref(ref: str) -> str:
+    """A `name:<alias>` reference resolved to the id of the session holding it. Any
+    other reference is returned unchanged."""
+    from tsugite_daemon.session_store import alias_from_ref
+
+    alias = alias_from_ref(ref)
+    if alias is None:
+        return ref
+    session = _call(_session_runner.store.find_named_session, alias)
+    if session is None:
+        raise ValueError(f"No session holds alias '{alias}'")
+    return session.id
+
+
 def _resolve_session_arg(session_id: Optional[str]) -> str:
     sid = session_id if session_id and session_id != CURRENT_SESSION else get_current_session_id()
     if not sid:
         raise ValueError("No current session - pass session_id explicitly")
-    live = _call(_session_runner.store.resolve_live, sid)
+    live = _call(_session_runner.store.resolve_live, _resolve_ref(sid))
     return live.id if live else sid
 
 
@@ -43,7 +57,8 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
 
     Args:
         message: Message to send to the session.
-        session_id: Session to reply to. Defaults to the current session; "current" means the same.
+        session_id: Session to reply to, or "name:<alias>" to address one by its alias.
+            Defaults to the current session; "current" means the same.
 
     Returns:
         Dict with session_id and the agent's response.
@@ -107,7 +122,8 @@ def session_notify(notify_session: str, session_id: Optional[str] = None) -> dic
     """Ask a session to message another session when it finishes.
 
     Args:
-        notify_session: Session that receives the completion message.
+        notify_session: Session that receives the completion message. A session id,
+            or "name:<alias>" to address a session by its alias.
         session_id: Session whose completion triggers the notification. Defaults to the
             current session; "current" means the same.
 
@@ -115,7 +131,7 @@ def session_notify(notify_session: str, session_id: Optional[str] = None) -> dic
         Dict with session_id and its current notify targets.
     """
     session_id = _resolve_session_arg(session_id)
-    session = _call(_session_runner.add_notify_session, session_id, notify_session)
+    session = _call(_session_runner.add_notify_session, session_id, _resolve_session_arg(notify_session))
     return {"session_id": session.id, "notify_sessions": list(session.notify_sessions)}
 
 

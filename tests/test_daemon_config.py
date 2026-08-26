@@ -302,3 +302,15 @@ def test_http_config_image_overrides_from_yaml(tmp_path):
     config = load_daemon_config(config_file)
     assert config.http.image_max_edge == 1024
     assert config.http.image_quality == 0.7
+
+
+def test_discord_session_name_must_be_a_valid_alias():
+    """It routes DMs by alias, so a value the alias contract rejects has to fail at
+    config load rather than on the first DM."""
+    with pytest.raises(ValidationError):
+        DiscordBotConfig(name="bot", token_secret="x", session_name="not a slug")
+
+
+def test_discord_session_name_may_be_empty():
+    config = DiscordBotConfig(name="bot", token_secret="x", session_name="")
+    assert config.session_name == ""

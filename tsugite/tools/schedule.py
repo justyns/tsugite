@@ -60,6 +60,12 @@ def _resolve_target_session(target_session: Optional[str], current_session_id: O
     where there is no current chat.
     """
     if target_session != CURRENT_SESSION:
+        if target_session:
+            from tsugite_daemon.session_store import alias_from_ref, validate_alias
+
+            alias = alias_from_ref(target_session)
+            if alias is not None:
+                validate_alias(alias)
         return target_session
     if not current_session_id:
         raise ValueError('target_session="current" requires a session context (daemon mode)')
@@ -119,7 +125,7 @@ def schedule_create(
             "primary" - primary lookup only (no fallback)
             "originating" - originating_session_id only
             "none" - skip delivery
-            "name:<n>" - lookup by metadata.session_name
+            "name:<n>" - the session holding alias <n>, created if none holds it
             "current" - the session creating the schedule, stored as its id
             "<sid>" - bare session id
         delivery_mode: Which session the result is delivered into. "existing_session" (default) uses target_session

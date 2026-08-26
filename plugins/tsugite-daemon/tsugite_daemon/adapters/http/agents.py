@@ -218,6 +218,7 @@ class AgentsMixin:
                 "pending_deliveries": s.pending_delivery_ids,
                 "waiting_on": waiting_on.get(s.id, []),
                 "is_primary": s.is_primary,
+                "alias": s.alias,
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.
                 "busy": self._session_busy(s),

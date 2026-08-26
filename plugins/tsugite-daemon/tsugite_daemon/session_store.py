@@ -6,6 +6,7 @@ webhook, background, spawned). Conversation data stays in JSONL history files.
 
 import json
 import logging
+import re
 import threading
 from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
@@ -156,10 +157,17 @@ READ_ONLY_METADATA_KEYS = frozenset(
         # Dedupe key for a monitor's incident session. System-stamped, so an
         # agent can't hijack another monitor's incidents by writing its key.
         "incident_key",
+        # The session's alias. Claimed through set_alias, which enforces uniqueness.
+        "session_name",
+        # Which platform DM route this session serves. Stamped at creation.
+        "dm_route",
     }
 )
 
 METADATA_SESSION_NAME = "session_name"
+# Where a platform's DMs land, per user. Deliberately not the alias: two people
+# DMing one bot need their own sessions, and an alias has a single holder.
+METADATA_DM_ROUTE = "dm_route"
 METADATA_PRIMARY_FLAG = "is_primary"
 METADATA_INCIDENT_KEY = "incident_key"
 # Truthy on a placeholder session that exists only to host a /job spawned outside a
@@ -167,8 +175,8 @@ METADATA_INCIDENT_KEY = "incident_key"
 # job finishes so they stop rendering as active/"starting" in the sidebar.
 METADATA_JOB_HOST = "job_host"
 
-# Metadata keys preserved across compaction in addition to READ_ONLY ones. session_name
-# anchors named-route adapters (e.g. Discord session_name) to the successor session;
+# Metadata keys preserved across compaction in addition to READ_ONLY ones (which
+# already carry session_name, so an alias follows the successor session).
 # is_primary makes the user's chosen primary session "follow" compaction. topic/type
 # describe the conversation's subject and are carried forward like title, so a compacted
 # session keeps its subject instead of resetting to blank until the next turn re-sets it.
@@ -176,10 +184,38 @@ METADATA_JOB_HOST = "job_host"
 # intent. Anything outside this set is dropped deliberately; in particular status_text
 # is transient ("investigating", "idle") and must reset on compaction.
 COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
-    {METADATA_SESSION_NAME, METADATA_PRIMARY_FLAG, "topic", "type", "task", "pr", "notes"}
+    {METADATA_PRIMARY_FLAG, "topic", "type", "task", "pr", "notes"}
 )
 
+# What a branch copies from the session it forks. The alias is excluded: a branch is
+# a second live session, so inheriting it would leave two holders of one identity.
+BRANCH_INHERITED_METADATA_KEYS = READ_ONLY_METADATA_KEYS - {METADATA_SESSION_NAME}
+
 TOPIC_MAX_LENGTH = 160
+
+ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+ALIAS_REF_PREFIX = "name:"
+
+
+def alias_from_ref(ref: str) -> Optional[str]:
+    """The alias in a `name:<alias>` reference, or None if `ref` is not one."""
+    if ref.startswith(ALIAS_REF_PREFIX):
+        return ref[len(ALIAS_REF_PREFIX) :]
+    return None
+
+
+class AliasConflictError(ValueError):
+    """Another routable session already holds the alias."""
+
+
+def validate_alias(alias: str) -> None:
+    """Raise unless `alias` matches the routing-identity format."""
+    if not isinstance(alias, str) or not ALIAS_PATTERN.match(alias):
+        raise ValueError(
+            f"Invalid alias {alias!r}: must start with a letter or digit and use only "
+            "letters, digits, '-' and '_' (max 64 characters)"
+        )
 
 
 class SessionSource(str, Enum):
@@ -271,6 +307,11 @@ class Session:
     @property
     def is_primary(self) -> bool:
         return bool(self.metadata.get(METADATA_PRIMARY_FLAG))
+
+    @property
+    def alias(self) -> Optional[str]:
+        """This session's routing identity, claimed through SessionStore.set_alias."""
+        return self.metadata.get(METADATA_SESSION_NAME)
 
     @property
     def needs_attention(self) -> bool:
@@ -626,20 +667,56 @@ class SessionStore:
         with self._lock:
             return {s.user_id: s.id for s in self._live_sessions_locked() if s.user_id and s.is_primary}
 
-    def _find_by_metadata_locked(self, user_id: str, key: str, value: str) -> Optional[Session]:
-        return self._latest(s for s in self._live_sessions_locked(user_id) if s.metadata.get(key) == value)
+    def _find_named_session_locked(self, name: str) -> Optional[Session]:
+        return self._latest(s for s in self._live_sessions_locked() if s.metadata.get(METADATA_SESSION_NAME) == name)
 
-    def _find_named_session_locked(self, user_id: str, name: str) -> Optional[Session]:
-        return self._find_by_metadata_locked(user_id, METADATA_SESSION_NAME, name)
+    def find_named_session(self, name: str) -> Optional[Session]:
+        """The routable session holding `name`, or None.
 
-    def find_named_session(self, user_id: str, name: str) -> Optional[Session]:
-        """Find the latest non-finished, non-superseded session tagged with metadata.session_name."""
+        One holder for the whole daemon. One person reaches it as several user_ids
+        (web-anonymous, a canonical name, a Discord id, a bare scheduler user), so a
+        per-user alias would be invisible to the surfaces that did not set it.
+        """
         with self._lock:
-            return self._find_named_session_locked(user_id, name)
+            return self._find_named_session_locked(name)
+
+    def set_alias(self, session_id: str, alias: str) -> Session:
+        """Claim `alias` as this session's routing identity.
+
+        Raises ValueError for a malformed alias, AliasConflictError for one another
+        routable session already holds. Passing a new alias renames, releasing the old
+        one in the same lock.
+        """
+        validate_alias(alias)
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise ValueError(f"Session '{session_id}' not found")
+            holder = next(
+                (s for s in self._live_sessions_locked() if s.alias == alias and s.id != session_id),
+                None,
+            )
+            if holder is not None:
+                raise AliasConflictError(f"Alias '{alias}' is already held by session '{holder.id}'")
+            session.metadata[METADATA_SESSION_NAME] = alias
+            self._persist(session)
+            return session
+
+    def clear_alias(self, session_id: str) -> Session:
+        """Release this session's alias, making it claimable again."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                raise ValueError(f"Session '{session_id}' not found")
+            session.metadata.pop(METADATA_SESSION_NAME, None)
+            self._persist(session)
+            return session
 
     def find_incident_session(self, user_id: str, incident_key: str) -> Optional[Session]:
         with self._lock:
-            return self._find_by_metadata_locked(user_id, METADATA_INCIDENT_KEY, incident_key)
+            return self._latest(
+                s for s in self._live_sessions_locked(user_id) if s.metadata.get(METADATA_INCIDENT_KEY) == incident_key
+            )
 
     def _find_primary_session_locked(self, user_id: str) -> Optional[Session]:
         """Lock-held variant of find_primary_session. Caller must hold self._lock."""
@@ -707,33 +784,46 @@ class SessionStore:
         with self._lock:
             return self._demote_primaries_locked(user_id)
 
-    def get_or_create_named_session(
-        self, user_id: str, name: str, source: str = SessionSource.INTERACTIVE.value
+    def claim_aliased_session(
+        self, alias: str, user_id: Optional[str] = None, source: str = SessionSource.INTERACTIVE.value
     ) -> Session:
-        """Resolve a named-route session for (user_id, name), creating one if absent.
+        """The session holding `alias`, creating one if none does.
 
-        The session_name lives in metadata and is preserved across compaction so the
-        named route follows the successor session automatically.
+        The alias lives in metadata and is preserved across compaction, so it follows
+        the successor session automatically.
         """
+        validate_alias(alias)
         with self._lock:
-            existing = self._find_named_session_locked(user_id, name)
+            existing = self._find_named_session_locked(alias)
             if existing:
                 return existing
-
-            conv_id = f"daemon_{user_id}_{name}_{uuid4().hex[:6]}"
-            session = Session(
-                id=conv_id,
-                source=source,
-                user_id=user_id,
-                title=f"{name.title()} Session",
-                metadata={METADATA_SESSION_NAME: name},
+            return self._create_routed_locked(
+                key=METADATA_SESSION_NAME, value=alias, user_id=user_id, source=source, title=f"{alias.title()} Session"
             )
-            tokens, msg_count = self._estimate_tokens(conv_id)
-            session.cumulative_tokens = tokens
-            session.message_count = msg_count
-            self._sessions[conv_id] = session
-            self._persist(session)
-            return session
+
+    def get_or_create_dm_session(
+        self, user_id: str, route: str, source: str = SessionSource.INTERACTIVE.value
+    ) -> Session:
+        """The session a platform's DMs from `user_id` land in, creating one if absent."""
+        with self._lock:
+            existing = self._latest(
+                s for s in self._live_sessions_locked(user_id) if s.metadata.get(METADATA_DM_ROUTE) == route
+            )
+            if existing:
+                return existing
+            return self._create_routed_locked(
+                key=METADATA_DM_ROUTE, value=route, user_id=user_id, source=source, title=f"{route.title()} Session"
+            )
+
+    def _create_routed_locked(
+        self, *, key: str, value: str, user_id: Optional[str], source: str, title: str
+    ) -> Session:
+        conv_id = f"daemon_{user_id}_{value}_{uuid4().hex[:6]}"
+        session = Session(id=conv_id, source=source, user_id=user_id, title=title, metadata={key: value})
+        session.cumulative_tokens, session.message_count = self._estimate_tokens(conv_id)
+        self._sessions[conv_id] = session
+        self._persist(session)
+        return session
 
     def needs_compaction(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
@@ -755,7 +845,7 @@ class SessionStore:
             src = source.source
             user_id = source.user_id
             title = source.title
-            preserved = {k: v for k, v in source.metadata.items() if k in READ_ONLY_METADATA_KEYS}
+            preserved = {k: v for k, v in source.metadata.items() if k in BRANCH_INHERITED_METADATA_KEYS}
             model_override = source.model_override
             reasoning_effort = source.reasoning_effort
             workspace_override = source.workspace_override
@@ -1363,6 +1453,7 @@ class SessionStore:
         result = asdict(session)
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
+        result["alias"] = session.alias
         result["needs_attention"] = session.needs_attention
         # Same key, same shape as the session-list row: ids, not whole cards.
         result["pending_deliveries"] = session.pending_delivery_ids

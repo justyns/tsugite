@@ -198,3 +198,29 @@ class TestCompactionTopic:
 
         prompt_text = "\n".join(m.get("content", "") for m in captured["messages"] if isinstance(m, dict))
         assert "<session_topic>" not in prompt_text
+
+
+class TestMessageContextAlias:
+    """A session that can be addressed as `name:<alias>` has to be able to see its
+    own alias, and its holder is the one that knows it."""
+
+    def test_alias_emits_dedicated_block(self, adapter, channel_context):
+        session_id = _seed_session(adapter)
+        adapter.session_store.set_alias(session_id, "lead")
+
+        rendered = adapter._build_message_context("hello", channel_context, "alice")
+
+        assert "<session_alias>lead</session_alias>" in rendered
+
+    def test_alias_is_not_in_the_generic_metadata_block(self, adapter, channel_context):
+        session_id = _seed_session(adapter, task="https://x/1")
+        adapter.session_store.set_alias(session_id, "lead")
+
+        rendered = adapter._build_message_context("hello", channel_context, "alice")
+
+        assert "session_name=" not in rendered
+
+    def test_no_alias_no_block(self, adapter, channel_context):
+        _seed_session(adapter)
+        rendered = adapter._build_message_context("hello", channel_context, "alice")
+        assert "<session_alias>" not in rendered

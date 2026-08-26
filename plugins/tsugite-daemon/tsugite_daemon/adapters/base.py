@@ -591,6 +591,7 @@ class BaseAdapter(ABC):
         last_active_xml = ""
         scheduler_timing_xml = ""
         session_topic_xml = ""
+        session_alias_xml = ""
         session_meta_xml = ""
         scratchpad_xml = ""
         session: Optional[Session] = None
@@ -615,6 +616,9 @@ class BaseAdapter(ABC):
             context_limit_for_render = self.session_store.get_session_context_limit(session.id)
             session_started_xml = render_iso_element("session_started", session.created_at, tz, tz_label, now)
             last_active_xml = render_iso_element("last_active", session.last_active, tz, tz_label, now)
+            if session.alias:
+                # The alias charset makes escaping unnecessary.
+                session_alias_xml = f"\n  <session_alias>{session.alias}</session_alias>"
             if session.metadata:
                 topic_lines = _render_session_topic_lines(session.metadata.get("topic"), indent="  ")
                 if topic_lines:
@@ -661,7 +665,7 @@ class BaseAdapter(ABC):
   <source>{channel_context.source}</source>
   <user_id>{channel_context.user_id}</user_id>
   <context_tokens_used>{tokens_used}</context_tokens_used>
-  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}{deliveries_xml}
+  <context_limit>{context_limit_for_render}</context_limit>{session_topic_xml}{session_alias_xml}{session_meta_xml}{scratchpad_xml}{jobs_xml}{deliveries_xml}
 </message_context>
 
 {message}"""

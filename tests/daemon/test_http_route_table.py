@@ -180,6 +180,8 @@ FULL_ROUTE_TABLE = [
     ("/api/sessions/{session_id}/metadata", ("GET",), "_api_get_metadata"),
     ("/api/sessions/{session_id}/metadata", ("PATCH",), "_api_update_metadata"),
     ("/api/sessions/{session_id}/metadata/{key}", ("DELETE",), "_api_delete_metadata"),
+    ("/api/sessions/{session_id}/alias", ("PUT",), "_api_claim_alias"),
+    ("/api/sessions/{session_id}/alias", ("DELETE",), "_api_release_alias"),
     ("/api/sessions/{session_id}/scratchpad", ("GET",), "_api_get_scratchpad"),
     ("/api/sessions/{session_id}/scratchpad", ("PUT",), "_api_update_scratchpad"),
     ("/api/sessions/{session_id}", ("GET",), "_api_get_session"),

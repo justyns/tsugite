@@ -647,7 +647,7 @@ class DiscordAdapter(BaseAdapter):
             )
 
         if self.bot_config.session_name:
-            return self.session_store.get_or_create_named_session(
+            return self.session_store.get_or_create_dm_session(
                 user_id, self.bot_config.session_name, source=SessionSource.DISCORD.value
             )
 

@@ -192,11 +192,38 @@ class TestResolveTargetSession:
     def test_name_lookup(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
 
-        named = store.get_or_create_named_session("alice", "research")
+        named = store.claim_aliased_session("research")
         entry = _make_entry(target_session="name:research")
         result = resolve_target_session(entry, "alice", store)
         assert result is not None
         assert result.id == named.id
+
+    def test_name_lookup_creates_a_holder_when_the_alias_is_free(self, store):
+        """An alias is an address, so a schedule pointed at one delivers even after
+        the session that held it finished."""
+        from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
+
+        entry = _make_entry(target_session="name:research")
+        result = resolve_target_session(entry, "alice", store)
+
+        assert result is not None
+        assert result.metadata["session_name"] == "research"
+        assert resolve_target_session(entry, "alice", store).id == result.id
+
+    def test_name_lookup_follows_compaction(self, store):
+        from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
+
+        named = store.claim_aliased_session("research")
+        successor = store.compact_session(named.id)
+
+        entry = _make_entry(target_session="name:research")
+        assert resolve_target_session(entry, "alice", store).id == successor.id
+
+    def test_a_malformed_alias_target_skips_injection(self, store):
+        from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session
+
+        entry = _make_entry(target_session="name:not a slug")
+        assert resolve_target_session(entry, "alice", store) is None
 
     def test_none_string_skips_injection(self, store):
         from tsugite_daemon.adapters.scheduler_adapter import resolve_target_session

@@ -124,6 +124,17 @@ class TestScheduleCreateValidation:
         mock_sched.update.assert_called_once()
         assert mock_sched.update.call_args.kwargs["target_session"] == "name:research"
 
+    def test_a_malformed_alias_target_is_rejected_at_creation(self, tool_loop):
+        """Otherwise the schedule stores fine and every fire silently delivers nowhere."""
+        from tsugite.tools.schedule import schedule_create, set_scheduler
+
+        mock_sched = MagicMock()
+        mock_sched.add.side_effect = lambda entry: entry
+        set_scheduler(mock_sched, tool_loop)
+
+        with pytest.raises(ValueError, match="Invalid alias"):
+            schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="name:not a slug")
+
     def test_schedule_update_clears_target_session_with_empty_string(self, tool_loop):
         from tsugite.tools.schedule import schedule_update, set_scheduler
 

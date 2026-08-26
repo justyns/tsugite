@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 TARGET_SESSION_PRIMARY = "primary"
 TARGET_SESSION_ORIGINATING = "originating"
 TARGET_SESSION_NONE = "none"
-TARGET_SESSION_NAME_PREFIX = "name:"
 
 DELIVERY_MODE_EXISTING = "existing_session"
 DELIVERY_MODE_PARENT = "parent_session"
@@ -88,7 +87,7 @@ class ScheduleEntry:
     #   "primary"    -> primary lookup only (no fallback)
     #   "originating"-> originating_session_id only
     #   "none"       -> skip injection
-    #   "name:<n>"   -> find_named_session(name)
+    #   "name:<n>"   -> the session holding alias <n>, created if none holds it
     #   "<sid>"      -> bare session id
     target_session: str | None = None
     # Which session the run's result is delivered into:

@@ -63,11 +63,18 @@ class DiscordBotConfig(BaseModel):
     guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
     allow_from: List[str] = Field(default_factory=list)
-    # DMs from a Discord user route to the latest non-finished session tagged with
-    # metadata.session_name == this value (auto-creates one if absent). Channels and threads
-    # keep their existing shared-team-session behavior. The name is preserved across compaction.
+    # Names the DM route: each Discord user's DMs land in their own session tagged
+    # metadata.dm_route == this value. Channels and threads stay shared.
     # Set to "" to fall back to the user's default-interactive session.
     session_name: str = "discord"
+
+    @model_validator(mode="after")
+    def _validate_session_name(self):
+        if self.session_name:
+            from tsugite_daemon.session_store import validate_alias
+
+            validate_alias(self.session_name)
+        return self
 
     @model_validator(mode="after")
     def _validate_token_source(self):

@@ -181,3 +181,55 @@ class TestToolsFollowCompaction:
 
         assert store.get_session(second.id).metadata["topic"] == "dinner"
         assert "topic" not in store.get_session(chat.id).metadata
+
+
+class TestToolsAddressAnAlias:
+    """`name:<alias>` reaches a session by its routing identity, so a worker can
+    message a lead it never learned the id of."""
+
+    def test_a_tool_reaches_the_session_holding_the_alias(self, store, runner):
+        lead = _chat(store, "lead")
+        store.set_alias(lead.id, "lead")
+        other = _chat(store, "other")
+
+        with _calling_session(other.id):
+            result = session_tools.rename_session(title="Feature X", session_id="name:lead")
+
+        assert result["session_id"] == lead.id
+        assert store.get_session(lead.id).title == "Feature X"
+
+    def test_an_alias_reaches_the_session_its_holder_became(self, store, runner):
+        lead = _chat(store, "lead")
+        store.set_alias(lead.id, "lead")
+        successor = store.compact_session(lead.id)
+
+        result = session_tools.rename_session(title="Feature X", session_id="name:lead")
+
+        assert result["session_id"] == successor.id
+
+    def test_replying_to_an_alias_runs_a_turn_on_its_holder(self, store, runner, adapter):
+        lead = _chat(store, "lead")
+        store.set_alias(lead.id, "lead")
+        worker = _chat(store, "worker")
+
+        with _calling_session(worker.id):
+            result = session_tools.session_reply(message="phase one done", session_id="name:lead")
+
+        assert result["session_id"] == lead.id
+        assert adapter.handle_message.await_count == 1
+
+    def test_notifying_an_alias_stores_the_holders_id(self, store, runner):
+        lead = _chat(store, "lead")
+        store.set_alias(lead.id, "lead")
+        worker = _chat(store, "worker")
+
+        with _calling_session(worker.id):
+            result = session_tools.session_notify(notify_session="name:lead")
+
+        assert result["notify_sessions"] == [lead.id]
+
+    def test_an_unheld_alias_is_a_clear_error(self, store, runner):
+        chat = _chat(store)
+
+        with _calling_session(chat.id), pytest.raises(ValueError, match="No session holds alias"):
+            session_tools.rename_session(title="Feature X", session_id="name:lead")

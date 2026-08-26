@@ -56,12 +56,12 @@ def test_create_default_session_stamps_source(store):
     assert store.create_default_session("u1", source=SessionSource.DISCORD.value).source == "discord"
 
 
-def test_get_or_create_named_session_defaults_to_interactive(store):
-    assert store.get_or_create_named_session("u1", "discord").source == SessionSource.INTERACTIVE.value
+def test_dm_route_defaults_to_interactive(store):
+    assert store.get_or_create_dm_session("u1", "discord").source == SessionSource.INTERACTIVE.value
 
 
-def test_get_or_create_named_session_stamps_source(store):
-    s = store.get_or_create_named_session("u1", "discord", source=SessionSource.DISCORD.value)
+def test_dm_route_stamps_source(store):
+    s = store.get_or_create_dm_session("u1", "discord", source=SessionSource.DISCORD.value)
     assert s.source == "discord"
 
 

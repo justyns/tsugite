@@ -10,6 +10,7 @@ from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
     mounted_api_routes,
 )
+from tsugite_daemon.session_store import AliasConflictError
 
 
 class SessionsMixin:
@@ -26,6 +27,8 @@ class SessionsMixin:
                     Route("/{session_id}/metadata", self._api_get_metadata, methods=["GET"]),
                     Route("/{session_id}/metadata", self._api_update_metadata, methods=["PATCH"]),
                     Route("/{session_id}/metadata/{key}", self._api_delete_metadata, methods=["DELETE"]),
+                    Route("/{session_id}/alias", self._api_claim_alias, methods=["PUT"]),
+                    Route("/{session_id}/alias", self._api_release_alias, methods=["DELETE"]),
                     Route("/{session_id}/scratchpad", self._api_get_scratchpad, methods=["GET"]),
                     Route("/{session_id}/scratchpad", self._api_update_scratchpad, methods=["PUT"]),
                     Route("/{session_id}", self._api_get_session, methods=["GET"]),
@@ -164,6 +167,7 @@ class SessionsMixin:
                         "title": s.title,
                         "metadata": s.metadata or {},
                         "is_primary": s.is_primary,
+                        "alias": s.alias,
                     }
                     for s in sessions
                 ]
@@ -203,6 +207,39 @@ class SessionsMixin:
             {"id": result.id, "status": result.status, "created_at": result.created_at},
             status_code=201,
         )
+
+    def _alias_response(self, session_id: str, alias: Optional[str]) -> JSONResponse:
+        self.event_bus.emit("session_update", {"action": "alias", "id": session_id, "alias": alias})
+        return JSONResponse({"ok": True, "id": session_id, "alias": alias})
+
+    async def _api_claim_alias(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        body = await self._optional_json_body(request)
+        alias = body.get("alias")
+        store = self.session_runner.store
+        try:
+            store.get_session(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        try:
+            session = store.set_alias(session_id, alias)
+        except AliasConflictError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return self._alias_response(session.id, session.alias)
+
+    async def _api_release_alias(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        session_id = request.path_params["session_id"]
+        try:
+            session = self.session_runner.store.clear_alias(session_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return self._alias_response(session.id, session.alias)
 
     async def _api_get_session(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

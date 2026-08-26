@@ -18,7 +18,6 @@ from tsugite_daemon.scheduler import (
     DELIVERY_MODE_AUTO,
     DELIVERY_MODE_NEW,
     DELIVERY_MODE_PARENT,
-    TARGET_SESSION_NAME_PREFIX,
     TARGET_SESSION_NONE,
     TARGET_SESSION_ORIGINATING,
     TARGET_SESSION_PRIMARY,
@@ -32,6 +31,7 @@ from tsugite_daemon.session_store import (
     Session,
     SessionSource,
     SessionStatus,
+    alias_from_ref,
     create_interactive_session,
 )
 
@@ -93,8 +93,13 @@ def resolve_target_session(entry: ScheduleEntry, user_id: str | None, store) -> 
         return store.find_primary_session(user_id)
     if spec == TARGET_SESSION_ORIGINATING:
         return _resolve_originating(entry, store)
-    if spec.startswith(TARGET_SESSION_NAME_PREFIX):
-        return store.find_named_session(user_id, spec[len(TARGET_SESSION_NAME_PREFIX) :])
+    alias = alias_from_ref(spec)
+    if alias is not None:
+        try:
+            return store.claim_aliased_session(alias, user_id=user_id)
+        except ValueError as e:
+            logger.warning("Schedule '%s' cannot target alias '%s': %s", entry.id, alias, e)
+            return None
     return store.resolve_live(spec)
 
 

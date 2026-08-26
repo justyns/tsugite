@@ -510,7 +510,7 @@ class TestDeliveryFollowsCompaction:
 
     @pytest.mark.asyncio
     async def test_a_named_target_reaches_the_live_session(self, store, sched_adapter):
-        named = store.get_or_create_named_session("alice", "daily")
+        named = store.claim_aliased_session("daily")
         store.update_session(named.id, user_id="alice")
         second = _compact_twice(store, named.id)
         entry = _entry(target_session="name:daily", originating_session_id=named.id)
