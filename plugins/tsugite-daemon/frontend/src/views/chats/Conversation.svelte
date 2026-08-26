@@ -786,7 +786,12 @@
     <RawMessages sessionId={ctrl.sessionId} onClose={() => (rawOpen = false)} />
   {/if}
   {#if rawMetadataOpen && row}
-    <RawSessionMetadata metadata={row.metadata} {links} onClose={() => (rawMetadataOpen = false)} />
+    <RawSessionMetadata
+      sessionId={row.id}
+      metadata={row.metadata}
+      {links}
+      onClose={() => (rawMetadataOpen = false)}
+    />
   {/if}
 </section>
 

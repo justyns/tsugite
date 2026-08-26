@@ -862,6 +862,78 @@ test('session menu shows raw session metadata, with the links reachable from it'
     .toHaveAttribute('href', 'https://forge.example/justyns/tsugite/pulls/608');
 });
 
+test('raw metadata shows the session fields that live outside the metadata block', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'review', timestamp: '2026-08-09T10:00:00Z' },
+  ]);
+  const row = metadataRow({ status_text: 'review posted' });
+  const detail = {
+    id: 'sess-1',
+    title: 'Nightly deploy check',
+    alias: 'daily',
+    model: 'codex_cli:gpt-5.5',
+    model_override: 'claude_code:opus',
+    reasoning_effort: 'high',
+    agent_file: 'odyn-daemon',
+    metadata: { status_text: 'review posted' },
+    prompt: 'SHOULD NOT RENDER',
+    result: 'SHOULD NOT RENDER',
+    deferred_deliveries: [{ message: 'SHOULD NOT RENDER' }],
+  };
+  // A Response body reads once, so every call needs its own.
+  const fetchSpy = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async (input) =>
+      String(input).includes('/api/sessions/')
+        ? new Response(JSON.stringify(detail), { headers: { 'content-type': 'application/json' } })
+        : new Response('{}', { headers: { 'content-type': 'application/json' } }),
+    );
+  try {
+    render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+    await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+    await page.getByRole('menuitem', { name: /view metadata/i }).click();
+
+    const dialog = page.getByTestId(TESTID.chatRawMetadata);
+    await expect.element(dialog).toHaveTextContent('"alias"');
+    await expect.element(dialog).toHaveTextContent('daily');
+    await expect.element(dialog).toHaveTextContent('"model_override"');
+    await expect.element(dialog).toHaveTextContent('claude_code:opus');
+    await expect.element(dialog).toHaveTextContent('"title"');
+    // The metadata block is still its own section.
+    await expect.element(dialog).toHaveTextContent('"status_text"');
+    // Content fields have their own surfaces and would swamp the overlay.
+    await expect.element(dialog).not.toHaveTextContent('SHOULD NOT RENDER');
+    // The effect must not read what it writes, or it refetches forever.
+    const detailCalls = fetchSpy.mock.calls.filter(([input]) =>
+      /\/api\/sessions\/[^/]+$/.test(String(input)),
+    );
+    expect(detailCalls).toHaveLength(1);
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
+test('raw metadata still renders when the session detail fetch fails', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'review', timestamp: '2026-08-09T10:00:00Z' },
+  ]);
+  const row = metadataRow({ status_text: 'review posted' });
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
+  try {
+    render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+    await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+    await page.getByRole('menuitem', { name: /view metadata/i }).click();
+
+    const dialog = page.getByTestId(TESTID.chatRawMetadata);
+    await expect.element(dialog).toBeInTheDocument();
+    await expect.element(dialog).toHaveTextContent('"status_text"');
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});
+
 test('the jobs chip links to the jobs board filtered to this session', async () => {
   // The chip is a shortcut to "the jobs this chat spawned" - landing on the
   // unfiltered board makes the user re-find them by hand.

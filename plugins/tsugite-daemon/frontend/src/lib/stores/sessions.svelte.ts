@@ -391,19 +391,24 @@ export class SessionsStore {
     return api.get<SessionSettings>(`/api/sessions/${encodeURIComponent(id)}/settings`);
   }
 
-  /** Resolve a session's metadata and resolved context limit from its record
-   *  (GET /api/sessions/{id}); the chat surface uses it to flag job artifacts. */
+  /** A session's whole stored record, every field the daemon keeps. */
+  async getDetail(id: string): Promise<Record<string, unknown>> {
+    return api.get<Record<string, unknown>>(`/api/sessions/${encodeURIComponent(id)}`);
+  }
+
+  /** Resolve a session's metadata and resolved context limit from its record;
+   *  the chat surface uses it to flag job artifacts. */
   async getInfo(id: string): Promise<{
     metadata: Record<string, unknown>;
     contextLimit: number | null;
     cumulativeTokens: number | null;
   }> {
-    const res = await api.get<{
+    const res = (await this.getDetail(id)) as {
       metadata?: Record<string, unknown>;
       context_limit?: number | null;
       context_limit_resolved?: number | null;
       cumulative_tokens?: number | null;
-    }>(`/api/sessions/${encodeURIComponent(id)}`);
+    };
     return {
       metadata: res.metadata ?? {},
       // Durable context truth for the meter: session_info frames are live-only,
