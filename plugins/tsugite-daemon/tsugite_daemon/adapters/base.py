@@ -979,7 +979,8 @@ class BaseAdapter(ABC):
             self.session_store.update_session_context_limit(conv_id, ps["context_window"])
 
         last_input = getattr(result, "last_input_tokens", None)
-        context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
+        token_count = getattr(result, "token_count", None)
+        context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (token_count or 0)
         self.session_store.update_token_count(conv_id, context_tokens)
 
         try:

@@ -20,7 +20,7 @@ from .helpers import (
     set_multistep_ui_context,
 )
 from .metrics import StepMetrics, display_step_metrics
-from .models import AgentSkippedError
+from .models import AgentExecutionResult, AgentSkippedError
 from .runner import _get_model_string, _prepare_step, _run_unit, _RunSetup, execute_prefetch
 
 if TYPE_CHECKING:
@@ -222,6 +222,7 @@ async def _execute_step_with_retries(
     prompt: str,
     event_bus: Optional["EventBus"] = None,
     assigned_vars: Optional[set] = None,
+    usage_sink: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, float]:
     """Execute a step with automatic retries on failure.
 
@@ -237,8 +238,8 @@ async def _execute_step_with_retries(
     # Per-step overrides of the run-level setup:
     #  - results bind to template/namespace variables, so they must be plain
     #    strings; AgentExecutionResult is not JSON-serializable and the default
-    #    subprocess executor drops such variables with only a log line. Token
-    #    accounting belongs to the run as a whole.
+    #    subprocess executor drops such variables with only a log line. The
+    #    step's accounting reaches the run through `usage_sink` instead.
     #  - the shared session gets one turn per step, so each records its own step
     #    header rather than replaying the user's prompt N times.
     #  - a provider session is never resumed across steps: steps are isolated by
@@ -326,6 +327,7 @@ async def _execute_step_with_retries(
                 step_setup,
                 model_kwargs=step.model_kwargs,
                 injectable_vars=injectable_vars,
+                usage_sink=usage_sink,
             )
 
         if step.timeout:
@@ -492,12 +494,15 @@ async def run_steps(
     prompt: str,
     context: Dict[str, Any],
     setup: "_RunSetup",
-) -> str:
+) -> str | AgentExecutionResult:
     """Run a multi-step agent: one `_run_unit` call per step, sharing one session.
 
     Steps run sequentially in file order. Only `assign`ed variables cross the
     boundary between them; each step gets a fresh agent loop, so a step never
     inherits a sibling's conversation.
+
+    Returns the rich result under `return_token_usage`, carrying the run's
+    totals, since the steps that make them up each return a plain string.
     """
     from tsugite.md_agents import extract_step_directives
 
@@ -573,6 +578,7 @@ async def run_steps(
         # Execute each step sequentially
         final_result = None
         step_metrics: List[StepMetrics] = []
+        step_usages: List[Dict[str, Any]] = []
         assigned_vars: set = set()  # Track user-assigned variables for namespace isolation
 
         for i, step in enumerate(steps, 1):
@@ -601,6 +607,7 @@ async def run_steps(
 
                 # Execute step with automatic retries
                 step_start_time = time.time()
+                step_usage: Dict[str, Any] = {}
                 try:
                     step_result, step_duration = await _execute_step_with_retries(
                         step=step,
@@ -614,10 +621,15 @@ async def run_steps(
                         prompt=prompt,
                         event_bus=event_bus,
                         assigned_vars=assigned_vars,
+                        usage_sink=step_usage,
                     )
 
                     # Success - store result and record metrics
                     final_result = step_result
+                    # A spawn step never reaches `_run_unit`, so it leaves the
+                    # sink empty; its own run does its own accounting.
+                    if step_usage:
+                        step_usages.append(step_usage)
                     step_metrics.append(
                         StepMetrics(
                             step_name=step.name,
@@ -681,6 +693,23 @@ async def run_steps(
         if step_metrics:
             display_step_metrics(step_metrics, custom_logger if custom_logger else None)
 
-        return final_result or ""
+        if not exec_options.return_token_usage:
+            return final_result or ""
+
+        def total(key: str):
+            return sum(usage.get(key) or 0 for usage in step_usages)
+
+        return AgentExecutionResult(
+            response=final_result or "",
+            token_count=total("token_count") or None,
+            cost=total("cost") or None,
+            step_count=total("step_count"),
+            cache_creation_tokens=total("cache_creation_tokens"),
+            cache_read_tokens=total("cache_read_tokens"),
+            # Context size is the last step's prompt, not the sum: the steps ran
+            # as separate conversations, so no single call ever saw the total.
+            last_input_tokens=step_usages[-1].get("last_input_tokens") if step_usages else None,
+            session_id=setup.conversation_id,
+        )
     finally:
         clear_multistep_ui_context(custom_logger)

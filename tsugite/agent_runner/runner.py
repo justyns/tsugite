@@ -399,10 +399,15 @@ async def _execute_agent_with_prompt(
     continue_conversation_id: Optional[str] = None,
     user_input_for_history: Optional[str] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
+    usage_sink: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
     Shared by single-shot runs and by each step of a multi-step run.
+
+    `usage_sink`, when given, receives this call's token and cost counters. It is
+    how a multi-step run collects accounting from steps that return plain
+    strings.
     """
     if exec_options is None:
         exec_options = ExecutionOptions()
@@ -627,6 +632,16 @@ async def _execute_agent_with_prompt(
 
         # Extract and display reasoning content if present
         _extract_reasoning_content(agent, custom_logger)
+
+        if usage_sink is not None:
+            usage_sink.update(
+                token_count=agent.total_tokens,
+                cost=agent.reported_cost,
+                cache_creation_tokens=agent.cache_creation_tokens,
+                cache_read_tokens=agent.cache_read_tokens,
+                last_input_tokens=agent.last_input_tokens,
+                step_count=len(agent.memory.steps),
+            )
 
         try:
             from tsugite.usage import get_usage_store
@@ -875,6 +890,7 @@ async def _run_unit(
     *,
     model_kwargs: Optional[Dict[str, Any]] = None,
     injectable_vars: Optional[Dict[str, Any]] = None,
+    usage_sink: Optional[Dict[str, Any]] = None,
 ) -> str | AgentExecutionResult:
     """Prepare and execute one prompt: the whole agent, or one step of it.
 
@@ -929,6 +945,7 @@ async def _run_unit(
         channel_metadata=setup.channel_metadata,
         model_kwargs=model_kwargs,
         injectable_vars=injectable_vars,
+        usage_sink=usage_sink,
     )
 
     try:

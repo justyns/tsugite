@@ -455,3 +455,100 @@ carried={{ carried }} local_is_defined={{ step_local is defined }}
     # The assigned step result crosses; the step's own directive variable does not.
     assert "carried=RESULT" in second
     assert "local_is_defined=False" in second
+
+
+@pytest.mark.asyncio
+async def test_multistep_run_aggregates_token_usage(tmp_path, monkeypatch):
+    """A multi-step run must honour `return_token_usage`.
+
+    Steps suppress their own accounting so their results stay plain strings, so
+    the run as a whole is the only place the totals can be assembled. Callers
+    that asked for the rich shape - the daemon always does - dereference
+    `.token_count` on what comes back.
+    """
+    from tsugite.agent_runner import runner
+    from tsugite.agent_runner.models import AgentExecutionResult
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        self.total_tokens = 100
+        self.total_cost = 0.25
+        self.cost_reported = True
+        self.last_input_tokens = 80
+        self.cache_creation_tokens = 5
+        self.cache_read_tokens = 10
+        self.memory.add_step(thought="t", code="c", output="o")
+        return "STEP_OUTPUT"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+    result = await runner.run_agent_async(
+        agent_file,
+        "test prompt",
+        exec_options=ExecutionOptions(return_token_usage=True),
+    )
+
+    assert isinstance(result, AgentExecutionResult), f"multi-step returned a bare {type(result).__name__}"
+    assert result.response == "STEP_OUTPUT"
+    assert result.token_count == 200, "per-step tokens were not summed across the run"
+    assert result.cost == pytest.approx(0.5)
+    assert result.cache_creation_tokens == 10
+    assert result.cache_read_tokens == 20
+    assert result.step_count == 2
+    assert result.last_input_tokens == 80, "context size is the final step's, not the sum"
+
+
+@pytest.mark.asyncio
+async def test_multistep_run_returns_a_string_without_token_usage(tmp_path, monkeypatch):
+    """The CLI path (history off) still gets a plain string back."""
+    from tsugite.agent_runner import runner
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        return "STEP_OUTPUT"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+    result = await runner.run_agent_async(
+        agent_file,
+        "test prompt",
+        exec_options=ExecutionOptions(return_token_usage=False),
+    )
+
+    assert result == "STEP_OUTPUT"
+
+
+@pytest.mark.asyncio
+async def test_looping_step_accumulates_every_iteration(tmp_path, monkeypatch):
+    """A repeating step spends on every pass, so every pass counts."""
+    from tsugite.agent_runner import runner
+    from tsugite.agent_runner.models import AgentExecutionResult
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        self.total_tokens = 100
+        return "STEP_OUTPUT"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    agent_file = _write(
+        tmp_path,
+        """---
+name: looping
+model: ollama:qwen2.5-coder:7b
+extends: none
+tools: []
+---
+<!-- tsu:step name="poll" repeat_while="iteration < 3" -->
+Poll again.
+""",
+    )
+    result = await runner.run_agent_async(
+        agent_file,
+        "test prompt",
+        exec_options=ExecutionOptions(return_token_usage=True),
+    )
+
+    assert isinstance(result, AgentExecutionResult)
+    assert result.token_count == 300, "only some iterations of the looping step were counted"
+    # None, not 0.0: nothing reported a cost, which is not the same as free.
+    assert result.cost is None
