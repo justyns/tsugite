@@ -558,11 +558,22 @@ class BaseAdapter(ABC):
         window_minutes = meta.get("heartbeat_window", 10)
         since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
         ctx["active_sessions"] = [
-            {"id": s.id, "status": s.status, "prompt": (s.prompt or "")[:100], "source": s.source}
+            {
+                "id": s.id,
+                "agent": s.agent_file or self.runtime.agent_file,
+                "status": s.status,
+                "prompt": (s.prompt or "")[:100],
+                "source": s.source,
+            }
             for s in self.session_store.list_sessions(status="running")
         ]
         ctx["recent_completions"] = [
-            {"id": s.id, "status": s.status, "result": (s.result or "")[:200]}
+            {
+                "id": s.id,
+                "agent": s.agent_file or self.runtime.agent_file,
+                "status": s.status,
+                "result": (s.result or "")[:200],
+            }
             for s in self.session_store.list_sessions(status="completed", updated_since=since)
         ]
 

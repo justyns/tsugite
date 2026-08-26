@@ -202,3 +202,56 @@ class TestSessionReply:
 
         with pytest.raises(ValueError, match="No adapter"):
             asyncio.run(runner.reply_to_session("sess-no-adapter", "hello"))
+
+
+# ── default.md renders against the real context shape ──
+
+
+class TestDefaultAgentRendersSessionContext:
+    """Renders the shipped default.md against real _build_agent_context output.
+
+    The renderer uses StrictUndefined, so a row key the template reads and the
+    builder does not supply raises during prompt assembly.
+    """
+
+    def _render(self, adapter, channel_context):
+        from tsugite.agent_inheritance import get_builtin_agents_path
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import parse_agent_file
+
+        agent = parse_agent_file(get_builtin_agents_path() / "default.md")
+        ctx = adapter._build_agent_context(channel_context)
+        return AgentPreparer().prepare(agent, prompt="heartbeat", context=ctx)
+
+    def test_renders_with_running_and_completed_sessions(self, workspace_dir, tmp_store):
+        adapter = _make_adapter(workspace_dir, tmp_store)
+        tmp_store.create_session(
+            Session(
+                id="sess-running",
+                source="background",
+                status="running",
+                prompt="Do work",
+                agent_file="job_worker",
+            )
+        )
+        tmp_store.create_session(
+            Session(
+                id="sess-done",
+                source="background",
+                status="completed",
+                result="Done!",
+                last_active=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+
+        ctx = ChannelContext(source="scheduler", channel_id=None, user_id="test", reply_to="test", metadata={})
+        prepared = self._render(adapter, ctx)
+
+        # A worker session keeps its own agent file; one without falls back to the daemon default.
+        assert "- `sess-running` (job_worker, running): Do work" in prepared.rendered_prompt
+        assert "- `sess-done` (default, completed): Done!" in prepared.rendered_prompt
+
+    def test_renders_with_no_sessions(self, workspace_dir, tmp_store):
+        adapter = _make_adapter(workspace_dir, tmp_store)
+        ctx = ChannelContext(source="scheduler", channel_id=None, user_id="test", reply_to="test", metadata={})
+        assert self._render(adapter, ctx).rendered_prompt
