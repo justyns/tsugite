@@ -50,7 +50,7 @@
   import {
     isFinishedSession,
     formatWhen,
-    needsYouSessions,
+    chatsNeedingAnswer,
     sessionTopic,
   } from './views/chats/sessionModel';
   import { neighborSession } from './views/chats/chatNav';
@@ -212,7 +212,7 @@
     if (!sessions.loaded) void sessions.load();
   });
 
-  const needsYouChats = $derived(needsYouSessions(sessions.rows));
+  const needsYouChats = $derived(chatsNeedingAnswer(sessions.rows));
   const navBadges = $derived({
     jobs: jobsNavBadges(jobs.counts),
     chats: chatsNavBadge(needsYouChats.length),

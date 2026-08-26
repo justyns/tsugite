@@ -7,9 +7,12 @@ import {
   isFinishedSession,
   formatWhen,
   sessionTopic,
-  sessionNeedsYou,
-  needsYouSessions,
+  chatNeedsAnswer,
+  sessionHasAttention,
+  chatsNeedingAnswer,
+  attentionSessions,
 } from './sessionModel';
+import { attentionRecord as rec } from './__fixtures__/sessionRow';
 
 const base = (over: Partial<SessionRow> = {}): SessionRow =>
   ({
@@ -158,78 +161,67 @@ describe('sessionTopic', () => {
   });
 });
 
-describe('sessionNeedsYou', () => {
-  it('reads the daemon status_text for an outstanding question', () => {
-    expect(sessionNeedsYou(base({ progress: { status_text: 'Awaiting answer' } as never }))).toBe(
-      true,
-    );
-    expect(sessionNeedsYou(base({ progress: { status_text: 'Tool: grep' } as never }))).toBe(false);
-    expect(sessionNeedsYou(base())).toBe(false);
+describe('chatNeedsAnswer', () => {
+  it('is false with nothing open', () => {
+    expect(chatNeedsAnswer(base())).toBe(false);
+    expect(sessionHasAttention(base())).toBe(false);
   });
 
-  it('counts a durable needs-attention flag from a needs-ack delivery', () => {
-    expect(sessionNeedsYou(base({ needs_attention: true }))).toBe(true);
-    expect(sessionNeedsYou(base({ needs_attention: false }))).toBe(false);
+  it('counts an unanswered delivery card', () => {
+    const row = base({ attention: [rec('delivery', { kind: 'needs_ack' })] });
+    expect(chatNeedsAnswer(row)).toBe(true);
+    expect(sessionHasAttention(row)).toBe(true);
   });
 
-  it('counts a job parked on the person as needing you', () => {
-    expect(sessionNeedsYou(base(), 1)).toBe(true);
-    expect(sessionNeedsYou(base(), 0)).toBe(false);
+  it('counts an outstanding question', () => {
+    const row = base({ attention: [rec('ask')] });
+    expect(chatNeedsAnswer(row)).toBe(true);
   });
 
-  it('groups a session with a parked job as active, not recent', () => {
-    const rows = [base({ id: 'blocked' }), base({ id: 'quiet' })];
-    const parked: Record<string, number> = { blocked: 1 };
-    const attn = new Set(rows.filter((r) => sessionNeedsYou(r, parked[r.id])).map((r) => r.id));
+  it('leaves a parked job to Jobs, while the rail still shows its session', () => {
+    const row = base({ attention: [rec('job', { kind: 'stuck' })] });
+    expect(chatNeedsAnswer(row)).toBe(false);
+    expect(sessionHasAttention(row)).toBe(true);
+  });
+
+  it('groups a session with anything outstanding as active, not recent', () => {
+    const rows = [
+      base({ id: 'blocked', attention: [rec('job', { kind: 'stuck' })] }),
+      base({ id: 'quiet' }),
+    ];
+    const attn = new Set(attentionSessions(rows).map((r) => r.id));
     const g = groupSessions(rows, { attn });
     expect(g.active.map((r) => r.id)).toEqual(['blocked']);
     expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
   });
-
-  it('groups a needs-attention row as active, not recent', () => {
-    const rows = [base({ id: 'ack', needs_attention: true }), base({ id: 'quiet' })];
-    const attn = new Set(rows.filter((r) => sessionNeedsYou(r)).map((r) => r.id));
-    const g = groupSessions(rows, { attn });
-    expect(g.active.map((r) => r.id)).toEqual(['ack']);
-    expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
-  });
 });
 
-describe('needsYouSessions', () => {
-  const tally = (parked: Record<string, number>) =>
-    new Map(Object.entries(parked).map(([id, n]) => [id, { open: n, parked: n }]));
-
-  it('collects the rows waiting on the person, jobs folded in', () => {
+describe('chatsNeedingAnswer', () => {
+  it('collects the rows the person still owes an answer', () => {
     const rows = [
-      base({ id: 'ack', needs_attention: true }),
-      base({ id: 'asked', progress: { status_text: 'Awaiting answer' } as never }),
-      base({ id: 'blocked' }),
+      base({ id: 'ack', attention: [rec('delivery', { kind: 'needs_ack' })] }),
+      base({ id: 'asked', attention: [rec('ask')] }),
+      base({ id: 'blocked', attention: [rec('job', { kind: 'stuck' })] }),
       base({ id: 'quiet' }),
     ];
-    expect(needsYouSessions(rows, tally({ blocked: 1 })).map((r) => r.id)).toEqual([
-      'ack',
-      'asked',
-      'blocked',
-    ]);
+    expect(chatsNeedingAnswer(rows).map((r) => r.id)).toEqual(['ack', 'asked']);
+    expect(attentionSessions(rows).map((r) => r.id)).toEqual(['ack', 'asked', 'blocked']);
   });
 
   it('drops a finished session, whatever it was waiting for', () => {
     const rows = [
-      base({ id: 'done', status: 'completed', needs_attention: true }),
-      base({ id: 'failed', status: 'failed' }),
+      base({ id: 'done', status: 'completed', attention: [rec('delivery')] }),
+      base({ id: 'failed', status: 'failed', attention: [rec('job', { kind: 'stuck' })] }),
     ];
-    expect(needsYouSessions(rows, tally({ failed: 2 }))).toEqual([]);
+    expect(chatsNeedingAnswer(rows)).toEqual([]);
+    expect(attentionSessions(rows)).toEqual([]);
   });
 
   it('drops a compacted-away session, leaving its successor to speak for it', () => {
     const rows = [
-      base({ id: 'old', needs_attention: true, superseded_by: 'new' }),
-      base({ id: 'new', needs_attention: true }),
+      base({ id: 'old', attention: [rec('delivery')], superseded_by: 'new' }),
+      base({ id: 'new', attention: [rec('delivery')] }),
     ];
-    expect(needsYouSessions(rows).map((r) => r.id)).toEqual(['new']);
-  });
-
-  it('ignores jobs entirely when given no tally', () => {
-    expect(needsYouSessions([base({ id: 'blocked' })])).toEqual([]);
+    expect(chatsNeedingAnswer(rows).map((r) => r.id)).toEqual(['new']);
   });
 });

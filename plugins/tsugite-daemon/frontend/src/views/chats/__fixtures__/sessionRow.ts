@@ -1,5 +1,21 @@
 /** A backend session row with every field filled in, for the chats rail tests. */
-import type { SessionRow } from '$lib/stores/sessions.svelte';
+import type { AttentionRecord, SessionRow } from '$lib/stores/sessions.svelte';
+
+export function attentionRecord(
+  source: string,
+  extra: Partial<AttentionRecord> = {},
+): AttentionRecord {
+  return {
+    id: `attn-${source}`,
+    owner_kind: 'session',
+    owner_id: 's1',
+    source,
+    ref_id: `${source}-1`,
+    kind: 'needs_answer',
+    created_at: '2026-07-17T00:00:00Z',
+    ...extra,
+  };
+}
 
 export function sessionRow(id: string, extra: Partial<SessionRow> = {}): SessionRow {
   return {
@@ -26,6 +42,7 @@ export function sessionRow(id: string, extra: Partial<SessionRow> = {}): Session
     unread: false,
     is_primary: false,
     busy: false,
+    attention: [],
     ...extra,
   };
 }

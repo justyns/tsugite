@@ -4,8 +4,7 @@
  * grouping and the relative-time stamp. Kept framework-free so it runs in the
  * fast unit vitest project and the rail stays a thin render of these.
  */
-import type { SessionRow } from '$lib/stores/sessions.svelte';
-import type { SessionJobTally } from '$lib/stores/jobsFilter';
+import type { AttentionRecord, SessionRow } from '$lib/stores/sessions.svelte';
 import type { SessionSourceType, SessionState } from '$lib/components/rows/rowState';
 
 /** metadata.type carries the semantic category badge (code/ops/res/chat). The
@@ -41,23 +40,29 @@ export interface RowStateHints {
   needsYou?: boolean;
 }
 
-export function sessionNeedsYou(row: SessionRow, parkedJobs = 0): boolean {
-  if (row.needs_attention === true) return true;
-  if (parkedJobs > 0) return true;
-  const text = String(row.progress?.status_text ?? '').toLowerCase();
-  return text.includes('awaiting') || text.includes('question') || text.includes('input on');
+function sessionAttention(row: SessionRow): AttentionRecord[] {
+  return row.attention ?? [];
 }
 
-export function needsYouSessions(
-  rows: SessionRow[],
-  jobCounts?: Map<string, SessionJobTally>,
-): SessionRow[] {
-  return rows.filter(
-    (row) =>
-      !row.superseded_by &&
-      !isFinishedSession(row) &&
-      sessionNeedsYou(row, jobCounts?.get(row.id)?.parked),
-  );
+export function sessionHasAttention(row: SessionRow): boolean {
+  return sessionAttention(row).length > 0;
+}
+
+/** Parked jobs are excluded: they are reported on Jobs, not owed an answer here. */
+export function chatNeedsAnswer(row: SessionRow): boolean {
+  return sessionAttention(row).some((record) => record.source !== 'job');
+}
+
+function liveRows(rows: SessionRow[]): SessionRow[] {
+  return rows.filter((row) => !row.superseded_by && !isFinishedSession(row));
+}
+
+export function chatsNeedingAnswer(rows: SessionRow[]): SessionRow[] {
+  return liveRows(rows).filter(chatNeedsAnswer);
+}
+
+export function attentionSessions(rows: SessionRow[]): SessionRow[] {
+  return liveRows(rows).filter(sessionHasAttention);
 }
 
 export function sessionRowState(row: SessionRow, hints: RowStateHints = {}): SessionState {

@@ -189,17 +189,11 @@ describe('SessionsStore attention', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  test('a delivered update patches the row in place instead of reloading the list', () => {
+  test('a delivered update patches the card list in place instead of reloading', () => {
     const store = new SessionsStore();
-    store.rows = [row('s1', { needs_attention: false, unread: false })];
+    store.rows = [row('s1', { unread: false })];
     apiGet.mockClear();
-    store.applySessionUpdate({
-      action: 'delivered',
-      id: 's1',
-      needs_attention: true,
-      pending_deliveries: ['dlv-1'],
-    });
-    expect(store.rows[0]!.needs_attention).toBe(true);
+    store.applySessionUpdate({ action: 'delivered', id: 's1', pending_deliveries: ['dlv-1'] });
     // The chat gates each card's own dismiss control on this list.
     expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-1']);
     // A delivery makes the session unread, so the rail marks it without a refetch.
@@ -208,41 +202,44 @@ describe('SessionsStore attention', () => {
     expect(apiGet).not.toHaveBeenCalled();
   });
 
-  test('an fyi delivery marks the row unread without raising needs-attention', () => {
+  test('attention_cleared drops the card in place', () => {
     const store = new SessionsStore();
-    store.rows = [row('s1', { needs_attention: false, unread: false })];
-    store.applySessionUpdate({ action: 'delivered', id: 's1', needs_attention: false });
-    expect(store.rows[0]!.needs_attention).toBe(false);
-    expect(store.rows[0]!.unread).toBe(true);
-  });
-
-  test('attention_cleared drops the flag in place', () => {
-    const store = new SessionsStore();
-    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
+    store.rows = [row('s1', { pending_deliveries: ['dlv-1'] })];
     apiGet.mockClear();
-    store.applySessionUpdate({
-      action: 'attention_cleared',
-      id: 's1',
-      needs_attention: false,
-      pending_deliveries: [],
-    });
-    expect(store.rows[0]!.needs_attention).toBe(false);
+    store.applySessionUpdate({ action: 'attention_cleared', id: 's1', pending_deliveries: [] });
     expect(store.rows[0]!.pending_deliveries).toEqual([]);
     vi.runAllTimers();
     expect(apiGet).not.toHaveBeenCalled();
   });
 
-  test('clearing one of two deliveries leaves the row still needing the person', () => {
+  test('an attention update carries the records, so the row needs no refetch', () => {
     const store = new SessionsStore();
-    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1', 'dlv-2'] })];
+    store.rows = [row('s1', { needs_attention: false })];
+    apiGet.mockClear();
+    const record = { id: 'attn-1', source: 'ask', kind: 'needs_answer' };
     store.applySessionUpdate({
-      action: 'attention_cleared',
+      action: 'attention',
       id: 's1',
       needs_attention: true,
-      pending_deliveries: ['dlv-2'],
+      attention: [record],
     });
     expect(store.rows[0]!.needs_attention).toBe(true);
-    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-2']);
+    expect(store.rows[0]!.attention).toEqual([record]);
+    vi.runAllTimers();
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+
+  test('the last record clearing empties the row', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { needs_attention: true })];
+    store.applySessionUpdate({
+      action: 'attention',
+      id: 's1',
+      needs_attention: false,
+      attention: [],
+    });
+    expect(store.rows[0]!.needs_attention).toBe(false);
+    expect(store.rows[0]!.attention).toEqual([]);
   });
 
   test('dismissAttention posts the dismissal and clears the flag optimistically', async () => {

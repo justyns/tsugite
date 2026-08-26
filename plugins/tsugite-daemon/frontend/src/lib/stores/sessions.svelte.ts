@@ -25,6 +25,16 @@ import {
   type SessionRowLike,
 } from './sessionsOrder';
 
+export interface AttentionRecord {
+  id: string;
+  owner_kind: string;
+  owner_id: string;
+  source: string;
+  ref_id: string;
+  kind: string;
+  created_at: string;
+}
+
 export interface SessionRow extends SessionRowLike {
   id: string;
   user_id: string;
@@ -52,6 +62,7 @@ export interface SessionRow extends SessionRowLike {
   compacting?: boolean;
   alias?: string | null;
   needs_attention?: boolean;
+  attention?: AttentionRecord[];
   pending_deliveries?: string[];
   waiting_on?: string[];
   progress?: Progress;
@@ -239,7 +250,6 @@ export class SessionsStore {
       case 'delivered':
         if (id)
           this.rows = patchRow(this.rows, id, {
-            needs_attention: data.needs_attention === true,
             pending_deliveries: pendingIds(data),
             unread: true,
           } as Partial<SessionRow>);
@@ -247,8 +257,14 @@ export class SessionsStore {
       case 'attention_cleared':
         if (id)
           this.rows = patchRow(this.rows, id, {
-            needs_attention: data.needs_attention === true,
             pending_deliveries: pendingIds(data),
+          } as Partial<SessionRow>);
+        return;
+      case 'attention':
+        if (id)
+          this.rows = patchRow(this.rows, id, {
+            attention: (data.attention as AttentionRecord[]) ?? [],
+            needs_attention: data.needs_attention === true,
           } as Partial<SessionRow>);
         return;
       case 'reordered':

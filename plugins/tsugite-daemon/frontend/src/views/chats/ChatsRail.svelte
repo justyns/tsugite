@@ -9,7 +9,7 @@
   import { jobTallyBySession } from '$lib/stores/jobsFilter';
   import SessionsRail from './SessionsRail.svelte';
   import { resolveDefaultSession } from './defaultSession';
-  import { needsYouSessions } from './sessionModel';
+  import { attentionSessions } from './sessionModel';
 
   let {
     focusedSessionId,
@@ -28,7 +28,7 @@
   const selectedId = $derived(resolveDefaultSession(rows, focusedSessionId));
 
   const jobCounts = $derived(jobTallyBySession(jobs.jobs));
-  const attn = $derived(new Set(needsYouSessions(rows, jobCounts).map((r) => r.id)));
+  const attn = $derived(new Set(attentionSessions(rows).map((r) => r.id)));
 
   $effect(() => {
     void sessions.load();
