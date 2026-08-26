@@ -10,7 +10,7 @@ from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
     mounted_api_routes,
 )
-from tsugite_daemon.session_store import AliasConflictError
+from tsugite_daemon.session_store import AliasConflictError, attention_fields
 
 
 class SessionsMixin:
@@ -152,7 +152,9 @@ class SessionsMixin:
         if err := self._require_auth_and_sessions(request):
             return err
         state = request.query_params.get("state")
-        sessions = self.session_runner.store.list_sessions(status=state)
+        store = self.session_runner.store
+        sessions = store.list_sessions(status=state)
+        by_owner = store.open_attention_by_owner()
         return JSONResponse(
             {
                 "sessions": [
@@ -168,6 +170,7 @@ class SessionsMixin:
                         "metadata": s.metadata or {},
                         "is_primary": s.is_primary,
                         "alias": s.alias,
+                        **attention_fields(by_owner.get(s.id, [])),
                     }
                     for s in sessions
                 ]
@@ -379,8 +382,8 @@ class SessionsMixin:
         return JSONResponse(
             {
                 "ok": True,
-                "needs_attention": session.needs_attention,
                 "pending_deliveries": session.pending_delivery_ids,
+                **attention_fields(self.session_runner.store.attention.open_records(session_id)),
             }
         )
 

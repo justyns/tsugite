@@ -35,9 +35,16 @@ class FakeRunner:
     def __init__(self):
         self.store = FakeStore()
         self.started: list[Session] = []
+        self.attention: list[tuple[str, dict]] = []
         self.cancelled: list[str] = []
         self._next_session_id_counter = 0
         self.store.sessions["parent-1"] = Session(id="parent-1")
+
+    def open_attention(self, session_id: str, **kwargs) -> None:
+        self.attention.append((session_id, kwargs))
+
+    def clear_attention_ref(self, source: str, ref_id: str, **kwargs) -> None:
+        self.attention = [e for e in self.attention if e[1]["ref_id"] != ref_id]
 
     def start_session(self, session: Session) -> Session:
         self._next_session_id_counter += 1

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 from xml.sax.saxutils import quoteattr
 
+from tsugite_daemon.attention_store import SOURCE_JOB
 from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_prompts import (
     _build_barrier_message,
@@ -55,6 +56,10 @@ _JOB_TO_SESSION_STATUS = {
 
 # Allowed notify_when values; anything else is coerced to "never" at intake.
 _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "all_done", "never"})
+
+
+# A job in one of these is parked on the user: it cannot progress until someone acts.
+_PARKED_STATES = frozenset({JobState.AWAITING_INPUT.value, JobState.STUCK.value, JobState.ERRORED.value})
 
 
 def _with_sandbox(job: Job, metadata: dict) -> dict:
@@ -1512,6 +1517,7 @@ class JobsOrchestrator:
     def _emit_job_event(self, job: Optional[Job]) -> None:
         if job is None:
             return
+        self._sync_attention(job)
         payload = job.to_payload()
         # payload already carries worker_terminal_id from the Job field, which a
         # non-agent executor (PTY-driven) stamps directly. Only fall back to the
@@ -1534,6 +1540,27 @@ class JobsOrchestrator:
                 self._event_bus.emit("job_update", payload)
             except Exception:
                 logger.exception("Failed to broadcast job_update for job '%s'", job.id)
+
+    def reconcile_attention(self) -> None:
+        """Match every job's record to its state at daemon start.
+
+        A parked job emits nothing until someone acts on it, so a record opened or
+        left over by a previous process is only reachable from here.
+        """
+        for job in self._jobs.list_all():
+            self._sync_attention(job)
+
+    def _sync_attention(self, job: Job) -> None:
+        """Match the parent session's record for this job to the job's state."""
+        if job.state in _PARKED_STATES:
+            self._runner.open_attention(
+                job.parent_session_id,
+                source=SOURCE_JOB,
+                ref_id=job.id,
+                kind=job.state,
+            )
+        else:
+            self._runner.clear_attention_ref(SOURCE_JOB, job.id)
 
 
 def _should_notify(job: Job, terminal: JobState) -> bool:

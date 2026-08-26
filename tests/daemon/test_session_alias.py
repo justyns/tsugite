@@ -1,4 +1,4 @@
-"""The alias contract: one durable routing identity per (user_id, alias)."""
+"""The alias contract: one durable routing identity per alias, daemon-wide."""
 
 import pytest
 from tsugite_daemon.session_store import AliasConflictError, Session, SessionSource, SessionStatus, SessionStore
@@ -121,6 +121,20 @@ def test_a_branch_does_not_inherit_the_alias(store, monkeypatch):
     assert store.find_named_session("daily").id == holder.id
 
 
+def test_a_branch_does_not_inherit_the_dm_route(store, monkeypatch):
+    class _Backend:
+        def create_branch(self, session_id, at_event_id):
+            return "branch-1"
+
+    monkeypatch.setattr("tsugite_daemon.session_store.get_history_backend", lambda: _Backend())
+    dm = store.get_or_create_dm_session("u1", "discord")
+
+    branch = store.branch_session(dm.id, at_event_id=1)
+
+    assert "dm_route" not in branch.metadata
+    assert store.get_or_create_dm_session("u1", "discord").id == dm.id
+
+
 @pytest.mark.parametrize(
     "bad", ["", " ", "has space", "-leading", "_leading", "with:colon", "a" * 65, "sl/ash", "daily\n"]
 )
@@ -131,7 +145,7 @@ def test_a_malformed_alias_is_rejected(store, bad):
         store.set_alias(session.id, bad)
 
 
-def test_get_or_create_named_session_rejects_a_malformed_alias(store):
+def test_claiming_an_aliased_session_rejects_a_malformed_alias(store):
     with pytest.raises(ValueError):
         store.claim_aliased_session("has space")
 
@@ -176,3 +190,35 @@ class TestDmRoute:
         store.get_or_create_dm_session("u1", "discord")
 
         assert store.find_named_session("discord") is None
+
+
+def test_a_legacy_discord_dm_session_moves_to_the_dm_route_key(tmp_path):
+    """Before the split, Discord DMs routed on the alias. They must keep their session
+    and stop squatting the daemon-wide alias."""
+    path = tmp_path / "session_store.json"
+    first = SessionStore(path)
+    first.create_session(
+        Session(
+            id="daemon_u1_discord_abc123",
+            source=SessionSource.DISCORD.value,
+            user_id="u1",
+            metadata={"session_name": "discord"},
+        )
+    )
+
+    reopened = SessionStore(path)
+
+    assert reopened.get_or_create_dm_session("u1", "discord").id == "daemon_u1_discord_abc123"
+    assert reopened.find_named_session("discord") is None
+
+
+def test_a_discord_chat_keeps_an_alias_the_user_set(tmp_path):
+    """The DM migration keys on the route-created id, so a hand-set alias is untouched."""
+    path = tmp_path / "session_store.json"
+    first = SessionStore(path)
+    first.create_session(Session(id="chat-1", source=SessionSource.DISCORD.value, user_id="u1"))
+    first.set_alias("chat-1", "daily")
+
+    reopened = SessionStore(path)
+
+    assert reopened.find_named_session("daily").id == "chat-1"

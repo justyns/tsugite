@@ -284,7 +284,7 @@ class TestScheduledRunDelivery:
         delivered = _deliveries(store, chat.id)
         assert len(delivered) == 1
         assert delivered[0]["kind"] == "needs_ack"
-        assert store.get_session(chat.id).needs_attention is True
+        assert store.get_session(chat.id).has_pending_deliveries is True
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -412,7 +412,7 @@ class TestRepeatedFailureDelivery:
         cards = [e for e in store.read_events(target.id) if e["type"] == "delivery"]
         assert [c["kind"] for c in cards] == ["needs_ack"]
         assert "backup-watch" in cards[0]["message"]
-        assert store.get_session(target.id).needs_attention is True
+        assert store.get_session(target.id).has_pending_deliveries is True
 
     @pytest.mark.asyncio
     async def test_below_the_threshold_delivers_nothing(self, sched_adapter, store):
@@ -589,7 +589,7 @@ class TestDeliveryStaysWithinItsAudience:
         await sched_adapter._run_agent(_entry(target_session=ops.id, delivery_kind="needs_ack"))
 
         assert _deliveries(store, ops.id) == []
-        assert store.get_session(ops.id).needs_attention is False
+        assert store.get_session(ops.id).has_pending_deliveries is False
 
     @pytest.mark.asyncio
     async def test_one_incident_session_per_run_not_one_per_owner(self, store, sched_adapter):

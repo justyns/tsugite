@@ -614,8 +614,8 @@ class DiscordAdapter(BaseAdapter):
         """Pick which session this message routes to.
 
         Channels and threads stay shared across users (team-agent context). DMs are
-        per-user, and when bot_config.session_name is set DMs route to the named session
-        for that user instead of their default-interactive.
+        per-user: when bot_config.session_name is set they land in that user's session
+        for the route, otherwise in their default-interactive session.
         """
         user_id = self.resolve_user(str(message.author.id), channel_context)
 
@@ -663,7 +663,7 @@ class DiscordAdapter(BaseAdapter):
         elif not is_dm and message.guild:
             route = f"#{self._channel_display_name(message.channel)}"
         elif self.bot_config.session_name:
-            route = f"DM · named: {self.bot_config.session_name}"
+            route = f"DM · {self.bot_config.session_name}"
         else:
             route = "DM"
 

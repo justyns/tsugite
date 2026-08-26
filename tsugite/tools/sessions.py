@@ -151,9 +151,10 @@ def session_acknowledge(delivery_id: Optional[str] = None, session_id: Optional[
     """
     session_id = _resolve_session_arg(session_id)
     session = _call(_session_runner.clear_attention, session_id, delivery_id)
+    open_records = _call(_session_runner.store.attention.open_records, session.id)
     return {
         "session_id": session.id,
-        "needs_attention": session.needs_attention,
+        "needs_attention": bool(open_records),
         "pending_deliveries": session.pending_delivery_ids,
     }
 

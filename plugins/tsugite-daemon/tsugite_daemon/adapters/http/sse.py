@@ -10,6 +10,7 @@ from uuid import uuid4
 from tsugite.events.base import BaseEvent
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import _PERSIST_EVENT_TYPES
+from tsugite_daemon.attention_store import SOURCE_ASK
 
 
 class SSEBroadcaster:
@@ -248,8 +249,10 @@ class HTTPInteractionBackend:
 
     TIMEOUT = 300  # 5 minutes
 
-    def __init__(self, progress: SSEProgressHandler):
+    def __init__(self, progress: SSEProgressHandler, *, session_runner=None, session_id: Optional[str] = None):
         self._progress = progress
+        self._session_runner = session_runner
+        self._session_id = session_id
         self._event = threading.Event()
         self._response: Optional[str] = None
         self._ask_id: Optional[str] = None
@@ -264,6 +267,7 @@ class HTTPInteractionBackend:
         if options:
             payload["options"] = options
         _PENDING_ASKS[ask_id] = self
+        self._open_attention(ask_id, question_type)
         try:
             self._progress._emit("ask_user", payload)
             if not self._event.wait(timeout=self.TIMEOUT):
@@ -271,6 +275,16 @@ class HTTPInteractionBackend:
             return self._response or ""
         finally:
             _PENDING_ASKS.pop(ask_id, None)
+            self._clear_attention(ask_id)
+
+    def _open_attention(self, ask_id: str, question_type: str) -> None:
+        if self._session_runner and self._session_id:
+            kind = "needs_approval" if question_type == "approval" else "needs_answer"
+            self._session_runner.open_attention(self._session_id, source=SOURCE_ASK, ref_id=ask_id, kind=kind)
+
+    def _clear_attention(self, ask_id: str) -> None:
+        if self._session_runner:
+            self._session_runner.clear_attention_ref(SOURCE_ASK, ask_id)
 
     def submit_response(self, response: str) -> None:
         # Emit a durable ask_answered before releasing the blocked ask_user: a

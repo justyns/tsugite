@@ -19,6 +19,12 @@ from uuid import uuid4
 from tsugite.core.record_store import SqliteCollectionStorage
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
+from tsugite_daemon.attention_store import (
+    OWNER_SESSION,
+    SOURCE_DELIVERY,
+    AttentionRecord,
+    AttentionStore,
+)
 from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -187,9 +193,10 @@ COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
     {METADATA_PRIMARY_FLAG, "topic", "type", "task", "pr", "notes"}
 )
 
-# What a branch copies from the session it forks. The alias is excluded: a branch is
-# a second live session, so inheriting it would leave two holders of one identity.
-BRANCH_INHERITED_METADATA_KEYS = READ_ONLY_METADATA_KEYS - {METADATA_SESSION_NAME}
+# What a branch copies from the session it forks. Routing keys are excluded: a branch
+# is a second live session, and both routes resolve to the newest holder, so inheriting
+# one would silently move the address to the branch.
+BRANCH_INHERITED_METADATA_KEYS = READ_ONLY_METADATA_KEYS - {METADATA_SESSION_NAME, METADATA_DM_ROUTE}
 
 TOPIC_MAX_LENGTH = 160
 
@@ -209,8 +216,7 @@ class AliasConflictError(ValueError):
     """Another routable session already holds the alias."""
 
 
-def validate_alias(alias: str) -> None:
-    """Raise unless `alias` matches the routing-identity format."""
+def validate_alias(alias: object) -> None:
     if not isinstance(alias, str) or not ALIAS_PATTERN.fullmatch(alias):
         raise ValueError(
             f"Invalid alias {alias!r}: must start with a letter or digit and use only "
@@ -314,7 +320,7 @@ class Session:
         return self.metadata.get(METADATA_SESSION_NAME)
 
     @property
-    def needs_attention(self) -> bool:
+    def has_pending_deliveries(self) -> bool:
         return bool(self.pending_deliveries)
 
     @property
@@ -349,6 +355,11 @@ class Session:
 
 
 PENDING_DELIVERY_MESSAGE_CHARS = 200
+
+
+def attention_fields(records: list[AttentionRecord]) -> dict:
+    """The `needs_attention` + `attention` pair on a session payload."""
+    return {"needs_attention": bool(records), "attention": [asdict(r) for r in records]}
 
 
 def render_pending_deliveries_xml(session: Session) -> str:
@@ -392,6 +403,7 @@ class SessionStore:
     ):
         self._path = store_path  # legacy JSON location; one-time migration source
         self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
+        self.attention = AttentionStore(store_path)
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
@@ -703,7 +715,6 @@ class SessionStore:
             return session
 
     def clear_alias(self, session_id: str) -> Session:
-        """Release this session's alias, making it claimable again."""
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
@@ -797,9 +808,7 @@ class SessionStore:
             existing = self._find_named_session_locked(alias)
             if existing:
                 return existing
-            return self._create_routed_locked(
-                key=METADATA_SESSION_NAME, value=alias, user_id=user_id, source=source, title=f"{alias.title()} Session"
-            )
+            return self._create_routed_locked(key=METADATA_SESSION_NAME, value=alias, user_id=user_id, source=source)
 
     def get_or_create_dm_session(
         self, user_id: str, route: str, source: str = SessionSource.INTERACTIVE.value
@@ -811,15 +820,13 @@ class SessionStore:
             )
             if existing:
                 return existing
-            return self._create_routed_locked(
-                key=METADATA_DM_ROUTE, value=route, user_id=user_id, source=source, title=f"{route.title()} Session"
-            )
+            return self._create_routed_locked(key=METADATA_DM_ROUTE, value=route, user_id=user_id, source=source)
 
-    def _create_routed_locked(
-        self, *, key: str, value: str, user_id: Optional[str], source: str, title: str
-    ) -> Session:
-        conv_id = f"daemon_{user_id}_{value}_{uuid4().hex[:6]}"
-        session = Session(id=conv_id, source=source, user_id=user_id, title=title, metadata={key: value})
+    def _create_routed_locked(self, *, key: str, value: str, user_id: Optional[str], source: str) -> Session:
+        conv_id = f"daemon_{user_id or 'shared'}_{value}_{uuid4().hex[:6]}"
+        session = Session(
+            id=conv_id, source=source, user_id=user_id, title=f"{value.title()} Session", metadata={key: value}
+        )
         session.cumulative_tokens, session.message_count = self._estimate_tokens(conv_id)
         self._sessions[conv_id] = session
         self._persist(session)
@@ -937,6 +944,15 @@ class SessionStore:
             old_session.model_override = None
             old_session.compacting = False
             old_session.pending_deliveries = []
+            # The cards moved to the successor, so the obligations they carry move too.
+            for record in self.attention.clear_owner(session_id, source=SOURCE_DELIVERY):
+                self.attention.open(
+                    owner_kind=OWNER_SESSION,
+                    owner_id=new_id,
+                    source=record.source,
+                    ref_id=record.ref_id,
+                    kind=record.kind,
+                )
             old_session.notify_sessions = []
             old_session.deferred_deliveries = []
             # The successor owns any in-flight turn now; a stale marker on the
@@ -1049,6 +1065,7 @@ class SessionStore:
         """
         self._sessions.pop(session_id, None)
         self._storage.delete(session_id)
+        self.attention.clear_owner(session_id)
         for tid, sid in list(self._thread_index.items()):
             if sid == session_id:
                 del self._thread_index[tid]
@@ -1207,14 +1224,14 @@ class SessionStore:
         with self._lock:
             return [s.id for s in self._sessions.values() if s.deferred_deliveries]
 
-    def record_delivery(self, session_id: str, event: dict, *, needs_attention: bool) -> Session:
+    def record_delivery(self, session_id: str, event: dict, *, needs_ack: bool) -> Session:
         """Append a delivery event and bump last_active, which is what `unread` derives from."""
         self.append_event(session_id, event)
         with self._lock:
             session = self._sessions.get(session_id)
             if not session:
                 raise ValueError(f"Session '{session_id}' not found")
-            if needs_attention:
+            if needs_ack:
                 session.pending_deliveries.append(
                     {
                         "id": event["delivery_id"],
@@ -1223,6 +1240,13 @@ class SessionStore:
                         "message": event.get("message") or "",
                         "timestamp": event.get("timestamp") or "",
                     }
+                )
+                self.attention.open(
+                    owner_kind=OWNER_SESSION,
+                    owner_id=session_id,
+                    source=SOURCE_DELIVERY,
+                    ref_id=event["delivery_id"],
+                    kind="needs_ack",
                 )
             session.last_active = datetime.now(timezone.utc).isoformat()
             self._persist(session)
@@ -1240,8 +1264,10 @@ class SessionStore:
                 raise ValueError(f"Session '{session_id}' not found")
             if delivery_id is None:
                 session.pending_deliveries = []
+                self.attention.clear_owner(session_id, source=SOURCE_DELIVERY)
             else:
                 session.pending_deliveries = [d for d in session.pending_deliveries if d.get("id") != delivery_id]
+                self.attention.clear_ref(SOURCE_DELIVERY, delivery_id)
             self._persist(session)
             return session
 
@@ -1267,6 +1293,13 @@ class SessionStore:
                 session.notify_sessions.append(target_id)
                 self._persist(session)
             return session
+
+    def open_attention_by_owner(self) -> dict[str, list[AttentionRecord]]:
+        """Grouped so a session list resolves every row in one pass."""
+        grouped: dict[str, list[AttentionRecord]] = {}
+        for record in self.attention.open_records():
+            grouped.setdefault(record.owner_id, []).append(record)
+        return grouped
 
     def waiting_on_map(self) -> dict[str, list[str]]:
         """Map a session id to the unfinished sessions that will notify it.
@@ -1308,11 +1341,13 @@ class SessionStore:
             ]
             if limit:
                 results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
-                # Pins and unanswered cards must outlive the recency window; the
+                # Pins and open obligations must outlive the recency window; the
                 # limit keeps bounding the rest of the tail.
-                head = results[:limit]
-                head_ids = {s.id for s in head}
-                head.extend(s for s in results[limit:] if (s.pinned or s.needs_attention) and s.id not in head_ids)
+                head, tail = results[:limit], results[limit:]
+                if tail:
+                    head_ids = {s.id for s in head}
+                    waiting = {r.owner_id for r in self.attention.open_records()}
+                    head.extend(s for s in tail if (s.pinned or s.id in waiting) and s.id not in head_ids)
                 results = head
             return results
 
@@ -1454,7 +1489,7 @@ class SessionStore:
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
         result["alias"] = session.alias
-        result["needs_attention"] = session.needs_attention
+        result.update(attention_fields(self.attention.open_records(session_id)))
         # Same key, same shape as the session-list row: ids, not whole cards.
         result["pending_deliveries"] = session.pending_delivery_ids
         # `context_limit` (the raw dataclass field) is None until the first turn
@@ -1599,6 +1634,16 @@ class SessionStore:
                     meta = sdata.get("metadata") or {}
                     meta.setdefault("thread_id", old_thread_id)
                     sdata["metadata"] = meta
+                # Discord DMs routed on the alias before dm_route existed, so each one
+                # squats a daemon-wide identity. Only the DM path built the id
+                # `daemon_<user>_<route>_<hex>`, which is what separates those from a
+                # Discord chat the user aliased by hand.
+                meta = sdata.get("metadata") or {}
+                route = meta.get(METADATA_SESSION_NAME)
+                if sdata.get("source") == SessionSource.DISCORD.value and route:
+                    if str(sdata.get("id", "")).startswith(f"daemon_{sdata.get('user_id')}_{route}_"):
+                        meta[METADATA_DM_ROUTE] = meta.pop(METADATA_SESSION_NAME)
+                        sdata["metadata"] = meta
                 sdata = {k: v for k, v in sdata.items() if k in valid_fields}
                 session = Session(**sdata)
             except (TypeError, KeyError) as e:

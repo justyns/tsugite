@@ -13,12 +13,14 @@ from xml.sax.saxutils import quoteattr
 from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.attention_store import OWNER_SESSION
 from tsugite_daemon.session_store import (
     FINISHED_STATUSES,
     Session,
     SessionSource,
     SessionStatus,
     SessionStore,
+    attention_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -414,7 +416,8 @@ class SessionRunner:
 
     def _flush_delivery(self, session_id: str, event: dict) -> None:
         is_needs_ack = event["kind"] == DELIVERY_KIND_NEEDS_ACK
-        session = self._store.record_delivery(session_id, event, needs_attention=is_needs_ack)
+        session = self._store.record_delivery(session_id, event, needs_ack=is_needs_ack)
+        self._emit_attention(session_id)
         if self._event_bus:
             payload = {k: v for k, v in event.items() if k not in ("type", "notify_channels")}
             self._event_bus.emit("session_event", {"session_id": session_id, "event_type": "delivery", **payload})
@@ -423,7 +426,6 @@ class SessionRunner:
                 {
                     "action": "delivered",
                     "id": session_id,
-                    "needs_attention": session.needs_attention,
                     "pending_deliveries": session.pending_delivery_ids,
                 },
             )
@@ -448,17 +450,42 @@ class SessionRunner:
     def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
         session_id = self._live_id(session_id)
         session = self._store.clear_attention(session_id, delivery_id)
+        self._emit_attention(session_id)
         if self._event_bus:
             self._event_bus.emit(
                 "session_update",
                 {
                     "action": "attention_cleared",
                     "id": session_id,
-                    "needs_attention": session.needs_attention,
                     "pending_deliveries": session.pending_delivery_ids,
                 },
             )
         return session
+
+    def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> None:
+        """A re-report of something already open announces nothing."""
+        opened = self._store.attention.open(
+            owner_kind=OWNER_SESSION,
+            owner_id=session_id,
+            source=source,
+            ref_id=ref_id,
+            kind=kind,
+        )
+        if opened:
+            self._emit_attention(session_id)
+
+    def clear_attention_ref(self, source: str, ref_id: str) -> None:
+        for record in self._store.attention.clear_ref(source, ref_id):
+            self._emit_attention(record.owner_id)
+
+    def _emit_attention(self, session_id: str) -> None:
+        if not self._event_bus:
+            return
+        records = self._store.attention.open_records(session_id)
+        self._event_bus.emit(
+            "session_update",
+            {"action": "attention", "id": session_id, **attention_fields(records)},
+        )
 
     def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
         session = self._store.mark_viewed(session_id, ts=ts)

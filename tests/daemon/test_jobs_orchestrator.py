@@ -42,12 +42,19 @@ class FakeRunner:
     def __init__(self):
         self.store = FakeStore()
         self._completion_listeners: list = []
+        self.attention: list[tuple[str, dict]] = []
         self.started: list[Session] = []
         self.cancelled: list[str] = []
         self._next_session_id_counter = 0
         # Seed the default parent session so create_and_start_job's parent-agent
         # lookup has something to find.
         self.store.sessions["parent-1"] = Session(id="parent-1")
+
+    def open_attention(self, session_id: str, **kwargs) -> None:
+        self.attention.append((session_id, kwargs))
+
+    def clear_attention_ref(self, source: str, ref_id: str, **kwargs) -> None:
+        self.attention = [e for e in self.attention if e[1]["ref_id"] != ref_id]
 
     def add_completion_listener(self, callback) -> None:
         if callback not in self._completion_listeners:
@@ -460,25 +467,12 @@ class RaisingStore:
             raise ValueError(f"Unknown session: {session_id}") from None
 
 
-class RaisingStoreRunner:
+class RaisingStoreRunner(FakeRunner):
     """FakeRunner whose store raises ValueError on get_session misses."""
 
     def __init__(self):
+        super().__init__()
         self.store = RaisingStore()
-        self.started: list[Session] = []
-        self.cancelled: list[str] = []
-        self._next_session_id_counter = 0
-
-    def start_session(self, session: Session) -> Session:
-        self._next_session_id_counter += 1
-        if not session.id:
-            session.id = f"session-{self._next_session_id_counter}"
-        session.status = SessionStatus.RUNNING.value
-        self.started.append(session)
-        return session
-
-    def cancel_session(self, session_id: str) -> None:
-        self.cancelled.append(session_id)
 
 
 @pytest.mark.asyncio

@@ -105,7 +105,7 @@ class TestDeliveryEvent:
         runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack")
 
         assert _deliveries(store, sid) == []
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_unknown_kind_is_rejected(self, store, runner):
         sid = _session(store)
@@ -118,14 +118,14 @@ class TestAttention:
         sid = _session(store)
         runner.deliver_to_session(sid, "approve the deploy?", source="job", kind="needs_ack")
 
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
     def test_fyi_leaves_attention_clear(self, store, runner):
         sid = _session(store)
         runner.deliver_to_session(sid, "build finished", source="job", kind="fyi")
 
         assert len(_deliveries(store, sid)) == 1
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_reading_a_session_does_not_clear_attention(self, store, runner):
         sid = _session(store)
@@ -133,20 +133,20 @@ class TestAttention:
 
         store.mark_viewed(sid)
 
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
     def test_clearing_attention_does_not_re_mark_unread(self, store):
         sid = _session(store)
         store.record_delivery(
-            sid, {"type": "delivery", "delivery_id": "dlv-1", "message": "m", "kind": "needs_ack"}, needs_attention=True
+            sid, {"type": "delivery", "delivery_id": "dlv-1", "message": "m", "kind": "needs_ack"}, needs_ack=True
         )
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
         store.mark_viewed(sid)
 
         store.clear_attention(sid)
 
         session = store.get_session(sid)
-        assert session.needs_attention is False
+        assert session.has_pending_deliveries is False
         assert session.last_active <= session.last_viewed_at
 
     def test_attention_survives_a_daemon_restart(self, store, runner, tmp_path):
@@ -155,7 +155,7 @@ class TestAttention:
 
         reopened = SessionStore(tmp_path / "store.json")
 
-        assert reopened.get_session(sid).needs_attention is True
+        assert reopened.get_session(sid).has_pending_deliveries is True
 
     def test_attention_follows_compaction_to_the_successor(self, store, runner):
         sid = _session(store)
@@ -163,8 +163,8 @@ class TestAttention:
 
         successor = store.compact_session(sid)
 
-        assert successor.needs_attention is True
-        assert store.get_session(sid).needs_attention is False
+        assert successor.has_pending_deliveries is True
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_runner_clear_attention_broadcasts(self, store, runner, bus):
         sid = _session(store)
@@ -172,9 +172,9 @@ class TestAttention:
 
         runner.clear_attention(sid)
 
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
         assert bus.of("session_update", "attention_cleared") == [
-            {"action": "attention_cleared", "id": sid, "needs_attention": False, "pending_deliveries": []}
+            {"action": "attention_cleared", "id": sid, "pending_deliveries": []}
         ]
 
 
@@ -204,7 +204,7 @@ class TestObligationSurvivesTheRecencyCap:
 
         rows = store.list_sessions(limit=3)
 
-        assert len([s for s in rows if not s.needs_attention]) == 3
+        assert len([s for s in rows if not s.has_pending_deliveries]) == 3
 
     def test_a_card_inside_the_window_is_not_listed_twice(self, store, runner):
         for i in range(3):
@@ -237,7 +237,7 @@ class TestMidTurnDeferral:
         store.end_turn(sid)
 
         assert [e["message"] for e in _deliveries(store, sid)] == ["first", "second"]
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
     def test_delivery_deferred_across_a_compaction_lands_on_the_successor(self, store, runner):
         sid = _session(store)
@@ -253,7 +253,7 @@ class TestMidTurnDeferral:
 
         assert _deliveries(store, sid) == []
         assert [e["message"] for e in _deliveries(store, successor.id)] == ["backup failed"]
-        assert store.get_session(successor.id).needs_attention is True
+        assert store.get_session(successor.id).has_pending_deliveries is True
 
     def test_deleting_a_session_drops_what_it_was_holding(self, store, runner):
         """A purged session's turn never ends, so what it held goes with it."""
@@ -334,7 +334,6 @@ class TestBroadcasts:
             {
                 "action": "delivered",
                 "id": sid,
-                "needs_attention": True,
                 "pending_deliveries": [event["delivery_id"]],
             }
         ]
@@ -343,9 +342,7 @@ class TestBroadcasts:
         sid = _session(store)
         runner.deliver_to_session(sid, "done", source="job")
 
-        assert bus.of("session_update", "delivered") == [
-            {"action": "delivered", "id": sid, "needs_attention": False, "pending_deliveries": []}
-        ]
+        assert bus.of("session_update", "delivered") == [{"action": "delivered", "id": sid, "pending_deliveries": []}]
 
 
 class TestTurnEndListener:
@@ -467,7 +464,7 @@ class TestExternalFanout:
             )
 
         assert len(_deliveries(store, sid)) == 1
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
 
 class _StubAdapter(BaseAdapter):
@@ -520,7 +517,7 @@ class TestRepliesDoNotDischargeAnObligation:
 
         await adapter.handle_message("alice", "what's the weather like?", _ctx(sid))
 
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
 
 @pytest.fixture
@@ -578,7 +575,7 @@ class TestHTTPSurface:
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_dismiss_reaches_the_session_a_compacted_chat_became(self, store, runner, client, auth):
         """A client holding the pre-compaction id must still discharge the card."""
@@ -590,7 +587,7 @@ class TestHTTPSurface:
 
         assert resp.status_code == 200
         assert resp.json()["needs_attention"] is False
-        assert store.get_session(successor.id).needs_attention is False
+        assert store.get_session(successor.id).has_pending_deliveries is False
 
     def test_dismiss_unknown_session_404s(self, client, auth):
         resp = client.post("/api/sessions/missing/dismiss-attention", json={}, headers=auth)
@@ -621,7 +618,7 @@ class TestPerCardObligations:
         resp = client.post(f"/api/sessions/{sid}/dismiss-attention", json={"delivery_id": first}, headers=auth)
 
         assert resp.status_code == 200
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
     def test_dismissing_the_last_card_clears_the_session(self, store, runner, client, auth):
         sid = _session(store)
@@ -632,7 +629,7 @@ class TestPerCardObligations:
                 f"/api/sessions/{sid}/dismiss-attention", json={"delivery_id": event["delivery_id"]}, headers=auth
             )
 
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_dismissing_without_an_id_clears_every_obligation(self, store, runner, client, auth):
         """The session-row menu's clear-all: one action for a chat the person
@@ -643,7 +640,7 @@ class TestPerCardObligations:
 
         client.post(f"/api/sessions/{sid}/dismiss-attention", json={}, headers=auth)
 
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_an_fyi_delivery_creates_no_obligation(self, store, runner):
         sid = _session(store)
@@ -663,17 +660,16 @@ class TestPerCardObligations:
         row = {r["id"]: r for r in resp.json()["sessions"]}[sid]
         assert row["pending_deliveries"] == outstanding
 
-    def test_an_fyi_landing_on_an_owed_session_does_not_broadcast_all_clear(self, store, runner, bus):
-        """Clients patch the payload onto the row verbatim, so a card's own kind
-        is not the session's answer."""
+    def test_an_fyi_landing_on_an_owed_session_leaves_the_obligation(self, store, runner, bus):
+        """A card's own kind is not the session's answer."""
         sid = _session(store)
         runner.deliver_to_session(sid, "rent is due friday", source="schedule", kind="needs_ack")
         runner.deliver_to_session(sid, "build finished", source="job", kind="fyi")
 
         fyi = bus.of("session_update", "delivered")[-1]
 
-        assert fyi["needs_attention"] is True
         assert fyi["pending_deliveries"] == store.get_session(sid).pending_delivery_ids
+        assert store.session_detail(sid)["needs_attention"] is True
 
     def test_session_detail_names_outstanding_deliveries_the_way_the_row_does(self, store, runner):
         sid = _session(store)
@@ -693,8 +689,9 @@ class TestPerCardObligations:
         runner.clear_attention(sid, delivery_id=first)
 
         assert bus.of("session_update", "attention_cleared") == [
-            {"action": "attention_cleared", "id": sid, "needs_attention": True, "pending_deliveries": [second]}
+            {"action": "attention_cleared", "id": sid, "pending_deliveries": [second]}
         ]
+        assert bus.of("session_update", "attention")[-1]["needs_attention"] is True
 
 
 @pytest.fixture
@@ -809,7 +806,7 @@ class TestObligationOutlivesCompaction:
         replayed = load_history_session(second.id).load_events()
         assert not any(e.type == "delivery" for e in replayed), "the card must be outside the retained window"
 
-        assert store.get_session(second.id).needs_attention is True
+        assert store.get_session(second.id).has_pending_deliveries is True
         rendered = context_adapter._build_message_context("hi", _ctx(second.id), "alice")
         assert "rent is due friday" in rendered
 
@@ -850,7 +847,7 @@ class TestSessionAcknowledge:
         result = tools.session_acknowledge(session_id=sid)
 
         assert result["needs_attention"] is False
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_acknowledging_one_card_leaves_the_other_outstanding(self, store, runner, tools):
         sid = _session(store)
@@ -861,7 +858,7 @@ class TestSessionAcknowledge:
         result = tools.session_acknowledge(delivery_id=first, session_id=sid)
 
         assert result["pending_deliveries"] == [second]
-        assert store.get_session(sid).needs_attention is True
+        assert store.get_session(sid).has_pending_deliveries is True
 
     def test_it_defaults_to_the_session_the_agent_is_running_in(self, store, runner, tools):
         sid = _session(store)
@@ -870,7 +867,7 @@ class TestSessionAcknowledge:
         with patch.object(tools, "get_current_session_id", return_value=sid):
             tools.session_acknowledge()
 
-        assert store.get_session(sid).needs_attention is False
+        assert store.get_session(sid).has_pending_deliveries is False
 
     def test_it_reaches_the_session_a_compacted_chat_became(self, store, runner, tools):
         sid = _session(store)
@@ -881,7 +878,7 @@ class TestSessionAcknowledge:
         with patch.object(tools, "get_current_session_id", return_value=sid):
             tools.session_acknowledge()
 
-        assert store.get_session(second.id).needs_attention is False
+        assert store.get_session(second.id).has_pending_deliveries is False
 
     def test_it_broadcasts_so_open_clients_stop_saying_needs_you(self, store, runner, bus, tools):
         sid = _session(store)
@@ -890,7 +887,7 @@ class TestSessionAcknowledge:
         tools.session_acknowledge(session_id=sid)
 
         assert bus.of("session_update", "attention_cleared") == [
-            {"action": "attention_cleared", "id": sid, "needs_attention": False, "pending_deliveries": []}
+            {"action": "attention_cleared", "id": sid, "pending_deliveries": []}
         ]
 
 
@@ -926,7 +923,7 @@ class TestHeldDeliveriesSurviveADaemonDeath:
         reopened = SessionStore(path)
         SessionRunner(store=reopened, adapter=None, event_bus=None)
 
-        assert reopened.get_session(sid).needs_attention is True
+        assert reopened.get_session(sid).has_pending_deliveries is True
         assert len(_deliveries(reopened, sid)) == 1
 
     def test_a_card_is_not_held_for_a_turn_that_already_ended(self, store):

@@ -179,12 +179,13 @@ class AgentsMixin:
                 include_superseded=include_superseded,
             )
 
-        from tsugite_daemon.session_store import SessionStatus
+        from tsugite_daemon.session_store import SessionStatus, attention_fields
 
         default_ids = adapter.session_store.default_primary_ids()
         live_statuses = {SessionStatus.RUNNING.value, SessionStatus.ACTIVE.value}
 
         waiting_on = adapter.session_store.waiting_on_map()
+        attention_by_owner = adapter.session_store.open_attention_by_owner()
 
         sessions = []
         for s in all_sessions:
@@ -214,8 +215,8 @@ class AgentsMixin:
                 "last_viewed_at": s.last_viewed_at,
                 "superseded_by": s.superseded_by,
                 "unread": unread,
-                "needs_attention": s.needs_attention,
                 "pending_deliveries": s.pending_delivery_ids,
+                **attention_fields(attention_by_owner.get(s.id, [])),
                 "waiting_on": waiting_on.get(s.id, []),
                 "is_primary": s.is_primary,
                 "alias": s.alias,
@@ -893,7 +894,9 @@ class AgentsMixin:
         progress.set_event_persister(build_session_event_persister(adapter.session_store, target_session_id))
         custom_logger = SimpleNamespace(ui_handler=progress)
 
-        interaction_backend = HTTPInteractionBackend(progress)
+        interaction_backend = HTTPInteractionBackend(
+            progress, session_runner=self.session_runner, session_id=target_session_id
+        )
         interaction_backend.pending_message = message
         chat_state = ActiveChat(backend=interaction_backend, progress=progress)
         self._active_chats[backend_key] = chat_state
