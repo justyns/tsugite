@@ -11,7 +11,7 @@ import pytest
 import uvicorn
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
-from tsugite_daemon.config import HTTPConfig
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -54,13 +54,14 @@ def e2e_auth_token(e2e_token_store):
 
 @pytest.fixture(scope="session")
 def e2e_adapter(e2e_workspace, e2e_session_store):
+    runtime = RuntimeDefaults(workspace_dir=e2e_workspace, agent_file="default")
 
     with patch("tsugite.workspace.Workspace") as mock_ws:
         from tsugite.workspace import WorkspaceNotFoundError
 
         mock_ws.load.side_effect = WorkspaceNotFoundError("not found")
         adapter = HTTPAgentAdapter(
-            runtime=agent_config,
+            runtime=runtime,
             session_store=e2e_session_store,
         )
 
