@@ -74,7 +74,7 @@ def test_context_carries_the_framework_variables_templates_rely_on():
     assert isinstance(ctx["available_tools"], list)
     for key in ("is_daemon", "is_scheduled", "is_subagent", "is_interactive"):
         assert isinstance(ctx[key], bool)
-    for key in ("schedule_id", "CWD"):
+    for key in ("schedule_id", "conversation_id", "CWD"):
         assert isinstance(ctx[key], str)
     assert "INVOKED_FROM" in ctx
     assert "WORKSPACE_DIR" in ctx

@@ -542,9 +542,7 @@ class BaseAdapter(ABC):
         # Session context
         ctx["is_session"] = channel_context.source == "session"
         ctx["session_id"] = meta.get("session_id", "") if ctx["is_session"] else ""
-        # The conversation this turn belongs to, for every source. `session_id` is
-        # only set for source="session", so a chat template keys per-conversation
-        # paths off this instead.
+        # Set for every source, unlike session_id.
         ctx["conversation_id"] = conv_id or ""
         ctx["is_channel_session"] = bool(meta.get("channel_session"))
         # Derived from actual wiring: a daemon without the session runner /

@@ -32,3 +32,13 @@ def test_validate_clean_agent_has_no_tool_warning(tmp_path, file_tools):
     result = runner.invoke(app, ["validate", str(agent)])
     assert result.exit_code == 0, result.output
     assert "not installed" not in result.output
+
+
+def test_validate_accepts_a_framework_context_variable(tmp_path, file_tools):
+    """`validate` renders against its own context dict, separate from the one
+    AgentPreparer builds, so a variable added to only one of them passes at run
+    time and fails here."""
+    agent = _write(tmp_path, "---\nname: a\nextends: none\n---\nnotes/{{ conversation_id }}.md\n")
+    result = runner.invoke(app, ["validate", str(agent)])
+    assert result.exit_code == 0, result.output
+    assert "undefined" not in result.output

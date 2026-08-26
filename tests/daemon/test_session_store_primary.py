@@ -173,7 +173,7 @@ def test_set_primary_picks_latest_active(store):
     b.metadata["is_primary"] = True
 
     time.sleep(0.01)
-    store.update_session(b.id, title="bumped")
+    store.update_session(b.id)
 
     found = store.find_primary_session("u1")
     assert found is not None

@@ -37,6 +37,17 @@ def _make_adapter(workspace_dir, session_store):
 
 
 class TestBuildAgentContext:
+    def test_conversation_id_is_set_for_a_chat_source(self, workspace_dir, tmp_store):
+        adapter = _make_adapter(workspace_dir, tmp_store)
+        ctx = ChannelContext(source="http", channel_id=None, user_id="u1", reply_to="http:u1")
+
+        with_conv = adapter._build_agent_context(ctx, conv_id="conv-1")
+        without = adapter._build_agent_context(ctx)
+
+        assert with_conv["conversation_id"] == "conv-1"
+        assert with_conv["session_id"] == "", "session_id stays session-source-only"
+        assert without["conversation_id"] == ""
+
     def test_active_sessions_populated(self, workspace_dir, tmp_store):
         adapter = _make_adapter(workspace_dir, tmp_store)
         # Create a running session
