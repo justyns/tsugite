@@ -121,7 +121,9 @@ def test_a_branch_does_not_inherit_the_alias(store, monkeypatch):
     assert store.find_named_session("daily").id == holder.id
 
 
-@pytest.mark.parametrize("bad", ["", " ", "has space", "-leading", "_leading", "with:colon", "a" * 65, "sl/ash"])
+@pytest.mark.parametrize(
+    "bad", ["", " ", "has space", "-leading", "_leading", "with:colon", "a" * 65, "sl/ash", "daily\n"]
+)
 def test_a_malformed_alias_is_rejected(store, bad):
     session = _plain(store, "s1")
 

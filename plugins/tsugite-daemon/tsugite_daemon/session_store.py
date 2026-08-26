@@ -211,7 +211,7 @@ class AliasConflictError(ValueError):
 
 def validate_alias(alias: str) -> None:
     """Raise unless `alias` matches the routing-identity format."""
-    if not isinstance(alias, str) or not ALIAS_PATTERN.match(alias):
+    if not isinstance(alias, str) or not ALIAS_PATTERN.fullmatch(alias):
         raise ValueError(
             f"Invalid alias {alias!r}: must start with a letter or digit and use only "
             "letters, digits, '-' and '_' (max 64 characters)"

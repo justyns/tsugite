@@ -26,6 +26,9 @@
     canComplete,
     canCancel,
     onRename,
+    onSetAlias,
+    onClearAlias,
+    alias,
     onEditTopic,
     onPin,
     onUnpin,
@@ -44,6 +47,9 @@
     /** A run is in flight (busy or streaming) that a cancel would stop. */
     canCancel: boolean;
     onRename: () => void;
+    onSetAlias: () => void;
+    onClearAlias: () => void;
+    alias?: string | null;
     onEditTopic: () => void;
     onPin: () => void;
     onUnpin: () => void;
@@ -62,7 +68,11 @@
   let menuEl = $state<HTMLElement>();
 
   const actions = $derived<Action[]>([
-    { id: 'rename', label: 'Rename', icon: 'edit', run: onRename },
+    { id: 'rename', label: 'Edit display name', icon: 'edit', run: onRename },
+    { id: 'alias', label: alias ? 'Change alias' : 'Set alias', icon: 'link', run: onSetAlias },
+    ...(alias
+      ? [{ id: 'clearalias', label: 'Remove alias', icon: 'x' as IconName, run: onClearAlias }]
+      : []),
     { id: 'topic', label: 'Edit topic', icon: 'link', run: onEditTopic },
     { id: 'copyid', label: 'Copy session id', icon: 'copy', run: onCopyId },
     { id: 'metadata', label: 'View metadata', icon: 'file', run: onViewMetadata },

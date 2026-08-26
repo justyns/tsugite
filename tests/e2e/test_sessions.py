@@ -50,13 +50,12 @@ def test_sessions_render_select_and_rename(authenticated_page, e2e_session_store
     second_row.click()
     expect(header_title).to_have_text("Second session")
 
-    # Rename the now-open session via the session menu (not the inline title
-    # click) - the dots menu -> "Rename" affordance shares the same inline
-    # header edit field.
+    # Edit the display name via the session menu (not the inline title click) -
+    # the dots menu affordance shares the same inline header edit field.
     page.locator('[data-testid="chat-session-menu-trigger"]').click()
-    page.locator('[data-testid="chat-session-menu"]').get_by_role("menuitem", name="Rename").click()
+    page.locator('[data-testid="chat-session-menu"]').get_by_role("menuitem", name="Edit display name").click()
 
-    rename_input = page.get_by_label("Rename session")
+    rename_input = page.get_by_label("Edit display name")
     rename_input.fill("Renamed session")
     rename_input.press("Enter")
 

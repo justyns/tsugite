@@ -176,6 +176,16 @@
     }
   }
 
+  async function setAlias(id: string, alias: string) {
+    try {
+      await sessions.setAlias(id, alias);
+    } catch (e) {
+      // A taken alias is the one failure the person has to resolve themselves.
+      const taken = e instanceof Error && e.message.includes('409');
+      toasts.push('err', taken ? `Alias "${alias}" is already taken` : 'Could not set the alias');
+    }
+  }
+
   async function copySessionId() {
     if (!selectedId) return;
     try {
@@ -254,6 +264,8 @@
     onBack={() => goBackToWorkspaceList('chats')}
     onRenameCommit={(title) => selectedId && void sessions.rename(selectedId, title)}
     onTopicCommit={(topic) => selectedId && void sessions.setTopic(selectedId, topic)}
+    onAliasCommit={(alias) => selectedId && void setAlias(selectedId, alias)}
+    alias={sessions.rows.find((r) => r.id === selectedId)?.alias ?? null}
     onComplete={() =>
       selectedId &&
       void lifecycle(

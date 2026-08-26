@@ -617,7 +617,6 @@ class BaseAdapter(ABC):
             session_started_xml = render_iso_element("session_started", session.created_at, tz, tz_label, now)
             last_active_xml = render_iso_element("last_active", session.last_active, tz, tz_label, now)
             if session.alias:
-                # The alias charset makes escaping unnecessary.
                 session_alias_xml = f"\n  <session_alias>{session.alias}</session_alias>"
             if session.metadata:
                 topic_lines = _render_session_topic_lines(session.metadata.get("topic"), indent="  ")

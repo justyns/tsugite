@@ -124,6 +124,7 @@ export const TESTID = {
   composerContextSubmenu: 'composer-context-submenu',
   composerContextChoice: (key: string, value: string) => `composer-context-choice-${key}-${value}`,
   chatReadonly: 'chat-readonly',
+  chatAlias: 'chat-alias',
   chatSessionMenuTrigger: 'chat-session-menu-trigger',
   chatSessionMenu: 'chat-session-menu',
   chatMetaLink: 'chat-meta-link',

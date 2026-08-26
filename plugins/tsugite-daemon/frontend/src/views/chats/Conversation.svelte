@@ -8,6 +8,7 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Pill from '$lib/components/buttons/Pill.svelte';
+  import Chip from '$lib/components/buttons/Chip.svelte';
   import type { PillState } from '$lib/components/buttons/pill-state';
   import Msg from '$lib/components/chatturns/Msg.svelte';
   import Prose from '$lib/components/chatturns/Prose.svelte';
@@ -22,6 +23,7 @@
   import type { ConversationController } from './conversation.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
   import { splitStreamFence, type Compaction, type DeliveryBlock } from './turns';
+  import { isValidAlias, suggestAlias } from './alias';
   import { formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
@@ -48,6 +50,8 @@
     onToggleRail,
     onBack,
     onRenameCommit,
+    onAliasCommit,
+    alias,
     onTopicCommit,
     onComplete,
     onCancel,
@@ -70,6 +74,8 @@
     /** Phone drilldown: leave the conversation and return to the sessions list. */
     onBack: () => void;
     onRenameCommit: (title: string) => void;
+    onAliasCommit: (alias: string) => void;
+    alias?: string | null;
     onTopicCommit: (topic: string) => void;
     onComplete: () => void;
     onCancel: () => void;
@@ -85,15 +91,20 @@
 
   let scrollEl = $state<HTMLElement>();
   const follow = new ScrollFollow();
-  let editing = $state<'title' | 'topic' | null>(null);
+  let editing = $state<'title' | 'topic' | 'alias' | null>(null);
   let editDraft = $state('');
   let rawOpen = $state(false);
   let rawMetadataOpen = $state(false);
 
   const timeline = $derived(ctrl.timeline);
-  const title = $derived(row?.title ?? 'New chat');
+  const storedTitle = $derived(row?.title ?? '');
+  const title = $derived(storedTitle || 'New chat');
   const topic = $derived(typeof row?.metadata?.topic === 'string' ? row.metadata.topic : '');
   const sourceType = $derived(row ? sessionSourceType(row) : 'chat');
+  const draft = $derived(editDraft.trim());
+  // An empty draft is a legal commit: it releases the alias.
+  const aliasDraftValid = $derived(draft === '' || isValidAlias(draft));
+  const aliasHintId = $props.id();
   const canRestart = $derived(row?.status === 'failed' || row?.status === 'cancelled');
   const canComplete = $derived(row != null && !isFinishedSession(row));
   const canCancel = $derived(ctrl.streaming || (row?.busy ?? false));
@@ -302,15 +313,24 @@
     lastAskKey = key;
   });
 
-  function startEdit(which: 'title' | 'topic') {
+  function startEdit(which: 'title' | 'topic' | 'alias') {
     editing = which;
-    editDraft = which === 'title' ? title : topic;
+    if (which === 'title') editDraft = title;
+    else if (which === 'topic') editDraft = topic;
+    else editDraft = alias ?? suggestAlias(storedTitle);
   }
   function commitEdit() {
-    const value = editDraft.trim();
-    if (editing === 'title') onRenameCommit(value || 'Untitled session');
-    else if (editing === 'topic') onTopicCommit(value);
+    // A malformed alias stays in the field so its rule can be read.
+    if (editing === 'alias' && !aliasDraftValid) return;
+    if (editing === 'title') onRenameCommit(draft || 'Untitled session');
+    else if (editing === 'topic') onTopicCommit(draft);
+    else if (editing === 'alias') onAliasCommit(draft);
     editing = null;
+  }
+  // Blurring a malformed alias abandons the draft.
+  function blurEdit() {
+    if (editing === 'alias' && !aliasDraftValid) editing = null;
+    else commitEdit();
   }
   function editKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
@@ -377,14 +397,44 @@
         class="hd-edit"
         bind:value={editDraft}
         onkeydown={editKeydown}
-        onblur={commitEdit}
-        aria-label="Rename session"
+        onblur={blurEdit}
+        aria-label="Edit display name"
         autofocus
       />
     {:else}
-      <h2 title="Click to rename">
+      <h2 title="Click to edit the display name">
         <button type="button" class="title-btn" onclick={() => startEdit('title')}>{title}</button>
       </h2>
+    {/if}
+
+    {#if editing === 'alias'}
+      <div class="hd-alias">
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          class="hd-edit"
+          bind:value={editDraft}
+          onkeydown={editKeydown}
+          onblur={blurEdit}
+          aria-label="Set session alias"
+          aria-invalid={!aliasDraftValid}
+          aria-describedby={aliasHintId}
+          placeholder="alias for schedules and agents"
+          autofocus
+        />
+        <p class="hd-alias-hint" class:is-err={!aliasDraftValid} id={aliasHintId}>
+          {#if !aliasDraftValid}
+            Start with a letter or digit, then letters, digits, - or _ (max 64).
+          {:else if alias && !draft}
+            Clearing this removes the alias.
+          {/if}
+        </p>
+      </div>
+    {:else if alias}
+      <span data-testid={TESTID.chatAlias}>
+        <Chip removable removeLabel="Remove alias" onRemove={() => onAliasCommit('')}>
+          {alias}
+        </Chip>
+      </span>
     {/if}
 
     <span class="t-type" data-k={sourceType}>{sourceType === 'research' ? 'res' : sourceType}</span>
@@ -432,6 +482,9 @@
         {canCancel}
         onRename={() => startEdit('title')}
         onEditTopic={() => startEdit('topic')}
+        onSetAlias={() => startEdit('alias')}
+        onClearAlias={() => onAliasCommit('')}
+        {alias}
         {onPin}
         {onUnpin}
         {onSetPrimary}
@@ -448,7 +501,7 @@
         class="convo-topic-edit"
         bind:value={editDraft}
         onkeydown={editKeydown}
-        onblur={commitEdit}
+        onblur={blurEdit}
         aria-label="Edit topic"
         placeholder="topic"
         autofocus
@@ -790,6 +843,22 @@
   }
   .hd-edit:focus {
     outline: none;
+  }
+  /* The alias field carries its hint under it, so it takes a header row of its own. */
+  .hd-alias {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .hd-alias .hd-edit {
+    width: 100%;
+  }
+  .hd-alias-hint {
+    margin: 3px 0 0;
+    font: 400 var(--fs-2xs) / 1.5 var(--font-ui);
+    color: var(--tx3);
+  }
+  .hd-alias-hint.is-err {
+    color: var(--st-err);
   }
   .t-type {
     display: inline-block;

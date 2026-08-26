@@ -50,6 +50,7 @@ export interface SessionRow extends SessionRowLike {
   is_primary: boolean;
   busy: boolean;
   compacting?: boolean;
+  alias?: string | null;
   needs_attention?: boolean;
   pending_deliveries?: string[];
   waiting_on?: string[];
@@ -315,6 +316,14 @@ export class SessionsStore {
         metadata: { ...row.metadata, topic },
       } as Partial<SessionRow>);
     }
+  }
+
+  async setAlias(id: string, value: string): Promise<void> {
+    const path = `/api/sessions/${encodeURIComponent(id)}/alias`;
+    const result = value
+      ? await api.put<{ alias: string | null }>(path, { alias: value })
+      : await api.del<{ alias: string | null }>(path);
+    this.rows = patchRow(this.rows, id, { alias: result.alias } as Partial<SessionRow>);
   }
 
   async complete(id: string): Promise<void> {

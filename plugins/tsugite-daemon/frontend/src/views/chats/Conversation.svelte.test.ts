@@ -1,17 +1,19 @@
 /// <reference types="@vitest/browser/context" />
-import { page } from '@vitest/browser/context';
+import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import Conversation from './Conversation.svelte';
 import { ConversationController } from './conversation.svelte';
 import type { SessionRow } from '$lib/stores/sessions.svelte';
 import { TESTID } from '$lib/testids';
+import { sessionRow } from './__fixtures__/sessionRow';
 
 const noop = () => {};
 const callbacks = {
   onToggleRail: noop,
   onBack: noop,
   onRenameCommit: noop,
+  onAliasCommit: noop,
   onTopicCommit: noop,
   onComplete: noop,
   onCancel: noop,
@@ -954,4 +956,112 @@ test('dismissing a card names the delivery it discharges', async () => {
   await page.getByTestId(TESTID.chatDeliveryDismiss).click();
 
   expect(dismissed).toEqual(['dlv-1']);
+});
+
+test('the alias renders as its own chip, distinct from the title', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, alias: 'daily' });
+
+  const chip = page.getByTestId(TESTID.chatAlias);
+  await expect.element(chip).toBeInTheDocument();
+  await expect.element(chip).toHaveTextContent('daily');
+});
+
+test('a session holding no alias renders no chip', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  expect(document.querySelector(`[data-testid="${TESTID.chatAlias}"]`)).toBeFalsy();
+});
+
+test('removing the alias from its chip commits an empty value', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  const committed: string[] = [];
+  render(Conversation, {
+    ctrl,
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+    alias: 'daily',
+    onAliasCommit: (value: string) => committed.push(value),
+  });
+
+  await page.getByLabelText('Remove alias').click();
+
+  expect(committed).toEqual(['']);
+});
+
+async function openAliasEditor(menuItem: string) {
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await page.getByRole('menuitem', { name: menuItem }).click();
+  return page.getByLabelText('Set session alias');
+}
+
+test('set alias prefills a slug of the display name', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  render(Conversation, {
+    ctrl,
+    row: sessionRow('s1', { title: 'Nightly deploy check' }),
+    railCollapsed: false,
+    ...callbacks,
+  });
+
+  const field = await openAliasEditor('Set alias');
+
+  await expect.element(field).toHaveValue('nightly-deploy-check');
+});
+
+test('change alias prefills the alias it already holds, not a fresh suggestion', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  render(Conversation, {
+    ctrl,
+    row: sessionRow('s1', { title: 'Nightly deploy check' }),
+    railCollapsed: false,
+    ...callbacks,
+    alias: 'daily',
+  });
+
+  const field = await openAliasEditor('Change alias');
+
+  await expect.element(field).toHaveValue('daily');
+});
+
+test('a malformed alias never commits, and says why', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  const committed: string[] = [];
+  render(Conversation, {
+    ctrl,
+    row: sessionRow('s1', { title: 'Nightly deploy check' }),
+    railCollapsed: false,
+    ...callbacks,
+    onAliasCommit: (value: string) => committed.push(value),
+  });
+
+  const field = await openAliasEditor('Set alias');
+  await field.fill('bad alias!');
+  await userEvent.keyboard('{Enter}');
+
+  expect(committed).toEqual([]);
+  await expect.element(field).toBeInTheDocument();
+  await expect.element(page.getByText(/Start with a letter or digit/)).toBeInTheDocument();
+});
+
+test('clearing the field commits an empty value, which releases the alias', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
+  const committed: string[] = [];
+  render(Conversation, {
+    ctrl,
+    row: sessionRow('s1', { title: 'Nightly deploy check' }),
+    railCollapsed: false,
+    ...callbacks,
+    alias: 'daily',
+    onAliasCommit: (value: string) => committed.push(value),
+  });
+
+  const field = await openAliasEditor('Change alias');
+  await field.fill('');
+  await expect.element(page.getByText('Clearing this removes the alias.')).toBeInTheDocument();
+  await userEvent.keyboard('{Enter}');
+
+  expect(committed).toEqual(['']);
 });
