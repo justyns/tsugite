@@ -55,7 +55,7 @@ class SchedulesMixin:
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
-        required = {"id", "agent", "prompt", "schedule_type"}
+        required = {"id", "prompt", "schedule_type"}
         missing = required - set(body.keys())
         if missing:
             return JSONResponse({"error": f"missing fields: {', '.join(missing)}"}, status_code=400)

@@ -1070,7 +1070,6 @@ class TestSchedulesEndpoint:
                 "/api/schedules",
                 {
                     "id": "job2",
-                    "agent": "test-agent",
                     "prompt": "hello",
                     "schedule_type": "cron",
                     "cron_expr": "0 10 * * *",
@@ -1102,6 +1101,24 @@ class TestSchedulesEndpoint:
         assert body["delivery_mode"] == "new_session"
         assert body["delivery_kind"] == "needs_ack"
         assert body["incident_key"] == "disk-2"
+
+    def test_create_does_not_require_a_daemon_agent(self, scheduler_client, test_token):
+        """ScheduleEntry has no `agent` field, so demanding one only blocks the caller."""
+        resp = scheduler_client.post(
+            "/api/schedules",
+            json={"id": "job3", "prompt": "hello", "schedule_type": "cron", "cron_expr": "0 10 * * *"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 201, resp.text
+
+    def test_create_still_names_the_fields_it_needs(self, scheduler_client, test_token):
+        resp = scheduler_client.post(
+            "/api/schedules",
+            json={"id": "job4"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
+        assert "prompt" in resp.json()["error"]
 
     def test_update_rejects_a_bad_delivery_mode(self, scheduler_client, test_token):
         resp = scheduler_client.patch(
