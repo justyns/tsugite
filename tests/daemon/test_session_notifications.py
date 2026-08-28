@@ -487,3 +487,40 @@ def test_add_notify_session_rejects_another_users_session(store):
         store.add_notify_session("src", "theirs")
 
     assert store.get_session("src").notify_sessions == []
+
+
+@pytest.mark.asyncio
+async def test_resumable_target_is_notified_despite_being_completed(store, adapter, runner):
+    """A background session stays reachable after its first turn: `session_reply`
+    never gated on FINISHED_STATUSES, so notify must not either."""
+    store.create_session(
+        Session(
+            id="chatty",
+            source=SessionSource.BACKGROUND.value,
+            status=SessionStatus.COMPLETED.value,
+            resumable=True,
+        )
+    )
+
+    runner.start_session(_worker(notify_sessions=["chatty"]))
+    await _settle(runner, "child")
+
+    assert adapter.notified_ids() == ["chatty"]
+
+
+@pytest.mark.asyncio
+async def test_failed_resumable_target_is_still_skipped(store, adapter, runner):
+    """Resumable only lifts the gate for a session that finished its turn cleanly."""
+    store.create_session(
+        Session(
+            id="broken",
+            source=SessionSource.BACKGROUND.value,
+            status=SessionStatus.FAILED.value,
+            resumable=True,
+        )
+    )
+
+    runner.start_session(_worker(notify_sessions=["broken"]))
+    await _settle(runner, "child")
+
+    assert adapter.notifications == []

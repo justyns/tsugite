@@ -214,6 +214,7 @@ class AgentsMixin:
                 "pin_position": s.pin_position,
                 "last_viewed_at": s.last_viewed_at,
                 "superseded_by": s.superseded_by,
+                "resumable": s.resumable,
                 "unread": unread,
                 "pending_deliveries": s.pending_delivery_ids,
                 **attention_fields(attention_by_owner.get(s.id, [])),

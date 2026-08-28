@@ -28,7 +28,7 @@
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
-  import { sessionSourceType, isFinishedSession } from './sessionModel';
+  import { sessionSourceType, isFinishedSession, isResumableSession } from './sessionModel';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import SessionMenu from './SessionMenu.svelte';
@@ -106,7 +106,9 @@
   const aliasDraftValid = $derived(draft === '' || isValidAlias(draft));
   const aliasHintId = $props.id();
   const canRestart = $derived(row?.status === 'failed' || row?.status === 'cancelled');
-  const canComplete = $derived(row != null && !isFinishedSession(row));
+  // A resumable background chat is already `completed`, so ending it for real is
+  // what clears `resumable` server-side and drops it into the ended bucket.
+  const canComplete = $derived(row != null && (!isFinishedSession(row) || isResumableSession(row)));
   const canCancel = $derived(ctrl.streaming || (row?.busy ?? false));
   const jobCount = $derived(
     timeline.turns.reduce((n, t) => n + t.blocks.filter((b) => b.kind === 'job').length, 0),
@@ -154,7 +156,7 @@
   const pillLabel = $derived(
     pillState === 'interrupted'
       ? (row?.status ?? undefined)
-      : pillState === 'idle' && row?.status === 'completed'
+      : pillState === 'idle' && row?.status === 'completed' && !isResumableSession(row)
         ? 'completed'
         : undefined,
   );

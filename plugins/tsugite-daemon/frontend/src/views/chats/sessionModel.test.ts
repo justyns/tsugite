@@ -5,6 +5,7 @@ import {
   sessionRowState,
   groupSessions,
   isFinishedSession,
+  isResumableSession,
   formatWhen,
   sessionTopic,
   chatNeedsAnswer,
@@ -223,5 +224,41 @@ describe('chatsNeedingAnswer', () => {
       base({ id: 'new', attention: [rec('delivery')] }),
     ];
     expect(chatsNeedingAnswer(rows).map((r) => r.id)).toEqual(['new']);
+  });
+});
+
+describe('isResumableSession', () => {
+  it('is true for a completed background session created to be talked to', () => {
+    expect(
+      isResumableSession(base({ source: 'background', status: 'completed', resumable: true })),
+    ).toBe(true);
+  });
+  it('is false for a one-shot schedule or job run', () => {
+    expect(isResumableSession(base({ source: 'schedule', status: 'completed' }))).toBe(false);
+    expect(isResumableSession(base({ source: 'spawned', status: 'completed' }))).toBe(false);
+  });
+  it('is false once the run failed or was cancelled - those need a restart', () => {
+    expect(isResumableSession(base({ status: 'failed', resumable: true }))).toBe(false);
+    expect(isResumableSession(base({ status: 'cancelled', resumable: true }))).toBe(false);
+  });
+});
+
+describe('resumable sessions in the rail', () => {
+  const resumable = (over: Partial<SessionRow> = {}) =>
+    base({ id: 'chatty', source: 'background', status: 'completed', resumable: true, ...over });
+
+  it('stays in the recency flow instead of the ended bucket', () => {
+    const g = groupSessions([resumable(), base({ id: 'done', status: 'completed' })], {
+      attn: new Set(),
+    });
+    expect(g.recent.map((r) => r.id)).toEqual(['chatty']);
+    expect(g.ended.map((r) => r.id)).toEqual(['done']);
+  });
+  it('reads as idle, the same as an interactive session awaiting input', () => {
+    expect(sessionRowState(resumable())).toBe('idle');
+    expect(sessionRowState(base({ status: 'completed' }))).toBe('done');
+  });
+  it('still counts as finished, so it is never auto-selected as the open chat', () => {
+    expect(isFinishedSession(resumable())).toBe(true);
   });
 });

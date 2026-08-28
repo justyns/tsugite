@@ -942,3 +942,33 @@ class TestHeldDeliveriesSurviveADaemonDeath:
 
         assert store.hold_delivery(sid, {"delivery_id": "dlv-1"}) is True
         assert store.take_deferred_deliveries(sid) == [{"delivery_id": "dlv-1"}]
+
+
+class TestResumableTargets:
+    """A background session created to be talked to keeps taking cards after its
+    first turn completes, matching what `session_reply` already allows."""
+
+    def _resumable(self, store: SessionStore, sid: str, status: str) -> str:
+        store.create_session(
+            Session(
+                id=sid,
+                source=SessionSource.BACKGROUND.value,
+                status=status,
+                resumable=True,
+            )
+        )
+        return sid
+
+    def test_a_completed_resumable_session_still_gets_cards(self, store, runner):
+        sid = self._resumable(store, "chatty", SessionStatus.COMPLETED.value)
+
+        runner.deliver_to_session(sid, "the build is green", source="job", kind="fyi")
+
+        assert len(_deliveries(store, sid)) == 1
+
+    def test_a_failed_resumable_session_gets_none(self, store, runner):
+        sid = self._resumable(store, "broken", SessionStatus.FAILED.value)
+
+        runner.deliver_to_session(sid, "the build is green", source="job", kind="fyi")
+
+        assert _deliveries(store, sid) == []

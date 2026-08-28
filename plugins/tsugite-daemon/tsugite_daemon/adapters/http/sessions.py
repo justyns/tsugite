@@ -286,7 +286,9 @@ class SessionsMixin:
             if status is not None:
                 if status != "completed":
                     return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
-                runner.store.update_session(session_id, status=status)
+                # Clearing `resumable` is what actually ends a background chat: without
+                # it the row would bounce straight back out of the ended bucket.
+                runner.store.update_session(session_id, status=status, resumable=False)
                 self.event_bus.emit("session_update", {"action": "completed", "id": session_id})
                 result["status"] = status
             return JSONResponse({"ok": True, **result})

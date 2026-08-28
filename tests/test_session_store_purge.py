@@ -87,7 +87,7 @@ def test_prune_background_purges_derived_indexes(store):
 
     leaked = _make_session(store, sid="bg-old", metadata={"thread_id": "leaked-thread"})
     _populate_state(store, leaked.id)
-    leaked.created_at = "2020-01-01T00:00:00+00:00"
+    leaked.last_active = "2020-01-01T00:00:00+00:00"
 
     _make_session(store, sid="bg-new")
 
@@ -139,3 +139,17 @@ def test_recover_stale_sessions_clears_compacting_on_restart(tmp_path):
 
     second = SessionStore(path)
     assert second.get_session(session.id).compacting is False
+
+
+def test_background_prune_drops_the_least_recently_active(store, monkeypatch):
+    """Job workers churn the shared background/spawned cap, so a cross-agent
+    session being replied to must outlive an older-but-idle one."""
+    monkeypatch.setattr(store, "MAX_BACKGROUND_SESSIONS", 2)
+    for sid, last_active in (("old-busy", "2026-08-27"), ("old-idle", "2026-01-02"), ("new", "2026-05-01")):
+        session = _make_session(store, sid=sid)
+        session.last_active = last_active
+
+    _make_session(store, sid="trigger")
+
+    assert "old-idle" not in store._sessions
+    assert "old-busy" in store._sessions

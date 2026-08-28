@@ -155,6 +155,9 @@ class SessionRunner:
         session.status = SessionStatus.RUNNING.value
         if not session.source:
             session.source = SessionSource.BACKGROUND.value
+        # Background runs stay open to `session_reply` after they finish; job
+        # workers and scheduled runs are one-shot.
+        session.resumable = session.source == SessionSource.BACKGROUND.value
         session = self._store.create_session(session)
 
         if self._event_bus:
@@ -299,7 +302,7 @@ class SessionRunner:
         if target is None:
             logger.info("Session '%s' cannot notify '%s': unknown or pruned", session.id, target_id)
             return
-        if target.status in FINISHED_STATUSES:
+        if target.status in FINISHED_STATUSES and not target.accepts_followup:
             logger.info("Session '%s' not notifying '%s': target already finished", session.id, target.id)
             return
         try:
@@ -369,7 +372,8 @@ class SessionRunner:
         on the event loop.
         """
         session_id = self._live_id(session_id)
-        if self._store.get_session(session_id).status in FINISHED_STATUSES:
+        target = self._store.get_session(session_id)
+        if target.status in FINISHED_STATUSES and not target.accepts_followup:
             logger.info("Not delivering to session '%s': already finished", session_id)
             return
         if kind not in DELIVERY_KINDS:

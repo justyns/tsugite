@@ -28,6 +28,15 @@ export function isFinishedSession(row: SessionRow): boolean {
   return FINISHED_STATUSES.has(row.status);
 }
 
+/** A finished session that can still take another turn: a background session
+ *  created to be talked to (`start_session`, `/bg`) rather than a one-shot
+ *  schedule or job run. Mirrors Session.accepts_followup in the daemon.
+ *  Deliberately narrower than `isFinishedSession`, which stays a pure status
+ *  read - a resumable row is still finished for auto-select and attention. */
+export function isResumableSession(row: SessionRow): boolean {
+  return row.resumable === true && row.status === 'completed';
+}
+
 /** A busy session is "thinking" while the daemon reports it waiting on the LLM,
  *  else "running" (a tool/turn is active). Read from the progress status_text
  *  the daemon already computes (session_store._progress_status_text). */
@@ -67,7 +76,7 @@ export function attentionSessions(rows: SessionRow[]): SessionRow[] {
 
 export function sessionRowState(row: SessionRow, hints: RowStateHints = {}): SessionState {
   if (row.status === 'failed') return 'failed';
-  if (DONE_STATUSES.has(row.status)) return 'done';
+  if (DONE_STATUSES.has(row.status) && !isResumableSession(row)) return 'done';
   if (hints.needsYou) return 'needs-you';
   if (row.busy) return busyState(row);
   return 'idle';
@@ -85,10 +94,11 @@ export interface GroupHints {
 }
 
 /** Four rail buckets: pinned (user-anchored), active (live or needs-you), recent
- *  (everything else still live), and ended (finished, pulled out of the recency
- *  flow). A row appears in exactly one bucket. Pinned wins over ended, so a pinned
- *  finished session stays pinned; a finished row never lands in active even with a
- *  pending ask. Order within a bucket is preserved from the store's sorted input. */
+ *  (everything else still live, plus resumable background chats), and ended
+ *  (finished, pulled out of the recency flow). A row appears in exactly one
+ *  bucket. Pinned wins over ended, so a pinned finished session stays pinned; a
+ *  finished row never lands in active even with a pending ask. Order within a
+ *  bucket is preserved from the store's sorted input. */
 export function groupSessions(rows: SessionRow[], hints: GroupHints): SessionGroups {
   const pinned: SessionRow[] = [];
   const active: SessionRow[] = [];
@@ -96,7 +106,7 @@ export function groupSessions(rows: SessionRow[], hints: GroupHints): SessionGro
   const ended: SessionRow[] = [];
   for (const row of rows) {
     if (row.pinned) pinned.push(row);
-    else if (isFinishedSession(row)) ended.push(row);
+    else if (isFinishedSession(row) && !isResumableSession(row)) ended.push(row);
     else if (row.busy || hints.attn.has(row.id)) active.push(row);
     else recent.push(row);
   }

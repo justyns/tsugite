@@ -277,6 +277,9 @@ class Session:
     notify: list[str] = field(default_factory=list)
     # `waiting_on` is the reverse view of this.
     notify_sessions: list[str] = field(default_factory=list)
+    # Created as a continuing conversation rather than a one-shot run, so it stays
+    # reachable once its first turn finishes. See `accepts_followup`.
+    resumable: bool = False
 
     title: Optional[str] = None
 
@@ -317,6 +320,12 @@ class Session:
     def alias(self) -> Optional[str]:
         """This session's routing identity, claimed through SessionStore.set_alias."""
         return self.metadata.get(METADATA_SESSION_NAME)
+
+    @property
+    def accepts_followup(self) -> bool:
+        """Finished, but still open to another turn. A failed or cancelled run needs
+        an explicit restart instead."""
+        return self.resumable and self.status == SessionStatus.COMPLETED.value
 
     @property
     def has_pending_deliveries(self) -> bool:
@@ -1087,7 +1096,9 @@ class SessionStore:
                 self._purge_session_state(s.id)
 
     def _prune_background_sessions(self) -> None:
-        """Remove oldest completed background/spawned sessions beyond MAX_BACKGROUND_SESSIONS. Must hold lock."""
+        """Remove least-recently-active finished background/spawned sessions beyond
+        MAX_BACKGROUND_SESSIONS. Job workers churn the shared cap, so a session still
+        being replied to outlives an older idle one. Must hold lock."""
         children = [
             s
             for s in self._sessions.values()
@@ -1096,7 +1107,7 @@ class SessionStore:
         ]
         if len(children) <= self.MAX_BACKGROUND_SESSIONS:
             return
-        children.sort(key=lambda s: s.created_at)
+        children.sort(key=lambda s: s.last_active)
         for s in children[: len(children) - self.MAX_BACKGROUND_SESSIONS]:
             self._purge_session_state(s.id)
 

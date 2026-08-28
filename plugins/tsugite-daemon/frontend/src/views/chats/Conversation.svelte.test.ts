@@ -1137,3 +1137,16 @@ test('clearing the field commits an empty value, which releases the alias', asyn
 
   expect(committed).toEqual(['']);
 });
+
+test('a resumable background chat reads as idle in the header, not completed', async () => {
+  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z' }]);
+  const row = sessionRow('sess-1', {
+    source: 'background',
+    status: 'completed',
+    resumable: true,
+  });
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+
+  await expect.element(page.getByText('idle', { exact: true })).toBeInTheDocument();
+  expect(await page.getByText('completed', { exact: true }).elements()).toHaveLength(0);
+});

@@ -56,6 +56,7 @@ export interface SessionRow extends SessionRowLike {
   pin_position: number | null;
   last_viewed_at: string | null;
   superseded_by: string | null;
+  resumable?: boolean;
   unread: boolean;
   is_primary: boolean;
   busy: boolean;
