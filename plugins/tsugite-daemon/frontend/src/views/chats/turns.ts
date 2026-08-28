@@ -118,6 +118,7 @@ export interface DeliveryBlock {
   needsAck: boolean;
   deliveryId?: string;
   title?: string;
+  origin?: TurnOrigin;
 }
 
 export type TurnBlock =
@@ -153,9 +154,9 @@ export interface TurnAttachment {
   path: string;
 }
 
-/** Who sent a user turn when the person did not: another session's
- *  `session_reply`, a job wake-up, or a scheduled run. Read off the routing key
- *  the daemon already records on the event's `channel`. */
+/** Who sent something the person did not: another session's `session_reply`, a
+ *  job wake-up, or a scheduled run. Read off the routing key the daemon already
+ *  records, on a user turn's `channel` or flat on a delivery. */
 export interface TurnOrigin {
   kind: 'session' | 'job' | 'schedule';
   id: string;
@@ -326,9 +327,9 @@ function parseContextItems(v: unknown): InjectedBlock['items'] {
   return items.length ? items : undefined;
 }
 
-/** The sender of a user_input the person did not type, from the routing key its
- *  `channel` carries. A background session's own opening prompt has none: it is
- *  the session's prompt, not a message from somewhere else. */
+/** The sender behind an event the person did not type, read off whichever
+ *  record holds the routing keys. A background session's own opening prompt has
+ *  none: it is the session's prompt, not a message from somewhere else. */
 function parseOrigin(v: unknown): TurnOrigin | undefined {
   const channel = rec(v);
   if (!channel) return undefined;
@@ -898,6 +899,9 @@ class Builder {
           turn = { id: this.uid('ai'), role: 'ai', at, blocks: [] };
           this.turns.push(turn);
         }
+        // A delivery spreads its metadata flat, so the routing keys are on the
+        // event rather than under `channel`.
+        const origin = parseOrigin(e);
         turn.blocks.push({
           kind: 'delivery',
           message: str(e.message) ?? '',
@@ -905,6 +909,7 @@ class Builder {
           needsAck: str(e.kind) === 'needs_ack',
           ...(str(e.delivery_id) ? { deliveryId: str(e.delivery_id) } : {}),
           ...(str(e.title) ? { title: str(e.title) } : {}),
+          ...(origin ? { origin } : {}),
         });
         return;
       }

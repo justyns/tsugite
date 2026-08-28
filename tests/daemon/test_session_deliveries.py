@@ -321,7 +321,14 @@ class TestFanoutDoesNotBlockTheLoop:
 class TestBroadcasts:
     def test_delivery_emits_event_and_session_update(self, store, runner, bus):
         sid = _session(store)
-        runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack", title="Deploy")
+        runner.deliver_to_session(
+            sid,
+            "approve?",
+            source="schedule",
+            kind="needs_ack",
+            title="Deploy",
+            metadata={"schedule_id": "deploy-watch"},
+        )
 
         [event] = bus.of("session_event")
         assert event["session_id"] == sid
@@ -329,6 +336,8 @@ class TestBroadcasts:
         assert event["message"] == "approve?"
         assert event["kind"] == "needs_ack"
         assert event["title"] == "Deploy"
+        # The card shows its schedule live, not only after a replay.
+        assert event["schedule_id"] == "deploy-watch"
 
         assert bus.of("session_update", "delivered") == [
             {

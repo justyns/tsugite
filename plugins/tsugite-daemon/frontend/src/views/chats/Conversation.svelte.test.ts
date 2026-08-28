@@ -1030,6 +1030,30 @@ test('dismissing a card names the delivery it discharges', async () => {
   expect(dismissed).toEqual(['dlv-1']);
 });
 
+test('two cards from different schedules show each schedule id', async () => {
+  // Without this every card reads "SCHEDULE", so a session fed by several
+  // schedules gives the reader no way to tell them apart.
+  const ctrl = controllerWith([
+    { ...NEEDS_ACK, delivery_id: 'dlv-1', schedule_id: 'nightly-backup', id: 9 },
+    { ...NEEDS_ACK, delivery_id: 'dlv-2', schedule_id: 'weekly-digest', id: 10 },
+  ]);
+  render(Conversation, { ctrl, row: attentionRow([]), railCollapsed: false, ...callbacks });
+
+  const cards = document.querySelectorAll(`[data-testid="${TESTID.chatDelivery}"]`);
+  expect(cards).toHaveLength(2);
+  expect(cards[0]!.textContent).toContain('nightly-backup');
+  expect(cards[1]!.textContent).toContain('weekly-digest');
+});
+
+test('a card carrying no origin id keeps the plain source header', async () => {
+  const ctrl = controllerWith([NEEDS_ACK]);
+  render(Conversation, { ctrl, row: attentionRow([]), railCollapsed: false, ...callbacks });
+
+  const card = page.getByTestId(TESTID.chatDelivery);
+  await expect.element(card).toHaveTextContent('schedule');
+  expect(card.element().querySelector('.dlv-origin')).toBeNull();
+});
+
 test('the alias renders as its own chip, distinct from the title', async () => {
   const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: 'z' }]);
   render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, alias: 'daily' });

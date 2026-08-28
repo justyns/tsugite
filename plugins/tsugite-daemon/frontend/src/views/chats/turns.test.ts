@@ -1639,6 +1639,12 @@ describe('buildTimeline (delivery cards)', () => {
     expect(cards.map((c) => (c as DeliveryBlock).deliveryId)).toEqual(['dlv-1', 'dlv-2']);
   });
 
+  it('reads the schedule id off a delivery', () => {
+    const t = buildTimeline([{ ...delivery, schedule_id: 'nightly-backup' }]);
+    const card = t.turns[0]!.blocks.find((b) => b.kind === 'delivery') as DeliveryBlock;
+    expect(card.origin).toEqual({ kind: 'schedule', id: 'nightly-backup' });
+  });
+
   it('marks an fyi delivery as not needing an acknowledgement', () => {
     const t = buildTimeline([{ ...delivery, kind: 'fyi', title: undefined }]);
     const card = t.turns[0]!.blocks[0] as DeliveryBlock;

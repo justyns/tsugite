@@ -25,6 +25,9 @@
   <div class="dlv-hd">
     <Icon name={block.needsAck ? 'alert' : 'down'} size={12} />
     <span>{block.source || 'delivery'}</span>
+    {#if block.origin}
+      <span class="dlv-origin" title={block.origin.id}>· {block.origin.id}</span>
+    {/if}
     {#if outstanding}<span class="dlv-tag">needs you</span>{/if}
   </div>
   {#if block.title}<div class="dlv-title">{block.title}</div>{/if}
@@ -67,7 +70,16 @@
   .dlv.is-ack .dlv-hd :global(svg) {
     color: var(--st-warn);
   }
+  /* An id is case-sensitive, so it must escape the header's uppercasing. */
+  .dlv-origin {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--tx2);
+    text-transform: none;
+  }
   .dlv-tag {
+    flex-shrink: 0;
     color: var(--st-warn);
   }
   .dlv-title {
