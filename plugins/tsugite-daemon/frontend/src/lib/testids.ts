@@ -140,6 +140,8 @@ export const TESTID = {
   chatEffortSeg: 'chat-effort-seg',
   /** Prominent, always-visible Retry on a failed turn (re-sends the last message). */
   chatRetry: 'chat-retry',
+  chatTurnOrigin: 'chat-turn-origin',
+  chatTurnReplyTo: 'chat-turn-reply-to',
   chatDelivery: 'chat-delivery',
   chatDeliveryDismiss: 'chat-delivery-dismiss',
   chatAttachmentImage: 'chat-attachment-image',

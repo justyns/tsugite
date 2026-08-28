@@ -153,6 +153,14 @@ export interface TurnAttachment {
   path: string;
 }
 
+/** Who sent a user turn when the person did not: another session's
+ *  `session_reply`, a job wake-up, or a scheduled run. Read off the routing key
+ *  the daemon already records on the event's `channel`. */
+export interface TurnOrigin {
+  kind: 'session' | 'job' | 'schedule';
+  id: string;
+}
+
 export interface Turn {
   id: string;
   role: 'user' | 'ai';
@@ -165,6 +173,11 @@ export interface Turn {
   /** True when the "user" turn is purely an injection (e.g. a scheduled-task
    *  result) - the person never typed it, so it must not render as "you". */
   synthetic?: boolean;
+  /** Set on a user turn something other than the person sent. */
+  origin?: TurnOrigin;
+  /** Set on the AI turn whose answer was handed back to the sender - a
+   *  `session_reply` only, never a one-way completion or job wake-up. */
+  replyTo?: TurnOrigin;
   /** The AI turn has begun but no final_result/session_end has closed it. */
   streaming?: boolean;
   /** Raw token-stream buffer (stream_chunk deltas). Rendered live as markdown,
@@ -313,6 +326,21 @@ function parseContextItems(v: unknown): InjectedBlock['items'] {
   return items.length ? items : undefined;
 }
 
+/** The sender of a user_input the person did not type, from the routing key its
+ *  `channel` carries. A background session's own opening prompt has none: it is
+ *  the session's prompt, not a message from somewhere else. */
+function parseOrigin(v: unknown): TurnOrigin | undefined {
+  const channel = rec(v);
+  if (!channel) return undefined;
+  const from = str(channel.from_session);
+  if (from) return { kind: 'session', id: from };
+  const job = str(channel.job_id);
+  if (job) return { kind: 'job', id: job };
+  const schedule = str(channel.schedule_id);
+  if (schedule) return { kind: 'schedule', id: schedule };
+  return undefined;
+}
+
 /** Server-split injection blocks off a user_input event ({tag, id?, body}); a
  *  client_context block also carries structured `items`. */
 function parseInjected(v: unknown): InjectedBlock[] {
@@ -387,6 +415,9 @@ class Builder {
    *  the message persists): held here and attached to the next AI turn, never
    *  rendered as a phantom agent turn floating above the user's message. */
   private pendingHooks: ExecBlock[] = [];
+  /** The sender awaiting the user turn in progress, stamped onto the AI turn it
+   *  opens. Unset for a one-way wake-up nobody is waiting on. */
+  private replyTo: TurnOrigin | undefined;
   /** The interactive prompt still awaiting an answer, folded from the durable
    *  ask_user / ask_answered events (not a timeline block). */
   pendingAsk: PendingAsk | null = null;
@@ -404,6 +435,7 @@ class Builder {
         at,
         blocks: [...this.pendingHooks],
         streaming: true,
+        ...(this.replyTo ? { replyTo: this.replyTo } : {}),
       };
       this.pendingHooks = [];
       this.turns.push(this.ai);
@@ -573,6 +605,11 @@ class Builder {
     const blocks = parseInjected(e.injected);
     const rest = (blocks.length ? (str(e.display_text) ?? '') : (str(e.text) ?? '')).trim();
     const attachments = parseAttachments(e.attachments);
+    const origin = parseOrigin(e.channel);
+    // Only `session_reply` hands its result back to the caller. A completion or
+    // job notification is one-way, so its turn is badged with the sender but the
+    // answer is not claimed to have gone anywhere.
+    this.replyTo = origin && str(rec(e.channel)?.source) === 'session' ? origin : undefined;
     this.turns.push({
       id: this.uid('user'),
       role: 'user',
@@ -581,6 +618,7 @@ class Builder {
       ...(blocks.length ? { injected: blocks } : {}),
       ...(attachments ? { attachments } : {}),
       ...(blocks.length && !rest ? { synthetic: true } : {}),
+      ...(origin ? { origin } : {}),
     });
   }
 

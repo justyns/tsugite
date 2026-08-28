@@ -1139,7 +1139,9 @@ test('clearing the field commits an empty value, which releases the alias', asyn
 });
 
 test('a resumable background chat reads as idle in the header, not completed', async () => {
-  const ctrl = controllerWith([{ type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z' }]);
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z' },
+  ]);
   const row = sessionRow('sess-1', {
     source: 'background',
     status: 'completed',
@@ -1149,4 +1151,102 @@ test('a resumable background chat reads as idle in the header, not completed', a
 
   await expect.element(page.getByText('idle', { exact: true })).toBeInTheDocument();
   expect(await page.getByText('completed', { exact: true }).elements()).toHaveLength(0);
+});
+
+// --- Cross-session attribution ---------------------------------------------
+
+function crossSessionController(): ConversationController {
+  return controllerWith([
+    {
+      type: 'user_input',
+      text: 'status on the migration?',
+      timestamp: '2026-07-14T15:00:00Z',
+      channel: { source: 'session', from_session: 'lead-agent' },
+    },
+    { type: 'model_response', raw_content: 'Two files left.', thought: 'Two files left.' },
+    { type: 'final_result', result: 'Two files left.' },
+  ]);
+}
+
+test('a message from another session is badged with its sender, not shown as yours', async () => {
+  render(Conversation, {
+    ctrl: crossSessionController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+
+  const badge = page.getByTestId(TESTID.chatTurnOrigin);
+  await expect.element(badge).toHaveTextContent('lead-agent');
+  // The gutter names the sender instead of claiming the person typed it.
+  await expect.element(page.getByText('session', { exact: true })).toBeInTheDocument();
+  expect(await page.getByText('you', { exact: true }).elements()).toHaveLength(0);
+});
+
+test('the sender badge links to the session it came from', async () => {
+  render(Conversation, {
+    ctrl: crossSessionController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+
+  await expect
+    .element(page.getByTestId(TESTID.chatTurnOrigin))
+    .toHaveAttribute('href', '#chats?sessionId=lead-agent');
+});
+
+test('the answer says it went back to the sender', async () => {
+  render(Conversation, {
+    ctrl: crossSessionController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+
+  await expect
+    .element(page.getByTestId(TESTID.chatTurnReplyTo))
+    .toHaveTextContent('replied to lead-agent');
+});
+
+test('a message the person typed carries no sender badge', async () => {
+  const ctrl = controllerWith([
+    {
+      type: 'user_input',
+      text: 'status on the migration?',
+      timestamp: '2026-07-14T15:00:00Z',
+      channel: { source: 'http', user_id: 'web-alice' },
+    },
+    { type: 'final_result', result: 'Two files left.' },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  await expect.element(page.getByText('you', { exact: true })).toBeInTheDocument();
+  expect(await page.getByTestId(TESTID.chatTurnOrigin).elements()).toHaveLength(0);
+  expect(await page.getByTestId(TESTID.chatTurnReplyTo).elements()).toHaveLength(0);
+});
+
+test('a session-completion wake-up folds instead of rendering raw XML as your message', async () => {
+  const ctrl = controllerWith([
+    {
+      type: 'user_input',
+      text: '<session_finished id="child" status="completed" title="Do the thing">\nall done\n</session_finished>',
+      display_text: '',
+      injected: [
+        {
+          tag: 'session_finished',
+          id: 'child',
+          status: 'completed',
+          title: 'Do the thing',
+          body: 'all done',
+        },
+      ],
+      timestamp: '2026-07-14T15:00:00Z',
+      channel: { source: 'session_completion', from_session: 'child' },
+    },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  expect(await page.getByText('<session_finished', { exact: false }).elements()).toHaveLength(0);
+  await expect.element(page.getByTestId(TESTID.chatTurnOrigin)).toHaveTextContent('child');
 });

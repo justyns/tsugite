@@ -64,7 +64,11 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
         Dict with session_id and the agent's response.
     """
     session_id = _resolve_session_arg(session_id)
-    result = _call(_session_runner.reply_to_session, session_id, message, timeout=120)
+    # Read here, not in reply_to_session: _call hops to the daemon loop with a fresh
+    # context, and reply_to_session rebinds the current session to the target.
+    origin = get_current_session_id()
+    metadata = {"from_session": origin} if origin and origin != session_id else None
+    result = _call(_session_runner.reply_to_session, session_id, message, metadata=metadata, timeout=120)
     return {"session_id": session_id, "response": str(result)[:2000]}
 
 

@@ -36,7 +36,14 @@ class _RecordingAdapter:
         return "test-model"
 
     async def handle_message(self, user_id, message, channel_context, custom_logger=None):
-        self.calls.append(SimpleNamespace(user_id=user_id, message=message, source=channel_context.source))
+        self.calls.append(
+            SimpleNamespace(
+                user_id=user_id,
+                message=message,
+                source=channel_context.source,
+                metadata=channel_context.metadata or {},
+            )
+        )
         if isinstance(self.result, Exception):
             raise self.result
         return self.result
@@ -118,6 +125,18 @@ async def test_notification_carries_id_status_title_and_result(store, adapter, r
     assert 'status="completed"' in message
     assert 'title="Do the thing"' in message
     assert "all done" in message
+
+
+@pytest.mark.asyncio
+async def test_notification_names_the_session_it_came_from(store, adapter, runner):
+    """The wake-up is machine-authored, so the recipient's transcript records the
+    sender rather than presenting it as the person typing."""
+    _listener(store, "watcher-a")
+
+    runner.start_session(_worker(notify_sessions=["watcher-a"]))
+    await _settle(runner, "child")
+
+    assert adapter.notifications[0].metadata["from_session"] == "child"
 
 
 @pytest.mark.asyncio

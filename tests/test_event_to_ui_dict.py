@@ -205,3 +205,24 @@ class TestInjectedBlockIds:
 
         blocks, _ = split_injected_context("<scheduled_task>ran</scheduled_task>")
         assert "id" not in blocks[0]
+
+
+def test_session_finished_folds_with_its_attributes():
+    """A session-completion wake-up is machine-authored: it folds like any other
+    injection instead of rendering as raw XML in the person's own bubble."""
+    text = (
+        '<session_finished id="child" status="completed" title="Do the thing">\n'
+        "<result>\nall done\n</result>\n"
+        "</session_finished>"
+    )
+    d = event_to_ui_dict(Event(type="user_input", ts=TS, data={"text": text}))
+    assert d["injected"] == [
+        {
+            "tag": "session_finished",
+            "id": "child",
+            "status": "completed",
+            "title": "Do the thing",
+            "body": "<result>\nall done\n</result>",
+        }
+    ]
+    assert d["display_text"] == ""

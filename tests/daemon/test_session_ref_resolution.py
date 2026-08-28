@@ -137,6 +137,30 @@ class TestToolsDefaultToTheCallingSession:
         assert result["response"] == "ack"
         assert adapter.handle_message.await_count == 1
 
+    def test_reply_records_the_session_it_came_from(self, store, runner, adapter):
+        """The recipient's transcript has to say who sent this, so the UI can badge
+        it instead of rendering another agent's message as the person's own.
+
+        The origin is read in the tool, not in `reply_to_session`: the runner hops
+        to the daemon loop via `run_coroutine_threadsafe`, which starts a fresh
+        context, and `reply_to_session` rebinds the current session to the target.
+        """
+        caller = _chat(store, "caller")
+        target = _chat(store, "target")
+        with _calling_session(caller.id):
+            session_tools.session_reply(message="how goes it", session_id=target.id)
+
+        context = adapter.handle_message.await_args.kwargs["channel_context"]
+        assert context.metadata["from_session"] == caller.id
+        assert context.metadata["session_id"] == target.id
+
+    def test_reply_from_outside_a_session_records_no_origin(self, store, runner, adapter):
+        target = _chat(store, "target")
+        with _calling_session(None):
+            session_tools.session_reply(message="how goes it", session_id=target.id)
+
+        assert "from_session" not in adapter.handle_message.await_args.kwargs["channel_context"].metadata
+
     def test_notify_defaults_only_the_session_it_modifies(self, store, runner):
         chat = _chat(store)
         watcher = _chat(store, "watcher")

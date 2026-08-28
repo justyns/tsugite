@@ -23,16 +23,24 @@ from .models import Event
 # task results, environment/message context). Split off the visible message so
 # UIs can fold them instead of rendering them as the user's own words.
 # ``environment`` appears only in older histories but must keep normalizing.
-_INJECTED_TAGS = ("message_context", "environment", "background_task_complete", "scheduled_task", "client_context")
+_INJECTED_TAGS = (
+    "message_context",
+    "environment",
+    "background_task_complete",
+    "scheduled_task",
+    "client_context",
+    "session_finished",
+)
 _INJECTED_RES = {tag: re.compile(rf"<{tag}(\s[^>]*)?>(.*?)</{tag}>", re.DOTALL) for tag in _INJECTED_TAGS}
 # Single quotes because quoteattr falls back to them when the value holds a `"`.
-_ID_RE = re.compile(r"""id=(?:"([^"]*)"|'([^']*)')""")
+_ATTR_RE = re.compile(r"""([A-Za-z_][\w-]*)=(?:"([^"]*)"|'([^']*)')""")
 
 
 def split_injected_context(text: str) -> Tuple[List[Dict[str, str]], str]:
     """Peel leading injection tags off a user message.
 
-    Returns (blocks, rest) where each block is {tag, id?, body} and rest is
+    Returns (blocks, rest) where each block is {tag, body} plus the tag's own
+    attributes (`id`, and `status`/`title` on a session_finished), and rest is
     the text the person actually typed ("" for a pure injection turn).
     """
     blocks: List[Dict[str, str]] = []
@@ -45,9 +53,9 @@ def split_injected_context(text: str) -> Tuple[List[Dict[str, str]], str]:
             m = tag_re.match(body)
             if m:
                 block = {"tag": tag}
-                id_m = _ID_RE.search(m.group(1) or "")
-                if id_m:
-                    block["id"] = id_m.group(1) if id_m.group(1) is not None else id_m.group(2)
+                for name, dq, sq in _ATTR_RE.findall(m.group(1) or ""):
+                    if name not in ("tag", "body"):
+                        block[name] = dq if dq else sq
                 block["body"] = (m.group(2) or "").strip()
                 blocks.append(block)
                 body = body[m.end() :]

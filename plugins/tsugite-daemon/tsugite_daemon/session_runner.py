@@ -306,7 +306,7 @@ class SessionRunner:
             logger.info("Session '%s' not notifying '%s': target already finished", session.id, target.id)
             return
         try:
-            await self.reply_to_session(target.id, message, source=source)
+            await self.reply_to_session(target.id, message, source=source, metadata={"from_session": session.id})
         except Exception as e:
             logger.warning("Session '%s' failed to notify '%s': %s", session.id, target.id, e)
 

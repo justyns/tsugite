@@ -1657,3 +1657,60 @@ describe('buildTimeline (delivery cards)', () => {
     expect(t.turns[1]!.blocks.map((b) => b.kind)).toEqual(['prose', 'delivery', 'prose']);
   });
 });
+
+describe('machine-origin user turns', () => {
+  // The recorded `channel` already carries one routing key per sender kind; the
+  // reducer only has to name which one is set.
+  const inbound = (channel: Record<string, unknown>) => [
+    { type: 'user_input', text: 'status?', timestamp: '2026-07-14T15:00:00Z', channel, id: 1 },
+    { type: 'final_result', result: 'all good', id: 2 },
+  ];
+
+  it('names the session a cross-session reply came from', () => {
+    const t = buildTimeline(inbound({ source: 'session', from_session: 'lead' }));
+    expect(t.turns[0]!.origin).toEqual({ kind: 'session', id: 'lead' });
+  });
+
+  it('names the job behind a job wake-up', () => {
+    const t = buildTimeline(inbound({ source: 'job_complete', job_id: 'job-3f22' }));
+    expect(t.turns[0]!.origin).toEqual({ kind: 'job', id: 'job-3f22' });
+  });
+
+  it('names the schedule behind a scheduled turn', () => {
+    const t = buildTimeline(inbound({ source: 'scheduler', schedule_id: 'nightly' }));
+    expect(t.turns[0]!.origin).toEqual({ kind: 'schedule', id: 'nightly' });
+  });
+
+  it('leaves a message the person typed unattributed', () => {
+    const t = buildTimeline(inbound({ source: 'http', user_id: 'web-alice' }));
+    expect(t.turns[0]!.origin).toBeUndefined();
+  });
+
+  it("leaves a background session's own opening prompt unattributed", () => {
+    // source is "session" for the first turn too, but nothing sent it.
+    const t = buildTimeline(inbound({ source: 'session', user_id: 'session:bg-1' }));
+    expect(t.turns[0]!.origin).toBeUndefined();
+  });
+
+  it('marks the answer as going back to the sender, not to the person', () => {
+    const t = buildTimeline(inbound({ source: 'session', from_session: 'lead' }));
+    expect(t.turns[1]!.replyTo).toEqual({ kind: 'session', id: 'lead' });
+  });
+
+  it('leaves the answer to a typed message unmarked', () => {
+    const t = buildTimeline(inbound({ source: 'http' }));
+    expect(t.turns[1]!.replyTo).toBeUndefined();
+  });
+
+  it.each(['session_completion', 'session_cancelled', 'session_failed', 'job_complete'])(
+    'does not claim the answer went back on a one-way %s wake-up',
+    (source) => {
+      // Only session_reply hands its result to the caller; a completion or job
+      // notification discards it, so the turn is still badged with its sender
+      // but must not say the answer was routed anywhere.
+      const t = buildTimeline(inbound({ source, from_session: 'child', job_id: 'job-1' }));
+      expect(t.turns[0]!.origin).toBeDefined();
+      expect(t.turns[1]!.replyTo).toBeUndefined();
+    },
+  );
+});

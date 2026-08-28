@@ -18,11 +18,12 @@
   import LocalEcho from '$lib/components/chatturns/LocalEcho.svelte';
   import Work from '$lib/components/feedback/Work.svelte';
   import Ask from '$lib/components/ask/Ask.svelte';
+  import { sessions } from '$lib/stores/sessions.svelte';
   import type { SessionRow } from '$lib/stores/sessions.svelte';
   import { TESTID } from '$lib/testids';
   import type { ConversationController } from './conversation.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
-  import { splitStreamFence, type Compaction, type DeliveryBlock } from './turns';
+  import { splitStreamFence, type Compaction, type DeliveryBlock, type TurnOrigin } from './turns';
   import { isValidAlias, suggestAlias } from './alias';
   import { formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
@@ -352,7 +353,30 @@
     message_context: 'context',
     environment: 'context',
     client_context: 'context',
+    session_finished: 'session',
   };
+  const ORIGIN_WHO: Record<TurnOrigin['kind'], string> = {
+    session: 'session',
+    job: 'job',
+    schedule: 'sched',
+  };
+  const ORIGIN_ICON: Record<TurnOrigin['kind'], IconName> = {
+    session: 'chat',
+    job: 'jobs',
+    schedule: 'sched',
+  };
+  // A session is named by its current title, read live so a rename follows here.
+  function originLabel(origin: TurnOrigin): string {
+    if (origin.kind !== 'session') return origin.id;
+    return sessions.rows.find((r) => r.id === origin.id)?.title || origin.id;
+  }
+  // The schedules view addresses no single entry, so a scheduled turn's chip is
+  // a label rather than a link.
+  function originHref(origin: TurnOrigin): string | null {
+    if (origin.kind === 'session') return buildHash('chats', { sessionId: origin.id });
+    if (origin.kind === 'job') return buildHash('jobs', { q: origin.id });
+    return null;
+  }
   // A client-context item's glyph comes from its provider (a pin for location);
   // fall back to a neutral pin for an item whose provider is gone.
   const contextIcon = (key: string): IconName => contextProvider(key)?.icon ?? 'pin';
@@ -361,6 +385,7 @@
   const isLongContext = (value: string): boolean => value.length > 100 || value.includes('\n');
   function turnWho(turn: (typeof timeline.turns)[number]): string {
     if (turn.role !== 'user') return 'tsugite';
+    if (turn.origin) return ORIGIN_WHO[turn.origin.kind];
     if (turn.synthetic) return INJECTED_WHO[turn.injected?.[0]?.tag ?? ''] ?? 'context';
     return 'you';
   }
@@ -594,6 +619,23 @@
           retryFailed={failed}
           onRetry={isLastAi && lastUserText ? () => onRetry(lastUserText) : undefined}
         >
+          {#if turn.origin}
+            <!-- Another agent, a job, or a schedule sent this - never the person.
+                 The chip names the sender and links back to it where there is
+                 something to open. -->
+            {@const href = originHref(turn.origin)}
+            {#if href}
+              <a class="t-origin" {href} data-testid={TESTID.chatTurnOrigin}>
+                <Icon name={ORIGIN_ICON[turn.origin.kind]} size={11} />
+                from {originLabel(turn.origin)}
+              </a>
+            {:else}
+              <span class="t-origin" data-testid={TESTID.chatTurnOrigin}>
+                <Icon name={ORIGIN_ICON[turn.origin.kind]} size={11} />
+                from {originLabel(turn.origin)}
+              </span>
+            {/if}
+          {/if}
           {#if turn.injected}
             <!-- Context injections (scheduled-task results, environment blocks)
                  fold into panels - never rendered as the person's own words.
@@ -710,6 +752,13 @@
             {#if streamed.code != null}
               <CodeBlock code={streamed.code} lang="python" streaming collapsible={false} />
             {/if}
+          {/if}
+          {#if turn.role === 'ai' && turn.replyTo}
+            <!-- The answer was routed back to whoever asked, not handed to the
+                 person reading this. -->
+            <div class="turn-meta mono" data-testid={TESTID.chatTurnReplyTo}>
+              replied to {originLabel(turn.replyTo)}
+            </div>
           {/if}
           {#if turn.role === 'ai' && turn.meta?.cacheRead != null}
             <!-- Headline = the LAST step's cached-prefix size, which matches the
@@ -1079,6 +1128,25 @@
     opacity: 0.85;
     cursor: default;
     align-self: start;
+  }
+  /* Sender chip on a machine-origin turn: sits above the message it belongs to,
+     muted so it reads as routing metadata rather than part of the message. */
+  .t-origin {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    border: 1px solid var(--bd0);
+    border-radius: var(--r-sm);
+    background: var(--bg1);
+    color: var(--tx3);
+    font: 500 var(--fs-2xs) / 1.4 var(--font-mono);
+    text-decoration: none;
+  }
+  a.t-origin:hover {
+    color: var(--tx1);
+    border-color: var(--bd1);
   }
   /* Client-context gutter: attached location/... shown as muted label:value rows
      above the user's message, distinct from the person's own words. */
