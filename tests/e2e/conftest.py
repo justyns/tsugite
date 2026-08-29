@@ -212,17 +212,21 @@ def mock_chat(e2e_adapter):
 
     Usage:
         mock_chat("Hello!", events=[("reaction", {"emoji": "👍"})])
+
+    `delay` holds the turn in flight, so a test can observe mid-turn UI state.
     """
     _original = getattr(e2e_adapter, "_original_handle_message", None)
     if _original is None:
         e2e_adapter._original_handle_message = e2e_adapter.handle_message
 
-    def _configure(response="Test response", events=None):
+    def _configure(response="Test response", events=None, delay=0):
         async def fake_handle(user_id, message, channel_context, custom_logger=None):
             if custom_logger and events:
                 handler = custom_logger.ui_handler
                 for ev_type, ev_data in events:
                     handler._emit(ev_type, ev_data)
+            if delay:
+                await asyncio.sleep(delay)
             return response
 
         e2e_adapter.handle_message = AsyncMock(side_effect=fake_handle)

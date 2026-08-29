@@ -52,6 +52,25 @@ def test_jsonl_step_start(capsys):
     assert event["turn"] == 1
 
 
+def test_jsonl_step_start_carries_max_turns(capsys):
+    """turn_start carries the loop limit so the UI can render turn N of M."""
+    handler = JSONLUIHandler()
+    handler.handle_event(StepStartEvent(step=3, max_turns=20))
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["turn"] == 3
+    assert event["max_turns"] == 20
+
+
+def test_jsonl_step_start_reports_an_unknown_max_turns_as_null(capsys):
+    """A run with no configured limit still ships the key, so the UI reads one shape."""
+    handler = JSONLUIHandler()
+    handler.handle_event(StepStartEvent(step=1))
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["max_turns"] is None
+
+
 def test_jsonl_thought(capsys):
     """Test LLM_MESSAGE event emits thought JSONL."""
     handler = JSONLUIHandler()

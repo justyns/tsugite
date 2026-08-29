@@ -49,7 +49,7 @@ class JSONLUIHandler(EventDispatchMixin):
 
     Event Type Mappings:
     - TaskStartEvent      → {"type": "init", "agent": str, "model": str}
-    - StepStartEvent      → {"type": "turn_start", "turn": int}
+    - StepStartEvent      → {"type": "turn_start", "turn": int, "max_turns": int|null}
     - LLMMessageEvent     → {"type": "thought", "content": str}
     - StreamChunkEvent    → {"type": "stream_chunk", "chunk": str}
     - StreamCompleteEvent → {"type": "stream_complete"}
@@ -77,7 +77,7 @@ class JSONLUIHandler(EventDispatchMixin):
 
     @handles(StepStartEvent)
     def _handle_step_start(self, event: StepStartEvent) -> None:
-        self._emit("turn_start", {"turn": event.step})
+        self._emit("turn_start", {"turn": event.step, "max_turns": event.max_turns})
 
     @handles(LLMMessageEvent)
     def _handle_llm_message(self, event: LLMMessageEvent) -> None:

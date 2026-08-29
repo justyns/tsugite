@@ -189,6 +189,11 @@ export interface Turn {
    *  by the waiting Work line, cleared when the hook resolves or the turn ends.
    *  Never persisted, so replay carries none. */
   liveStatus?: string;
+  /** Agent-loop position from turn_start, shown on the waiting Work line.
+   *  `maxTurns` is absent when the run reports no limit. The frame is live-only,
+   *  so replay carries neither. */
+  turnNum?: number;
+  maxTurns?: number;
   /** Cache usage across the turn's model_response steps (present AND live).
    *  `cacheRead` is the LAST step's read - the current cached-prefix size, the
    *  footer headline that matches the context meter's scale (not the misleading
@@ -487,6 +492,13 @@ class Builder {
     return undefined;
   }
 
+  /** A calm informational line, at most once per distinct message. */
+  private pushNotice(turn: Turn, message: string): void {
+    if (!turn.blocks.some((b) => b.kind === 'notice' && b.message === message)) {
+      turn.blocks.push({ kind: 'notice', message });
+    }
+  }
+
   /** Close any exec still marked running when its turn ends: `done` if a result
    *  arrived, else `ended` (neutral) - never a permanent spinner. */
   private resolveOpenExecs(turn: Turn): void {
@@ -634,9 +646,12 @@ class Builder {
       case 'user_input':
         this.pushUser(e, at);
         return;
-      case 'turn_start':
-        this.ensureAi(at);
+      case 'turn_start': {
+        const turn = this.ensureAi(at);
+        turn.turnNum = num(e.turn);
+        turn.maxTurns = num(e.max_turns);
         return;
+      }
       case 'stream_chunk': {
         // A token delta from the in-flight model turn. Chunks starting after a
         // code run are the NEXT model step, so the running block closes first.
@@ -1000,22 +1015,26 @@ class Builder {
           str(e.message) ??
           str(rec(e.data)?.message) ??
           "The chat's model session was reset; continuing from saved history.";
-        const turn = this.ensureAi(at);
-        if (!turn.blocks.some((b) => b.kind === 'notice' && b.message === message)) {
-          turn.blocks.push({ kind: 'notice', message });
-        }
+        this.pushNotice(this.ensureAi(at), message);
         return;
       }
       case 'session_end':
       case 'session_complete':
       case 'session_error':
-      case 'session_cancelled':
+      case 'session_cancelled': {
+        // How the run ended, when it did not end well: "max_turns (20) reached",
+        // "Cancelled by user". The recorded message already reads as the reason,
+        // so it ships unformatted.
+        const ended = str(e.error_message);
+        const closing = this.ai ?? this.tailAi();
+        if (ended && closing && str(e.status) !== 'success') this.pushNotice(closing, ended);
         if (this.ai) {
           this.resolveOpenExecs(this.ai);
           this.ai.streaming = false;
         }
         this.ai = null;
         return;
+      }
       case 'session_info': {
         const tokens = num(e.tokens);
         const limit = num(e.context_limit);

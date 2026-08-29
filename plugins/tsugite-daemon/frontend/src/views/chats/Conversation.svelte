@@ -211,15 +211,16 @@
     openSummary = {};
   });
 
+  const lastTurn = $derived(timeline.turns[timeline.turns.length - 1]);
+
   // While a sent turn is in flight and no block is showing its own spinner
   // (tool/code activity), the timeline gets an explicit "waiting on the model"
   // working line - a silent gap after Send reads as a hang.
   const waiting = $derived.by(() => {
     if (!ctrl.working) return false;
-    const last = timeline.turns[timeline.turns.length - 1];
-    if (!last || last.role !== 'ai') return true;
-    if (last.stream) return false;
-    return !last.blocks.some(
+    if (!lastTurn || lastTurn.role !== 'ai') return true;
+    if (lastTurn.stream) return false;
+    return !lastTurn.blocks.some(
       (b) =>
         (b.kind === 'exec' && b.status === 'running') ||
         (b.kind === 'code' && b.status === 'running'),
@@ -234,12 +235,19 @@
   // strip the message's own verb/ellipsis so the Work line reads "running
   // hook · precommit" instead of "waiting on the model".
   const liveStatus = $derived.by(() => {
-    const last = timeline.turns[timeline.turns.length - 1];
-    if (!last || last.role !== 'ai' || !last.streaming) return null;
-    const msg = last.liveStatus?.trim();
+    if (!lastTurn || lastTurn.role !== 'ai' || !lastTurn.streaming) return null;
+    const msg = lastTurn.liveStatus?.trim();
     if (!msg) return null;
     const m = /^Running\s+(.+?)\.{0,3}$/i.exec(msg);
     return m ? `hook · ${m[1]}` : msg.replace(/\.{3}$/, '');
+  });
+
+  // The agent-loop position, as the Work line's trailing detail clause.
+  const turnBudget = $derived.by(() => {
+    if (!lastTurn || lastTurn.role !== 'ai' || lastTurn.turnNum == null) return undefined;
+    return lastTurn.maxTurns == null
+      ? `turn ${lastTurn.turnNum}`
+      : `turn ${lastTurn.turnNum} / ${lastTurn.maxTurns}`;
   });
 
   function clock(iso: string): string {
@@ -799,6 +807,7 @@
           <Work
             verb={liveStatus ? 'running' : 'waiting'}
             operation={liveStatus ?? 'on the model'}
+            detail={turnBudget}
             startedAt={waitStart}
           />
         </div>

@@ -1774,3 +1774,48 @@ describe('machine-origin user turns', () => {
     },
   );
 });
+
+describe('buildTimeline (agent turn budget)', () => {
+  it('carries the live agent-loop position onto the streaming turn', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, max_turns: 20, id: 2 },
+      { type: 'turn_start', turn: 2, max_turns: 20, id: 3 },
+    ]);
+    const ai = t.turns[1]!;
+    expect(ai.turnNum).toBe(2);
+    expect(ai.maxTurns).toBe(20);
+  });
+
+  it('leaves the limit unset when the backend reports none', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, id: 2 },
+    ]);
+    const ai = t.turns[1]!;
+    expect(ai.turnNum).toBe(1);
+    expect(ai.maxTurns).toBeUndefined();
+  });
+
+  it.each([
+    ['interrupted', 'max_turns (2) reached'],
+    ['cancelled', 'Cancelled by user'],
+  ])('renders a %s run-end as a notice on the turn it ended', (status, message) => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, max_turns: 2, id: 2 },
+      { type: 'final_result', result: 'partial', id: 3 },
+      { type: 'session_end', status, error_message: message, id: 4 },
+    ]);
+    const notices = t.turns[1]!.blocks.filter((b) => b.kind === 'notice') as NoticeBlock[];
+    expect(notices.map((n) => n.message)).toEqual([message]);
+  });
+
+  it('adds no notice when the run ended normally', () => {
+    const t = buildTimeline([
+      ...replay.slice(0, -1),
+      { type: 'session_end', status: 'success', error_message: 'ignored', id: 7 },
+    ]);
+    expect(t.turns[1]!.blocks.some((b) => b.kind === 'notice')).toBe(false);
+  });
+});

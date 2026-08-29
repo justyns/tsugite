@@ -489,6 +489,26 @@ test('an in-flight send with no visible activity shows the waiting-on-model line
   expect(document.querySelectorAll('.t-work button').length).toBe(0);
 });
 
+test('the waiting line shows the agent-loop position while the turn runs', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'do the thing', timestamp: 'z' },
+    { type: 'turn_start', turn: 3, max_turns: 20 },
+  ]);
+  ctrl.streaming = true;
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  await expect.element(page.getByText('turn 3 / 20')).toBeInTheDocument();
+});
+
+test('the waiting line shows the turn alone when the run reports no limit', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'do the thing', timestamp: 'z' },
+    { type: 'turn_start', turn: 3 },
+  ]);
+  ctrl.streaming = true;
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  await expect.element(page.getByText(/turn 3$/)).toBeInTheDocument();
+});
+
 test('a running tool suppresses the waiting line (its own spinner carries the signal)', async () => {
   const ctrl = controllerWith([
     { type: 'user_input', text: 'grep', timestamp: 'z' },
