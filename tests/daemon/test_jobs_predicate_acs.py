@@ -28,6 +28,12 @@ class FakeStore:
     def get_session(self, session_id: str):
         return self.sessions.get(session_id)
 
+    def resolve_live(self, session_id: str):
+        session = self.sessions.get(session_id)
+        while session and session.superseded_by:
+            session = self.sessions.get(session.superseded_by)
+        return session
+
 
 class FakeRunner:
     """Minimal stand-in for SessionRunner."""
@@ -45,6 +51,10 @@ class FakeRunner:
 
     def clear_attention_ref(self, source: str, ref_id: str, **kwargs) -> None:
         self.attention = [e for e in self.attention if e[1]["ref_id"] != ref_id]
+
+    def live_id(self, session_id: str) -> str:
+        live = self.store.resolve_live(session_id)
+        return live.id if live else session_id
 
     def start_session(self, session: Session) -> Session:
         self._next_session_id_counter += 1

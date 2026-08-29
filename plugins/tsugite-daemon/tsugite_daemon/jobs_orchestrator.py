@@ -126,6 +126,10 @@ class JobsOrchestrator:
         """
         self._executors[name] = executor
 
+    def all_jobs(self) -> list[Job]:
+        """Every job, newest first."""
+        return self._jobs.list_all()
+
     def get_job(self, job_id: str) -> Optional[Job]:
         """Read a Job by id. The public accessor for executor plugins, so they
         don't depend on the private JobStore layout."""
@@ -162,7 +166,7 @@ class JobsOrchestrator:
 
     def render_context_xml(self, session_id: str, recent_limit: int = 3) -> str:
         """Jobs context block for <message_context>; "" when the session has no jobs."""
-        return render_jobs_context_xml(self._jobs, session_id, recent_limit)
+        return render_jobs_context_xml(self.jobs_for_parent(session_id), recent_limit)
 
     def recover_orphaned_jobs(self) -> int:
         """Mark jobs left active by a previous daemon process as errored.
@@ -1287,15 +1291,12 @@ class JobsOrchestrator:
         and a parent still mid-turn may spawn more of the batch, so the barrier
         waits for the turn to end.
         """
-        if self._jobs.list_active_for_parent(parent_session_id):
+        jobs = self.jobs_for_parent(parent_session_id)
+        if any(j.state not in self._jobs.terminal_states for j in jobs):
             return
         if self._parent_turn_in_flight(parent_session_id):
             return
-        batch = [
-            j
-            for j in self._jobs.list_for_parent(parent_session_id)
-            if j.notify_when == "all_done" and not j.barrier_notified
-        ]
+        batch = [j for j in jobs if j.notify_when == "all_done" and not j.barrier_notified]
         if not batch:
             return
         batch.sort(key=lambda j: j.created_at or "")
@@ -1307,13 +1308,8 @@ class JobsOrchestrator:
             self._jobs.update(member.id, barrier_notified=True)
 
     def _parent_turn_in_flight(self, parent_session_id: str) -> bool:
-        store = getattr(self._runner, "_store", None) if self._runner else None
-        if store is None:
-            return False
-        try:
-            return store.get_session(parent_session_id).turn_in_flight
-        except (ValueError, KeyError):
-            return False
+        parent = self._get_parent_session(parent_session_id)
+        return bool(parent and parent.turn_in_flight)
 
     def _schedule_reply(self, job: Job, message: str, *, source: str, metadata: Optional[dict] = None) -> bool:
         """Queue a wake-up for the parent, returning whether it was queued.
@@ -1432,6 +1428,14 @@ class JobsOrchestrator:
             SessionStatus.CANCELLED.value,
         )
 
+    def jobs_for_parent(self, session_id: str) -> list[Job]:
+        """Every job belonging to `session_id`'s conversation. A job keeps the id
+        its parent had when it was spawned and compaction rotates that chat onto a
+        successor, so both sides of the match resolve through the chain."""
+        live = self._runner.live_id
+        target = live(session_id)
+        return [j for j in self._jobs.list_all() if live(j.parent_session_id) == target]
+
     def _get_parent_session(self, parent_session_id: str) -> Optional[Session]:
         """Fetch a session, tolerating both the FakeStore None-on-miss contract and a
         real SessionStore raising ValueError/KeyError. Returns None if the runner has
@@ -1440,7 +1444,7 @@ class JobsOrchestrator:
         if store is None or not hasattr(store, "get_session"):
             return None
         try:
-            return store.get_session(parent_session_id)
+            return store.get_session(self._runner.live_id(parent_session_id))
         except (ValueError, KeyError):
             return None
 
@@ -1532,7 +1536,9 @@ class JobsOrchestrator:
                 logger.debug("Worker-terminal lookup failed for job '%s'", job.id)
         # Persist into parent session JSONL so a page reload re-renders the tile.
         try:
-            self._runner.store.append_event(job.parent_session_id, {"type": "job_status", **payload})
+            self._runner.store.append_event(
+                self._runner.live_id(job.parent_session_id), {"type": "job_status", **payload}
+            )
         except Exception:
             logger.exception("Failed to persist job_status event for job '%s'", job.id)
         if self._event_bus:
@@ -1582,20 +1588,14 @@ def _should_notify(job: Job, terminal: JobState) -> bool:
     return notify_when == state
 
 
-def render_jobs_context_xml(job_store: JobStore, session_id: str, recent_limit: int = 3) -> str:
-    """Render an XML block describing Jobs anchored on `session_id`, suitable for
-    inclusion in `<message_context>` so the LLM is aware of what's running and
-    what just finished without dumping full worker output into the chat.
+def render_jobs_context_xml(jobs: list[Job], recent_limit: int = 3) -> str:
+    """Render an XML block describing `jobs`, suitable for inclusion in
+    `<message_context>` so the LLM is aware of what's running and what just
+    finished without dumping full worker output into the chat.
 
     Returns "" when there are no jobs (so the surrounding template can omit the
     section entirely without empty whitespace).
     """
-    if not session_id:
-        return ""
-    try:
-        jobs = job_store.list_for_parent(session_id)
-    except Exception:
-        return ""
     if not jobs:
         return ""
 

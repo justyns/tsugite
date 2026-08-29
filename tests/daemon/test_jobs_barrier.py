@@ -1,11 +1,11 @@
 """Job completion barrier: notify a parent once its last active job finishes."""
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 from tsugite_daemon.job_prompts import _build_barrier_message
 from tsugite_daemon.job_store import Job, JobState
+from tsugite_daemon.session_store import Session
 
 from .test_jobs_orchestrator import _verifier_session, _worker_session
 
@@ -45,29 +45,6 @@ async def test_all_done_is_a_valid_notify_when(store, orchestrator):
     assert store.get(job.id).notify_when == "all_done"
 
 
-# ── store query ──
-
-
-def test_list_active_for_parent_excludes_terminal_and_other_parents(store):
-    active = store.add(Job(id="", parent_session_id="parent-1", prompt="a"))
-    store.update_state(active.id, JobState.RUNNING.value)
-    resolved = store.add(Job(id="", parent_session_id="parent-1", prompt="b"))
-    store.update_state(resolved.id, JobState.RUNNING.value)
-    store.update_state(resolved.id, JobState.CANCELLED.value)
-    other = store.add(Job(id="", parent_session_id="parent-2", prompt="c"))
-    store.update_state(other.id, JobState.RUNNING.value)
-
-    assert [j.id for j in store.list_active_for_parent("parent-1")] == [active.id]
-
-
-def test_list_active_for_parent_counts_awaiting_input_as_active(store):
-    job = store.add(Job(id="", parent_session_id="parent-1", prompt="a"))
-    store.update_state(job.id, JobState.RUNNING.value)
-    store.update_state(job.id, JobState.AWAITING_INPUT.value)
-
-    assert [j.id for j in store.list_active_for_parent("parent-1")] == [job.id]
-
-
 # ── the barrier ──
 
 
@@ -87,6 +64,40 @@ async def test_barrier_fires_once_when_the_last_job_finishes(store, runner, orch
     assert sent[0]["metadata"] == {"kind": "jobs_barrier"}
     for job in jobs:
         assert job.id in sent[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_barrier_reads_the_turn_flag_off_a_compacted_parent(store, runner, orchestrator):
+    """The turn that is still filling the batch belongs to the successor, so the
+    guard has to look there rather than at the id the jobs were spawned under."""
+    sent = _capture_replies(runner)
+    runner.store.sessions["parent-1"].superseded_by = "parent-2"
+    successor = Session(id="parent-2")
+    successor.turn_in_flight = True
+    runner.store.sessions["parent-2"] = successor
+
+    jobs = _seed_batch(store, orchestrator, 2)
+    for job in jobs:
+        await _finish(orchestrator, job)
+    assert [m for m in sent if m["source"] == "jobs_all_complete"] == []
+
+    successor.turn_in_flight = False
+    orchestrator.close_batch_barrier("parent-1")
+    await asyncio.sleep(0)
+
+    assert len([m for m in sent if m["source"] == "jobs_all_complete"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_barrier_waits_on_a_job_awaiting_input(store, runner, orchestrator):
+    """A job parked on a question is still outstanding."""
+    sent = _capture_replies(runner)
+    parked, finishing = _seed_batch(store, orchestrator, 2)
+    store.update_state(parked.id, JobState.AWAITING_INPUT.value)
+
+    await _finish(orchestrator, finishing)
+
+    assert sent == []
 
 
 @pytest.mark.asyncio
@@ -257,23 +268,13 @@ def test_barrier_message_summarises_counts_and_outcomes():
     assert "get_job" in msg
 
 
-class _TurnState:
-    """Minimal session store: just the turn flag the barrier consults."""
-
-    def __init__(self, in_flight: bool):
-        self.in_flight = in_flight
-
-    def get_session(self, _session_id):
-        return SimpleNamespace(turn_in_flight=self.in_flight)
-
-
 @pytest.mark.asyncio
 async def test_a_batch_spawned_across_one_turn_reports_once(store, runner, orchestrator):
     """A job can finish before its siblings are spawned, so a batch does not close
     while the turn that is filling it is still running."""
     sent = _capture_replies(runner)
-    turn = _TurnState(in_flight=True)
-    runner._store = turn
+    parent = runner.store.sessions["parent-1"]
+    parent.turn_in_flight = True
 
     first = _seed_batch(store, orchestrator, 1)[0]
     await _finish(orchestrator, first)
@@ -281,7 +282,7 @@ async def test_a_batch_spawned_across_one_turn_reports_once(store, runner, orche
     await _finish(orchestrator, second)
     assert [m for m in sent if m["source"] == "jobs_all_complete"] == []
 
-    turn.in_flight = False
+    parent.turn_in_flight = False
     orchestrator.close_batch_barrier("parent-1")
     await asyncio.sleep(0)
 

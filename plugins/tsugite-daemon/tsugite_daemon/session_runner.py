@@ -371,7 +371,7 @@ class SessionRunner:
         Sync: call it from a worker thread (asyncio.to_thread) when the caller is
         on the event loop.
         """
-        session_id = self._live_id(session_id)
+        session_id = self.live_id(session_id)
         target = self._store.get_session(session_id)
         if target.status in FINISHED_STATUSES and not target.accepts_followup:
             logger.info("Not delivering to session '%s': already finished", session_id)
@@ -395,7 +395,7 @@ class SessionRunner:
             return
         self._flush_delivery(session_id, event)
 
-    def _live_id(self, session_id: str) -> str:
+    def live_id(self, session_id: str) -> str:
         live = self._store.resolve_live(session_id)
         return live.id if live else session_id
 
@@ -452,7 +452,7 @@ class SessionRunner:
             logger.error("Delivery notification for session '%s' failed: %s", session_id, e)
 
     def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
-        session_id = self._live_id(session_id)
+        session_id = self.live_id(session_id)
         session = self._store.clear_attention(session_id, delivery_id)
         self._emit_attention(session_id)
         if self._event_bus:
@@ -537,6 +537,7 @@ class SessionRunner:
         metadata: dict | None = None,
     ) -> str:
         """Send a follow-up message to an existing session."""
+        session_id = self.live_id(session_id)
         self._store.get_session(session_id)  # raises if the session is unknown
 
         adapter = self._adapter

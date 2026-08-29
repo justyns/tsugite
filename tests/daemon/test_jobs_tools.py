@@ -12,6 +12,8 @@ tools directly.
 
 import pytest
 from tsugite_daemon.job_store import Job, JobState, JobStore
+from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
+from tsugite_daemon.session_store import Session
 
 import tsugite.tools.jobs as jobs_tool
 
@@ -41,11 +43,6 @@ class _StoreSpy:
         return self._real.get(job_id)
 
 
-class _OrchStub:
-    def __init__(self, store):
-        self._jobs = store
-
-
 @pytest.fixture
 def real_store(tmp_path):
     return JobStore(tmp_path / "jobs.json")
@@ -57,9 +54,9 @@ def store_spy(real_store):
 
 
 @pytest.fixture
-def wire(monkeypatch, store_spy):
-    """Point the tool module's global at an orchestrator stub backed by the spy."""
-    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", _OrchStub(store_spy))
+def wire(monkeypatch, store_spy, runner):
+    """Point the tool module's global at a real orchestrator backed by the spy."""
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", JobsOrchestrator(store_spy, runner))
     return store_spy
 
 
@@ -117,6 +114,34 @@ def test_list_jobs_filters_by_session_id(wire, real_store):
     _add(real_store, parent="p2", prompt="theirs")
     out = jobs_tool.list_jobs(session_id="p1")
     assert [row["prompt"] for row in out] == ["mine"]
+
+
+def test_list_jobs_finds_jobs_a_parent_spawned_before_it_compacted(wire, real_store, runner):
+    """The chat that spawned the job has since rotated onto a successor id."""
+    _add(real_store, parent="p1", prompt="mine")
+    runner.store.sessions["p1"] = Session(id="p1", superseded_by="p2")
+    runner.store.sessions["p2"] = Session(id="p2")
+
+    assert [row["prompt"] for row in jobs_tool.list_jobs(session_id="p2")] == ["mine"]
+
+
+def test_spawn_job_reports_whether_it_will_call_back(monkeypatch, wire, real_store):
+    """The caller has to learn from the spawn itself that nothing will wake it,
+    since notify_when defaults to never."""
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "p1")
+    job = _add(real_store, parent="p1", prompt="do x")
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, **kw: (job, Session(id="worker-1")))
+
+    assert jobs_tool.spawn_job(prompt="do x")["notify_when"] == "never"
+
+
+def test_list_jobs_reports_the_parent_and_whether_it_will_call_back(wire, real_store):
+    job = _add(real_store, parent="p1", prompt="mine")
+    real_store.update(job.id, notify_when="terminal")
+
+    row = jobs_tool.list_jobs(session_id="p1")[0]
+    assert row["parent_session_id"] == "p1"
+    assert row["notify_when"] == "terminal"
 
 
 def test_list_jobs_filters_by_state(wire, real_store):
@@ -185,6 +210,8 @@ def test_list_jobs_row_shape_is_lean(wire, real_store):
         "prompt",
         "created_at",
         "resolved_at",
+        "parent_session_id",
+        "notify_when",
         "worker_session_id",
         "verifier_session_id",
         "verify_attempts",
@@ -280,7 +307,7 @@ def test_spawn_job_forwards_executor(monkeypatch):
 
     def fake_call(fn, *args, timeout=30, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(id="job-1"), SimpleNamespace(id="session-1")
+        return SimpleNamespace(id="job-1", notify_when="never"), SimpleNamespace(id="session-1")
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
 
@@ -300,7 +327,7 @@ def test_spawn_job_forwards_effort(monkeypatch):
 
     def fake_call(fn, *args, timeout=30, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(id="job-1"), SimpleNamespace(id="session-1")
+        return SimpleNamespace(id="job-1", notify_when="never"), SimpleNamespace(id="session-1")
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
 

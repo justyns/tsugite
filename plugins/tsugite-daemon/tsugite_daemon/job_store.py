@@ -266,9 +266,6 @@ class JobStore(RecordStore):
         """Return every Job record, newest-first by updated_at."""
         return sorted(super().list_all(), key=lambda j: j.updated_at or "", reverse=True)
 
-    def list_active_for_parent(self, parent_session_id: str) -> list[Job]:
-        return [j for j in self.list_for_parent(parent_session_id) if j.state not in self.terminal_states]
-
     def _coerce_update_value(self, key: str, value):
         if key == "state":
             # State changes normally go through update_state(); this loose path

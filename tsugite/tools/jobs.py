@@ -162,6 +162,7 @@ def spawn_job(
         # None for a non-agent executor job (no worker Session is spawned).
         "worker_session_id": started.id if started else None,
         "parent_session_id": parent_session_id,
+        "notify_when": job.notify_when,
         "state": "running",
     }
 
@@ -253,7 +254,8 @@ def list_jobs(
     """List Jobs with optional filters.
 
     Args:
-        session_id: Only return Jobs whose parent is this session id.
+        session_id: Only return Jobs belonging to this session's conversation,
+            including ones spawned before a compaction rotated it onto a new id.
         state: Only return Jobs in this state (queued|running|verifying|done|stuck|cancelled|errored).
         since: ISO timestamp; only return Jobs whose `created_at` is >= this.
         until: ISO timestamp; only return Jobs whose `created_at` is <= this.
@@ -261,13 +263,12 @@ def list_jobs(
 
     Returns:
         List of lean Job dicts (id, state, prompt[:120], created_at, resolved_at,
-        worker_session_id, verifier_session_id, verify_attempts, error).
+        parent_session_id, notify_when, worker_session_id, verifier_session_id,
+        verify_attempts, error).
     """
     if _jobs_orchestrator is None:
         return [{"error": "Jobs orchestrator not initialised"}]
-    jobs = _jobs_orchestrator._jobs.list_all()
-    if session_id:
-        jobs = [j for j in jobs if j.parent_session_id == session_id]
+    jobs = _jobs_orchestrator.jobs_for_parent(session_id) if session_id else _jobs_orchestrator.all_jobs()
     if state:
         jobs = [j for j in jobs if j.state == state]
     if since:
@@ -283,6 +284,8 @@ def list_jobs(
             "prompt": (j.prompt or "")[:120],
             "created_at": j.created_at,
             "resolved_at": j.resolved_at,
+            "parent_session_id": j.parent_session_id,
+            "notify_when": j.notify_when,
             "worker_session_id": j.worker_session_id,
             "verifier_session_id": j.verifier_session_id,
             "verify_attempts": j.verify_attempts,

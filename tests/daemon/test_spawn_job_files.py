@@ -35,7 +35,7 @@ def _wire_tool(monkeypatch, tmp_path):
 
     def fake_call(fn, *args, timeout=30, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(id="job-1"), SimpleNamespace(id="session-1")
+        return SimpleNamespace(id="job-1", notify_when="never"), SimpleNamespace(id="session-1")
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
     return jobs_tool, seen

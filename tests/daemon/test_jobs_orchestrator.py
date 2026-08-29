@@ -29,6 +29,12 @@ class FakeStore:
     def get_session(self, session_id: str):
         return self.sessions.get(session_id)
 
+    def resolve_live(self, session_id: str):
+        session = self.sessions.get(session_id)
+        while session and session.superseded_by:
+            session = self.sessions.get(session.superseded_by)
+        return session
+
     def update_session(self, session_id: str, **fields) -> Session:
         session = self.sessions[session_id]
         for key, value in fields.items():
@@ -55,6 +61,10 @@ class FakeRunner:
 
     def clear_attention_ref(self, source: str, ref_id: str, **kwargs) -> None:
         self.attention = [e for e in self.attention if e[1]["ref_id"] != ref_id]
+
+    def live_id(self, session_id: str) -> str:
+        live = self.store.resolve_live(session_id)
+        return live.id if live else session_id
 
     def add_completion_listener(self, callback) -> None:
         if callback not in self._completion_listeners:
@@ -466,6 +476,12 @@ class RaisingStore:
         except KeyError:
             raise ValueError(f"Unknown session: {session_id}") from None
 
+    def resolve_live(self, session_id: str):
+        session = self.sessions.get(session_id)
+        while session and session.superseded_by:
+            session = self.sessions.get(session.superseded_by)
+        return session
+
 
 class RaisingStoreRunner(FakeRunner):
     """FakeRunner whose store raises ValueError on get_session misses."""
@@ -473,6 +489,25 @@ class RaisingStoreRunner(FakeRunner):
     def __init__(self):
         super().__init__()
         self.store = RaisingStore()
+
+        self.started: list[Session] = []
+        self.cancelled: list[str] = []
+        self._next_session_id_counter = 0
+
+    def live_id(self, session_id: str) -> str:
+        live = self.store.resolve_live(session_id)
+        return live.id if live else session_id
+
+    def start_session(self, session: Session) -> Session:
+        self._next_session_id_counter += 1
+        if not session.id:
+            session.id = f"session-{self._next_session_id_counter}"
+        session.status = SessionStatus.RUNNING.value
+        self.started.append(session)
+        return session
+
+    def cancel_session(self, session_id: str) -> None:
+        self.cancelled.append(session_id)
 
 
 @pytest.mark.asyncio
@@ -1199,15 +1234,11 @@ async def test_retry_with_hint_rejects_non_stuck(store, runner, orchestrator):
 # ── notify + context injection + new tools ──
 
 
-def test_render_jobs_context_xml_empty_for_no_jobs(store):
-    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
-
-    assert render_jobs_context_xml(store, "parent-X") == ""
+def test_render_jobs_context_xml_empty_for_no_jobs(orchestrator):
+    assert orchestrator.render_context_xml("parent-X") == ""
 
 
 def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestrator, tmp_path):
-    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
-
     # Active job
     active = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
 
@@ -1221,7 +1252,7 @@ def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestr
     runner.store.sessions["other-parent"] = Session(id="other-parent")
     other = store.add(Job(id="", parent_session_id="other-parent", prompt="not mine"))
 
-    xml = render_jobs_context_xml(store, "parent-1")
+    xml = orchestrator.render_context_xml("parent-1")
     assert "<active>" in xml
     assert active.id in xml
     assert "<recent>" in xml
@@ -1230,7 +1261,8 @@ def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestr
     assert "something done" in xml
 
 
-def test_render_jobs_context_xml_truncates_prompt_and_error(store):
+def test_render_jobs_context_xml_truncates_prompt_and_error(store, runner, orchestrator):
+    runner.store.sessions["parent-T"] = Session(id="parent-T")
     long = "x" * 200
     job = store.add(Job(id="", parent_session_id="parent-T", prompt=long))
     store.update_state(job.id, JobState.RUNNING.value)
@@ -1238,9 +1270,7 @@ def test_render_jobs_context_xml_truncates_prompt_and_error(store):
     store.update_state(job.id, JobState.STUCK.value)
     store.update(job.id, error=("y" * 500))
 
-    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
-
-    xml = render_jobs_context_xml(store, "parent-T")
+    xml = orchestrator.render_context_xml("parent-T")
     # Prompt truncated to 80 + ellipsis
     assert "xxxxxxxx" in xml
     assert "x" * 200 not in xml
@@ -1249,7 +1279,7 @@ def test_render_jobs_context_xml_truncates_prompt_and_error(store):
     assert "y" * 200 in xml
 
 
-def test_render_jobs_context_xml_escapes_ampersands(store):
+def test_render_jobs_context_xml_escapes_ampersands(store, runner, orchestrator):
     """Job prompts and errors must be XML-escaped, ampersand included.
 
     An unescaped `&` makes the block invalid XML, and a prompt that already
@@ -1257,15 +1287,14 @@ def test_render_jobs_context_xml_escapes_ampersands(store):
     """
     import xml.etree.ElementTree as ET
 
+    runner.store.sessions["parent-A"] = Session(id="parent-A")
     job = store.add(Job(id="", parent_session_id="parent-A", prompt='fix A & B <urgent> "now"'))
     store.update_state(job.id, JobState.RUNNING.value)
     store.update_state(job.id, JobState.VERIFYING.value)
     store.update_state(job.id, JobState.STUCK.value)
     store.update(job.id, error="failed: X & Y")
 
-    from tsugite_daemon.jobs_orchestrator import render_jobs_context_xml
-
-    xml = render_jobs_context_xml(store, "parent-A")
+    xml = orchestrator.render_context_xml("parent-A")
 
     ET.fromstring(xml)  # must be well-formed
 
@@ -2288,3 +2317,41 @@ async def test_failed_prune_keeps_the_worktree_path_for_retry(store, runner, orc
     assert store.get(job.id).worktree_path == "/tmp/does-not-matter/.tsugite-jobs/job-x", (
         "a failed prune must keep the path so the leftover tree stays trackable"
     )
+
+
+# ── parent compaction ──
+
+
+def _compact(runner, old_id: str, new_id: str) -> None:
+    """Rotate a parent session onto a successor the way SessionStore.compact_session does."""
+    runner.store.sessions[old_id].superseded_by = new_id
+    runner.store.sessions[new_id] = Session(id=new_id)
+
+
+@pytest.mark.asyncio
+async def test_job_status_events_land_in_the_successor_of_a_compacted_parent(store, orchestrator, runner):
+    """The tile re-renders from the parent's history on reload, so the event has to
+    land in the live session."""
+    job = _seed_running_job(store, orchestrator, runner)
+    _compact(runner, "parent-1", "parent-2")
+    runner.store.events.clear()
+
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+
+    anchors = {sid for sid, event in runner.store.events if event["type"] == "job_status"}
+    assert anchors == {"parent-2"}
+
+
+def test_context_block_follows_a_compacted_chat(store, orchestrator, runner):
+    """The agent's <jobs> context block is how it knows its own job is running."""
+    job = _seed_running_job(store, orchestrator, runner)
+    _compact(runner, "parent-1", "parent-2")
+
+    assert job.id in orchestrator.render_context_xml("parent-2")
+
+
+def test_context_block_excludes_another_session(store, orchestrator, runner):
+    _seed_running_job(store, orchestrator, runner)
+    runner.store.sessions["other"] = Session(id="other")
+
+    assert orchestrator.render_context_xml("other") == ""

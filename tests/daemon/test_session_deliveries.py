@@ -255,6 +255,22 @@ class TestMidTurnDeferral:
         assert [e["message"] for e in _deliveries(store, successor.id)] == ["backup failed"]
         assert store.get_session(successor.id).has_pending_deliveries is True
 
+    @pytest.mark.asyncio
+    async def test_a_reply_resumes_the_successor_of_a_compacted_session(self, store, bus):
+        """A job wake-up or a schedule's completion callback carries the id it saw
+        when it started; by the time it fires the chat may have rotated, so the turn
+        belongs in the conversation the user still has open."""
+        adapter = MagicMock()
+        adapter.handle_message = AsyncMock(return_value="ok")
+        runner = SessionRunner(store=store, adapter=adapter, event_bus=bus)
+        sid = _session(store)
+        successor = store.compact_session(sid)
+
+        await runner.reply_to_session(sid, "the job finished", source="job_complete")
+
+        context = adapter.handle_message.await_args.kwargs["channel_context"]
+        assert context.metadata["conv_id_override"] == successor.id
+
     def test_deleting_a_session_drops_what_it_was_holding(self, store, runner):
         """A purged session's turn never ends, so what it held goes with it."""
         sid = _session(store)
