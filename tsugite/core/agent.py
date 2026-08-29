@@ -972,6 +972,8 @@ class TsugiteAgent:
                     content_blocks=parsed.content_blocks,
                     tail=parsed.tail,
                     usage=usage_dump,
+                    provider=self._provider_name,
+                    model=self._model_id,
                 )
             )
         if not self.storage:

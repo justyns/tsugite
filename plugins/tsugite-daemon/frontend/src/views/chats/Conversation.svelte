@@ -760,6 +760,18 @@
               replied to {originLabel(turn.replyTo)}
             </div>
           {/if}
+          {#if turn.role === 'ai' && turn.meta?.model}
+            <!-- The model recorded on this turn's own event, not the session's current one. -->
+            <div
+              class="turn-meta mono"
+              title={turn.meta.provider
+                ? `${turn.meta.provider}:${turn.meta.model}`
+                : turn.meta.model}
+              data-testid={TESTID.chatTurnModel}
+            >
+              {turn.meta.model}
+            </div>
+          {/if}
           {#if turn.role === 'ai' && turn.meta?.cacheRead != null}
             <!-- Headline = the LAST step's cached-prefix size, which matches the
                  context meter's scale. The summed reads/writes across the turn's

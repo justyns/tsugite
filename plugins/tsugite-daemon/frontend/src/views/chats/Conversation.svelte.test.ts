@@ -179,6 +179,67 @@ test('an ai turn with no reported cache shows no cached footer (honest absence)'
   expect(page.getByText(/cached/).query()).toBeNull();
 });
 
+test('an ai turn footer shows the serving model, fully qualified on hover', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z' },
+    {
+      type: 'model_response',
+      raw_content: 'hey',
+      thought: 'hey',
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+    },
+    { type: 'final_result', result: 'hey', tokens: 10 },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  const badge = page.getByTestId(TESTID.chatTurnModel);
+  await expect.element(badge).toHaveTextContent('gpt-4o-mini');
+  await expect.element(badge).toHaveAttribute('title', 'openai:gpt-4o-mini');
+});
+
+test('a transcript whose model changes mid-session labels each turn with its own', async () => {
+  // The second turn records no provider, so it also covers the tooltip falling
+  // back to the bare id rather than a half-qualified one.
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'first', timestamp: '2026-07-14T15:00:00Z' },
+    {
+      type: 'model_response',
+      raw_content: 'a',
+      thought: 'a',
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+    },
+    { type: 'final_result', result: 'a', tokens: 10 },
+    { type: 'user_input', text: 'second', timestamp: '2026-07-14T15:05:00Z' },
+    { type: 'model_response', raw_content: 'b', thought: 'b', model: 'claude-opus-4-5' },
+    { type: 'final_result', result: 'b', tokens: 10 },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  const badges = document.querySelectorAll(`[data-testid="${TESTID.chatTurnModel}"]`);
+  expect(Array.from(badges, (b) => b.textContent?.trim())).toEqual([
+    'gpt-4o-mini',
+    'claude-opus-4-5',
+  ]);
+  expect(Array.from(badges, (b) => b.getAttribute('title'))).toEqual([
+    'openai:gpt-4o-mini',
+    'claude-opus-4-5',
+  ]);
+});
+
+test('an ai turn from history with no recorded model shows no model footer', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'hi', timestamp: '2026-07-14T15:00:00Z' },
+    { type: 'model_response', raw_content: 'hey', thought: 'hey' },
+    { type: 'final_result', result: 'hey', tokens: 10 },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+
+  await expect.element(page.getByText('hey')).toBeInTheDocument();
+  expect(page.getByTestId(TESTID.chatTurnModel).query()).toBeNull();
+});
+
 test('an unfinished ai turn is a live region (aria-busy) for streaming a11y', async () => {
   const ctrl = controllerWith([
     { type: 'user_input', text: 'q', timestamp: '2026-07-14T15:00:00Z' },

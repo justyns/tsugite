@@ -295,6 +295,27 @@ async def test_model_response_event_carries_usage_dump_without_storage():
 
 
 @pytest.mark.asyncio
+async def test_model_response_names_the_serving_model_live_and_persisted():
+    """The live frame carries the same model the persisted event records, so a
+    transcript badge does not change on refresh."""
+    bus = _Bus()
+    storage = _Storage()
+    agent = _agent(event_bus=bus, storage=storage)
+
+    async def mock_acompletion(*args, **kwargs):
+        return _mock_response('Thought: yes.\n\n```python-exec\nfinal_answer("ok")\n```')
+
+    _patch_provider(agent, mock_acompletion)
+    await agent.run("go")
+
+    [persisted] = [f for t, f in storage.recorded if t == "model_response"]
+    frames = [e for e in bus.events if isinstance(e, ModelResponseEvent)]
+    assert frames, "ModelResponseEvent should be emitted"
+    assert persisted["model"] == "gpt-4o-mini"
+    assert (frames[0].provider, frames[0].model) == (persisted["provider"], persisted["model"])
+
+
+@pytest.mark.asyncio
 async def test_persisted_model_response_carries_usage_dump():
     """Replay reads per-turn cache tokens off the persisted usage dump; a plain
     Usage dataclass serializes to a dict, not the dropped-on-the-floor None it

@@ -1423,6 +1423,60 @@ describe('buildTimeline (per-turn cache usage)', () => {
   });
 });
 
+describe('buildTimeline (per-turn model)', () => {
+  it('reads the model that served the turn', () => {
+    const ai = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      {
+        type: 'model_response',
+        turn: 0,
+        thought: 'hey',
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        id: 2,
+      },
+      { type: 'final_result', result: 'hey', turns: 1, id: 3 },
+    ]).turns[1]!;
+    expect(ai.meta?.model).toBe('gpt-4o-mini');
+    expect(ai.meta?.provider).toBe('openai');
+  });
+
+  it('labels each turn with its own model when the model changes mid-session', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'first', id: 1 },
+      { type: 'model_response', turn: 0, thought: 'a', model: 'gpt-4o-mini', id: 2 },
+      { type: 'final_result', result: 'a', turns: 1, id: 3 },
+      { type: 'user_input', text: 'second', id: 4 },
+      { type: 'model_response', turn: 0, thought: 'b', model: 'claude-opus-4-5', id: 5 },
+      { type: 'final_result', result: 'b', turns: 1, id: 6 },
+    ]);
+    expect(t.turns.filter((x) => x.role === 'ai').map((x) => x.meta?.model)).toEqual([
+      'gpt-4o-mini',
+      'claude-opus-4-5',
+    ]);
+  });
+
+  it("takes the last step's model on a multi-step turn", () => {
+    const ai = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'model_response', turn: 0, thought: 'one', model: 'gpt-4o-mini', id: 2 },
+      { type: 'code_execution', code: 'x = 1', id: 3 },
+      { type: 'model_response', turn: 1, thought: 'two', model: 'gpt-4o', id: 4 },
+      { type: 'final_result', result: 'done', turns: 2, id: 5 },
+    ]).turns[1]!;
+    expect(ai.meta?.model).toBe('gpt-4o');
+  });
+
+  it('leaves the model absent on history that recorded none', () => {
+    const ai = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      { type: 'model_response', turn: 0, thought: 'hey', id: 2 },
+      { type: 'final_result', result: 'hey', turns: 1, id: 3 },
+    ]).turns[1]!;
+    expect(ai.meta).not.toHaveProperty('model');
+  });
+});
+
 describe('buildTimeline (windowed suffix)', () => {
   // The tail-window initial load can start mid-history: the first event in the
   // window may be a bare AI-turn fragment, a pre-message hook, a compaction

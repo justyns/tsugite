@@ -119,6 +119,9 @@ class ModelResponseEvent(BaseEvent):
     # live surfaces read the cache split without a reload. None when the run
     # carried no usage (e.g. an aborted turn).
     usage: Optional[Dict[str, Any]] = None
+    # The model that served this turn: bare id, prefix in provider.
+    provider: str = ""
+    model: str = ""
 
 
 class FinalAnswerEvent(BaseEvent):

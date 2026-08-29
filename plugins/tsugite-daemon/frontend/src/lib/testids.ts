@@ -142,6 +142,7 @@ export const TESTID = {
   chatRetry: 'chat-retry',
   chatTurnOrigin: 'chat-turn-origin',
   chatTurnReplyTo: 'chat-turn-reply-to',
+  chatTurnModel: 'chat-turn-model',
   chatDelivery: 'chat-delivery',
   chatDeliveryDismiss: 'chat-delivery-dismiss',
   chatAttachmentImage: 'chat-attachment-image',

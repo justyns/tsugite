@@ -123,6 +123,8 @@ class JSONLUIHandler(EventDispatchMixin):
                 "content_blocks": event.content_blocks,
                 "tail": event.tail,
                 "usage": event.usage,
+                "provider": event.provider,
+                "model": event.model,
             },
         )
 

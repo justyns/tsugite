@@ -100,6 +100,44 @@ def test_save_run_to_history_legacy_path_writes_full_events(history_dir, fake_ag
     assert types == ["session_start", "user_input", "model_response", "session_end"]
 
 
+def test_fallback_record_splits_the_model_string_like_the_agent_loop(history_dir, fake_agent_path):
+    """Both model_response producers record the model the same way: bare id in
+    `model`, prefix in `provider`. An ollama id keeps its own colon."""
+    with patch("tsugite.config.load_config") as cfg:
+        cfg.return_value = MagicMock(history_enabled=True)
+        session_id = save_run_to_history(
+            agent_path=fake_agent_path,
+            agent_name="fake",
+            prompt="hello",
+            result="hi",
+            model="ollama:qwen2.5-coder:14b",
+        )
+
+    storage = load_history_session(session_id)
+    [recorded] = [e for e in storage.iter_events() if e.type == "model_response"]
+    assert recorded.data["provider"] == "ollama"
+    assert recorded.data["model"] == "qwen2.5-coder:14b"
+
+
+def test_fallback_record_keeps_an_unqualified_model_whole(history_dir, fake_agent_path):
+    """Callers fall back to the literal "unknown" when they cannot resolve a
+    model; with no prefix to split there is no provider to claim."""
+    with patch("tsugite.config.load_config") as cfg:
+        cfg.return_value = MagicMock(history_enabled=True)
+        session_id = save_run_to_history(
+            agent_path=fake_agent_path,
+            agent_name="fake",
+            prompt="hello",
+            result="hi",
+            model="unknown",
+        )
+
+    storage = load_history_session(session_id)
+    [recorded] = [e for e in storage.iter_events() if e.type == "model_response"]
+    assert "provider" not in recorded.data
+    assert recorded.data["model"] == "unknown"
+
+
 def test_run_agent_creates_storage_at_runtime(history_dir, fake_agent_path):
     """The TsugiteAgent constructor accepts a `storage` keyword and stores it
     on the instance — confirms the plumbing endpoint exists. (Integration is

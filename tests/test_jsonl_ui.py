@@ -82,6 +82,17 @@ def test_jsonl_model_response(capsys):
     assert event["tail"] == "post-fence prose"
 
 
+def test_jsonl_model_response_carries_the_serving_model(capsys):
+    """The frame carries the model that served the turn, so a live transcript
+    labels it without waiting for a reload to read history."""
+    handler = JSONLUIHandler()
+    handler.handle_event(ModelResponseEvent(thought="x", provider="openai", model="gpt-4o-mini"))
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["provider"] == "openai"
+    assert event["model"] == "gpt-4o-mini"
+
+
 def test_jsonl_model_response_carries_usage(capsys):
     """The frame maps the turn's usage dump through unchanged, so the live path
     surfaces the same cache split (reads/writes) that replay reads off history."""

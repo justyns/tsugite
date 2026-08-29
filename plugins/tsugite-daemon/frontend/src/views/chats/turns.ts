@@ -203,6 +203,10 @@ export interface Turn {
     cacheReadTotal?: number;
     cacheWriteTotal?: number;
     cacheSteps?: number;
+    /** The model that served the turn, and its provider, as the last step
+     *  reported them. Kept apart: an ollama model id carries its own colon. */
+    model?: string;
+    provider?: string;
   };
 }
 
@@ -675,6 +679,9 @@ class Builder {
         this.closeOpenCode(turn);
         turn.stream = undefined; // superseded, never re-parsed
         this.addCacheUsage(turn, rec(e.usage));
+        // Last step wins, matching cacheRead.
+        const served = str(e.model);
+        if (served) turn.meta = { ...turn.meta, model: served, provider: str(e.provider) };
         const thought = str(e.thought) ?? '';
         // Blocking surfaces emit the thought frame right before this one;
         // don't render the same text twice.

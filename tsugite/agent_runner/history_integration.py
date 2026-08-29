@@ -262,10 +262,12 @@ def save_run_to_history(
             )
 
     state_delta = provider_state if provider_state else None
+    # Split as the agent loop records it: bare id in `model`, prefix in `provider`.
+    model_provider, _, model_id = model.partition(":")
     storage.record(
         "model_response",
-        provider=model.split(":", 1)[0] if ":" in model else None,
-        model=model,
+        provider=model_provider if model_id else None,
+        model=model_id or model,
         raw_content=result or "",
         usage={"total_tokens": token_count} if token_count else None,
         cost=cost,
