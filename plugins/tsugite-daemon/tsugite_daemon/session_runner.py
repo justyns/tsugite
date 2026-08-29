@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,17 @@ def set_current_session_id(session_id: str) -> None:
 
 def set_current_chain_depth(depth: int) -> None:
     _current_chain_depth.set(depth)
+
+
+@contextmanager
+def chain_depth_scope(depth: int):
+    """Run a chained reply at `depth`, restoring what the caller had."""
+    previous = _current_chain_depth.get()
+    _current_chain_depth.set(depth)
+    try:
+        yield
+    finally:
+        _current_chain_depth.set(previous)
 
 
 # Transient events that should reach live subscribers but not the JSONL event log.
@@ -287,12 +299,9 @@ class SessionRunner:
 
         message = build_completion_message(session, status, summary)
         source = _COMPLETION_SOURCES[status]
-        set_current_chain_depth(depth + 1)
-        try:
+        with chain_depth_scope(depth + 1):
             for target_id in targets:
                 await self._notify_one(session, target_id, message, source)
-        finally:
-            set_current_chain_depth(depth)
 
     async def _notify_one(self, session: Session, target_id: str, message: str, source: str) -> None:
         if target_id == session.id:

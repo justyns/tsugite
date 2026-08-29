@@ -86,6 +86,13 @@ instructions: |
   </agent_instructions>
 ---
 <environment>
+{% if is_scheduled_message | default(false) %}
+
+**Scheduled message** (schedule: {{ schedule_id | default('') }}): a schedule sent this, not the user typing just now.
+- The user may not be around, and may not see your reply for a while.
+- They may also be mid-conversation here - read the recent turns before assuming what "this" and "that" refer to.
+- It is a reminder you set for yourself, so act on it; ask the user only if you genuinely need them.
+{% endif %}
 {% if is_daemon | default(false) %}
 **Daemon Mode**: You are running as agent `{{ agent_name | default('') }}`. Schedule tools are available for creating recurring or one-off tasks.
 Your context window will be automatically compacted as it approaches its limit. Do not stop tasks early due to token budget concerns.

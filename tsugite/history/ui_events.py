@@ -28,6 +28,7 @@ _INJECTED_TAGS = (
     "environment",
     "background_task_complete",
     "scheduled_task",
+    "scheduled_message",
     "client_context",
     "session_finished",
 )

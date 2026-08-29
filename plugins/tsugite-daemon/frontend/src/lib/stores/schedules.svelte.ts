@@ -21,7 +21,7 @@ export interface Schedule {
   last_status: string | null;
   last_error: string | null;
   timezone: string;
-  execution_type: 'agent' | 'script';
+  execution_type: 'agent' | 'script' | 'session_message';
   command: string | null;
   run_count: number;
   disabled_reason: string | null;

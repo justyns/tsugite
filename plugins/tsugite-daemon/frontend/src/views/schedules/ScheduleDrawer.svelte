@@ -94,7 +94,7 @@
     }
     return {
       id: s.id,
-      execution_type: s.execution_type === 'script' ? 'script' : 'agent',
+      execution_type: s.execution_type,
       schedule_type: s.schedule_type === 'once' ? 'once' : 'cron',
       cron_expr: s.cron_expr ?? '',
       run_at: toLocalInput(s.run_at),
@@ -296,7 +296,7 @@
 
         <div class="row">
           <Seg
-            options={['agent', 'script']}
+            options={isEdit ? ['agent', 'script', 'session_message'] : ['agent', 'script']}
             bind:value={form.execution_type}
             ariaLabel="Execution type"
           />

@@ -535,6 +535,11 @@ class BaseAdapter(ABC):
             ctx["is_scheduled"] = True
             ctx["schedule_id"] = meta.get("schedule_id", "")
             ctx["has_notify_tool"] = meta.get("notify_tool", False)
+        # A scheduled message lands in a live chat, so unlike is_scheduled it does
+        # not mean "no user is present".
+        ctx["is_scheduled_message"] = channel_context.source == "schedule_message"
+        if ctx["is_scheduled_message"]:
+            ctx["schedule_id"] = meta.get("schedule_id", "")
         ctx["running_tasks"] = meta.get("running_tasks", [])
         ctx["tsugite_url"] = meta.get("tsugite_url", "")
         ctx["tsugite_token"] = meta.get("tsugite_token", "")

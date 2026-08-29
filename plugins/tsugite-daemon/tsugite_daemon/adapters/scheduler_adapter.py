@@ -25,8 +25,9 @@ from tsugite_daemon.scheduler import (
     ScheduleEntry,
     Scheduler,
 )
-from tsugite_daemon.session_runner import DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH
+from tsugite_daemon.session_runner import DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
 from tsugite_daemon.session_store import (
+    FINISHED_STATUSES,
     METADATA_INCIDENT_KEY,
     Session,
     SessionSource,
@@ -57,6 +58,17 @@ def build_task_complete_message(task_id: str, chain_depth: int, prompt: str, res
         ],
         {"id": task_id, "chain_depth": chain_depth},
     ).render(indent="  ")
+
+
+def _scheduled_message_block(entry: ScheduleEntry) -> str:
+    """Tag the message so the woken turn reads it as a reminder rather than as
+    something the person just typed. The fire time is here because a reminder
+    that says "it has been 2 hours" has no other way to check that it has."""
+    return El(
+        "scheduled_message",
+        [entry.prompt],
+        {"id": entry.id, "sent_at": datetime.now(timezone.utc).isoformat()},
+    ).render()
 
 
 def _recorded_run_outcome(conv_id: str | None) -> tuple[str, str | None]:
@@ -156,6 +168,7 @@ class SchedulerAdapter:
             schedules_path,
             self._run_agent,
             script_callback=self._run_script,
+            session_message_callback=self._run_session_message,
             on_repeated_failure=self._on_repeated_failure,
         )
 
@@ -246,6 +259,60 @@ class SchedulerAdapter:
             self._adapter.session_store.update_session(conv_id, **fields)
         except ValueError as e:
             logger.warning("Schedule '%s' session update failed for %s: %s", entry.id, conv_id, e)
+
+    async def _run_session_message(self, entry: ScheduleEntry) -> RunResult:
+        """Send `entry.prompt` into an existing session and let it take a turn. Opens no session of its own."""
+        if entry.chain_depth >= MAX_CHAIN_DEPTH:
+            raise RuntimeError(f"Chain depth {entry.chain_depth} reached max {MAX_CHAIN_DEPTH}")
+
+        store = self._adapter.session_store
+        target = resolve_target_session(entry, self._delivery_recipients(self._adapter, entry, [])[0], store)
+        if target is None or target.status in FINISHED_STATUSES:
+            await self._report_undeliverable(entry, target)
+            ref = entry.target_session or (target.id if target else "unresolved")
+            raise RuntimeError(f"Target session '{ref}' is not resumable")
+
+        # A turn already running holds the session; a second one would have two
+        # agent loops writing one history.
+        if target.has_live_work:
+            await asyncio.to_thread(
+                self._session_runner.deliver_to_session,
+                target.id,
+                entry.prompt,
+                source="schedule_message",
+                kind=entry.delivery_kind,
+                metadata={"schedule_id": entry.id},
+            )
+            return RunResult(output="delivered as a card; the session was mid-turn", session_id=target.id)
+
+        with chain_depth_scope(entry.chain_depth + 1):
+            result = await self._session_runner.reply_to_session(
+                target.id,
+                _scheduled_message_block(entry),
+                source="schedule_message",
+                metadata={"schedule_id": entry.id},
+            )
+        return RunResult(output=result, session_id=target.id)
+
+    async def _report_undeliverable(self, entry: ScheduleEntry, target: Session | None) -> None:
+        """Deliver a needs-ack card to the session that set the reminder. A one-off
+        is removed as soon as it fires, so nothing else surfaces the error."""
+        origin = _resolve_originating(entry, self._adapter.session_store)
+        if not origin or (target and origin.id == target.id):
+            return
+        reason = "has already finished" if target else "no longer exists"
+        try:
+            await asyncio.to_thread(
+                self._session_runner.deliver_to_session,
+                origin.id,
+                f"Scheduled message `{entry.id}` could not be delivered: its target session {reason}.\n\n{entry.prompt}",
+                source="schedule_failure",
+                kind=DELIVERY_KIND_NEEDS_ACK,
+                title=f"Undelivered scheduled message: {entry.id}",
+                metadata={"schedule_id": entry.id},
+            )
+        except Exception as e:
+            logger.error("Undeliverable report for schedule '%s' failed: %s", entry.id, e)
 
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
@@ -555,17 +622,13 @@ class SchedulerAdapter:
                 logger.error("Completion delivery for task '%s' failed: %s", entry.id, e)
             return
 
-        from tsugite_daemon.session_runner import set_current_chain_depth
-
-        set_current_chain_depth(entry.chain_depth + 1)
-        try:
-            await self._session_runner.reply_to_session(
-                session_id,
-                message,
-                source="completion_callback",
-                metadata={"schedule_id": entry.id, "completion_callback": True},
-            )
-        except Exception as e:
-            logger.error("on_complete reply to session '%s' failed: %s", session_id, e)
-        finally:
-            set_current_chain_depth(0)
+        with chain_depth_scope(entry.chain_depth + 1):
+            try:
+                await self._session_runner.reply_to_session(
+                    session_id,
+                    message,
+                    source="completion_callback",
+                    metadata={"schedule_id": entry.id, "completion_callback": True},
+                )
+            except Exception as e:
+                logger.error("on_complete reply to session '%s' failed: %s", session_id, e)

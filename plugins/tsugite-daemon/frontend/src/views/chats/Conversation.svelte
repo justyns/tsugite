@@ -357,6 +357,7 @@
   // gutter by what injected them instead of "you".
   const INJECTED_WHO: Record<string, string> = {
     scheduled_task: 'sched',
+    scheduled_message: 'sched',
     background_task_complete: 'task',
     message_context: 'context',
     environment: 'context',

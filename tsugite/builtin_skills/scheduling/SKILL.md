@@ -26,16 +26,33 @@ Schedule tools let agents create recurring (cron) or one-off scheduled tasks tha
 | `schedule_enable(id)` | Re-enable a disabled schedule |
 | `schedule_disable(id)` | Disable without deleting |
 
-## Script vs Agent Execution
+## Execution Types
 
-Schedules support two execution types:
+| | `execution_type="agent"` (default) | `execution_type="script"` | `execution_type="session_message"` |
+|---|---|---|---|
+| **How it works** | Runs a full LLM agent loop | Runs a shell command directly | Sends `prompt` into `target_session` and lets that conversation take a turn |
+| **When to use** | Tasks needing reasoning, summarization, or multi-step logic | Deterministic commands with predictable output | Reminders and follow-ups in an existing conversation |
+| **Cost** | LLM tokens per run | Zero tokens | One turn in the target session |
+| **Latency** | Seconds to minutes | Sub-second to seconds | Seconds to minutes |
 
-| | `execution_type="agent"` (default) | `execution_type="script"` |
-|---|---|---|
-| **How it works** | Runs a full LLM agent loop | Runs a shell command directly |
-| **When to use** | Tasks needing reasoning, summarization, or multi-step logic | Deterministic commands with predictable output |
-| **Cost** | LLM tokens per run | Zero tokens |
-| **Latency** | Seconds to minutes | Sub-second to seconds |
+**Use `session_message` when the follow-up belongs in this conversation:**
+- "Check on that job in 2 hours and make sure it completes"
+- "Remind yourself tomorrow morning to revisit this PR if no review has happened"
+- "In 30 minutes, ask me whether the deployment finished"
+
+Write `prompt` as the message your future self should receive. `target_session` is required;
+`"current"` is almost always what you want. The target is followed through compaction, and a
+session that is mid-turn takes the message as a card.
+
+```python-exec
+schedule_create(
+    id="check-deploy",
+    prompt="It has been 2 hours. Check whether the deploy finished and report the outcome.",
+    run_at="2026-03-04T16:30:00-06:00",
+    execution_type="session_message",
+    target_session="current",
+)
+```
 
 **Use `script` when the command is fully known ahead of time:**
 - `curl -s https://api.weather.gov/...` — fetch weather data
@@ -159,7 +176,7 @@ schedules = schedule_list()
 print(schedules)
 ```
 
-Each schedule includes: `id`, `agent`, `schedule_type`, `enabled`, `next_run`, `last_run`, `last_status`, `last_error`.
+Each schedule includes: `id`, `execution_type`, `schedule_type`, `enabled`, `next_run`, `last_run`, `last_status`, `last_error`.
 
 ## Managing Schedules
 

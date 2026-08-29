@@ -105,7 +105,7 @@ def schedule_create(
 
     Args:
         id: Unique schedule name (e.g., "daily-backup")
-        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script".
+        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script". For "session_message" this is the message the target session receives.
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
         timezone: IANA timezone (default: UTC)
@@ -114,7 +114,9 @@ def schedule_create(
         inject_history: If true (default), delivers the task result into the recipient's chat session so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
         agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run — edit the file and the next execution picks up changes.
-        execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM.
+        execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM,
+            "session_message" sends `prompt` into target_session and lets that conversation take a turn. Reminders and
+            follow-ups ("check on that job in 2 hours") want this one; it requires target_session, usually "current".
         command: Shell command to execute when execution_type is "script". Required for script type.
         script_timeout: Max seconds for script execution (default: 60). Only used when execution_type is "script".
         expires_at: ISO datetime after which the schedule auto-disables (e.g., "2026-04-01T00:00:00Z").
@@ -158,6 +160,9 @@ def schedule_create(
     target_session = _resolve_target_session(target_session, originating_session_id)
 
     from tsugite_daemon.scheduler import ScheduleEntry
+    from tsugite_daemon.session_runner import get_current_chain_depth
+
+    chain_depth = get_current_chain_depth() if execution_type == "session_message" else 0
 
     entry = ScheduleEntry(
         id=id,
@@ -179,6 +184,7 @@ def schedule_create(
         session_id=session_id,
         target_session=target_session,
         originating_session_id=originating_session_id,
+        chain_depth=chain_depth,
         delivery_mode=delivery_mode,
         delivery_kind=delivery_kind,
         incident_key=incident_key,
@@ -292,7 +298,7 @@ def schedule_update(
         inject_history: Enable/disable result injection into user chat sessions (optional)
         model: Model override for this schedule (optional). Set to empty string to clear.
         agent_file: Agent name (e.g., "+reporter") or path to agent .md file (optional). Set to empty string to clear.
-        execution_type: Change to "agent" or "script" (optional).
+        execution_type: Change to "agent", "script" or "session_message" (optional).
         command: Shell command for script execution (optional). Set to empty string to clear.
         script_timeout: Max seconds for script execution (optional).
         expires_at: ISO datetime for auto-disable (optional). Set to empty string to clear.
@@ -405,6 +411,7 @@ def schedule_status(id: str, history_limit: int = 10) -> dict:
         "next_run": entry.next_run,
         "enabled": entry.enabled,
         "run_count": entry.run_count,
+        "execution_type": entry.execution_type,
         "session_id": entry.session_id,
         "run_history": entry.run_history[-history_limit:],
     }
@@ -472,12 +479,15 @@ def background_task(
     Returns:
         Dict with status and generated task ID
     """
+    if execution_type not in ("agent", "script"):
+        raise ValueError(
+            f"background_task runs 'agent' or 'script', got '{execution_type}'; use schedule_create for session_message"
+        )
     if execution_type == "script":
         if not command:
             raise ValueError("'command' is required when execution_type is 'script'")
-    else:
-        if not prompt:
-            raise ValueError("'prompt' is required when execution_type is 'agent'")
+    elif not prompt:
+        raise ValueError("'prompt' is required when execution_type is 'agent'")
 
     if on_complete and (not isinstance(on_complete, dict) or on_complete.get("action") != "reply"):
         raise ValueError("on_complete must be {'action': 'reply'}")

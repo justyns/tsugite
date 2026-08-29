@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,6 +24,11 @@ logger = logging.getLogger(__name__)
 TARGET_SESSION_PRIMARY = "primary"
 TARGET_SESSION_ORIGINATING = "originating"
 TARGET_SESSION_NONE = "none"
+
+EXECUTION_AGENT = "agent"
+EXECUTION_SCRIPT = "script"
+EXECUTION_SESSION_MESSAGE = "session_message"
+EXECUTION_TYPES = (EXECUTION_AGENT, EXECUTION_SCRIPT, EXECUTION_SESSION_MESSAGE)
 
 DELIVERY_MODE_EXISTING = "existing_session"
 DELIVERY_MODE_PARENT = "parent_session"
@@ -63,7 +67,7 @@ class ScheduleEntry:
     timezone: str = "UTC"
     agent_file: str | None = None
     max_turns: int | None = None
-    execution_type: str = "agent"  # "agent" | "script"
+    execution_type: str = EXECUTION_AGENT
     command: str | None = None
     script_timeout: int = 60
     # Auto-expiry
@@ -120,10 +124,14 @@ class ScheduleEntry:
             raise ValueError("cron_expr required for cron schedules")
         if self.schedule_type == "once" and not self.run_at:
             raise ValueError("run_at required for one-off schedules")
-        if self.execution_type not in ("agent", "script"):
-            raise ValueError(f"execution_type must be 'agent' or 'script', got '{self.execution_type}'")
-        if self.execution_type == "script" and not self.command:
+        if self.execution_type not in EXECUTION_TYPES:
+            raise ValueError(f"execution_type must be one of {', '.join(EXECUTION_TYPES)}, got '{self.execution_type}'")
+        if self.execution_type == EXECUTION_SCRIPT and not self.command:
             raise ValueError("command required for script execution type")
+        if self.execution_type == EXECUTION_SESSION_MESSAGE and not self.prompt:
+            raise ValueError("prompt required for session_message execution type")
+        if self.execution_type == EXECUTION_SESSION_MESSAGE and self.target_session in (None, TARGET_SESSION_NONE):
+            raise ValueError("target_session required for session_message execution type")
         validate_delivery(self.delivery_mode, self.delivery_kind)
 
 
@@ -153,12 +161,14 @@ class Scheduler:
         schedules_path: Path,
         run_callback: RunCallback,
         script_callback: RunCallback | None = None,
+        session_message_callback: RunCallback | None = None,
         on_repeated_failure: Callable[["ScheduleEntry"], None] | None = None,
     ):
         self._path = schedules_path
         self._storage = SqliteCollectionStorage.for_state_file(schedules_path, "schedules")
         self._run_callback = run_callback
         self._script_callback = script_callback
+        self._session_message_callback = session_message_callback
         # Called once when a schedule crosses its consecutive-failure threshold,
         # so the daemon/adapter can surface it (Discord/notify). None = log only.
         self._on_repeated_failure = on_repeated_failure
@@ -332,10 +342,14 @@ class Scheduler:
             logger.info("Firing schedule '%s' (type=%s)", entry.id, entry.execution_type)
             run_conv_id = None
             try:
-                if entry.execution_type == "script":
+                if entry.execution_type == EXECUTION_SCRIPT:
                     if not self._script_callback:
                         raise RuntimeError("No script callback configured — cannot run script schedules")
                     run_result = await self._script_callback(entry)
+                elif entry.execution_type == EXECUTION_SESSION_MESSAGE:
+                    if not self._session_message_callback:
+                        raise RuntimeError("No session-message callback configured")
+                    run_result = await self._session_message_callback(entry)
                 else:
                     run_result = await self._run_callback(entry)
                 run_conv_id = run_result.session_id
@@ -550,12 +564,10 @@ class Scheduler:
             if not hasattr(entry, key):
                 raise ValueError(f"Unknown field '{key}'")
         # Validate against a throwaway copy BEFORE touching the live entry: a
-        # rejected update (bad timezone/cron/expires_at) must not poison
+        # rejected update (bad shape, timezone, cron or expires_at) must not poison
         # in-memory state that a later unrelated _save() would persist - that
         # bricked scheduler startup until schedules.json was hand-edited.
-        candidate = copy.copy(entry)
-        for key, value in updates.items():
-            setattr(candidate, key, value)
+        candidate = replace(entry, **updates)
         next_run = self._validate_entry(candidate)
         for key, value in updates.items():
             setattr(entry, key, value)
@@ -648,7 +660,7 @@ class Scheduler:
         for entry_data in entries:
             try:
                 entry = ScheduleEntry(**{k: v for k, v in entry_data.items() if k in _PERSISTED_FIELDS})
-            except TypeError as e:
+            except (TypeError, ValueError) as e:
                 logger.error("Skipping malformed schedule entry: %s", e)
                 continue
             self._schedules[entry.id] = entry
