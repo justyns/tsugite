@@ -24,8 +24,8 @@ SOURCE_ASK = "ask"
 SOURCE_JOB = "job"
 SOURCE_ERROR = "error"
 
-# Records the user discharges by acknowledging them. An ask or a parked job
-# clears when the thing it belongs to moves on, so dismissing cannot touch them.
+# Sources the user can dismiss. An ask clears when it is answered and a parked
+# job when it resumes, so neither belongs here.
 ACKNOWLEDGEABLE_SOURCES = (SOURCE_DELIVERY, SOURCE_ERROR)
 
 OWNER_SESSION = "session"

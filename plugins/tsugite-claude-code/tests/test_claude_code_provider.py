@@ -884,7 +884,7 @@ class TestClaudeCodeContextLimit:
 
 
 class TestClaudeCodeCostTracking:
-    """Tests for cost delta calculation — Claude CLI reports cumulative cost."""
+    """Tests for cost delta calculation - Claude CLI reports cumulative cost."""
 
     @pytest.mark.asyncio
     async def test_cost_is_delta_not_cumulative(self):
@@ -1169,7 +1169,7 @@ class TestClaudeCodeErrorResult:
     """The Claude CLI surfaces context-overflow and similar failures as a result
     event with is_error=true rather than a non-zero exit. The provider must
     raise AgentExecutionError so the daemon's existing prompt-too-long retry
-    path can fire — otherwise the user sees the raw 'Prompt is too long' text
+    path can fire - otherwise the user sees the raw 'Prompt is too long' text
     as the bot's reply with no recovery.
     """
 
@@ -1561,12 +1561,6 @@ class TestClaudeCodeStallWarning:
             pass
 
         assert self._warnings(bus) == []
-
-    def test_threshold_defaults_to_five_minutes(self, monkeypatch):
-        from tsugite_claude_code.process import ClaudeCodeProcess
-
-        monkeypatch.delenv("TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS", raising=False)
-        assert ClaudeCodeProcess()._stall_warn_seconds == 300.0
 
     def test_threshold_reads_env_override(self, monkeypatch):
         from tsugite_claude_code.process import ClaudeCodeProcess

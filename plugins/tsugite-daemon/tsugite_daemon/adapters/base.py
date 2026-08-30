@@ -793,7 +793,7 @@ class BaseAdapter(ABC):
         # must reflect server truth, not wait for progress events.
         self._broadcast_session_busy(conv_id, True)
 
-        # Compaction applies to override (pinned/explicit) sessions too —
+        # Compaction applies to override (pinned/explicit) sessions too -
         # otherwise cumulative_tokens grow until the provider raises "Prompt
         # is too long" with no recovery. compact_session migrates pin state
         # to the successor, so the user's pin follows the rotation.
@@ -1166,7 +1166,7 @@ class BaseAdapter(ABC):
                     if name not in auto_exempt:
                         self.session_store.mark_sticky(conv_id, name)
 
-            # Drop anything the agent called unload_skill() on — this wins over any
+            # Drop anything the agent called unload_skill() on - this wins over any
             # other sticky mutation from the same turn.
             for step in execution_steps:
                 for name in getattr(step, "unloaded_skills", []) or []:
@@ -1415,7 +1415,7 @@ class BaseAdapter(ABC):
         # Record the model the new session will actually run with. A mid-session
         # model override (carried forward by compact_session) drives every turn,
         # so session_start must reflect it rather than the agent's config default
-        # — otherwise the post-compaction session is born mislabeled.
+        # - otherwise the post-compaction session is born mislabeled.
         new_storage = backend.create(
             agent_name=self.agent_label,
             model=new_session.model_override or resolved_model,

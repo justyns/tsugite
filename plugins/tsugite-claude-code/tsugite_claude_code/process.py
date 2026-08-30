@@ -34,8 +34,7 @@ _STREAM_READ_LIMIT = 16 * 1024 * 1024
 
 # How long the child may produce nothing on stdout before the silence is reported.
 # A line arrives per stream-json event, not per token, so a whole model turn can
-# pass between two of them; the threshold is generous enough that only a wedged
-# child trips it.
+# pass between two of them.
 _STALL_WARN_SECONDS = 300.0
 _STALL_WARN_ENV = "TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS"
 
@@ -96,12 +95,10 @@ class ClaudeCodeProcess:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
 
     async def _read_stdout_line(self) -> bytes:
-        """Read one stdout line, reporting the wait once it passes the stall threshold.
+        """Read one stdout line, warning once per silent stretch past the stall threshold.
 
-        A long tool call is silent on stdout too, so the wait is only reported: the
-        read resumes afterwards, with one warning per silent stretch. Cancelling a
-        StreamReader read leaves its buffer intact, so the retried readline picks up
-        where this one stopped.
+        Cancelling a StreamReader read leaves its buffer intact, so the retried
+        readline picks up where this one stopped.
         """
         warned = False
         while True:
@@ -263,13 +260,13 @@ class ClaudeCodeProcess:
 
             event_type = event.get("type", "")
 
-            # Init event — capture session_id (arrives after first user message)
+            # Init event - capture session_id (arrives after first user message)
             if event_type == "system" and event.get("subtype") == "init":
                 self._session_id = event.get("session_id")
                 logger.debug("Init event received (session=%s)", self._session_id)
                 continue
 
-            # Compact boundary — Claude Code auto-compacted the conversation
+            # Compact boundary - Claude Code auto-compacted the conversation
             if event_type == "system" and event.get("subtype") == "compact_boundary":
                 self._compacted = True
                 logger.info(
@@ -285,7 +282,7 @@ class ClaudeCodeProcess:
                     streamed_text += delta["text"]
                     yield {"type": "text_delta", "text": delta["text"]}
 
-            # Full assistant message — extract text and usage from content blocks
+            # Full assistant message - extract text and usage from content blocks
             elif event_type == "assistant":
                 message = event.get("message", {})
                 usage = message.get("usage", {})

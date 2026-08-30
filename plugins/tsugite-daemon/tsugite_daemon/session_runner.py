@@ -1,4 +1,4 @@
-"""Session runner — executes agent sessions in the background."""
+"""Session runner - executes agent sessions in the background."""
 
 import asyncio
 import contextvars
@@ -109,38 +109,28 @@ def build_completion_message(session: Session, status: str, summary: str) -> str
     )
 
 
-def emit_attention(store: SessionStore, event_bus, session_id: str) -> None:
-    if not event_bus:
-        return
-    records = store.attention.open_records(session_id)
-    event_bus.emit("session_update", {"action": "attention", "id": session_id, **attention_fields(records)})
-
-
-def open_attention_record(
-    store: SessionStore, event_bus, session_id: str, *, source: str, ref_id: str, kind: str
-) -> None:
-    """A re-report of something already open announces nothing."""
-    opened = store.attention.open(
-        owner_kind=OWNER_SESSION,
-        owner_id=session_id,
-        source=source,
-        ref_id=ref_id,
-        kind=kind,
-    )
-    if opened:
-        emit_attention(store, event_bus, session_id)
-
-
 def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_id: str, error: str) -> None:
-    """Surface a send that failed after the turn ended: an error block in the chat
-    and a record the session list can badge."""
+    """Record a send that failed: an error block in the chat, and an attention
+    record the session list can badge.
+
+    A module function because BaseAdapter reports without holding a SessionRunner.
+    """
     store.append_event(
         session_id,
         {"type": "error", "timestamp": datetime.now(timezone.utc).isoformat(), "error": error},
     )
     if event_bus:
         event_bus.emit("session_event", {"session_id": session_id, "event_type": "error", "error": error})
-    open_attention_record(store, event_bus, session_id, source=SOURCE_ERROR, ref_id=ref_id, kind="send_failed")
+    opened = store.attention.open(
+        owner_kind=OWNER_SESSION,
+        owner_id=session_id,
+        source=SOURCE_ERROR,
+        ref_id=ref_id,
+        kind="send_failed",
+    )
+    if opened and event_bus:
+        records = store.attention.open_records(session_id)
+        event_bus.emit("session_update", {"action": "attention", "id": session_id, **attention_fields(records)})
 
 
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
@@ -528,14 +518,26 @@ class SessionRunner:
         return session
 
     def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> None:
-        open_attention_record(self._store, self._event_bus, session_id, source=source, ref_id=ref_id, kind=kind)
+        """Open an attention record; a re-report of something already open announces nothing."""
+        opened = self._store.attention.open(
+            owner_kind=OWNER_SESSION,
+            owner_id=session_id,
+            source=source,
+            ref_id=ref_id,
+            kind=kind,
+        )
+        if opened:
+            self._emit_attention(session_id)
 
     def clear_attention_ref(self, source: str, ref_id: str) -> None:
         for record in self._store.attention.clear_ref(source, ref_id):
             self._emit_attention(record.owner_id)
 
     def _emit_attention(self, session_id: str) -> None:
-        emit_attention(self._store, self._event_bus, session_id)
+        if not self._event_bus:
+            return
+        records = self._store.attention.open_records(session_id)
+        self._event_bus.emit("session_update", {"action": "attention", "id": session_id, **attention_fields(records)})
 
     def _report_send_failure(self, session_id: str, *, ref_id: str, error: str) -> None:
         report_send_failure(self._store, self._event_bus, session_id, ref_id=ref_id, error=error)
@@ -590,13 +592,12 @@ class SessionRunner:
     ) -> str:
         """Send a follow-up message to an existing session, running a turn in it.
 
-        A session that has ended takes no turn unless `revive` says the caller means
-        to reach it anyway.
+        A finished session takes no turn unless `revive` is set.
         """
         session_id = self.live_id(session_id)
         target = self._store.get_session(session_id)  # raises if the session is unknown
         if not revive and target.status in FINISHED_STATUSES and not target.accepts_followup:
-            logger.info("Not replying to session '%s': already finished", session_id)
+            logger.info("Session '%s' takes no reply: already finished", session_id)
             return ""
 
         adapter = self._adapter

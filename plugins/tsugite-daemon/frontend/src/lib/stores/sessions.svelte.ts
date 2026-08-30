@@ -25,7 +25,7 @@ import {
   type SessionRowLike,
 } from './sessionsOrder';
 
-/** Records a dismissal discharges; an ask or a parked job clears on its own. */
+/** Sources the user can dismiss. An ask or a parked job clears itself. */
 const ACKNOWLEDGEABLE_SOURCES = new Set(['delivery', 'error']);
 
 export interface AttentionRecord {
