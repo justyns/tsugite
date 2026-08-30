@@ -57,8 +57,7 @@ def get_xdg_write_path(filename: str) -> Path:
     Returns:
         Path where config should be written
     """
-    xdg_config = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
-    return Path(xdg_config) / "tsugite" / filename
+    return get_xdg_config_dir(filename)
 
 
 def get_xdg_config_dir(subdir: str = "") -> Path:

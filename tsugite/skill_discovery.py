@@ -138,16 +138,20 @@ def _collect_skill_roots(workspace, extra_paths: Optional[List[str]]) -> List[Pa
         for p in extra_paths:
             roots.append(Path(p).expanduser())
 
+    # dict.fromkeys drops the second global root, which is the same directory as the
+    # first unless XDG_CONFIG_HOME points somewhere other than ~/.config.
     roots.extend(
-        [
-            Path(".agents/skills"),
-            Path(".tsugite/skills"),
-            Path("skills"),
-            get_builtin_skills_path(),
-            Path.home() / ".agents" / "skills",
-            get_xdg_config_dir("skills"),
-            Path.home() / ".config" / "tsugite" / "skills",
-        ]
+        dict.fromkeys(
+            [
+                Path(".agents/skills"),
+                Path(".tsugite/skills"),
+                Path("skills"),
+                get_builtin_skills_path(),
+                Path.home() / ".agents" / "skills",
+                get_xdg_config_dir("skills"),
+                Path.home() / ".config" / "tsugite" / "skills",
+            ]
+        )
     )
     return roots
 
