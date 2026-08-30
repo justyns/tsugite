@@ -349,11 +349,12 @@ async def compute_session_title(
     user_content: str,
     assistant_content: str,
     agent_model: str,
+    compaction_model: str | None = None,
 ) -> str:
     """Compute a title for a session. Returns empty string if no title could be generated."""
     if len(user_content) <= SHORT_TITLE_THRESHOLD:
         return user_content
-    model = infer_compaction_model(agent_model)
+    model = compaction_model or infer_compaction_model(agent_model)
     messages = [
         {"role": "user", "content": user_content},
         {"role": "assistant", "content": assistant_content},

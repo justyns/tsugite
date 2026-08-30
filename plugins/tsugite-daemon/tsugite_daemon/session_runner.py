@@ -526,7 +526,9 @@ class SessionRunner:
         try:
             from tsugite_daemon.memory import compute_session_title
 
-            title = await compute_session_title(session.prompt or "", result_str, adapter.resolve_model())
+            title = await compute_session_title(
+                session.prompt or "", result_str, adapter.resolve_model(), adapter.runtime.compaction_model
+            )
             if title:
                 self.rename_session(session.id, title)
         except Exception as e:

@@ -1034,7 +1034,9 @@ class BaseAdapter(ABC):
         try:
             from tsugite_daemon.memory import compute_session_title
 
-            title = await compute_session_title(user_message, assistant_response, self.resolve_model())
+            title = await compute_session_title(
+                user_message, assistant_response, self.resolve_model(), self.runtime.compaction_model
+            )
             if title:
                 self.session_store.update_session(session_id, title=title)
                 if self.event_bus:
