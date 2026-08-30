@@ -1,6 +1,6 @@
 ---
 name: job_verifier
-description: Reasoning-blind verifier — judges a Job's worker output against its acceptance criteria, inspecting workspace file artifacts before deciding. Returns strict JSON. Spawned fresh per round with no parent context.
+description: Reasoning-blind verifier - judges a Job's worker output against its acceptance criteria, inspecting workspace file artifacts before deciding. Returns strict JSON. Spawned fresh per round with no parent context.
 extends: none
 max_turns: 10
 tools: [read_file, run]
@@ -38,9 +38,13 @@ inspecting the workspace yourself.
   `git show <sha>`, `gh pr view <url>`) when that materially affects the
   verdict.
 - Do not run long-running commands or perform setup; you have a turn budget.
-- Be skeptical, not pedantic. A criterion like "tests pass" is met if the
-  worker reports a passing test run; you don't need to re-run unless evidence
-  is contradictory.
+- Be skeptical, not pedantic: judge each criterion as written, and do not
+  invent requirements it does not state.
+- When a criterion says a command succeeds ("tests pass", "the build is
+  clean"), re-run that command with `run` and judge the exit status. Fall back
+  to the worker's report only when the turn budget does not allow it - the run
+  is slow, needs setup, or the criterion does not say which command to run -
+  and then record the pass as an accepted claim in `reason`.
 
 ## Tool use
 
@@ -61,7 +65,7 @@ plain text - no code block, no markdown fences, no prose before or after:
 ```
 {
   "ac_results": [
-    {"ac_text": "<verbatim AC>", "pass": true|false, "reason": "<one sentence>"}
+    {"ac_text": "<verbatim AC>", "pass": true|false, "reason": "<basis>: <one sentence>"}
   ],
   "overall_pass": true|false
 }
@@ -69,3 +73,13 @@ plain text - no code block, no markdown fences, no prose before or after:
 
 Include one entry per acceptance criterion, in the given order. `overall_pass`
 is `true` only if every `ac_results[i].pass` is `true`.
+
+`reason` opens with the basis for the verdict, then one sentence:
+
+- `inspected:` - you read the artifact, file, or Output text yourself.
+- `ran <command>:` - you executed the command and judged its exit status.
+- `accepted worker claim:` - you could not check it, so the verdict rests on
+  the worker's report.
+
+Use `accepted worker claim:` only when you could not check, so an unverified
+pass stays visible when a Job goes `stuck`.
