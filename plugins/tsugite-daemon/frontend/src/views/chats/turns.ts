@@ -723,6 +723,14 @@ class Builder {
         this.addProse(turn, str(e.message) ?? str(e.text) ?? '');
         return;
       }
+      case 'warning': {
+        // A provider or runtime warning the run continued through (a model
+        // process gone quiet, a skill that failed to load). A calm line in the
+        // turn it interrupted, never a failure block.
+        const message = str(e.message);
+        if (message) this.pushNotice(this.ensureAi(at), message);
+        return;
+      }
       case 'hook_status': {
         // Live tick while a hook runs ("Running precommit..."); surfaced by the
         // conversation's waiting line, not a timeline block.
@@ -1080,7 +1088,7 @@ class Builder {
       }
       default:
         // prompt_snapshot / model_request / init / llm_wait_progress
-        // / warning / file_read: no timeline block.
+        // / file_read: no timeline block.
         return;
     }
   }

@@ -182,6 +182,7 @@ _PERSIST_EVENT_TYPES = frozenset(
         "error",
         "cancelled",
         "info",
+        "warning",
         "hook_execution",
         "ask_user",
         "ask_answered",

@@ -30,6 +30,7 @@ from tsugite.events import (
     TaskStartEvent,
     ToolCallEvent,
     ToolResultEvent,
+    WarningEvent,
 )
 from tsugite.ui.dispatch import EventDispatchMixin, handles
 
@@ -62,6 +63,7 @@ class JSONLUIHandler(EventDispatchMixin):
     - SkillLoadedEvent    → {"type": "skill_loaded", "name": str, "description": str}
     - SkillLoadFailedEvent→ {"type": "warning", "message": "Failed to load skill '{name}': {error}"}
     - SkillUnloadedEvent  → {"type": "skill_unloaded", "name": str}
+    - WarningEvent        → {"type": "warning", "message": str}
     - SecretAccessEvent   → {"type": "secret_access", "name": str}
     - ExecutionGroupStartEvent → {"type": "group_start", "group_id": str, "title": str, "parent_group_id": str|null}
     - ExecutionGroupEndEvent   → {"type": "group_end", "group_id": str, "success": bool, "duration_ms": int|null, "error": str|null}
@@ -218,6 +220,10 @@ class JSONLUIHandler(EventDispatchMixin):
     @handles(InfoEvent)
     def _handle_info(self, event: InfoEvent) -> None:
         self._emit("info", {"message": event.message})
+
+    @handles(WarningEvent)
+    def _handle_warning(self, event: WarningEvent) -> None:
+        self._emit("warning", {"message": event.message})
 
     @handles(PromptSnapshotEvent)
     def _handle_prompt_snapshot(self, event: PromptSnapshotEvent) -> None:

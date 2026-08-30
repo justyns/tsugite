@@ -95,19 +95,15 @@ class ClaudeCodeProcess:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
 
     async def _read_stdout_line(self) -> bytes:
-        """Read one stdout line, warning once per silent stretch past the stall threshold.
+        """Read one stdout line, warning at every stall threshold the silence crosses.
 
-        Cancelling a StreamReader read leaves its buffer intact, so the retried
-        readline picks up where this one stopped.
+        Cancelling the read discards no buffered data, so the retry resumes mid-line.
         """
-        warned = False
         while True:
             try:
                 line = await asyncio.wait_for(self._process.stdout.readline(), timeout=self._stall_warn_seconds)
             except asyncio.TimeoutError:
-                if not warned:
-                    self._warn_stalled()
-                    warned = True
+                self._warn_stalled()
                 continue
             self._last_output_at = time.monotonic()
             return line

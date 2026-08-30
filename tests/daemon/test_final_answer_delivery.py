@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from tsugite_daemon.adapters.http import SSEProgressHandler
 
-from tsugite.events import ErrorEvent, FinalAnswerEvent, InfoEvent
+from tsugite.events import ErrorEvent, FinalAnswerEvent, InfoEvent, WarningEvent
 
 
 class TestFinalResultPersistence:
@@ -61,3 +61,17 @@ class TestFinalResultPersistence:
         payload = persister.call_args[0][0]
         assert payload["type"] == "info"
         assert payload["message"] == "working on it"
+
+    def test_warning_event_is_persisted(self):
+        """Provider warnings (a model process gone quiet, say) must be persisted so
+        a reloaded chat still explains why the turn sat silent."""
+        handler = SSEProgressHandler()
+        persister = MagicMock()
+        handler.set_event_persister(persister)
+
+        handler.handle_event(WarningEvent(message="no output for 300s", category="provider_stall"))
+
+        assert persister.called, "warnings must be persisted so a stalled turn still explains itself on reload"
+        payload = persister.call_args[0][0]
+        assert payload["type"] == "warning"
+        assert payload["message"] == "no output for 300s"

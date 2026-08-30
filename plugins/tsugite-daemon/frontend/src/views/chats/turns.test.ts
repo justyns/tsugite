@@ -1819,3 +1819,45 @@ describe('buildTimeline (agent turn budget)', () => {
     expect(t.turns[1]!.blocks.some((b) => b.kind === 'notice')).toBe(false);
   });
 });
+
+describe('buildTimeline (provider warning notice)', () => {
+  const STALL = 'Claude Code has produced no output for 300s; still waiting.';
+
+  const notices = (t: ReturnType<typeof buildTimeline>) =>
+    t.turns.flatMap((x) => x.blocks).filter((b) => b.kind === 'notice') as NoticeBlock[];
+
+  it('renders a warning as a calm notice in the running turn, not an error', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, id: 2 },
+      { type: 'warning', message: STALL, category: 'provider_stall', id: 3 },
+    ]);
+    expect(notices(t).map((n) => n.message)).toEqual([STALL]);
+    expect(t.turns[1]!.blocks.some((b) => b.kind === 'error')).toBe(false);
+    // The turn is still in flight - a warning must not close it.
+    expect(t.turns[1]!.streaming).toBe(true);
+  });
+
+  it('keeps every repeat of a growing stall report', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, id: 2 },
+      { type: 'warning', message: 'no output for 300s; still waiting.', id: 3 },
+      { type: 'warning', message: 'no output for 600s; still waiting.', id: 4 },
+      { type: 'warning', message: 'no output for 600s; still waiting.', id: 5 },
+    ]);
+    expect(notices(t).map((n) => n.message)).toEqual([
+      'no output for 300s; still waiting.',
+      'no output for 600s; still waiting.',
+    ]);
+  });
+
+  it('ignores a warning with no message', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'turn_start', turn: 1, id: 2 },
+      { type: 'warning', id: 3 },
+    ]);
+    expect(notices(t)).toHaveLength(0);
+  });
+});

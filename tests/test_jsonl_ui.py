@@ -17,6 +17,7 @@ from tsugite.events import (
     ObservationEvent,
     StepStartEvent,
     TaskStartEvent,
+    WarningEvent,
 )
 from tsugite.ui.jsonl import JSONLUIHandler
 
@@ -238,6 +239,17 @@ def test_jsonl_error(capsys):
     assert event["type"] == "error"
     assert event["error"] == "Something went wrong"
     assert event["step"] == 2
+
+
+def test_jsonl_warning(capsys):
+    """A WarningEvent emits a warning frame. Without it the daemon's UI handlers,
+    which all subclass this one, drop provider warnings before any chat sees them."""
+    handler = JSONLUIHandler()
+    handler.handle_event(WarningEvent(message="no output for 300s", category="provider_stall"))
+
+    event = json.loads(capsys.readouterr().out.strip())
+    assert event["type"] == "warning"
+    assert event["message"] == "no output for 300s"
 
 
 def test_jsonl_llm_wait_progress(capsys):

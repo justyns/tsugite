@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1456,6 +1457,25 @@ _RESULT = json.dumps(
 )
 
 
+class _StepClock:
+    """Monotonic clock that advances a fixed step per read, so the elapsed time
+    a stall reports is deterministic without waiting out a real threshold."""
+
+    def __init__(self, step: float = 300.0):
+        self.now = 0.0
+        self.step = step
+
+    def monotonic(self) -> float:
+        value = self.now
+        self.now += self.step
+        return value
+
+
+def _idles(bus) -> list[int]:
+    """Seconds of silence each emitted warning reported."""
+    return [int(re.search(r"for (\d+)s", call.args[0].message).group(1)) for call in bus.emit.call_args_list]
+
+
 class TestClaudeCodeStallWarning:
     """A quiet child is reported, never acted on: the read keeps going either way."""
 
@@ -1467,6 +1487,14 @@ class TestClaudeCodeStallWarning:
         set_ui_context(event_bus=bus)
         yield bus
         clear_ui_context()
+
+    @pytest.fixture
+    def clock(self, monkeypatch):
+        from tsugite_claude_code import process as process_module
+
+        stepping = _StepClock()
+        monkeypatch.setattr(process_module, "time", stepping)
+        return stepping
 
     @staticmethod
     def _warnings(bus):
@@ -1510,45 +1538,102 @@ class TestClaudeCodeStallWarning:
         asyncio.get_running_loop().call_later(delay, gate.set)
 
     @pytest.mark.asyncio
-    async def test_stall_warns_once_and_keeps_reading(self, bus, caplog):
-        """Many threshold expiries in one silent stretch produce one warning, and
-        the stream still completes once the child speaks again."""
+    async def test_a_wedged_child_keeps_warning(self, bus, clock, caplog):
+        """Every threshold the silence crosses is reported, with the elapsed time
+        growing - a wedged child must not go quiet after one warning."""
         import logging
 
         from tsugite_claude_code.process import ClaudeCodeProcess
 
         gate = asyncio.Event()
+        bus.emit.side_effect = lambda _event: gate.set() if len(bus.emit.call_args_list) >= 3 else None
+
         process = ClaudeCodeProcess(stall_warn_seconds=0.01)
         process._process = self._gated_proc([(gate, _delta("hi")), (None, _RESULT)])
-        self._open_after(gate, 0.15)
+        # Backstop so a run that stops warning ends on an assertion, not a hang.
+        self._open_after(gate, 0.3)
 
         with caplog.at_level(logging.WARNING, logger="tsugite_claude_code.process"):
             collected = [event async for event in process.send_message("hello")]
 
-        warnings = self._warnings(bus)
-        assert len(warnings) == 1, f"expected one stall warning, got {[w.message for w in warnings]}"
-        assert warnings[0].category == "provider_stall"
-        assert len([r for r in caplog.records if "no output" in r.getMessage()]) == 1
+        idles = _idles(bus)
+        assert len(idles) >= 3, f"the wedged child fell quiet after {len(idles)} warning(s)"
+        assert idles == sorted(set(idles)), f"elapsed time did not grow across the warnings: {idles}"
+        assert len([r for r in caplog.records if "no output" in r.getMessage()]) == len(idles)
         assert [e["type"] for e in collected] == ["text_delta", "result"]
 
     @pytest.mark.asyncio
-    async def test_output_resuming_resets_the_stall_timer(self, bus):
-        """Lines arriving between two stalls clear the warned flag, so the second
-        stall is reported too - and the fast lines themselves warn about nothing."""
+    async def test_output_resuming_resets_the_stall_timer(self, bus, clock):
+        """A line arriving mid-stall restarts the count, so the next stall reports
+        from the threshold again instead of continuing the first stall's total."""
         from tsugite_claude_code.process import ClaudeCodeProcess
 
         first, second = asyncio.Event(), asyncio.Event()
         process = ClaudeCodeProcess(stall_warn_seconds=0.01)
-        process._process = self._gated_proc(
-            [(first, _delta("a")), (None, _delta("b")), (None, _delta("c")), (second, _RESULT)]
-        )
-        self._open_after(first, 0.1)
-        self._open_after(second, 0.2)
+        process._process = self._gated_proc([(first, _delta("a")), (second, _RESULT)])
+
+        resumed_at = None
+
+        def open_gates(_event):
+            nonlocal resumed_at
+            emitted = len(bus.emit.call_args_list)
+            # The clock starts at zero, so a moved stamp means the first line landed.
+            if process._last_output_at == 0.0:
+                if emitted >= 2:
+                    first.set()
+                return
+            if resumed_at is None:
+                resumed_at = emitted
+            if emitted > resumed_at:
+                second.set()
+
+        bus.emit.side_effect = open_gates
+        self._open_after(first, 0.2)
+        self._open_after(second, 0.4)
 
         collected = [event async for event in process.send_message("hello")]
 
-        assert len(self._warnings(bus)) == 2
-        assert [e["type"] for e in collected] == ["text_delta", "text_delta", "text_delta", "result"]
+        idles = _idles(bus)
+        assert len(idles) >= 4, f"expected both stalls to be reported, got {idles}"
+        drop = next((i for i in range(1, len(idles)) if idles[i] < idles[i - 1]), None)
+        assert drop is not None, f"the resumed output never reset the elapsed count: {idles}"
+        assert idles[drop:] == sorted(set(idles[drop:])), f"the second stall did not grow: {idles}"
+        assert [e["type"] for e in collected] == ["text_delta", "result"]
+
+    @pytest.mark.asyncio
+    async def test_stall_warning_reaches_the_chat_ui(self, clock):
+        """The daemon renders agent events through JSONLUIHandler subclasses, so the
+        web UI shows a stall only when that handler emits a frame for it."""
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        from tsugite.events import EventBus
+        from tsugite.ui.jsonl import JSONLUIHandler
+        from tsugite.ui_context import clear_ui_context, set_ui_context
+
+        frames = []
+
+        class _Capture(JSONLUIHandler):
+            def _emit(self, event_type, data):
+                frames.append((event_type, data))
+
+        event_bus = EventBus()
+        event_bus.subscribe(_Capture().handle_event)
+        set_ui_context(event_bus=event_bus)
+
+        gate = asyncio.Event()
+        process = ClaudeCodeProcess(stall_warn_seconds=0.01)
+        process._process = self._gated_proc([(gate, _RESULT)])
+        self._open_after(gate, 0.05)
+
+        try:
+            async for _event in process.send_message("hello"):
+                pass
+        finally:
+            clear_ui_context()
+
+        warnings = [data for event_type, data in frames if event_type == "warning"]
+        assert warnings, f"no warning frame reached the UI handler; frames={frames}"
+        assert "no output" in warnings[0]["message"]
 
     @pytest.mark.asyncio
     async def test_fast_stream_never_warns(self, bus):
