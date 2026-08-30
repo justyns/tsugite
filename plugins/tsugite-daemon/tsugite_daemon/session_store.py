@@ -17,6 +17,7 @@ from typing import Callable, Optional
 from uuid import uuid4
 
 from tsugite.core.record_store import SqliteCollectionStorage
+from tsugite.core.state import copy_state
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
 from tsugite_daemon.attention_store import (
@@ -924,6 +925,7 @@ class SessionStore:
             new_session.created_at = old_session.created_at
 
             self._sessions[new_id] = new_session
+            copy_state(session_id, new_id)
 
             # Compaction preserves is_primary metadata, so the new session automatically
             # becomes the user's default if the predecessor was. The named-route lookup

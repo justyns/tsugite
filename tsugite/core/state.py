@@ -9,13 +9,30 @@ a sandbox escape.
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
+from tsugite.config import get_xdg_data_path
 from tsugite.exceptions import StateSerializationError
 
 DEFAULT_MAX_BYTES_PER_KEY = 10 * 1024 * 1024
 DEFAULT_MAX_BYTES_TOTAL = 10 * 1024 * 1024
+
+
+def session_state_path(session_id: str) -> Path:
+    """Path to a session's state file."""
+    return get_xdg_data_path("state") / session_id / "state.json"
+
+
+def copy_state(old_session_id: str, new_session_id: str) -> None:
+    """Copy a session's saved state to `new_session_id`, leaving the original in place."""
+    source = session_state_path(old_session_id)
+    if not source.exists():
+        return
+    destination = session_state_path(new_session_id)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
 
 
 def load_state(path: Path) -> dict[str, Any]:

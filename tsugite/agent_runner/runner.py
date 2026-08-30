@@ -10,10 +10,10 @@ from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
-from tsugite.config import get_xdg_data_path  # noqa: E402
 from tsugite.core.agent import TsugiteAgent  # noqa: E402
 from tsugite.core.executor_registry import get_executor_class  # noqa: E402
 from tsugite.core.proxy import _parse_pattern  # noqa: E402
+from tsugite.core.state import session_state_path  # noqa: E402
 from tsugite.exceptions import (  # noqa: E402
     AgentExecutionError,
     is_prompt_too_long_error,
@@ -48,7 +48,7 @@ def _resolve_state_path(session_id: Optional[str]) -> Optional[Path]:
     """Return the per-session JSON state path, or None for an ephemeral run."""
     if not session_id:
         return None
-    return get_xdg_data_path("state") / session_id / "state.json"
+    return session_state_path(session_id)
 
 
 if TYPE_CHECKING:
