@@ -297,6 +297,48 @@ class TestMidTurnDeferral:
         assert [e["message"] for e in _deliveries(store, busy)] == ["later"]
 
 
+class TestRepliesIntoFinishedSessions:
+    """A reply starts a turn, so it obeys the same gate a delivery does: a session
+    that has ended takes no more turns unless the caller asks for one explicitly."""
+
+    @pytest.mark.asyncio
+    async def test_a_reply_into_a_finished_session_runs_no_turn(self, store, bus):
+        adapter = MagicMock()
+        adapter.handle_message = AsyncMock(return_value="ok")
+        runner = SessionRunner(store=store, adapter=adapter, event_bus=bus)
+        sid = _session(store)
+        store.update_session(sid, status=SessionStatus.COMPLETED.value)
+
+        assert await runner.reply_to_session(sid, "the job finished", source="job_complete") == ""
+
+        adapter.handle_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_resumable_completed_session_still_takes_the_turn(self, store, bus):
+        adapter = MagicMock()
+        adapter.handle_message = AsyncMock(return_value="ok")
+        runner = SessionRunner(store=store, adapter=adapter, event_bus=bus)
+        sid = _session(store, resumable=True)
+        store.update_session(sid, status=SessionStatus.COMPLETED.value)
+
+        await runner.reply_to_session(sid, "the job finished", source="job_complete")
+
+        adapter.handle_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_revive_reaches_a_finished_session_on_purpose(self, store, bus):
+        """`session_reply` addresses a finished session deliberately."""
+        adapter = MagicMock()
+        adapter.handle_message = AsyncMock(return_value="ok")
+        runner = SessionRunner(store=store, adapter=adapter, event_bus=bus)
+        sid = _session(store)
+        store.update_session(sid, status=SessionStatus.COMPLETED.value)
+
+        await runner.reply_to_session(sid, "one more thing", revive=True)
+
+        adapter.handle_message.assert_awaited_once()
+
+
 class TestFanoutDoesNotBlockTheLoop:
     @pytest.mark.asyncio
     async def test_flushing_a_deferred_needs_ack_delivery_leaves_the_loop_free(self, store, bus):

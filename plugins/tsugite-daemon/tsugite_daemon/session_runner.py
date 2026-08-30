@@ -317,9 +317,6 @@ class SessionRunner:
         if target is None:
             logger.info("Session '%s' cannot notify '%s': unknown or pruned", session.id, target_id)
             return
-        if target.status in FINISHED_STATUSES and not target.accepts_followup:
-            logger.info("Session '%s' not notifying '%s': target already finished", session.id, target.id)
-            return
         try:
             await self.reply_to_session(target.id, message, source=source, metadata={"from_session": session.id})
         except Exception as e:
@@ -552,10 +549,18 @@ class SessionRunner:
         message: str,
         source: str = "session",
         metadata: dict | None = None,
+        revive: bool = False,
     ) -> str:
-        """Send a follow-up message to an existing session."""
+        """Send a follow-up message to an existing session, running a turn in it.
+
+        A session that has ended takes no turn unless `revive` says the caller means
+        to reach it anyway.
+        """
         session_id = self.live_id(session_id)
-        self._store.get_session(session_id)  # raises if the session is unknown
+        target = self._store.get_session(session_id)  # raises if the session is unknown
+        if not revive and target.status in FINISHED_STATUSES and not target.accepts_followup:
+            logger.info("Not replying to session '%s': already finished", session_id)
+            return ""
 
         adapter = self._adapter
         if not adapter:

@@ -68,7 +68,8 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
     # context, and reply_to_session rebinds the current session to the target.
     origin = get_current_session_id()
     metadata = {"from_session": origin} if origin and origin != session_id else None
-    result = _call(_session_runner.reply_to_session, session_id, message, metadata=metadata, timeout=120)
+    # revive: an agent addressing a session by id means it, finished or not.
+    result = _call(_session_runner.reply_to_session, session_id, message, metadata=metadata, revive=True, timeout=120)
     return {"session_id": session_id, "response": str(result)[:2000]}
 
 

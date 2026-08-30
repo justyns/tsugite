@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
@@ -323,6 +323,32 @@ def test_reconcile_orphaned_host_sessions_skips_non_terminal_job(store, runner, 
 
     assert orchestrator.reconcile_orphaned_host_sessions() == 0
     assert runner.store.sessions[host.id].status == SessionStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_a_notify_job_starts_no_turn_in_the_host_session_it_just_closed(tmp_path, history_dir, event_bus):
+    """`_finalize` reconciles the job-host placeholder to `completed` and then wakes
+    it. The wake-up must not run an LLM turn in a session that has ended."""
+    from tsugite_daemon.session_runner import SessionRunner
+    from tsugite_daemon.session_store import SessionStore
+
+    adapter = MagicMock()
+    adapter.handle_message = AsyncMock(return_value="ok")
+    sessions = SessionStore(tmp_path / "sessions.json")
+    sessions.create_session(_job_host_session())
+    real_runner = SessionRunner(store=sessions, adapter=adapter, event_bus=event_bus)
+    jobs = JobStore(tmp_path / "notify-jobs.json")
+    orch = JobsOrchestrator(jobs, real_runner, event_bus=event_bus)
+
+    job = jobs.add(Job(id="", parent_session_id="host-1", prompt="do the thing", notify_when="terminal"))
+    orch.register_worker(job.id, "worker-1", timeout_minutes=30)
+
+    await orch.on_session_complete(_worker_session(job), "all done")
+    await asyncio.sleep(0)
+
+    assert jobs.get(job.id).state == JobState.DONE.value
+    assert sessions.get_session("host-1").status == SessionStatus.COMPLETED.value
+    adapter.handle_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

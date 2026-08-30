@@ -191,7 +191,7 @@ class TestSessionReply:
         session = Session(id="sess-reply", source="background", status="completed", prompt="task")
         tmp_store.create_session(session)
 
-        result = asyncio.run(runner.reply_to_session("sess-reply", "follow up"))
+        result = asyncio.run(runner.reply_to_session("sess-reply", "follow up", revive=True))
 
         assert result == "response text"
         mock_adapter.handle_message.assert_called_once()
@@ -212,7 +212,7 @@ class TestSessionReply:
         tmp_store.create_session(session)
 
         with pytest.raises(ValueError, match="No adapter"):
-            asyncio.run(runner.reply_to_session("sess-no-adapter", "hello"))
+            asyncio.run(runner.reply_to_session("sess-no-adapter", "hello", revive=True))
 
 
 # ── default.md renders against the real context shape ──
