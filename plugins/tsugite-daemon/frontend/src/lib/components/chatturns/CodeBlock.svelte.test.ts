@@ -210,7 +210,7 @@ test('a block whose group failed stays open even when told to collapse', async (
   await expect.element(page.getByText('HTTPError: 401')).toBeVisible();
 });
 
-test('the folded header says how many tools ran', async () => {
+test('the folded row says how many tools ran', async () => {
   await render(CodeBlock, {
     code,
     collapsed: true,
@@ -260,7 +260,7 @@ test('expanding a summarised block reveals the code again', async () => {
   });
   expect(container.querySelector('.pre-wrap')).toBeNull();
 
-  await page.getByRole('button', { name: 'Expand code' }).click();
+  await page.getByRole('button', { name: 'read the docs' }).click();
   expect(container.querySelector('.pre-wrap')).not.toBeNull();
 });
 
@@ -288,4 +288,87 @@ test('a folded block with neither groups nor calls peeks at its code', async () 
     collapsed: true,
   });
   expect(container.querySelector('.pre-wrap')).not.toBeNull();
+});
+
+test('a folded grouped block is one row, with no language label, line count or copy', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    meta: '0.4s',
+    calls: [{ tool: 'read_file', status: 'done' as const, groupId: 'g1' }],
+    groups: [{ id: 'g1', title: 'check for exact duplicate issue' }],
+  });
+
+  const row = container.querySelector('button.t-code-summary')!;
+  expect(row).not.toBeNull();
+  expect(row.getAttribute('aria-expanded')).toBe('false');
+  expect(row.querySelector('.sum')!.textContent).toBe('check for exact duplicate issue');
+  expect(row).toBeVisible();
+
+  expect(container.querySelector('.t-code-hd')).toBeNull();
+  expect(container.textContent).not.toContain('python');
+  expect(container.textContent).not.toContain('1 line');
+  expect(container.querySelector('[aria-label="Copy code"]')).toBeNull();
+});
+
+test('the folded row shows its duration and running flag', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    running: true,
+    meta: '0.4s',
+    groups: [{ id: 'g1', title: 'check for exact duplicate issue' }],
+  });
+  expect(container.querySelector('button.t-code-summary')).not.toBeNull();
+  await expect.element(page.getByText('0.4s')).toBeVisible();
+  await expect.element(page.getByText('running')).toBeVisible();
+});
+
+test('clicking the folded row reveals the code and the group rows', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    calls: [{ tool: 'read_file', status: 'done' as const, groupId: 'g1' }],
+    groups: [{ id: 'g1', title: 'check for exact duplicate issue' }],
+  });
+  expect(container.querySelector('.pre-wrap')).toBeNull();
+
+  await page.getByRole('button', { name: /check for exact duplicate issue/ }).click();
+
+  expect(container.querySelector('button.t-code-summary')).toBeNull();
+  expect(container.querySelector('.pre-wrap')).not.toBeNull();
+  await expect.element(page.getByText('read_file(path="a")')).toBeVisible();
+  expect(container.querySelector('.t-code-group')).toBeVisible();
+});
+
+test('the folded row shows every group title on one line', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    groups: [
+      { id: 'g1', title: 'check for exact duplicate issue' },
+      { id: 'g2', title: 'filed Forgejo issue' },
+    ],
+  });
+
+  const label = container.querySelector('.t-code-summary .sum')!;
+  expect(label.textContent).toBe('check for exact duplicate issue · filed Forgejo issue');
+});
+
+test('a failed block never folds to a row', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'http_request(url="x")',
+    lang: 'python',
+    collapsed: true,
+    calls: [{ tool: 'http_request', status: 'error' as const, groupId: 'g1' }],
+    groups: [{ id: 'g1', title: 'fetch open issues', success: false, error: 'HTTPError: 401' }],
+  });
+
+  expect(container.querySelector('button.t-code-summary')).toBeNull();
+  expect(container.querySelector('.t-code-hd')).not.toBeNull();
+  await expect.element(page.getByText('HTTPError: 401')).toBeVisible();
 });

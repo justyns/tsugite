@@ -77,7 +77,6 @@
 
   let userOverride = $state<{ prop: boolean; value: boolean } | null>(null);
   const isCollapsed = $derived(userOverride?.prop === foldable ? userOverride.value : foldable);
-  // Conditionally rendered now (the summary replaces it), so the binding is reactive.
   let codeEl = $state<HTMLElement | undefined>(undefined);
 
   const rows = $derived(codeRows(calls, groups));
@@ -139,46 +138,56 @@
 <div
   class="t-code"
   class:is-collapsed={isCollapsed}
+  class:is-row={!!summary}
   class:is-streaming={streaming}
   class:is-run={running}
 >
-  <div class="t-code-hd">
-    {#if lang}<span class="lang">{lang}</span>{/if}
-    {#if filename}<span>{filename}</span>{/if}
-    {#if running}<span class="run"><Spin />running</span>{/if}
-    {#if streaming}
-      <span class="streamflag"
-        ><span class="ic-stream" aria-hidden="true"><i></i><i></i><i></i></span>streaming</span
-      >
-    {/if}
-    <div class="grow"></div>
-    {#if isCollapsed && calls.length > 0}
-      <span>{calls.length} {calls.length === 1 ? 'tool' : 'tools'}</span>
-    {/if}
-    {#if meta}<span class="meta">{meta}</span>{/if}
-    {#if lineCount > 0}<span>{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>{/if}
-    <button type="button" class="t-iconbtn" onclick={copy} aria-label="Copy code">
-      <Icon name="copy" size={11} />copy
-    </button>
-    {#if collapsible}
-      <button
-        type="button"
-        class="t-iconbtn"
-        aria-expanded={!isCollapsed}
-        aria-label={isCollapsed ? 'Expand code' : 'Collapse code'}
-        onclick={toggleCollapsed}
-      >
-        {isCollapsed ? 'expand' : 'collapse'}
-      </button>
-    {/if}
-  </div>
   {#if summary}
-    <!-- Folded with groups: the agent's own labels say more than a line of code.
-         Pointer-only, like .pre-expand below; the header button is the keyboard control. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="t-code-summary" onclick={toggleCollapsed}>{summary}</div>
+    <!-- Folded with groups: the agent's own labels say more than a line of code. -->
+    <button
+      type="button"
+      class="t-code-summary"
+      class:is-err={failed}
+      aria-expanded={!isCollapsed}
+      onclick={toggleCollapsed}
+    >
+      <span class="chev"><Icon name="chev-r" size={10} /></span>
+      <span class="sum">{summary}</span>
+      {#if running}<span class="run"><Spin />running</span>{/if}
+      {#if failed}<span class="flag">failed</span>{/if}
+      {#if calls.length > 0}
+        <span class="tail">{calls.length} {calls.length === 1 ? 'tool' : 'tools'}</span>
+      {/if}
+      {#if meta}<span class="tail meta">{meta}</span>{/if}
+    </button>
   {:else}
+    <div class="t-code-hd">
+      {#if lang}<span class="lang">{lang}</span>{/if}
+      {#if filename}<span>{filename}</span>{/if}
+      {#if running}<span class="run"><Spin />running</span>{/if}
+      {#if streaming}
+        <span class="streamflag"
+          ><span class="ic-stream" aria-hidden="true"><i></i><i></i><i></i></span>streaming</span
+        >
+      {/if}
+      <div class="grow"></div>
+      {#if meta}<span class="meta">{meta}</span>{/if}
+      {#if lineCount > 0}<span>{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>{/if}
+      <button type="button" class="t-iconbtn" onclick={copy} aria-label="Copy code">
+        <Icon name="copy" size={11} />copy
+      </button>
+      {#if collapsible}
+        <button
+          type="button"
+          class="t-iconbtn"
+          aria-expanded={!isCollapsed}
+          aria-label={isCollapsed ? 'Expand code' : 'Collapse code'}
+          onclick={toggleCollapsed}
+        >
+          {isCollapsed ? 'expand' : 'collapse'}
+        </button>
+      {/if}
+    </div>
     <div class="pre-wrap">
       <pre><code bind:this={codeEl}
           >{#if children}{@render children()}{:else}{code}{/if}</code
@@ -290,14 +299,55 @@
   .pre-wrap {
     position: relative;
   }
+  /* Folded with groups: no card, just an activity row. */
+  .t-code.is-row {
+    border: 0;
+    background: none;
+  }
   .t-code-summary {
-    padding: 9px 11px;
-    font: 400 var(--fs-sm) / 1.65 var(--font-ui);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 3px 6px;
+    background: none;
+    border: 0;
+    border-radius: var(--r-sm);
     color: var(--tx2);
+    font: 400 var(--fs-sm) / 1.65 var(--font-ui);
+    text-align: left;
     cursor: pointer;
+  }
+  .t-code-summary:hover {
+    color: var(--tx0);
+    background: var(--bg2);
+  }
+  .t-code-summary .chev {
+    display: inline-flex;
+    flex: none;
+    color: var(--tx3);
+  }
+  .t-code-summary.is-err .chev {
+    color: var(--st-err);
+  }
+  .t-code-summary .sum {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .t-code-summary .flag {
+    flex: none;
+    color: var(--st-err);
+    font: 600 var(--fs-2xs) var(--font-mono);
+  }
+  .t-code-summary .tail {
+    flex: none;
+    color: var(--tx3);
+    font: 500 var(--fs-2xs) var(--font-mono);
   }
 
   /* One line of peek: enough to say what ran, short enough that a finished turn
@@ -322,12 +372,14 @@
   .t-code.is-run {
     border-color: color-mix(in oklab, var(--st-ok) 40%, transparent);
   }
-  .t-code-hd .run {
+  .t-code-hd .run,
+  .t-code-summary .run {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    flex: none;
     color: var(--st-ok);
-    font-weight: 600;
+    font: 600 var(--fs-2xs) var(--font-mono);
   }
   .t-code-hd .streamflag {
     display: inline-flex;
@@ -377,7 +429,8 @@
       transform: none;
     }
   }
-  .t-code-hd .meta {
+  .t-code-hd .meta,
+  .t-code-summary .meta {
     font-variant-numeric: tabular-nums;
   }
 
@@ -424,9 +477,10 @@
     color: var(--st-err);
   }
 
-  /* Folded: only the header stays, carrying the tool count and duration. */
+  /* Folded: the header (or the summary row) is all that stays on screen. */
   .t-code.is-collapsed .t-code-calls,
-  .t-code.is-collapsed .t-code-out {
+  .t-code.is-collapsed .t-code-out,
+  .t-code.is-row .t-code-rv {
     display: none;
   }
 
