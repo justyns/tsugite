@@ -25,7 +25,7 @@ from tsugite_daemon.scheduler import (
     ScheduleEntry,
     Scheduler,
 )
-from tsugite_daemon.session_runner import DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
+from tsugite_daemon.session_runner import DELIVERY_KIND_FYI, DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
 from tsugite_daemon.session_store import (
     FINISHED_STATUSES,
     METADATA_INCIDENT_KEY,
@@ -315,6 +315,22 @@ class SchedulerAdapter:
         except Exception as e:
             logger.error("Undeliverable report for schedule '%s' failed: %s", entry.id, e)
 
+    async def _record_script_output(self, entry: ScheduleEntry, conv_id: str, output: str) -> None:
+        """Give the run session a transcript of its own. Must precede the status
+        update: `deliver_to_session` drops a card aimed at a finished session."""
+        if not self._session_runner:
+            logger.debug("Schedule '%s' has no session runner; skipping script output", entry.id)
+            return
+        await asyncio.to_thread(
+            self._session_runner.deliver_to_session,
+            conv_id,
+            output,
+            source="schedule_script",
+            kind=DELIVERY_KIND_FYI,
+            title=f"Script output: {entry.id}",
+            metadata={"schedule_id": entry.id},
+        )
+
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
         logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
@@ -335,10 +351,13 @@ class SchedulerAdapter:
 
         if proc.returncode != 0:
             output = (proc.stderr or proc.stdout or "")[:2000]
+            failure = f"Script exited with code {proc.returncode}: {output}"
+            await self._record_script_output(entry, conv_id, failure)
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=output)
-            raise RuntimeError(f"Script exited with code {proc.returncode}: {output}")
+            raise RuntimeError(failure)
 
         result = proc.stdout[:_MAX_RESULT_CHARS]
+        await self._record_script_output(entry, conv_id, result)
         self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' script completed (exit 0)", entry.id)
 
