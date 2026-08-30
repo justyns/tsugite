@@ -6,7 +6,7 @@ history as a delivery. Ordering matters: `deliver_to_session` refuses a session
 already in a finished status, so the delivery precedes the status update.
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from tsugite_daemon.scheduler import ScheduleEntry
@@ -76,3 +76,31 @@ async def test_a_failed_script_run_records_its_stderr_and_exit_code(tmp_path, hi
     assert len(deliveries) == 1
     assert "disk full" in deliveries[0]["message"]
     assert "3" in deliveries[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_script_run_records_the_timeout(tmp_path, history_dir):
+    sa, store = _make_scheduler_adapter(tmp_path)
+    entry = _script_entry("echo partial progress; sleep 30")
+    entry.script_timeout = 1
+
+    with pytest.raises(RuntimeError):
+        await sa._run_script(entry)
+
+    session = _run_session(store)
+    assert session.status == SessionStatus.FAILED.value
+    deliveries = _deliveries(store, session.id)
+    assert len(deliveries) == 1
+    assert "timed out" in deliveries[0]["message"].lower()
+    assert "partial progress" in deliveries[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_recording_still_finishes_the_run(tmp_path, history_dir):
+    sa, store = _make_scheduler_adapter(tmp_path)
+    sa._session_runner.deliver_to_session = Mock(side_effect=RuntimeError("history unavailable"))
+
+    await sa._run_script(_script_entry("echo ingested 42 docs"))
+
+    session = _run_session(store)
+    assert session.status == SessionStatus.COMPLETED.value

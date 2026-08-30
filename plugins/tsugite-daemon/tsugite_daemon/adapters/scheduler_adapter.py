@@ -321,15 +321,18 @@ class SchedulerAdapter:
         if not self._session_runner:
             logger.debug("Schedule '%s' has no session runner; skipping script output", entry.id)
             return
-        await asyncio.to_thread(
-            self._session_runner.deliver_to_session,
-            conv_id,
-            output,
-            source="schedule_script",
-            kind=DELIVERY_KIND_FYI,
-            title=f"Script output: {entry.id}",
-            metadata={"schedule_id": entry.id},
-        )
+        try:
+            await asyncio.to_thread(
+                self._session_runner.deliver_to_session,
+                conv_id,
+                output,
+                source="schedule_script",
+                kind=DELIVERY_KIND_FYI,
+                title=f"Script output: {entry.id}",
+                metadata={"schedule_id": entry.id},
+            )
+        except Exception as e:
+            logger.warning("Schedule '%s' could not record script output in %s: %s", entry.id, conv_id, e)
 
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
@@ -346,8 +349,13 @@ class SchedulerAdapter:
                 timeout=entry.script_timeout,
             )
         except subprocess.TimeoutExpired as e:
+            timed_out = f"Script timed out after {entry.script_timeout}s"
+            partial = "".join(
+                c.decode(errors="replace") if isinstance(c, bytes) else c for c in (e.output, e.stderr) if c
+            )[:2000]
+            await self._record_script_output(entry, conv_id, f"{timed_out}: {partial}" if partial else timed_out)
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
-            raise RuntimeError(f"Script timed out after {entry.script_timeout}s") from e
+            raise RuntimeError(timed_out) from e
 
         if proc.returncode != 0:
             output = (proc.stderr or proc.stdout or "")[:2000]
