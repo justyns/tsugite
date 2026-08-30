@@ -630,7 +630,7 @@
         >
           {#if turn.origin}
             <!-- Another agent, a job, or a schedule sent this - never the person.
-                 The chip names the sender and links back to it where there is
+                 The chip shows the sender and links back to it where there is
                  something to open. -->
             {@const href = originHref(turn.origin)}
             {#if href}
