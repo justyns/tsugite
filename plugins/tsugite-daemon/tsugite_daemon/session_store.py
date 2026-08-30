@@ -1869,6 +1869,7 @@ def create_interactive_session(
     event_bus=None,
     metadata=None,
     source: str = SessionSource.INTERACTIVE.value,
+    parent_id=None,
 ) -> str:
     """Provision a fresh interactive session and broadcast its creation.
 
@@ -1884,6 +1885,7 @@ def create_interactive_session(
             user_id=user_id,
             title=title or None,
             metadata=metadata or {},
+            parent_id=parent_id,
         )
     )
     if event_bus is not None:

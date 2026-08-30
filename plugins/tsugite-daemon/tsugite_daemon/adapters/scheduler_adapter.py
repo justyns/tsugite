@@ -129,6 +129,7 @@ def _incident_session(entry: ScheduleEntry, user_id: str, store, event_bus=None)
         event_bus=event_bus,
         metadata={"type": "ops", "topic": title, "schedule_id": entry.id, METADATA_INCIDENT_KEY: key},
         source=SessionSource.SCHEDULE.value,
+        parent_id=entry.id,
     )
     return store.get_session(session_id)
 

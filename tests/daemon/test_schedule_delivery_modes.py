@@ -250,6 +250,18 @@ class TestResolveDeliverySession:
         assert second is not None
         assert second.id != first.id
 
+    def test_resolved_incidents_stay_bounded(self, store):
+        """A monitor that opens and resolves an incident every run prunes like any
+        other schedule session rather than piling up forever."""
+        entry = _entry(delivery_mode="new_session", incident_key="backup-disk-2")
+
+        for _ in range(30):
+            incident = _resolve_one(entry, "alice", store)
+            assert incident is not None
+            store.update_session(incident.id, status=SessionStatus.COMPLETED.value)
+
+        assert len(_incident_sessions(store)) <= SessionStore.MAX_SCHEDULE_SESSIONS
+
 
 class TestScheduledRunDelivery:
     @pytest.mark.asyncio
