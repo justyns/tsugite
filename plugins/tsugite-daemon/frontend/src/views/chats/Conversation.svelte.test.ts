@@ -793,6 +793,21 @@ test('a local command echo renders at the conversation tail (local-only footer)'
   await expect.element(page.getByText(/not saved/)).toBeInTheDocument();
 });
 
+test('a local command echo can be dismissed from its footer', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'q', timestamp: 'z' },
+    { type: 'final_result', result: 'a' },
+  ]);
+  ctrl.pushEcho('/status', 'Model: haiku', true);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  await expect.element(page.getByText('/status')).toBeInTheDocument();
+
+  await page.getByRole('button', { name: 'Dismiss' }).click();
+
+  expect(ctrl.localEcho).toHaveLength(0);
+  await expect.element(page.getByText('/status')).not.toBeInTheDocument();
+});
+
 test('an echo pushed while scrolled up never force-scrolls (its own channel, not the follow trigger)', async () => {
   // The follow effect watches events/turns length only; localEcho is a separate
   // array, so appending an echo must not yank an unpinned reader to the tail.

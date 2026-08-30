@@ -342,6 +342,10 @@ export class ConversationController {
     ];
   }
 
+  dismissEcho(id: string): void {
+    this.localEcho = this.localEcho.filter((e) => e.id !== id);
+  }
+
   /** Park a message typed mid-turn; it sends when the current turn finishes. */
   queue(text: string, opts: SendOpts = {}): void {
     this.queued = [...this.queued, { text, opts }];

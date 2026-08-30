@@ -843,6 +843,7 @@
             output={echo.output}
             ok={echo.ok}
             action={echo.action}
+            onDismiss={() => ctrl.dismissEcho(echo.id)}
           />
         {/each}
       </div>

@@ -11,12 +11,14 @@
     output,
     ok,
     action,
+    onDismiss,
   }: {
     command: string;
     output: string;
     ok: boolean;
     // Optional navigation affordance (e.g. /job's "Open jobs" link).
     action?: { label: string; href: string };
+    onDismiss?: () => void;
   } = $props();
 
   // Empty output must never render an empty gutter block: fall back to a minimal
@@ -42,9 +44,14 @@
     {/if}
   </div>
   <div class="echo-foot">
-    <span>local only · not saved · not sent to model</span>
+    <span class="echo-note">local only · not saved · not sent to model</span>
     {#if action}
       <a class="echo-act" href={action.href}>{action.label}</a>
+    {/if}
+    {#if onDismiss}
+      <button type="button" class="echo-x" aria-label="Dismiss" onclick={onDismiss}>
+        <Icon name="x" size={11} />
+      </button>
     {/if}
   </div>
 </div>
@@ -133,8 +140,11 @@
     font-size: var(--fs-2xs);
     opacity: 0.85;
   }
+  .echo-note {
+    min-width: 0;
+    margin-right: auto;
+  }
   .echo-act {
-    margin-left: auto;
     flex: none;
     color: var(--acc);
     text-decoration: none;
@@ -142,5 +152,21 @@
   }
   .echo-act:hover {
     text-decoration: underline;
+  }
+  .echo-x {
+    flex: none;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 2px;
+    background: none;
+    border: 0;
+    border-radius: var(--r-sm);
+    color: var(--tx3);
+    cursor: pointer;
+  }
+  .echo-x:hover {
+    color: var(--tx0);
+    background: var(--bg3);
   }
 </style>

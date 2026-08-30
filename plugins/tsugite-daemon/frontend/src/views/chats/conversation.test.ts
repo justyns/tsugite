@@ -722,6 +722,18 @@ test('pushEcho carries an optional action affordance (the /job open-jobs link)',
   expect(ctrl.localEcho[0]?.action).toEqual({ label: 'Open jobs', href: '#jobs' });
 });
 
+test('dismissEcho drops just that echo and leaves its siblings', () => {
+  const ctrl = new ConversationController();
+  ctrl.pushEcho('/status', 'Model: x', true);
+  ctrl.pushEcho('/model haiku', 'switched', true);
+  const [first, second] = ctrl.localEcho;
+
+  ctrl.dismissEcho(first!.id);
+
+  expect(ctrl.localEcho.map((e) => e.id)).toEqual([second!.id]);
+  expect(ctrl.localEcho[0]?.command).toBe('/model haiku');
+});
+
 test('a normal send on a long session renders the message once through the settle resync', async () => {
   // The live settle path (diagnosed on the :18461 stack): open a long session's
   // tail window (id-bearing), send, let the per-chat stream finish normally (onDone,
