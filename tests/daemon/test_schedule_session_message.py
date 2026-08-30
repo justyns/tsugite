@@ -234,6 +234,19 @@ class TestUnreachableTarget:
         assert entry.last_status == "error"
 
     @pytest.mark.asyncio
+    async def test_a_target_that_ends_mid_flight_records_an_error(self, sched_adapter, runner, store):
+        """The target passed the resumable check but finished before the reply ran,
+        so the runner declined the turn. Nothing was sent; the run failed."""
+        chat = _chat(store)
+        runner.reply_to_session = AsyncMock(return_value=None)
+
+        entry = _entry(target_session=chat.id)
+        await sched_adapter.scheduler._fire_schedule(entry)
+
+        assert entry.last_status == "error"
+        assert chat.id in entry.last_error
+
+    @pytest.mark.asyncio
     async def test_the_originating_session_is_told(self, sched_adapter, runner, store):
         """The reminder was set from somewhere; that is where its failure belongs."""
         origin = _chat(store)

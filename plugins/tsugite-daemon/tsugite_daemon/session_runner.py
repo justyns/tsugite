@@ -589,16 +589,17 @@ class SessionRunner:
         source: str = "session",
         metadata: dict | None = None,
         revive: bool = False,
-    ) -> str:
+    ) -> str | None:
         """Send a follow-up message to an existing session, running a turn in it.
 
-        A finished session takes no turn unless `revive` is set.
+        Returns the turn's reply, or None when no turn ran: a finished session
+        takes one only when `revive` is set.
         """
         session_id = self.live_id(session_id)
         target = self._store.get_session(session_id)  # raises if the session is unknown
         if not revive and target.status in FINISHED_STATUSES and not target.accepts_followup:
             logger.info("Session '%s' takes no reply: already finished", session_id)
-            return ""
+            return None
 
         adapter = self._adapter
         if not adapter:

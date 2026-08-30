@@ -309,9 +309,21 @@ class TestRepliesIntoFinishedSessions:
         sid = _session(store)
         store.update_session(sid, status=SessionStatus.COMPLETED.value)
 
-        assert await runner.reply_to_session(sid, "the job finished", source="job_complete") == ""
+        assert await runner.reply_to_session(sid, "the job finished", source="job_complete") is None
 
         adapter.handle_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_reads_differently_from_an_empty_reply(self, store, bus):
+        adapter = MagicMock()
+        adapter.handle_message = AsyncMock(return_value="")
+        runner = SessionRunner(store=store, adapter=adapter, event_bus=bus)
+        live = _session(store, "live")
+        finished = _session(store, "finished")
+        store.update_session(finished, status=SessionStatus.COMPLETED.value)
+
+        assert await runner.reply_to_session(live, "hi", source="job_complete") == ""
+        assert await runner.reply_to_session(finished, "hi", source="job_complete") is None
 
     @pytest.mark.asyncio
     async def test_a_resumable_completed_session_still_takes_the_turn(self, store, bus):

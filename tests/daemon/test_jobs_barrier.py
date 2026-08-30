@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from tsugite_daemon.job_prompts import _build_barrier_message
 from tsugite_daemon.job_store import Job, JobState
-from tsugite_daemon.session_store import Session
+from tsugite_daemon.session_store import Session, SessionStatus
 
 from .test_jobs_orchestrator import _verifier_session, _worker_session
 
@@ -289,3 +289,39 @@ async def test_a_batch_spawned_across_one_turn_reports_once(store, runner, orche
     barriers = [m for m in sent if m["source"] == "jobs_all_complete"]
     assert len(barriers) == 1
     assert "All 2 background job(s) finished" in barriers[0]["message"]
+
+
+# ── the wake-up has to land ──
+
+
+@pytest.mark.asyncio
+async def test_a_refused_barrier_wake_up_leaves_the_batch_unnotified(store, runner, orchestrator):
+    """A finished parent takes no turn, so `reply_to_session` refuses with None.
+    Marking the batch anyway would record a summary nobody ever saw."""
+    refused = []
+
+    async def refuse(session_id, message, source="session", metadata=None):
+        refused.append(session_id)
+        return None
+
+    runner.reply_to_session = refuse
+    runner.store.sessions["parent-1"].status = SessionStatus.COMPLETED.value
+    jobs = _seed_batch(store, orchestrator, 2)
+
+    for job in jobs:
+        await _finish(orchestrator, job)
+
+    assert refused == ["parent-1"], "the barrier must still attempt the wake-up"
+    assert [store.get(j.id).barrier_notified for j in jobs] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_barrier_wake_up_marks_the_batch(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    jobs = _seed_batch(store, orchestrator, 2)
+
+    for job in jobs:
+        await _finish(orchestrator, job)
+
+    assert len(sent) == 1
+    assert all(store.get(j.id).barrier_notified for j in jobs)

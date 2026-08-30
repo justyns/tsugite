@@ -293,6 +293,8 @@ class SchedulerAdapter:
                 source="schedule_message",
                 metadata={"schedule_id": entry.id},
             )
+        if result is None:
+            raise RuntimeError(f"Target session '{target.id}' finished before the message could be sent")
         return RunResult(output=result, session_id=target.id)
 
     async def _report_undeliverable(self, entry: ScheduleEntry, target: Session | None) -> None:

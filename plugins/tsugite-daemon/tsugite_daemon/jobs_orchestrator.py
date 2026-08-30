@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from xml.sax.saxutils import quoteattr
 
 from tsugite_daemon.attention_store import SOURCE_JOB
@@ -1300,32 +1300,48 @@ class JobsOrchestrator:
         if not batch:
             return
         batch.sort(key=lambda j: j.created_at or "")
-        if not self._schedule_reply(
-            batch[-1], _build_barrier_message(batch), source="jobs_all_complete", metadata={"kind": "jobs_barrier"}
-        ):
-            return
-        for member in batch:
-            self._jobs.update(member.id, barrier_notified=True)
+
+        def mark_batch_notified() -> None:
+            for member in batch:
+                self._jobs.update(member.id, barrier_notified=True)
+
+        self._schedule_reply(
+            batch[-1],
+            _build_barrier_message(batch),
+            source="jobs_all_complete",
+            metadata={"kind": "jobs_barrier"},
+            on_delivered=mark_batch_notified,
+        )
 
     def _parent_turn_in_flight(self, parent_session_id: str) -> bool:
         parent = self._get_parent_session(parent_session_id)
         return bool(parent and parent.turn_in_flight)
 
-    def _schedule_reply(self, job: Job, message: str, *, source: str, metadata: Optional[dict] = None) -> bool:
-        """Queue a wake-up for the parent, returning whether it was queued.
+    def _schedule_reply(
+        self,
+        job: Job,
+        message: str,
+        *,
+        source: str,
+        metadata: Optional[dict] = None,
+        on_delivered: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """Queue a wake-up for the parent.
 
-        Best-effort: errors are logged, not raised.
+        `on_delivered` runs once the parent has actually taken the turn, so a
+        caller can record the wake-up only when it landed. Best-effort: errors are
+        logged, not raised.
         """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.debug("No running loop; skipping %s wake-up for job '%s'", source, job.id)
-            return False
+            return
         metadata = metadata or {"job_id": job.id, "kind": "job_notify"}
 
         async def _send():
             try:
-                await self._runner.reply_to_session(
+                reply = await self._runner.reply_to_session(
                     job.parent_session_id,
                     message,
                     source=source,
@@ -1333,11 +1349,21 @@ class JobsOrchestrator:
                 )
             except Exception:
                 logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
+                return
+            if reply is None:
+                logger.warning(
+                    "Dropped the %s wake-up for job '%s': parent session '%s' has finished",
+                    source,
+                    job.id,
+                    job.parent_session_id,
+                )
+                return
+            if on_delivered:
+                on_delivered()
 
         task = loop.create_task(_send())
         self._notify_tasks.add(task)
         task.add_done_callback(self._notify_tasks.discard)
-        return True
 
     def _spawn_bg(self, make_coro) -> bool:
         """Run `make_coro()` as a tracked background task, so it can't be garbage
