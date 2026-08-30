@@ -1435,3 +1435,141 @@ class TestHungSubprocessRecovery:
         finally:
             asyncio.get_running_loop().set_exception_handler(None)
             await proc.stop()
+
+
+# ── Stall detection ──
+
+
+def _delta(text: str) -> str:
+    return json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}})
+
+
+_RESULT = json.dumps(
+    {
+        "type": "result",
+        "subtype": "success",
+        "result": "done",
+        "total_cost_usd": 0.001,
+        "duration_ms": 10,
+        "session_id": "s1",
+    }
+)
+
+
+class TestClaudeCodeStallWarning:
+    """A quiet child is reported, never acted on: the read keeps going either way."""
+
+    @pytest.fixture
+    def bus(self):
+        from tsugite.ui_context import clear_ui_context, set_ui_context
+
+        bus = MagicMock()
+        set_ui_context(event_bus=bus)
+        yield bus
+        clear_ui_context()
+
+    @staticmethod
+    def _warnings(bus):
+        return [call.args[0] for call in bus.emit.call_args_list]
+
+    def _gated_proc(self, script):
+        """Mock subprocess whose stdout.readline walks `script`, a list of
+        (gate, json) pairs; a gate is awaited before its line is returned.
+
+        The pending step lives outside readline, so a cancelled read resumes
+        where it stopped rather than restarting - a real StreamReader keeps its
+        buffer across a cancelled readline the same way.
+        """
+        mock_proc = AsyncMock()
+        mock_proc.stdin = AsyncMock()
+        mock_proc.stderr = AsyncMock()
+        mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.returncode = None
+        mock_proc.stdout = AsyncMock()
+
+        steps = iter(script)
+        pending = None
+
+        async def readline():
+            nonlocal pending
+            if pending is None:
+                pending = next(steps, None)
+            if pending is None:
+                return b""
+            gate, payload = pending
+            if gate is not None:
+                await gate.wait()
+            pending = None
+            return (payload + "\n").encode()
+
+        mock_proc.stdout.readline = readline
+        return mock_proc
+
+    @staticmethod
+    def _open_after(gate, delay: float) -> None:
+        asyncio.get_running_loop().call_later(delay, gate.set)
+
+    @pytest.mark.asyncio
+    async def test_stall_warns_once_and_keeps_reading(self, bus, caplog):
+        """Many threshold expiries in one silent stretch produce one warning, and
+        the stream still completes once the child speaks again."""
+        import logging
+
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        gate = asyncio.Event()
+        process = ClaudeCodeProcess(stall_warn_seconds=0.01)
+        process._process = self._gated_proc([(gate, _delta("hi")), (None, _RESULT)])
+        self._open_after(gate, 0.15)
+
+        with caplog.at_level(logging.WARNING, logger="tsugite_claude_code.process"):
+            collected = [event async for event in process.send_message("hello")]
+
+        warnings = self._warnings(bus)
+        assert len(warnings) == 1, f"expected one stall warning, got {[w.message for w in warnings]}"
+        assert warnings[0].category == "provider_stall"
+        assert len([r for r in caplog.records if "no output" in r.getMessage()]) == 1
+        assert [e["type"] for e in collected] == ["text_delta", "result"]
+
+    @pytest.mark.asyncio
+    async def test_output_resuming_resets_the_stall_timer(self, bus):
+        """Lines arriving between two stalls clear the warned flag, so the second
+        stall is reported too - and the fast lines themselves warn about nothing."""
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        first, second = asyncio.Event(), asyncio.Event()
+        process = ClaudeCodeProcess(stall_warn_seconds=0.01)
+        process._process = self._gated_proc(
+            [(first, _delta("a")), (None, _delta("b")), (None, _delta("c")), (second, _RESULT)]
+        )
+        self._open_after(first, 0.1)
+        self._open_after(second, 0.2)
+
+        collected = [event async for event in process.send_message("hello")]
+
+        assert len(self._warnings(bus)) == 2
+        assert [e["type"] for e in collected] == ["text_delta", "text_delta", "text_delta", "result"]
+
+    @pytest.mark.asyncio
+    async def test_fast_stream_never_warns(self, bus):
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        process = ClaudeCodeProcess(stall_warn_seconds=0.05)
+        process._process = self._gated_proc([(None, _delta("hi")), (None, _RESULT)])
+
+        async for _event in process.send_message("hello"):
+            pass
+
+        assert self._warnings(bus) == []
+
+    def test_threshold_defaults_to_five_minutes(self, monkeypatch):
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        monkeypatch.delenv("TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS", raising=False)
+        assert ClaudeCodeProcess()._stall_warn_seconds == 300.0
+
+    def test_threshold_reads_env_override(self, monkeypatch):
+        from tsugite_claude_code.process import ClaudeCodeProcess
+
+        monkeypatch.setenv("TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS", "12.5")
+        assert ClaudeCodeProcess()._stall_warn_seconds == 12.5

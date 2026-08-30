@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator
 
@@ -31,6 +32,13 @@ _STOP_TIMEOUT_SECONDS = 5.0
 # on stdout or killing the stderr drain into a pipe deadlock. 16MB is ample.
 _STREAM_READ_LIMIT = 16 * 1024 * 1024
 
+# How long the child may produce nothing on stdout before the silence is reported.
+# A line arrives per stream-json event, not per token, so a whole model turn can
+# pass between two of them; the threshold is generous enough that only a wedged
+# child trips it.
+_STALL_WARN_SECONDS = 300.0
+_STALL_WARN_ENV = "TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS"
+
 
 class ClaudeCodeProcess:
     """Manages a persistent claude CLI subprocess for LLM completions.
@@ -40,7 +48,7 @@ class ClaudeCodeProcess:
     state in memory between turns.
     """
 
-    def __init__(self):
+    def __init__(self, stall_warn_seconds: float | None = None):
         self._process: asyncio.subprocess.Process | None = None  # pylint: disable=no-member
         self._session_id: str | None = None
         self._system_prompt_file: str | None = None
@@ -48,6 +56,12 @@ class ClaudeCodeProcess:
         self._stderr_task: asyncio.Task | None = None
         self._compacted: bool = False
         self._last_usage: dict = {}
+        self._stall_warn_seconds = (
+            stall_warn_seconds
+            if stall_warn_seconds is not None
+            else float(os.environ.get(_STALL_WARN_ENV, _STALL_WARN_SECONDS))
+        )
+        self._last_output_at: float = 0.0
 
     @property
     def session_id(self) -> str | None:
@@ -80,6 +94,37 @@ class ClaudeCodeProcess:
 
     def _get_stderr(self) -> str:
         return "\n".join(self._stderr_lines[-20:])  # last 20 lines
+
+    async def _read_stdout_line(self) -> bytes:
+        """Read one stdout line, reporting the wait once it passes the stall threshold.
+
+        A long tool call is silent on stdout too, so the wait is only reported: the
+        read resumes afterwards, with one warning per silent stretch. Cancelling a
+        StreamReader read leaves its buffer intact, so the retried readline picks up
+        where this one stopped.
+        """
+        warned = False
+        while True:
+            try:
+                line = await asyncio.wait_for(self._process.stdout.readline(), timeout=self._stall_warn_seconds)
+            except asyncio.TimeoutError:
+                if not warned:
+                    self._warn_stalled()
+                    warned = True
+                continue
+            self._last_output_at = time.monotonic()
+            return line
+
+    def _warn_stalled(self) -> None:
+        from tsugite.events import WarningEvent
+        from tsugite.ui_context import get_event_bus
+
+        idle = time.monotonic() - self._last_output_at
+        message = f"Claude Code has produced no output for {idle:.0f}s; still waiting."
+        logger.warning("%s (pid=%s, session=%s)", message, self._process.pid, self._session_id)
+        event_bus = get_event_bus()
+        if event_bus:
+            event_bus.emit(WarningEvent(message=message, category="provider_stall"))
 
     async def start(
         self,
@@ -190,6 +235,7 @@ class ClaudeCodeProcess:
         )
         self._process.stdin.write((json.dumps(msg) + "\n").encode())
         await self._process.stdin.drain()
+        self._last_output_at = time.monotonic()
         logger.debug("Sent message (%d chars, ~%d est tokens): %.200s", content_len, content_len // 4, content)
 
         # Text already emitted as content_block_delta chunks. The CLI repeats the
@@ -199,7 +245,7 @@ class ClaudeCodeProcess:
         streamed_text = ""
 
         while True:
-            line = await self._process.stdout.readline()
+            line = await self._read_stdout_line()
             if not line:
                 stderr = self._get_stderr()
                 raise RuntimeError(
