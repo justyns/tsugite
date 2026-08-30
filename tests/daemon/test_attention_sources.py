@@ -1,9 +1,10 @@
-"""The three things that can wait on the user, and the records they open.
+"""The four things that can wait on the user, and the records they open.
 
-A needs-ack delivery, a blocking `ask_user`, and a job parked in
-awaiting_input/stuck/errored each open a record while they wait and clear it
-when they stop. Delivery and job records outlive a daemon restart; an ask
-cannot, because the blocked call it belonged to is gone.
+A needs-ack delivery, a blocking `ask_user`, a job parked in
+awaiting_input/stuck/errored, and a send that failed after the turn ended each
+open a record while they wait and clear it when they stop. Delivery and job
+records outlive a daemon restart; an ask cannot, because the blocked call it
+belonged to is gone.
 """
 
 import threading
@@ -11,11 +12,11 @@ import time
 
 import pytest
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
-from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ASK, SOURCE_DELIVERY, SOURCE_JOB
+from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ASK, SOURCE_DELIVERY, SOURCE_ERROR, SOURCE_JOB
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
 from tsugite_daemon.session_runner import SessionRunner
-from tsugite_daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore, attention_fields
 
 
 class _Bus:
@@ -380,3 +381,94 @@ class TestOneAnswerEverywhere:
         announced = bus.of("session_update", "attention")[-1]
         assert announced["needs_attention"] is True
         assert [r["source"] for r in announced["attention"]] == [SOURCE_JOB]
+
+
+class TestErrorSource:
+    """A send that fails after the turn is an obligation too: the chat gets an
+    error block and the session list gets a record the user can acknowledge."""
+
+    @staticmethod
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("target is gone")
+
+    def _notify_target(self, store, runner, monkeypatch) -> str:
+        sid = _session(store, "s1")
+        runner.add_notify_session(sid, _session(store, "s2"))
+        monkeypatch.setattr(runner, "reply_to_session", self._boom)
+        return sid
+
+    @pytest.mark.asyncio
+    async def test_a_failed_notify_opens_an_error_record(self, store, runner, monkeypatch):
+        sid = self._notify_target(store, runner, monkeypatch)
+
+        await runner._notify_finished(store.get_session(sid), SessionStatus.COMPLETED.value, "done")
+
+        records = store.attention.open_records(sid)
+        assert [(r.source, r.kind) for r in records] == [(SOURCE_ERROR, "send_failed")]
+        assert attention_fields(records)["needs_attention"] is True
+
+    @pytest.mark.asyncio
+    async def test_the_chat_records_what_failed(self, store, runner, monkeypatch):
+        sid = self._notify_target(store, runner, monkeypatch)
+
+        await runner._notify_finished(store.get_session(sid), SessionStatus.COMPLETED.value, "done")
+
+        errors = [e for e in store.read_events(sid) if e["type"] == "error"]
+        assert len(errors) == 1
+        assert "target is gone" in errors[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_acknowledging_clears_the_error_record(self, store, runner, monkeypatch):
+        sid = self._notify_target(store, runner, monkeypatch)
+        await runner._notify_finished(store.get_session(sid), SessionStatus.COMPLETED.value, "done")
+        assert _sources(store, sid) == [SOURCE_ERROR]
+
+        runner.clear_attention(sid)
+
+        assert store.attention.open_records(sid) == []
+        assert store.session_detail(sid)["needs_attention"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_failed_completion_listener_opens_a_record(self, store, runner):
+        sid = _session(store)
+        runner.add_completion_listener(self._boom)
+
+        await runner._dispatch_completion(store.get_session(sid), "done")
+
+        assert [r.source for r in store.attention.open_records(sid)] == [SOURCE_ERROR]
+
+    def _failing_notifier(self, store, bus, monkeypatch) -> tuple[SessionRunner, str]:
+        runner = SessionRunner(
+            store=store, adapter=None, event_bus=bus, notification_channels={"ntfy": {"url": "https://ntfy.test"}}
+        )
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("ntfy is down")
+
+        monkeypatch.setattr("tsugite_daemon.session_runner.send_notification_nowait", boom)
+        return runner, _session(store)
+
+    def test_a_failed_delivery_notification_opens_a_record(self, store, bus, monkeypatch):
+        runner, sid = self._failing_notifier(store, bus, monkeypatch)
+
+        runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack", notify_channels=[("ntfy", {})])
+
+        assert _sources(store, sid) == [SOURCE_DELIVERY, SOURCE_ERROR]
+
+    def test_acknowledging_clears_delivery_and_error_together(self, store, bus, monkeypatch):
+        runner, sid = self._failing_notifier(store, bus, monkeypatch)
+        runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack", notify_channels=[("ntfy", {})])
+        assert _sources(store, sid) == [SOURCE_DELIVERY, SOURCE_ERROR]
+
+        runner.clear_attention(sid)
+
+        assert store.attention.open_records(sid) == []
+
+    def test_acknowledging_an_error_leaves_an_open_ask(self, store, runner):
+        sid = _session(store)
+        runner.open_attention(sid, source=SOURCE_ERROR, ref_id="err-1", kind="send_failed")
+        runner.open_attention(sid, source=SOURCE_ASK, ref_id="ask-1", kind="needs_answer")
+
+        runner.clear_attention(sid)
+
+        assert [r.source for r in store.attention.open_records(sid)] == [SOURCE_ASK]

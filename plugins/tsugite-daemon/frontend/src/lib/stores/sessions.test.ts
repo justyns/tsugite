@@ -15,6 +15,7 @@ vi.mock('$lib/api/client', () => ({
 }));
 
 import { api } from '$lib/api/client';
+import { attentionRecord } from '../../views/chats/__fixtures__/sessionRow';
 import { SessionsStore, type SessionRow } from './sessions.svelte';
 
 const apiGet = api.get as ReturnType<typeof vi.fn>;
@@ -259,6 +260,32 @@ describe('SessionsStore attention', () => {
       delivery_id: 'dlv-1',
     });
     expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-2']);
+    expect(store.rows[0]!.needs_attention).toBe(true);
+  });
+
+  test('dismissing discharges an error record', async () => {
+    const store = new SessionsStore();
+    store.rows = [
+      row('s1', {
+        needs_attention: true,
+        attention: [attentionRecord('error', { kind: 'send_failed' })],
+      }),
+    ];
+    await store.dismissAttention('s1');
+    expect(store.rows[0]!.attention).toEqual([]);
+    expect(store.rows[0]!.needs_attention).toBe(false);
+  });
+
+  test('dismissing an error leaves an open ask outstanding', async () => {
+    const store = new SessionsStore();
+    store.rows = [
+      row('s1', {
+        needs_attention: true,
+        attention: [attentionRecord('error', { kind: 'send_failed' }), attentionRecord('ask')],
+      }),
+    ];
+    await store.dismissAttention('s1');
+    expect(store.rows[0]!.attention!.map((r) => r.source)).toEqual(['ask']);
     expect(store.rows[0]!.needs_attention).toBe(true);
   });
 });

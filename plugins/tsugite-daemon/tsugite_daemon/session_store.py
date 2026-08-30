@@ -21,6 +21,7 @@ from tsugite.core.state import copy_state
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
 from tsugite_daemon.attention_store import (
+    ACKNOWLEDGEABLE_SOURCES,
     OWNER_SESSION,
     SOURCE_DELIVERY,
     AttentionRecord,
@@ -1275,7 +1276,8 @@ class SessionStore:
                 raise ValueError(f"Session '{session_id}' not found")
             if delivery_id is None:
                 session.pending_deliveries = []
-                self.attention.clear_owner(session_id, source=SOURCE_DELIVERY)
+                for source in ACKNOWLEDGEABLE_SOURCES:
+                    self.attention.clear_owner(session_id, source=source)
             else:
                 session.pending_deliveries = [d for d in session.pending_deliveries if d.get("id") != delivery_id]
                 self.attention.clear_ref(SOURCE_DELIVERY, delivery_id)

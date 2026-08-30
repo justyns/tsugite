@@ -25,6 +25,9 @@ import {
   type SessionRowLike,
 } from './sessionsOrder';
 
+/** Records a dismissal discharges; an ask or a parked job clears on its own. */
+const ACKNOWLEDGEABLE_SOURCES = new Set(['delivery', 'error']);
+
 export interface AttentionRecord {
   id: string;
   owner_kind: string;
@@ -438,8 +441,14 @@ export class SessionsStore {
     );
     const row = this.rows.find((r) => r.id === id);
     const left = deliveryId ? (row?.pending_deliveries ?? []).filter((d) => d !== deliveryId) : [];
+    const attention = (row?.attention ?? []).filter((r) =>
+      deliveryId
+        ? !(r.source === 'delivery' && r.ref_id === deliveryId)
+        : !ACKNOWLEDGEABLE_SOURCES.has(r.source),
+    );
     this.rows = patchRow(this.rows, id, {
-      needs_attention: left.length > 0,
+      needs_attention: attention.length > 0 || left.length > 0,
+      attention,
       pending_deliveries: left,
     } as Partial<SessionRow>);
   }

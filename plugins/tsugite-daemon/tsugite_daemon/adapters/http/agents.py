@@ -29,6 +29,7 @@ from tsugite_daemon.adapters.http.sse import (
     SSEProgressHandler,
     resolve_pending_ask,
 )
+from tsugite_daemon.attention_store import SOURCE_ERROR
 
 
 def _session_or_default(adapter: HTTPAgentAdapter, session_id: Optional[str], user_id: str):
@@ -965,6 +966,13 @@ class AgentsMixin:
             except Exception as e:
                 logger.exception("Chat error")
                 progress._emit("error", {"error": str(e)})
+                if self.session_runner:
+                    self.session_runner.open_attention(
+                        target_session_id,
+                        source=SOURCE_ERROR,
+                        ref_id=f"{target_session_id}:turn",
+                        kind="turn_failed",
+                    )
             finally:
                 self._active_chats.pop(backend_key, None)
                 progress.signal_done()

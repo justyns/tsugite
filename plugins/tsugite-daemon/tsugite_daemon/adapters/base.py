@@ -718,11 +718,22 @@ class BaseAdapter(ABC):
             # Clear the durable in-flight marker set when the session resolved
             # (see _handle_message_inner); a daemon death before this line is
             # what boot recovery repairs.
+            conv_id = broadcast_state.get("conv_id")
             try:
-                self.session_store.end_turn(broadcast_state.get("conv_id"))
+                self.session_store.end_turn(conv_id)
             except Exception as e:
                 logger.warning("end_turn after handle_message failed: %s", e)
-            self._broadcast_turn_complete(broadcast_state.get("conv_id"))
+                if conv_id:
+                    from tsugite_daemon.session_runner import report_send_failure
+
+                    report_send_failure(
+                        self.session_store,
+                        self.event_bus,
+                        conv_id,
+                        ref_id=f"{conv_id}:end-turn",
+                        error=f"Ending the turn failed: {e}",
+                    )
+            self._broadcast_turn_complete(conv_id)
 
     def _broadcast_session_busy(self, conv_id: Optional[str], busy: bool) -> None:
         """Patchable busy transition for clients - they flip the one session's

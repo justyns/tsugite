@@ -14,7 +14,7 @@ from xml.sax.saxutils import quoteattr
 from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
-from tsugite_daemon.attention_store import OWNER_SESSION
+from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ERROR
 from tsugite_daemon.session_store import (
     FINISHED_STATUSES,
     Session,
@@ -109,6 +109,40 @@ def build_completion_message(session: Session, status: str, summary: str) -> str
     )
 
 
+def emit_attention(store: SessionStore, event_bus, session_id: str) -> None:
+    if not event_bus:
+        return
+    records = store.attention.open_records(session_id)
+    event_bus.emit("session_update", {"action": "attention", "id": session_id, **attention_fields(records)})
+
+
+def open_attention_record(
+    store: SessionStore, event_bus, session_id: str, *, source: str, ref_id: str, kind: str
+) -> None:
+    """A re-report of something already open announces nothing."""
+    opened = store.attention.open(
+        owner_kind=OWNER_SESSION,
+        owner_id=session_id,
+        source=source,
+        ref_id=ref_id,
+        kind=kind,
+    )
+    if opened:
+        emit_attention(store, event_bus, session_id)
+
+
+def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_id: str, error: str) -> None:
+    """Surface a send that failed after the turn ended: an error block in the chat
+    and a record the session list can badge."""
+    store.append_event(
+        session_id,
+        {"type": "error", "timestamp": datetime.now(timezone.utc).isoformat(), "error": error},
+    )
+    if event_bus:
+        event_bus.emit("session_event", {"session_id": session_id, "event_type": "error", "error": error})
+    open_attention_record(store, event_bus, session_id, source=SOURCE_ERROR, ref_id=ref_id, kind="send_failed")
+
+
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
 
 
@@ -155,6 +189,11 @@ class SessionRunner:
                 await callback(session, result_str)
             except Exception as e:
                 logger.error("Session '%s' completion listener failed: %s", session.id, e)
+                self._report_send_failure(
+                    session.id,
+                    ref_id=f"{session.id}:completion",
+                    error=f"Completion listener failed: {e}",
+                )
 
     @property
     def store(self) -> SessionStore:
@@ -321,6 +360,11 @@ class SessionRunner:
             await self.reply_to_session(target.id, message, source=source, metadata={"from_session": session.id})
         except Exception as e:
             logger.warning("Session '%s' failed to notify '%s': %s", session.id, target.id, e)
+            self._report_send_failure(
+                session.id,
+                ref_id=f"{session.id}:notify:{target.id}",
+                error=f"Failed to notify session '{target.id}': {e}",
+            )
 
     def add_notify_session(self, session_id: str, target_id: str) -> Session:
         session = self._store.add_notify_session(session_id, target_id)
@@ -462,6 +506,11 @@ class SessionRunner:
             send_notification_nowait(text, channels, url=f"#chats?sessionId={session_id}")
         except Exception as e:
             logger.error("Delivery notification for session '%s' failed: %s", session_id, e)
+            self._report_send_failure(
+                session_id,
+                ref_id=f"{session_id}:delivery-notify:{event['delivery_id']}",
+                error=f"Delivery notification failed: {e}",
+            )
 
     def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
         session_id = self.live_id(session_id)
@@ -479,29 +528,17 @@ class SessionRunner:
         return session
 
     def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> None:
-        """A re-report of something already open announces nothing."""
-        opened = self._store.attention.open(
-            owner_kind=OWNER_SESSION,
-            owner_id=session_id,
-            source=source,
-            ref_id=ref_id,
-            kind=kind,
-        )
-        if opened:
-            self._emit_attention(session_id)
+        open_attention_record(self._store, self._event_bus, session_id, source=source, ref_id=ref_id, kind=kind)
 
     def clear_attention_ref(self, source: str, ref_id: str) -> None:
         for record in self._store.attention.clear_ref(source, ref_id):
             self._emit_attention(record.owner_id)
 
     def _emit_attention(self, session_id: str) -> None:
-        if not self._event_bus:
-            return
-        records = self._store.attention.open_records(session_id)
-        self._event_bus.emit(
-            "session_update",
-            {"action": "attention", "id": session_id, **attention_fields(records)},
-        )
+        emit_attention(self._store, self._event_bus, session_id)
+
+    def _report_send_failure(self, session_id: str, *, ref_id: str, error: str) -> None:
+        report_send_failure(self._store, self._event_bus, session_id, ref_id=ref_id, error=error)
 
     def mark_viewed(self, session_id: str, ts: Optional[str] = None) -> Session:
         session = self._store.mark_viewed(session_id, ts=ts)
