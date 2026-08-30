@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tsugite.agent_inheritance import iter_agent_search_paths
-from tsugite.config import load_config
+from tsugite.config import get_xdg_config_dir, load_config
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.utils import parse_yaml_frontmatter
 from tsugite_daemon.adapters.http.helpers import (
@@ -165,9 +165,11 @@ class FilesMixin:
             if resolved not in seen:
                 seen.add(resolved)
                 dirs.append((subdir, "project", False))
-        global_dir = Path.home() / ".config" / "tsugite" / "skills"
-        seen.add(global_dir.resolve())
-        dirs.append((global_dir, "global", False))
+        for global_dir in [get_xdg_config_dir("skills"), Path.home() / ".config" / "tsugite" / "skills"]:
+            resolved = global_dir.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                dirs.append((global_dir, "global", False))
         for raw_path in load_config().skill_paths:
             subdir = Path(raw_path).expanduser()
             resolved = subdir.resolve()

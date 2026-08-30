@@ -22,6 +22,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal, Optional, Set, Tuple
 
+from tsugite.config import get_xdg_config_dir
 from tsugite.utils import parse_yaml_frontmatter
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def _collect_skill_roots(workspace, extra_paths: Optional[List[str]]) -> List[Pa
       2. user-configured extra_paths
       3. <cwd>/.agents/skills, <cwd>/.tsugite/skills, <cwd>/skills
       4. builtin_skills (ships with the package)
-      5. ~/.agents/skills, ~/.config/tsugite/skills
+      5. ~/.agents/skills, $XDG_CONFIG_HOME/tsugite/skills, ~/.config/tsugite/skills
     """
     roots: List[Path] = []
 
@@ -144,6 +145,7 @@ def _collect_skill_roots(workspace, extra_paths: Optional[List[str]]) -> List[Pa
             Path("skills"),
             get_builtin_skills_path(),
             Path.home() / ".agents" / "skills",
+            get_xdg_config_dir("skills"),
             Path.home() / ".config" / "tsugite" / "skills",
         ]
     )

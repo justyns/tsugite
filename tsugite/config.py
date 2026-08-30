@@ -61,6 +61,26 @@ def get_xdg_write_path(filename: str) -> Path:
     return Path(xdg_config) / "tsugite" / filename
 
 
+def get_xdg_config_dir(subdir: str = "") -> Path:
+    """Get XDG-compliant config directory path.
+
+    Uses XDG Base Directory specification for config:
+    - $XDG_CONFIG_HOME/tsugite/{subdir} (if XDG_CONFIG_HOME is set)
+    - ~/.config/tsugite/{subdir} (XDG default)
+
+    Args:
+        subdir: Optional subdirectory within tsugite config (e.g., "skills")
+
+    Returns:
+        Path to config directory
+    """
+    xdg_base = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    path = Path(xdg_base) / "tsugite"
+    if subdir:
+        path = path / subdir
+    return path
+
+
 def get_xdg_cache_path(subdir: str = "") -> Path:
     """Get XDG-compliant cache directory path.
 

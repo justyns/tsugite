@@ -195,6 +195,25 @@ class TestScanSkills:
         names = {s.name for s in scan_skills()}
         assert "user-skill" in names
 
+    def test_global_skill_under_xdg_config_home_is_discovered(self, skill_dirs, monkeypatch):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        xdg_home = skill_dirs["base"] / "xdg"
+        xdg_skills = xdg_home / "tsugite" / "skills"
+        xdg_skills.mkdir(parents=True)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_home))
+        _write_skill(xdg_skills, "xdg-skill", "From XDG_CONFIG_HOME")
+        names = {s.name for s in scan_skills()}
+        assert "xdg-skill" in names
+
+    def test_home_config_skill_discovered_when_xdg_points_elsewhere(self, skill_dirs, monkeypatch):
+        monkeypatch.chdir(skill_dirs["base"])
+        monkeypatch.setenv("HOME", str(skill_dirs["base"]))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(skill_dirs["base"] / "xdg"))
+        _write_skill(skill_dirs["user_global"], "home-config-skill", "From ~/.config")
+        names = {s.name for s in scan_skills()}
+        assert "home-config-skill" in names
+
     def test_invalid_yaml_frontmatter(self, skill_dirs, monkeypatch):
         monkeypatch.chdir(skill_dirs["base"])
         monkeypatch.setenv("HOME", str(skill_dirs["base"]))
