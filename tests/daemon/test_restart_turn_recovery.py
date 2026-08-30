@@ -11,6 +11,8 @@ Mechanism: adapters durably mark `Session.turn_in_flight` around each turn
 turn was in flight (or that was left RUNNING) when the previous daemon died.
 """
 
+import contextlib
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -139,3 +141,72 @@ async def test_adapter_brackets_turn_with_in_flight_marker(tmp_path, history_dir
     with pytest.raises(RuntimeError):
         await adapter.handle_message("u1", "hi", ctx)
     assert store.get_session("s1").turn_in_flight is False, "marker must clear on the error path"
+
+
+def _adapter_with_unwritable_store(tmp_path, monkeypatch):
+    """An adapter whose daemon.db refuses writes, which is what breaks end_turn
+    and then the failure report that end_turn's handler attempts."""
+    from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+    from tsugite_daemon.config import RuntimeDefaults
+
+    class _StubAdapter(BaseAdapter):
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    store = SessionStore(tmp_path / "session_store.json")
+    store.create_session(Session(id="s1", source=SessionSource.INTERACTIVE.value, user_id="u1"))
+    adapter = _StubAdapter(RuntimeDefaults(workspace_dir=tmp_path / "ws", agent_file="default"), store)
+
+    def _refuse_write(*_args, **_kwargs):
+        raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    monkeypatch.setattr(store, "end_turn", _refuse_write)
+    monkeypatch.setattr(store, "append_event", _refuse_write)
+
+    return adapter, ChannelContext(source="test", channel_id="c1", user_id="u1", reply_to="t")
+
+
+@pytest.mark.asyncio
+async def test_a_failing_end_turn_report_does_not_mask_the_original_error(tmp_path, history_dir, monkeypatch):
+    """The turn's own exception is the diagnosis; a teardown report that also
+    fails must not overwrite it with a storage error."""
+    adapter, ctx = _adapter_with_unwritable_store(tmp_path, monkeypatch)
+
+    async def fake_inner(*_args, **kwargs):
+        kwargs["_broadcast_state"]["conv_id"] = "s1"
+        raise RuntimeError("the-original-failure")
+
+    monkeypatch.setattr(adapter, "_handle_message_inner", fake_inner)
+
+    with pytest.raises(RuntimeError, match="the-original-failure"):
+        await adapter.handle_message("u1", "hi", ctx)
+
+
+@pytest.mark.parametrize("break_reporting", ["raises", "unimportable"])
+@pytest.mark.asyncio
+async def test_the_turn_completes_broadcasting_even_when_reporting_fails(
+    tmp_path, history_dir, monkeypatch, break_reporting
+):
+    """Without the broadcast, every connected client still shows the session as
+    busy until someone reloads."""
+    from tsugite_daemon import session_runner
+
+    adapter, ctx = _adapter_with_unwritable_store(tmp_path, monkeypatch)
+    if break_reporting == "unimportable":
+        monkeypatch.delattr(session_runner, "report_send_failure")
+    broadcast_for: list = []
+    monkeypatch.setattr(adapter, "_broadcast_turn_complete", broadcast_for.append)
+
+    async def fake_inner(*_args, **kwargs):
+        kwargs["_broadcast_state"]["conv_id"] = "s1"
+        return "ok"
+
+    monkeypatch.setattr(adapter, "_handle_message_inner", fake_inner)
+
+    with contextlib.suppress(ImportError):
+        await adapter.handle_message("u1", "hi", ctx)
+
+    assert broadcast_for == ["s1"]

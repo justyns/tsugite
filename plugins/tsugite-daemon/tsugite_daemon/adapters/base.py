@@ -720,20 +720,28 @@ class BaseAdapter(ABC):
             # what boot recovery repairs.
             conv_id = broadcast_state.get("conv_id")
             try:
-                self.session_store.end_turn(conv_id)
-            except Exception as e:
-                logger.warning("end_turn after handle_message failed: %s", e)
-                if conv_id:
-                    from tsugite_daemon.session_runner import report_send_failure
+                try:
+                    self.session_store.end_turn(conv_id)
+                except Exception as e:
+                    logger.warning("end_turn after handle_message failed: %s", e)
+                    if conv_id:
+                        from tsugite_daemon.session_runner import report_send_failure
 
-                    report_send_failure(
-                        self.session_store,
-                        self.event_bus,
-                        conv_id,
-                        ref_id=f"{conv_id}:end-turn",
-                        error=f"Ending the turn failed: {e}",
-                    )
-            self._broadcast_turn_complete(conv_id)
+                        # The report writes to the same store end_turn just
+                        # failed on; raising here would replace the turn's own
+                        # exception.
+                        try:
+                            report_send_failure(
+                                self.session_store,
+                                self.event_bus,
+                                conv_id,
+                                ref_id=f"{conv_id}:end-turn",
+                                error=f"Ending the turn failed: {e}",
+                            )
+                        except Exception as report_error:
+                            logger.warning("reporting the end_turn failure failed: %s", report_error)
+            finally:
+                self._broadcast_turn_complete(conv_id)
 
     def _broadcast_session_busy(self, conv_id: Optional[str], busy: bool) -> None:
         """Patchable busy transition for clients - they flip the one session's
