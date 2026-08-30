@@ -31,6 +31,7 @@
   import type { IconName } from '$lib/components/icon/icons';
   import { sessionSourceType, isFinishedSession, isResumableSession } from './sessionModel';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
+  import { expandThinking } from '$lib/stores/expandThinking.svelte';
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import SessionMenu from './SessionMenu.svelte';
   import ModelEffort from './ModelEffort.svelte';
@@ -694,7 +695,12 @@
             {#if block.kind === 'prose'}
               <Prose content={block.text} breaks={turn.role === 'user' && hardLineBreaks.enabled} />
             {:else if block.kind === 'think'}
-              <Think content={block.content} tokens={block.tokens} label={block.label} />
+              <Think
+                content={block.content}
+                tokens={block.tokens}
+                label={block.label}
+                open={expandThinking.enabled}
+              />
             {:else if block.kind === 'exec'}
               <ExecBlock
                 command={block.command}

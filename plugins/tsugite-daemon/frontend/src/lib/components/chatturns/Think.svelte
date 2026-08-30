@@ -15,12 +15,13 @@
     tokens?: number;
     // Markdown reasoning body.
     content?: string;
-    // Initial expanded state.
     open?: boolean;
   } = $props();
 
-  // svelte-ignore state_referenced_locally -- `open` seeds the initial state; toggling owns it after.
-  let isOpen = $state(open);
+  // Follow the `open` prop as the preference flips; a manual toggle wins only
+  // until the prop next changes.
+  let userOverride = $state<{ prop: boolean; value: boolean } | null>(null);
+  const isOpen = $derived(userOverride?.prop === open ? userOverride.value : open);
 
   // Seed synchronously (no flash of empty), then coalesce streamed reasoning
   // deltas to one parse per frame; the trailing value always renders.
@@ -38,7 +39,11 @@
 </script>
 
 <div class="t-think" class:is-open={isOpen}>
-  <button type="button" aria-expanded={isOpen} onclick={() => (isOpen = !isOpen)}>
+  <button
+    type="button"
+    aria-expanded={isOpen}
+    onclick={() => (userOverride = { prop: open, value: !isOpen })}
+  >
     <span class="chev"><Icon name="chev-r" size={10} /></span>
     {label}{#if tokens != null}<span class="tok"> · {formatTokens(tokens)} tokens</span>{/if}
   </button>

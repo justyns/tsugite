@@ -5,6 +5,7 @@ import { beforeEach, expect, test } from 'vitest';
 import SettingsDrawer from './SettingsDrawer.svelte';
 import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
 import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
+import { expandThinking } from '$lib/stores/expandThinking.svelte';
 
 beforeEach(() => {
   localStorage.removeItem('tsugite_auto_follow');
@@ -43,4 +44,15 @@ test('hard line breaks are on out of the box, and turning them off persists', as
   await toggle.click();
   expect(hardLineBreaks.enabled).toBe(false);
   expect(localStorage.getItem('tsugite_hard_line_breaks')).toBe('false');
+});
+
+test('expanded thinking is on out of the box, and turning it off persists', async () => {
+  expandThinking.set(true);
+  await render(SettingsDrawer, { open: true, onclose: () => {} });
+  const toggle = page.getByRole('switch', { name: 'Expand thinking blocks by default' });
+  await expect.element(toggle).toHaveAttribute('aria-checked', 'true');
+
+  await toggle.click();
+  expect(expandThinking.enabled).toBe(false);
+  expect(localStorage.getItem('tsugite_expand_thinking')).toBe('false');
 });

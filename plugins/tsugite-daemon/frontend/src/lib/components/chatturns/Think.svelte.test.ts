@@ -17,3 +17,32 @@ test('respects an initial open prop', async () => {
   const toggle = page.getByRole('button', { name: /thought for 2s/ });
   await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
 });
+
+test('follows the open prop when it changes', async () => {
+  const { rerender } = await render(Think, {
+    label: 'thought for 4s',
+    content: 'reconsidering',
+    open: true,
+  });
+  const toggle = page.getByRole('button', { name: /thought for 4s/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  await rerender({ open: false });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a manual toggle wins until the open prop next changes', async () => {
+  const { rerender } = await render(Think, {
+    label: 'thought for 9s',
+    content: 'reconsidering',
+    open: true,
+  });
+  const toggle = page.getByRole('button', { name: /thought for 9s/ });
+  await toggle.click();
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  await rerender({ open: false });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+});

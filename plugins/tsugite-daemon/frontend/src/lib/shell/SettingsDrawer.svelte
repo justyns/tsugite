@@ -16,6 +16,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { contextProviders } from '$lib/context/contextProviders';
   import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
+  import { expandThinking } from '$lib/stores/expandThinking.svelte';
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import { autoFollow } from '$lib/stores/autoFollow.svelte';
   import { TESTID } from '$lib/testids';
@@ -137,6 +138,19 @@
             <span class="sub">
               Render soft line breaks in your messages as hard line breaks. Does not apply to the
               agent's.
+            </span>
+          </div>
+        </div>
+        <div class="d-toggle">
+          <Switch
+            checked={expandThinking.enabled}
+            onCheckedChange={(v) => expandThinking.set(v)}
+            ariaLabel="Expand thinking blocks by default"
+          />
+          <div class="d-toggle-lb">
+            <span class="tt">Expand thinking</span>
+            <span class="sub">
+              Show the agent's reasoning blocks expanded. You can still collapse them one at a time.
             </span>
           </div>
         </div>

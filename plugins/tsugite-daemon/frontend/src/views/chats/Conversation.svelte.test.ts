@@ -7,6 +7,7 @@ import { ConversationController } from './conversation.svelte';
 import type { SessionRow } from '$lib/stores/sessions.svelte';
 import { TESTID } from '$lib/testids';
 import { sessionRow } from './__fixtures__/sessionRow';
+import { expandThinking } from '$lib/stores/expandThinking.svelte';
 
 const noop = () => {};
 const callbacks = {
@@ -32,6 +33,9 @@ const callbacks = {
 afterEach(async () => {
   await page.viewport(1440, 900);
 });
+
+// The thinking pref is a module singleton shared with every other browser test.
+afterEach(() => expandThinking.set(true));
 
 function controllerWith(events: Record<string, unknown>[]): ConversationController {
   const ctrl = new ConversationController();
@@ -1369,4 +1373,54 @@ test('a session-completion wake-up folds instead of rendering raw XML as your me
 
   expect(await page.getByText('<session_finished', { exact: false }).elements()).toHaveLength(0);
   await expect.element(page.getByTestId(TESTID.chatTurnOrigin)).toHaveTextContent('child');
+});
+
+function reasoningController(): ConversationController {
+  return controllerWith([
+    { type: 'user_input', text: 'which option?', timestamp: '2026-07-14T15:00:00Z' },
+    { type: 'reasoning', content: 'weighing the options' },
+    { type: 'model_response', raw_content: 'Option A.', thought: 'Option A.' },
+    { type: 'final_result', result: 'Option A.' },
+  ]);
+}
+
+test('a thinking block renders expanded by default', async () => {
+  expandThinking.set(true);
+  render(Conversation, {
+    ctrl: reasoningController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+  await expect
+    .element(page.getByRole('button', { name: /thinking/ }))
+    .toHaveAttribute('aria-expanded', 'true');
+});
+
+test('turning the thinking pref off renders the block collapsed', async () => {
+  expandThinking.set(false);
+  render(Conversation, {
+    ctrl: reasoningController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+  await expect
+    .element(page.getByRole('button', { name: /thinking/ }))
+    .toHaveAttribute('aria-expanded', 'false');
+});
+
+test('flipping the thinking pref collapses a block already on screen', async () => {
+  expandThinking.set(true);
+  render(Conversation, {
+    ctrl: reasoningController(),
+    row: null,
+    railCollapsed: false,
+    ...callbacks,
+  });
+  const toggle = page.getByRole('button', { name: /thinking/ });
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+
+  expandThinking.set(false);
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
 });
