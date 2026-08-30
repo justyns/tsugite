@@ -4,11 +4,15 @@ import { render, cleanup } from 'vitest-browser-svelte';
 import { afterEach, expect, test, vi } from 'vitest';
 import { type Snippet, createRawSnippet, mount, unmount } from 'svelte';
 import Mux from './Mux.svelte';
+import { KEEP_ALIVE_MAX } from './PaneView.svelte';
+import KeepAliveHost from './__fixtures__/KeepAliveHost.svelte';
+import { mountCounts } from './__fixtures__/MountCounter.svelte';
 import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
 import { writeSurfaceDrag } from './drag';
 import {
   type Layout,
+  type LeafNode,
   type PaneTabModel,
   type SplitDir,
   type SurfaceRef,
@@ -392,4 +396,55 @@ test('reordering tabs inside a pane does not also split that pane', async () => 
   await expect.poll(() => collectLeaves(mux.layout.root).length).toBe(1);
   const kinds = collectLeaves(mux.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
   expect(kinds).toEqual(['terminal', 'chat']);
+});
+
+// ── keep-alive: a visited tab stays mounted while another tab is on screen ──
+
+async function mountKeepAlive(tabCount: number) {
+  mountCounts.clear();
+  let layout = defaultLayout();
+  const paneId = layout.root.id;
+  for (let i = 0; i < tabCount; i++) {
+    layout = dockAsTab(layout, paneId, { kind: 'chat', params: { id: `s${i}` } });
+  }
+  const tabIds = (layout.root as LeafNode).tabs.map((t) => t.id);
+  const screen = await render(KeepAliveHost, { layout });
+  return {
+    tabIds,
+    select: async (tabId: string) => {
+      layout = selectTab(layout, paneId, tabId);
+      await screen.rerender({ layout });
+    },
+    mounted: () => screen.container.querySelectorAll('[data-mounted]').length,
+  };
+}
+
+test('switching tabs leaves the tab behind mounted rather than rebuilding it on return', async () => {
+  // Unmounting an inactive tab throws its surface away: a chat rebuilds its
+  // controller, clears the timeline and refetches, so every switch reloads.
+  const mux = await mountKeepAlive(2);
+  const [a, b] = mux.tabIds;
+  await mux.select(a!);
+  expect(mountCounts.get(a!)).toBe(1);
+  await mux.select(b!);
+  await mux.select(a!);
+  expect(mountCounts.get(a!)).toBe(1);
+});
+
+test('a tab never visited in this session is not mounted', async () => {
+  const mux = await mountKeepAlive(3);
+  // dockAsTab activates what it docks, so only the last tab has ever been shown.
+  expect(mux.mounted()).toBe(1);
+});
+
+test('keep-alive holds KEEP_ALIVE_MAX tabs, dropping the least recently active', async () => {
+  const mux = await mountKeepAlive(KEEP_ALIVE_MAX + 1);
+  for (const id of mux.tabIds) await mux.select(id);
+  expect(mux.mounted()).toBe(KEEP_ALIVE_MAX);
+  const evicted = mux.tabIds[0]!;
+  const kept = mux.tabIds[1]!;
+  await mux.select(kept);
+  expect(mountCounts.get(kept)).toBe(1);
+  await mux.select(evicted);
+  expect(mountCounts.get(evicted)).toBe(2);
 });

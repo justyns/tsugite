@@ -151,6 +151,55 @@ test('auto-follow off stops the tail-follow chasing new output', async () => {
   expect(el.scrollTop).toBe(0);
 });
 
+// ── background mux tab: kept mounted, `hidden`, so zero height ──
+//
+// A pane the mux keeps alive behind another tab goes to zero height, where
+// scrollHeight reads 0 and every scroll write clamps to the top. The stream
+// keeps arriving there, so the follow has to hold off until the tab is shown.
+
+function append(el: HTMLElement, px: number): void {
+  const spacer = document.createElement('div');
+  spacer.style.height = `${px}px`;
+  el.appendChild(spacer);
+}
+
+async function hiddenTurn(el: HTMLElement, run: () => void): Promise<void> {
+  el.hidden = true;
+  await settle();
+  run();
+  await settle();
+  el.hidden = false;
+  await settle();
+  await settle();
+}
+
+test('a turn that lands while the tab is hidden leaves it at the tail on return', async () => {
+  const el = fixture();
+  const f = attach(el);
+  el.scrollTop = 500; // scrolled down to the tail: pinned
+  el.dispatchEvent(new Event('scroll'));
+  expect(f.pinned).toBe(true);
+  await hiddenTurn(el, () => {
+    append(el, 300);
+    f.sync();
+  });
+  expect(dist(el)).toBeLessThan(4);
+});
+
+test('a hidden tab the reader had scrolled back in returns to the same place, unpinned', async () => {
+  const el = fixture();
+  const f = attach(el);
+  f.pinned = false;
+  el.scrollTop = 200;
+  el.dispatchEvent(new Event('scroll'));
+  await hiddenTurn(el, () => {
+    append(el, 300);
+    f.sync();
+  });
+  expect(el.scrollTop).toBe(200);
+  expect(f.pinned).toBe(false);
+});
+
 test('jump-to-latest still snaps with auto-follow off (an explicit ask, not a chase)', async () => {
   const el = fixture();
   const f = attach(el);

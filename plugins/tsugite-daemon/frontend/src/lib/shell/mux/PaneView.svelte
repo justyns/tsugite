@@ -1,4 +1,11 @@
+<script module lang="ts">
+  /** How many of a pane's tabs stay mounted at once, most recently active first.
+   *  Past this, the oldest is unmounted and rebuilds its surface on return. */
+  export const KEEP_ALIVE_MAX = 8;
+</script>
+
 <script lang="ts">
+  import { untrack } from 'svelte';
   import Pane from '$lib/components/multiplexer/Pane.svelte';
   import TabStrip, { type PaneTab } from '$lib/components/multiplexer/TabStrip.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
@@ -49,6 +56,19 @@
     })),
   );
   const paneLabel = $derived(activeTab ? surfaceLabel(activeTab) : 'Empty pane');
+
+  // Keep-alive: a visited tab stays mounted and hidden while another tab is on
+  // screen, so switching back shows the surface it left instead of rebuilding it.
+  let visited = $state<string[]>([]);
+  $effect(() => {
+    const id = pane.activeTabId;
+    if (!id) return;
+    untrack(() => {
+      const live = new Set(pane.tabs.map((t) => t.id));
+      visited = [id, ...visited.filter((t) => t !== id && live.has(t))].slice(0, KEEP_ALIVE_MAX);
+    });
+  });
+  const mountedTabs = $derived(pane.tabs.filter((t) => visited.includes(t.id)));
 
   let slotEl = $state<HTMLElement>();
   let dropZone = $state<DropZone | null>(null);
@@ -166,7 +186,11 @@
     {/snippet}
     {#if activeTab}
       {#if content}
-        {@render content(activeTab, () => handlers.onFocusPane?.(pane.id))}
+        {#each mountedTabs as tab (tab.id)}
+          <div class="mux-surf" hidden={tab.id !== pane.activeTabId}>
+            {@render content(tab, () => handlers.onFocusPane?.(pane.id))}
+          </div>
+        {/each}
       {/if}
     {:else}
       <div class="mux-empty">
@@ -220,6 +244,16 @@
     pointer-events: none;
     box-shadow: inset 0 0 0 2px var(--acc);
     border-radius: var(--r-sm);
+  }
+
+  /* The wrapper exists only to carry `hidden`: `display: contents` leaves the
+     surface itself a direct flex child of the pane body, so a kept-alive pane
+     lays out exactly as a single-tab one does. */
+  .mux-surf {
+    display: contents;
+  }
+  .mux-surf[hidden] {
+    display: none;
   }
 
   .mux-empty {

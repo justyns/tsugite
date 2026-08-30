@@ -31,6 +31,8 @@ export class ScrollFollow {
   /** Wire input + scroll listeners to the scroll container. Returns a cleanup. */
   attach(el: HTMLElement): () => void {
     this.#el = el;
+    // Last scroll position seen while the container had height.
+    let top = el.scrollTop;
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) this.#unpin();
     };
@@ -53,17 +55,32 @@ export class ScrollFollow {
       // trips on mobile - harmless.
       if (e.clientX - el.getBoundingClientRect().left > el.clientWidth) this.#unpin();
     };
-    let lastTop = el.scrollTop;
     const onScroll = () => {
+      // A mux tab kept alive behind another one is `hidden`, so it has no height
+      // and no scroll position; ignore that so the remembered one survives.
+      if (!el.clientHeight) return;
       // Re-pin only when the user scrolls DOWN to the tail, never on an upward
       // scroll that merely stayed within BOTTOM_EPS. Without the direction guard, a
       // gentle wheel/touchpad scroll up unpins (onWheel) and then this same small
       // scroll re-pins (still near the bottom), so the view feels stuck to the
       // bottom until you scroll hard enough to clear the slop in one gesture.
-      const scrollingDown = el.scrollTop >= lastTop;
-      lastTop = el.scrollTop;
+      const scrollingDown = el.scrollTop >= top;
+      top = el.scrollTop;
       if (scrollingDown && this.#atBottom()) this.pinned = true;
     };
+    // A hidden tab has no height to scroll, so a turn landing there leaves the
+    // container short of the tail; catch up on the way back.
+    let visible = el.clientHeight > 0;
+    const onResize = () => {
+      const now = el.clientHeight > 0;
+      if (now === visible) return;
+      visible = now;
+      if (!now) return;
+      if (this.pinned) this.#scrollToTail();
+      else el.scrollTop = top;
+    };
+    const ro = new ResizeObserver(onResize);
+    ro.observe(el);
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
@@ -77,6 +94,7 @@ export class ScrollFollow {
       el.removeEventListener('keydown', onKeydown);
       el.removeEventListener('pointerdown', onPointerDown);
       el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
       if (this.#el === el) this.#el = null;
     };
   }
@@ -103,7 +121,7 @@ export class ScrollFollow {
   #scrollToTail(): void {
     const scroll = () => {
       const el = this.#el;
-      if (!this.pinned || !el) return;
+      if (!this.pinned || !el || !el.clientHeight) return;
       el.scrollTop = el.scrollHeight;
     };
     requestAnimationFrame(() => {
