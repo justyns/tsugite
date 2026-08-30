@@ -449,6 +449,9 @@ class Gateway:
 
             set_notifier(notifier, loop)
 
+        if self._session_runner:
+            self._session_runner.flush_held_deliveries()
+
         from tsugite.tools.daemon_control import set_restart_controller
 
         set_restart_controller(self, loop)

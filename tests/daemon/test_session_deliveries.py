@@ -946,10 +946,48 @@ class TestHeldDeliveriesSurviveADaemonDeath:
         runner.deliver_to_session(sid, "rent is due", source="schedule", kind="needs_ack")
 
         reopened = SessionStore(path)
-        SessionRunner(store=reopened, adapter=None, event_bus=None)
+        SessionRunner(store=reopened, adapter=None, event_bus=None).flush_held_deliveries()
 
         assert reopened.get_session(sid).has_pending_deliveries is True
         assert len(_deliveries(reopened, sid)) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_needs_ack_card_held_across_a_restart_still_notifies(self, tmp_path, history_dir):
+        """The gateway wires the notifier after it builds the runner, so a boot flush
+        that runs during construction has nobody to tell."""
+        from tsugite_daemon.config import NotificationChannelConfig
+
+        from tsugite.tools.notify import set_notifier
+
+        path = tmp_path / "restart_store.json"
+        channels = {"push": NotificationChannelConfig(type="web-push")}
+        store = SessionStore(path)
+        runner = SessionRunner(store=store, adapter=None, event_bus=None, notification_channels=channels)
+        sid = _session(store)
+        store.begin_turn(sid)
+        runner.deliver_to_session(
+            sid, "approve the deploy?", source="job", kind="needs_ack", notify_channels=list(channels.items())
+        )
+
+        sent: list[str] = []
+
+        async def notifier(message, channel_configs, url="/"):
+            sent.append(message)
+            return {}
+
+        reopened = SessionStore(path)
+        rebooted = SessionRunner(store=reopened, adapter=None, event_bus=None, notification_channels=channels)
+        set_notifier(notifier, asyncio.get_running_loop())
+        try:
+            rebooted.flush_held_deliveries()
+            for _ in range(50):
+                if sent:
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            set_notifier(None, None)
+
+        assert sent == ["approve the deploy?"]
 
     def test_a_card_is_not_held_for_a_turn_that_already_ended(self, store):
         """The hold decision and the hold share one lock, so a turn that ends first

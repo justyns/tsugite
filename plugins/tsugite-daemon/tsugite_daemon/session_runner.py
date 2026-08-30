@@ -128,13 +128,19 @@ class SessionRunner:
         self._event_bus = event_bus
         self._notification_channels = notification_channels or {}
         store.set_turn_end_listener(self._on_turn_end)
-        # A turn that died with the last daemon will never end, so its held cards need flushing now.
-        for session_id in store.sessions_holding_deliveries():
-            self._flush_deferred_deliveries(session_id)
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._completion_listeners: list[NotifyCallback] = []
         if notify_callback:
             self._completion_listeners.append(notify_callback)
+
+    def flush_held_deliveries(self) -> None:
+        """Deliver cards held by a turn that died with the last daemon; that turn
+        never ends, so nothing else will flush them.
+
+        Call it once the notifier is wired, or the fanout is dropped.
+        """
+        for session_id in self._store.sessions_holding_deliveries():
+            self._flush_deferred_deliveries(session_id)
 
     def add_completion_listener(self, callback: NotifyCallback) -> None:
         """Register a session-completion listener. Idempotent."""
