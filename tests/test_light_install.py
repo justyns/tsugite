@@ -5,9 +5,12 @@ modules must not require ddgs / daemon / web deps, and the tools that do need th
 must raise a clear "install the extra" error instead of a confusing traceback.
 """
 
+import json
 import subprocess
 import sys
+import tempfile
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -64,3 +67,36 @@ def test_core_tools_load_without_optional_deps():
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
+
+
+AGENT_RUNTIME_MODULES = ("tsugite.core.agent", "tsugite.agent_runner.runner")
+
+
+def modules_loaded_by_cli(*argv: str) -> set[str]:
+    """Names in sys.modules after a fresh interpreter runs the CLI on argv."""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "modules.json"
+        script = textwrap.dedent(
+            f"""
+            import json
+            import sys
+            from pathlib import Path
+
+            sys.argv = ["tsu", *sys.argv[1:]]
+            from tsugite.tsugite import app
+
+            try:
+                app()
+            except SystemExit:
+                pass
+            Path({str(out)!r}).write_text(json.dumps(sorted(sys.modules)))
+            """
+        )
+        result = subprocess.run([sys.executable, "-c", script, *argv], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return set(json.loads(out.read_text()))
+
+
+def test_version_does_not_import_agent_runtime():
+    loaded = modules_loaded_by_cli("--version")
+    assert not loaded.intersection(AGENT_RUNTIME_MODULES)

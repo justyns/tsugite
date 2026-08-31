@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from tsugite.cli import app
-from tsugite.config import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+from tsugite.constants import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
 
 
 @pytest.fixture(autouse=True)

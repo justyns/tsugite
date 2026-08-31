@@ -10,7 +10,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from tsugite.agent_runner.validation import validate_agent_file
 from tsugite.md_agents import parse_agent_file
 
 console = Console()
@@ -50,6 +49,8 @@ def validate_command(
         tsugite validate agents/*.md
         tsugite validate .tsugite/default.md agents/*.md
     """
+    from tsugite.agent_runner.validation import validate_agent_file
+
     # Expand glob patterns
     agent_files = []
     for pattern in files:

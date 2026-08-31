@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Literal, Optional
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-from tsugite.config import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+from tsugite.constants import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
 
 
 def _get_default_state_dir() -> Path:

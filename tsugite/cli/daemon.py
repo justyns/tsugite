@@ -11,7 +11,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from tsugite.config import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT, get_xdg_data_path, get_xdg_write_path
+from tsugite.constants import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
 
 daemon_app = typer.Typer(help="Daemon management commands")
 console = Console()
@@ -166,6 +166,7 @@ def _create_new_workspace(style) -> tuple[str, Path]:
     """
     import questionary
 
+    from tsugite.config import get_xdg_data_path
     from tsugite.workspace import Workspace
 
     workspace_name = questionary.text(
@@ -269,6 +270,8 @@ def init_daemon(
     """Interactive setup wizard for Discord bot."""
     import yaml
     from tsugite_daemon.config import load_daemon_config
+
+    from tsugite.config import get_xdg_data_path, get_xdg_write_path
 
     console.print(
         Panel(
@@ -713,6 +716,8 @@ def _get_tokens_path(config_path: Optional[Path] = None) -> Path:
     """
     from tsugite_daemon.auth import TOKENS_FILENAME
     from tsugite_daemon.config import load_daemon_config
+
+    from tsugite.config import get_xdg_data_path
 
     try:
         state_dir = load_daemon_config(config_path).state_dir
