@@ -234,6 +234,24 @@ class TestUnreachableTarget:
         assert entry.last_status == "error"
 
     @pytest.mark.asyncio
+    async def test_a_resumable_finished_target_still_takes_the_message(self, sched_adapter, runner, store):
+        """A resumable background chat takes another turn after it completes, so the scheduler's pre-check must let it through."""
+        chat = store.create_session(
+            Session(
+                id="chatty",
+                source=SessionSource.BACKGROUND.value,
+                status=SessionStatus.COMPLETED.value,
+                resumable=True,
+            )
+        )
+
+        entry = _entry(target_session=chat.id)
+        await sched_adapter.scheduler._fire_schedule(entry)
+
+        assert runner.reply_to_session.await_args.args[0] == chat.id
+        assert entry.last_status == "success"
+
+    @pytest.mark.asyncio
     async def test_a_target_that_ends_mid_flight_records_an_error(self, sched_adapter, runner, store):
         """The target passed the resumable check but finished before the reply ran,
         so the runner declined the turn. Nothing was sent; the run failed."""

@@ -330,6 +330,11 @@ class Session:
         return self.resumable and self.status == SessionStatus.COMPLETED.value
 
     @property
+    def is_reachable(self) -> bool:
+        """Open to another turn or delivery: not finished, or finished with `accepts_followup`."""
+        return self.status not in FINISHED_STATUSES or self.accepts_followup
+
+    @property
     def has_pending_deliveries(self) -> bool:
         return bool(self.pending_deliveries)
 

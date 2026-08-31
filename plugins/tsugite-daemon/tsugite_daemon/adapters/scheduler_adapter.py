@@ -27,7 +27,6 @@ from tsugite_daemon.scheduler import (
 )
 from tsugite_daemon.session_runner import DELIVERY_KIND_FYI, DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
 from tsugite_daemon.session_store import (
-    FINISHED_STATUSES,
     METADATA_INCIDENT_KEY,
     Session,
     SessionSource,
@@ -268,7 +267,7 @@ class SchedulerAdapter:
 
         store = self._adapter.session_store
         target = resolve_target_session(entry, self._delivery_recipients(self._adapter, entry, [])[0], store)
-        if target is None or target.status in FINISHED_STATUSES:
+        if target is None or not target.is_reachable:
             await self._report_undeliverable(entry, target)
             ref = entry.target_session or (target.id if target else "unresolved")
             raise RuntimeError(f"Target session '{ref}' is not resumable")

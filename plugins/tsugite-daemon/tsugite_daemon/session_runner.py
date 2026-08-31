@@ -16,7 +16,6 @@ from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ERROR
 from tsugite_daemon.session_store import (
-    FINISHED_STATUSES,
     Session,
     SessionSource,
     SessionStatus,
@@ -419,7 +418,7 @@ class SessionRunner:
         """
         session_id = self.live_id(session_id)
         target = self._store.get_session(session_id)
-        if target.status in FINISHED_STATUSES and not target.accepts_followup:
+        if not target.is_reachable:
             logger.info("Not delivering to session '%s': already finished", session_id)
             return
         if kind not in DELIVERY_KINDS:
@@ -597,7 +596,7 @@ class SessionRunner:
         """
         session_id = self.live_id(session_id)
         target = self._store.get_session(session_id)  # raises if the session is unknown
-        if not revive and target.status in FINISHED_STATUSES and not target.accepts_followup:
+        if not revive and not target.is_reachable:
             logger.info("Session '%s' takes no reply: already finished", session_id)
             return None
 
