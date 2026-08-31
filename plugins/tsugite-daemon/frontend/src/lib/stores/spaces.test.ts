@@ -76,6 +76,26 @@ describe('parseSpaces / serializeSpaces', () => {
     expect(busted.layout.root.type).toBe('leaf');
   });
 
+  test("round-trips each space's nav selection", () => {
+    const a: Space = { ...defaultSpace(), nav: 'chats' };
+    const b: Space = { ...defaultSpace('Ops'), nav: 'files' };
+    const parsed = parseSpaces(serializeSpaces([a, b], b.id));
+    expect(parsed.spaces.map((s) => s.nav)).toEqual(['chats', 'files']);
+  });
+
+  test('state persisted before spaces had a nav field parses with no stored nav', () => {
+    const a = defaultSpace();
+    const raw = JSON.stringify({
+      version: SPACES_SCHEMA_VERSION,
+      activeSpaceId: a.id,
+      spaces: [{ id: a.id, name: a.name, layout: a.layout }],
+    });
+    const parsed = parseSpaces(raw);
+    expect(parsed.spaces).toHaveLength(1);
+    expect(parsed.spaces[0]!.id).toBe(a.id);
+    expect(parsed.spaces[0]!.nav).toBeUndefined();
+  });
+
   test('an active id that names no surviving space resets to the first space', () => {
     const a = defaultSpace();
     const raw = serializeSpaces([a], 'ghost');
@@ -189,6 +209,18 @@ describe('space management', () => {
     store.closeTab(pane.id, pane.tabs[0]!.id);
     expect(surfaceKinds(store, a)).toEqual(['file']);
     expect(surfaceKinds(store, b)).toEqual(['chat', 'terminal']);
+  });
+
+  test('each space records its own nav selection', () => {
+    const store = new SpacesStore();
+    const a = store.activeSpaceId;
+    const b = store.addSpace('Second');
+    store.setNav(a, 'chats');
+    store.setNav(b, 'files');
+    expect(store.spaces.find((s) => s.id === a)!.nav).toBe('chats');
+    expect(store.spaces.find((s) => s.id === b)!.nav).toBe('files');
+    store.setNav(b, 'terminals');
+    expect(store.spaces.find((s) => s.id === a)!.nav).toBe('chats');
   });
 
   test('setActive ignores an id no space owns', () => {

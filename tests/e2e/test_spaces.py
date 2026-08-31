@@ -112,3 +112,39 @@ def test_the_spaces_strip_survives_a_phone_width(authenticated_page):
             if close.count():
                 close.first.click()
                 page.wait_for_timeout(200)
+
+
+# Which secondary rail is mounted, per nav view - the visible proof the space's
+# own selection came back rather than the outgoing space's.
+RAILS = {"chats": "chat-rail", "files": "files-tree"}
+
+
+def _expect_nav(page, view_id: str) -> None:
+    expect(page.locator(f'[data-testid="nav-{view_id}"]')).to_have_attribute("aria-current", "page")
+    expect(page.locator(f'[data-testid="view-{view_id}"]')).to_be_visible()
+    expect(page.locator(f'[data-testid="{RAILS[view_id]}"]')).to_be_visible()
+
+
+def test_each_space_keeps_its_own_nav_selection(authenticated_page, e2e_session_store):
+    """Space 1 on Chats and Space 2 on Files, each restored on the way back."""
+    e2e_session_store.get_or_create_interactive(E2E_USER_ID)
+
+    page = authenticated_page
+    page.reload()
+    page.wait_for_selector(SPACE_BAR)
+
+    # Main sits on the default Chats view.
+    _expect_nav(page, "chats")
+
+    # A new space starts on the default view too, then picks Files.
+    page.get_by_role("button", name="New space").click()
+    _expect_nav(page, "chats")
+    open_view(page, "files")
+    _expect_nav(page, "files")
+
+    # Back and forth: each space brings its own nav selection with it.
+    for _ in range(2):
+        _space(page, "Main").click()
+        _expect_nav(page, "chats")
+        _space(page, "Space 2").click()
+        _expect_nav(page, "files")

@@ -35,6 +35,7 @@
   import { surfaceComponent } from './views/surfaces';
   import { workspacePhoneScreen } from '$lib/shell/phoneNav';
   import { focusedSurface } from '$lib/shell/shellNav';
+  import { followSpaceNav } from '$lib/shell/spaceNav.svelte';
   import { resolveShellShortcut } from '$lib/shell/keymap';
   import { chatsNavBadge, jobsNavBadges, needsYouTotal } from '$lib/shell/navBadges';
   import { pageTitle } from '$lib/shell/pageTitle';
@@ -188,6 +189,8 @@
       if (id && known) shellView.activate(id);
     });
   });
+
+  $effect(() => followSpaceNav());
 
   // A plugin surface that declared workspace mode docks into the mux like a rail
   // pick instead of taking the region. Kept out of the deep-link effect above

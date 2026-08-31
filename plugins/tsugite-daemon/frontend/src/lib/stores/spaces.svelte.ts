@@ -1,9 +1,9 @@
 /**
- * Spaces store: named spaces, each owning a multiplexer layout, plus the active
- * space and a per-space state rollup. Persisted to localStorage under a
- * schema-versioned envelope; a corrupt envelope falls back to a single default
- * space and a single corrupt layout self-heals to a default (without dropping
- * its sibling spaces).
+ * Spaces store: named spaces, each owning a multiplexer layout and a nav
+ * selection, plus the active space and a per-space state rollup. Persisted to
+ * localStorage under a schema-versioned envelope; a corrupt envelope falls back
+ * to a single default space and a single corrupt layout self-heals to a default
+ * (without dropping its sibling spaces).
  *
  * The parse / serialize / rollup helpers are pure (node-unit-tested); the class
  * wires them to `$state` + localStorage and delegates every mutation to the pure
@@ -47,6 +47,7 @@ export interface Space {
   id: string;
   name: string;
   layout: Layout;
+  nav?: string;
 }
 
 /** A closed space plus where it sat, so it can be put back. */
@@ -91,6 +92,7 @@ export function serializeSpaces(spaces: Space[], activeSpaceId: string): string 
     spaces: spaces.map((s) => ({
       id: s.id,
       name: s.name,
+      nav: s.nav,
       // Callers pass a $state.snapshot, so the layout is already a plain object;
       // the outer JSON.stringify serializes it directly.
       layout: s.layout,
@@ -116,11 +118,13 @@ export function parseSpaces(raw: string | null): SpacesState {
     // an otherwise-valid entry self-heals to a default (deserializeLayout owns the
     // structural validation).
     if (!isRecord(s) || typeof s.id !== 'string' || typeof s.name !== 'string') continue;
-    spaces.push({
+    const space: Space = {
       id: s.id,
       name: s.name,
       layout: deserializeLayout(JSON.stringify(s.layout ?? null)),
-    });
+    };
+    if (typeof s.nav === 'string') space.nav = s.nav;
+    spaces.push(space);
   }
   if (spaces.length === 0) return freshState();
   const activeSpaceId =
@@ -286,6 +290,12 @@ export class SpacesStore {
 
   // --- space management ---
 
+  setNav(id: string, view: string): void {
+    const s = this.spaces.find((x) => x.id === id);
+    if (!s || s.nav === view) return;
+    s.nav = view;
+    this.persist();
+  }
   setActive(id: string): void {
     if (this.spaces.some((s) => s.id === id)) {
       this.activeSpaceId = id;
