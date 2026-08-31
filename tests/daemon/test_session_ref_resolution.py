@@ -183,6 +183,18 @@ class TestToolsDefaultToTheCallingSession:
             session_tools.rename_session(title="Groceries")
 
 
+class TestReplyingToAFinishedSession:
+    def test_a_finished_session_still_takes_the_reply(self, store, runner, adapter):
+        """`session_reply` with an explicit id revives a finished session; `reply_to_session` on its own declines the turn."""
+        chat = _chat(store)
+        store.update_session(chat.id, status=SessionStatus.COMPLETED.value)
+
+        result = session_tools.session_reply(message="one more thing", session_id=chat.id)
+
+        assert result["response"] == "ack"
+        assert adapter.handle_message.await_count == 1
+
+
 class TestToolsFollowCompaction:
     def test_a_bare_id_reaches_the_session_it_became(self, store, runner):
         chat = _chat(store)
