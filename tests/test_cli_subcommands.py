@@ -172,3 +172,24 @@ class TestPluginSubcommands:
 
         assert result.exit_code == 0
         assert "dashboard" in result.stdout
+
+
+class TestEveryCommandResolves:
+    """The lazy command group resolves every command it advertises."""
+
+    def _group(self):
+        from typer.main import get_command
+
+        return get_command(app)
+
+    def test_each_command_help_exits_zero(self):
+        for name in self._group().list_commands(None):
+            result = runner.invoke(app, [name, "--help"])
+            assert result.exit_code == 0, f"{name} --help failed: {result.output}"
+
+    def test_listed_help_matches_the_imported_command(self):
+        from tsugite.cli import _LAZY_COMMANDS, _import_command
+
+        group = self._group()
+        for name in _LAZY_COMMANDS:
+            assert _import_command(name).get_short_help_str() == group.commands[name].get_short_help_str()

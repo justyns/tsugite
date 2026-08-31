@@ -87,16 +87,37 @@ def modules_loaded_by_cli(*argv: str) -> set[str]:
 
             try:
                 app()
-            except SystemExit:
-                pass
-            Path({str(out)!r}).write_text(json.dumps(sorted(sys.modules)))
+                code = 0
+            except SystemExit as exit_:
+                code = exit_.code or 0
+            Path({str(out)!r}).write_text(json.dumps({{"code": code, "modules": sorted(sys.modules)}}))
             """
         )
         result = subprocess.run([sys.executable, "-c", script, *argv], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
-        return set(json.loads(out.read_text()))
+        recorded = json.loads(out.read_text())
+        assert recorded["code"] == 0, f"{argv} exited {recorded['code']}\n{result.stdout}{result.stderr}"
+        return set(recorded["modules"])
+
+
+def command_modules_in(loaded: set[str]) -> set[str]:
+    return {name for name in loaded if name.startswith("tsugite.cli.")}
 
 
 def test_version_does_not_import_agent_runtime():
     loaded = modules_loaded_by_cli("--version")
     assert not loaded.intersection(AGENT_RUNTIME_MODULES)
+
+
+def test_version_imports_no_command_module():
+    assert not command_modules_in(modules_loaded_by_cli("--version"))
+
+
+def test_help_imports_no_command_module():
+    assert not command_modules_in(modules_loaded_by_cli("--help"))
+
+
+def test_daemon_help_imports_only_its_own_module():
+    loaded = modules_loaded_by_cli("daemon", "--help")
+    assert command_modules_in(loaded) == {"tsugite.cli.daemon"}
+    assert "tsugite.config" not in loaded

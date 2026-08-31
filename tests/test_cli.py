@@ -856,7 +856,7 @@ class TestUnpackExecutionResult:
     def test_unpack_agent_execution_result(self):
         """Test unpacking AgentExecutionResult object."""
         from tests.conftest import mock_agent_execution_result
-        from tsugite.cli import _unpack_execution_result
+        from tsugite.cli.run import _unpack_execution_result
 
         # Create an AgentExecutionResult
         result = mock_agent_execution_result(
@@ -882,7 +882,7 @@ class TestUnpackExecutionResult:
 
     def test_unpack_plain_string(self):
         """Test unpacking plain string result."""
-        from tsugite.cli import _unpack_execution_result
+        from tsugite.cli.run import _unpack_execution_result
 
         result = "Simple string response"
         unpacked = _unpack_execution_result(result)
