@@ -1,11 +1,11 @@
 [project]
 name = "tsugite-claude-code"
-version = "0.21.0"
+version = "0.21.1"
 description = "Tsugite plugin: Claude Code provider (routes LLM calls through the claude CLI)"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.21.0",
+  "tsugite-cli==0.21.1",
 ]
 
 [project.entry-points."tsugite.providers"]
