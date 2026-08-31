@@ -3,9 +3,8 @@
 import importlib
 from typing import Any, Optional
 
-import click
 import typer
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup
 
 # name -> (module, attribute, help line). The help text lives here so the root
 # help renders without importing any command module.
@@ -36,21 +35,23 @@ _LAZY_COMMANDS: dict[str, tuple[str, str, str]] = {
 }
 
 
-def _import_command(name: str) -> click.Command:
+def _import_command(name: str) -> TyperGroup | TyperCommand:
     module, attribute, _ = _LAZY_COMMANDS[name]
     target = getattr(importlib.import_module(module), attribute)
     if isinstance(target, typer.Typer):
         return typer.main.get_group(target)
     holder = typer.Typer(add_completion=False)
     holder.command(name)(target)
-    built = typer.main.get_command(holder)
-    return built.commands[name] if isinstance(built, click.Group) else built
+    return typer.main.get_command(holder)
 
 
-class _LazyCommand(click.Command):
+class _LazyCommand(TyperCommand):
     """Stand-in with just enough to render a help row.
 
-    `make_context` returns the real command's context, so click's `Group.invoke`
+    Subclasses typer's command, not click's: typer 0.26+ vendors its own click,
+    so a real-click subclass is foreign to the group typer builds.
+
+    `make_context` returns the real command's context, so the group's `invoke`
     reads `sub_ctx.command` and dispatches to it.
     """
 
@@ -58,9 +59,9 @@ class _LazyCommand(click.Command):
         self,
         info_name: Optional[str],
         args: list[str],
-        parent: Optional[click.Context] = None,
+        parent: Any = None,
         **extra: Any,
-    ) -> click.Context:
+    ) -> Any:
         real = _import_command(self.name or "")
         return real.make_context(info_name, args, parent=parent, **extra)
 
@@ -71,7 +72,7 @@ class LazyCommandGroup(TyperGroup):
         for name, (_module, _attribute, help_text) in _LAZY_COMMANDS.items():
             self.commands[name] = _LazyCommand(name, help=help_text)
 
-    def invoke(self, ctx: click.Context) -> Any:
+    def invoke(self, ctx: Any) -> Any:
         # Only a command run needs the rich excepthook, and installing it pulls in rich.console.
         from rich.traceback import install
 
