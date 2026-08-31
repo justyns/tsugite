@@ -326,6 +326,58 @@ test('the folded row shows its duration and running flag', async () => {
   await expect.element(page.getByText('running')).toBeVisible();
 });
 
+test('the folded row shows the return value', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    calls: [{ tool: 'read_file', status: 'done' as const }],
+    returnValue: "{'a': 1}",
+  });
+  expect(container.querySelector('button.t-code-summary')!.textContent).toContain("{'a': 1}");
+  expect(container.querySelector('.t-code-rv')).toBeNull();
+});
+
+test('a long return value keeps the folded row one line', async () => {
+  const { container, rerender } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    calls: [{ tool: 'read_file', status: 'done' as const }],
+    returnValue: 'ok',
+  });
+  const oneLine = (container.querySelector('button.t-code-summary') as HTMLElement).offsetHeight;
+
+  await rerender({ returnValue: Array.from({ length: 40 }, (_, i) => `key_${i}=${i}`).join(', ') });
+  const row = container.querySelector('button.t-code-summary') as HTMLElement;
+  expect(row.offsetHeight).toBe(oneLine);
+});
+
+test('a long return value does not squeeze out the summary it sits beside', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    groups: [{ id: 'g1', title: 'check for exact duplicate issue' }],
+    returnValue: 'x'.repeat(2048),
+  });
+  const sum = container.querySelector('.t-code-summary .sum') as HTMLElement;
+  const rv = container.querySelector('.t-code-summary .rv') as HTMLElement;
+  expect(sum.offsetWidth).toBeGreaterThan(rv.offsetWidth);
+});
+
+test('a folded block that called nothing keeps its return value under the peek', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'total = 1 + 1',
+    lang: 'python',
+    collapsed: true,
+    returnValue: '2',
+  });
+  const rv = container.querySelector('.t-code-rv') as HTMLElement;
+  expect(rv.textContent).toContain('2');
+  expect(rv).toBeVisible();
+});
+
 test('clicking the folded row reveals the code and the group rows', async () => {
   const { container } = await render(CodeBlock, {
     code: 'read_file(path="a")',

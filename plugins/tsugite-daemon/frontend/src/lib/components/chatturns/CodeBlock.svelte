@@ -153,6 +153,8 @@
     >
       <span class="chev"><Icon name="chev-r" size={10} /></span>
       <span class="sum">{summary}</span>
+      {#if returnValue}<span class="rv"><span class="arrow">→</span> {returnValue}</span>{/if}
+      <span class="grow"></span>
       {#if running}<span class="run"><Spin />running</span>{/if}
       {#if failed}<span class="flag">failed</span>{/if}
       {#if calls.length > 0}
@@ -257,7 +259,7 @@
       {/if}
     </div>
   {/if}
-  {#if returnValue}
+  {#if returnValue && !summary}
     <div class="t-code-rv"><span class="arrow">→</span> {returnValue}</div>
   {/if}
 </div>
@@ -284,7 +286,8 @@
     font-weight: 600;
     letter-spacing: 0.05em;
   }
-  .t-code-hd .grow {
+  .t-code-hd .grow,
+  .t-code-summary .grow {
     flex: 1;
   }
   .t-code pre {
@@ -332,12 +335,19 @@
   .t-code-summary.is-err .chev {
     color: var(--st-err);
   }
-  .t-code-summary .sum {
-    flex: 1 1 auto;
+  .t-code-summary .sum,
+  .t-code-summary .rv {
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .t-code-summary .rv {
+    flex-shrink: 4;
+    max-width: 45%;
+    color: var(--tx2);
+    font: 500 var(--fs-xs) var(--font-mono);
   }
   .t-code-summary .flag {
     flex: none;
@@ -479,8 +489,7 @@
 
   /* Folded: the header (or the summary row) is all that stays on screen. */
   .t-code.is-collapsed .t-code-calls,
-  .t-code.is-collapsed .t-code-out,
-  .t-code.is-row .t-code-rv {
+  .t-code.is-collapsed .t-code-out {
     display: none;
   }
 
@@ -534,7 +543,8 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .t-code-rv .arrow {
+  .t-code-rv .arrow,
+  .t-code-summary .rv .arrow {
     color: var(--st-ok);
     font-weight: 600;
   }
