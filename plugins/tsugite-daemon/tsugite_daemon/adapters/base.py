@@ -455,6 +455,7 @@ class BaseAdapter(ABC):
         conv_id,
         metadata,
         result_str,
+        model,
         token_count=None,
         cost=None,
         execution_steps=None,
@@ -472,7 +473,7 @@ class BaseAdapter(ABC):
                 agent_name=self.agent_label,
                 prompt=message,
                 result=result_str,
-                model=self.resolve_model(),
+                model=model,
                 token_count=token_count,
                 cost=cost,
                 execution_steps=execution_steps,
@@ -851,13 +852,15 @@ class BaseAdapter(ABC):
 
         client_context = _build_client_context_block(client_items)
         recorded_message = f"{client_context}\n\n{message}" if client_context else message
+        # /model switches a live session, so bill the override, not the agent default.
+        turn_model = (channel_context.metadata or {}).get("model_override") or self.resolve_session_model(conv_id)
         try:
             from tsugite.agent_runner.history_integration import open_or_create_session, record_user_input
 
             early_storage = open_or_create_session(
                 agent_path=agent_path,
                 agent_name=self.agent_label,
-                model=(channel_context.metadata or {}).get("model_override") or self.resolve_session_model(conv_id),
+                model=turn_model,
                 continue_conversation_id=conv_id,
             )
             if early_storage is not None:
@@ -983,6 +986,7 @@ class BaseAdapter(ABC):
                     conv_id=conv_id,
                     metadata=metadata,
                     result_str=error_result,
+                    model=turn_model,
                     token_count=e.token_usage,
                     cost=e.cost,
                     execution_steps=e.execution_steps,
@@ -995,6 +999,7 @@ class BaseAdapter(ABC):
             conv_id=conv_id,
             metadata=metadata,
             result_str=str(result),
+            model=turn_model,
             token_count=getattr(result, "token_count", None),
             cost=getattr(result, "cost", None),
             execution_steps=getattr(result, "execution_steps", None),
@@ -1024,7 +1029,7 @@ class BaseAdapter(ABC):
             get_usage_store().record(
                 session_id=conv_id,
                 agent=self.agent_label,
-                model=self.resolve_model(),
+                model=turn_model,
                 source=channel_context.source if channel_context else "daemon",
                 schedule_name=(channel_context.metadata or {}).get("schedule_id") if channel_context else None,
                 total_tokens=result.token_count or 0,
