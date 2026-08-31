@@ -19,6 +19,7 @@ import { attentionRecord } from '../../views/chats/__fixtures__/sessionRow';
 import { SessionsStore, type SessionRow } from './sessions.svelte';
 
 const apiGet = api.get as ReturnType<typeof vi.fn>;
+const apiPost = api.post as ReturnType<typeof vi.fn>;
 
 function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
   return { id, pinned: false, pin_position: null, ...extra } as unknown as SessionRow;
@@ -243,18 +244,38 @@ describe('SessionsStore attention', () => {
     expect(store.rows[0]!.attention).toEqual([]);
   });
 
-  test('dismissAttention posts the dismissal and clears the flag optimistically', async () => {
+  test('dismissAttention posts the dismissal and takes the row state from the response', async () => {
     const store = new SessionsStore();
-    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
+    store.rows = [
+      row('s1', {
+        needs_attention: true,
+        attention: [attentionRecord('error', { kind: 'send_failed' })],
+        pending_deliveries: ['dlv-1'],
+      }),
+    ];
+    const ask = attentionRecord('ask');
+    apiPost.mockResolvedValueOnce({
+      ok: true,
+      needs_attention: true,
+      attention: [ask],
+      pending_deliveries: ['dlv-2'],
+    });
     await store.dismissAttention('s1');
     expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/dismiss-attention', undefined);
-    expect(store.rows[0]!.needs_attention).toBe(false);
-    expect(store.rows[0]!.pending_deliveries).toEqual([]);
+    expect(store.rows[0]!.attention).toEqual([ask]);
+    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-2']);
+    expect(store.rows[0]!.needs_attention).toBe(true);
   });
 
-  test('dismissing one delivery names it and leaves the rest outstanding', async () => {
+  test('dismissing one delivery sends its id and applies what is left', async () => {
     const store = new SessionsStore();
     store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1', 'dlv-2'] })];
+    apiPost.mockResolvedValueOnce({
+      ok: true,
+      needs_attention: true,
+      attention: [],
+      pending_deliveries: ['dlv-2'],
+    });
     await store.dismissAttention('s1', 'dlv-1');
     expect(api.post).toHaveBeenCalledWith('/api/sessions/s1/dismiss-attention', {
       delivery_id: 'dlv-1',
@@ -263,29 +284,12 @@ describe('SessionsStore attention', () => {
     expect(store.rows[0]!.needs_attention).toBe(true);
   });
 
-  test('dismissing discharges an error record', async () => {
+  test('a rejected dismissal leaves the row as it was', async () => {
     const store = new SessionsStore();
-    store.rows = [
-      row('s1', {
-        needs_attention: true,
-        attention: [attentionRecord('error', { kind: 'send_failed' })],
-      }),
-    ];
-    await store.dismissAttention('s1');
-    expect(store.rows[0]!.attention).toEqual([]);
-    expect(store.rows[0]!.needs_attention).toBe(false);
-  });
-
-  test('dismissing an error leaves an open ask outstanding', async () => {
-    const store = new SessionsStore();
-    store.rows = [
-      row('s1', {
-        needs_attention: true,
-        attention: [attentionRecord('error', { kind: 'send_failed' }), attentionRecord('ask')],
-      }),
-    ];
-    await store.dismissAttention('s1');
-    expect(store.rows[0]!.attention!.map((r) => r.source)).toEqual(['ask']);
+    store.rows = [row('s1', { needs_attention: true, pending_deliveries: ['dlv-1'] })];
+    apiPost.mockRejectedValueOnce(new Error('offline'));
+    await expect(store.dismissAttention('s1')).rejects.toThrow('offline');
     expect(store.rows[0]!.needs_attention).toBe(true);
+    expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-1']);
   });
 });

@@ -25,9 +25,6 @@ import {
   type SessionRowLike,
 } from './sessionsOrder';
 
-/** Sources the user can dismiss. An ask or a parked job clears itself. */
-const ACKNOWLEDGEABLE_SOURCES = new Set(['delivery', 'error']);
-
 export interface AttentionRecord {
   id: string;
   owner_kind: string;
@@ -434,22 +431,20 @@ export class SessionsStore {
     return api.patch<SessionSettings>(`/api/sessions/${encodeURIComponent(id)}/settings`, patch);
   }
 
+  /** The row takes its new state from the response, which reports what is still open. */
   async dismissAttention(id: string, deliveryId?: string): Promise<void> {
-    await api.post(
+    const { needs_attention, attention, pending_deliveries } = await api.post<{
+      needs_attention: boolean;
+      attention: AttentionRecord[];
+      pending_deliveries: string[];
+    }>(
       `/api/sessions/${encodeURIComponent(id)}/dismiss-attention`,
       deliveryId ? { delivery_id: deliveryId } : undefined,
     );
-    const row = this.rows.find((r) => r.id === id);
-    const left = deliveryId ? (row?.pending_deliveries ?? []).filter((d) => d !== deliveryId) : [];
-    const attention = (row?.attention ?? []).filter((r) =>
-      deliveryId
-        ? !(r.source === 'delivery' && r.ref_id === deliveryId)
-        : !ACKNOWLEDGEABLE_SOURCES.has(r.source),
-    );
     this.rows = patchRow(this.rows, id, {
-      needs_attention: attention.length > 0 || left.length > 0,
+      needs_attention,
       attention,
-      pending_deliveries: left,
+      pending_deliveries,
     } as Partial<SessionRow>);
   }
 
