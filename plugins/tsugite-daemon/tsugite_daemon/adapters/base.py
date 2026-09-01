@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
+from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.context import collect_detected_items
 from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
@@ -854,9 +855,12 @@ class BaseAdapter(ABC):
         recorded_message = f"{client_context}\n\n{message}" if client_context else message
         # /model switches a live session, so bill the override, not the agent default.
         turn_model = (channel_context.metadata or {}).get("model_override") or self.resolve_session_model(conv_id)
+        opened_history = False
         try:
             from tsugite.agent_runner.history_integration import open_or_create_session, record_user_input
+            from tsugite.history import get_history_backend
 
+            existed = get_history_backend().exists(conv_id)
             early_storage = open_or_create_session(
                 agent_path=agent_path,
                 agent_name=self.agent_label,
@@ -864,6 +868,7 @@ class BaseAdapter(ABC):
                 continue_conversation_id=conv_id,
             )
             if early_storage is not None:
+                opened_history = not existed
                 # Idempotent within a turn: the runner's own later record_user_input
                 # (via user_input_for_history=recorded_message) is a no-op once this
                 # has run, so exactly one user_input event lands. uploaded_attachments
@@ -980,6 +985,12 @@ class BaseAdapter(ABC):
                 )
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
+        except AgentSkippedError:
+            if opened_history:
+                from tsugite.history import get_history_backend
+
+                get_history_backend().delete_session(conv_id)
+            raise
         except Exception as e:
             partial_output = getattr(e, "partial_output", None)
             error_result = f"[Error: {e}]\n\n{partial_output}" if partial_output else f"[Error: {e}]"

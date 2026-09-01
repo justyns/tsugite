@@ -13,6 +13,7 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
+from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.exceptions import AgentExecutionError
 from tsugite.history import get_history_backend
 
@@ -173,3 +174,39 @@ async def test_a_turn_that_already_answered_once_still_ends_as_error(adapter, mo
 
     assert ends, "the failed turn recorded no session_end at all"
     assert ends[-1].data["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_a_skip_on_the_first_turn_leaves_no_history_session(adapter, monkeypatch):
+    """handle_message opens the session to hold the prompt before the guard runs,
+    so a first turn that never happens must take that row with it."""
+    monkeypatch.setattr(
+        "tsugite_daemon.adapters.base.run_agent",
+        MagicMock(side_effect=AgentSkippedError("run_if guard")),
+    )
+    session = adapter.session_store.get_or_create_interactive("alice")
+
+    with pytest.raises(AgentSkippedError):
+        await _run_turn(adapter)
+
+    assert not get_history_backend().exists(session.id), "the skipped run left a history session behind"
+
+
+@pytest.mark.asyncio
+async def test_a_skip_keeps_a_conversation_that_already_has_turns(adapter, monkeypatch):
+    """Only the turn that opened the session may discard it, or a guard declining
+    on turn five would delete the first four."""
+    monkeypatch.setattr(
+        "tsugite_daemon.adapters.base.run_agent",
+        lambda *a, **kw: SimpleNamespace(token_count=10, cost=0.0, provider_state={}),
+    )
+    session_id = await _run_turn(adapter)
+
+    monkeypatch.setattr(
+        "tsugite_daemon.adapters.base.run_agent",
+        MagicMock(side_effect=AgentSkippedError("run_if guard")),
+    )
+    with pytest.raises(AgentSkippedError):
+        await _run_turn(adapter)
+
+    assert get_history_backend().exists(session_id), "a skip deleted a conversation that had already run"
