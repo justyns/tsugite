@@ -962,9 +962,11 @@ class BaseAdapter(ABC):
         code_events_before = self.session_store.count_events_by_type(conv_id, "code_execution")
         ctx = contextvars.copy_context()
         try:
-            result = await asyncio.to_thread(ctx.run, run_in_workspace)
-        except AgentExecutionError as e:
-            if is_prompt_too_long_error(e):
+            try:
+                result = await asyncio.to_thread(ctx.run, run_in_workspace)
+            except AgentExecutionError as e:
+                if not is_prompt_too_long_error(e):
+                    raise
                 code_events_after = self.session_store.count_events_by_type(conv_id, "code_execution")
                 if code_events_after > code_events_before:
                     logger.warning(
@@ -978,20 +980,23 @@ class BaseAdapter(ABC):
                 )
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
-            else:
-                error_result = f"[Error: {e}]\n\n{e.partial_output}" if e.partial_output else f"[Error: {e}]"
-                self._save_history(
-                    agent_path=agent_path,
-                    message=message,
-                    conv_id=conv_id,
-                    metadata=metadata,
-                    result_str=error_result,
-                    model=turn_model,
-                    token_count=e.token_usage,
-                    cost=e.cost,
-                    execution_steps=e.execution_steps,
-                )
-                raise
+        except Exception as e:
+            partial_output = getattr(e, "partial_output", None)
+            error_result = f"[Error: {e}]\n\n{partial_output}" if partial_output else f"[Error: {e}]"
+            self._save_history(
+                agent_path=agent_path,
+                message=message,
+                conv_id=conv_id,
+                metadata=metadata,
+                result_str=error_result,
+                model=turn_model,
+                token_count=getattr(e, "token_usage", None),
+                cost=getattr(e, "cost", None),
+                execution_steps=getattr(e, "execution_steps", None),
+                status="error",
+                error_message=str(e),
+            )
+            raise
 
         self._save_history(
             agent_path=agent_path,
