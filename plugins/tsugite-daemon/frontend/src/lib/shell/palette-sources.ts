@@ -30,8 +30,13 @@ export interface CommandLike {
   params: CommandParamLike[];
 }
 
+export interface ViewLike {
+  id: string;
+  label: string;
+  icon: IconName;
+}
+
 export interface PaletteData {
-  views: { id: string; label: string; icon: IconName }[];
   /** Plugin-contributed UI surfaces, openable as a mux tab. */
   surfaces: { kind: string; label: string; icon: IconName }[];
   themes: readonly Theme[];
@@ -112,16 +117,6 @@ export interface SessionLike {
 export function buildPaletteItems(data: PaletteData): PaletteItem[] {
   const items: PaletteItem[] = [];
 
-  for (const view of data.views) {
-    items.push({
-      group: 'views',
-      icon: view.icon,
-      label: view.label,
-      meta: 'view',
-      href: `view:${view.id}`,
-    });
-  }
-
   for (const surface of data.surfaces) {
     items.push({
       group: 'plugins',
@@ -193,6 +188,18 @@ export function buildPaletteItems(data: PaletteData): PaletteItem[] {
   }
 
   return items;
+}
+
+/** Map registered views to query-only palette rows. The phone rail only exposes
+ *  the first few views, so rows stay searchable. */
+export function buildViewItems(views: ViewLike[]): PaletteItem[] {
+  return views.map((view) => ({
+    group: 'views',
+    icon: view.icon,
+    label: view.label,
+    meta: 'view',
+    href: `view:${view.id}`,
+  }));
 }
 
 /** Map chat sessions to palette rows, live sessions before ended ones (recency

@@ -35,6 +35,8 @@ export const MAX_RESULTS_EMPTY = 14;
 export const MAX_RESULTS_QUERY = 12;
 /** Sessions fold into a query as their own trailing group; cap to the most recent. */
 export const MAX_SESSION_RESULTS = 8;
+/** View rows are a phone-reachability fallback, not default-list content. */
+export const MAX_VIEW_RESULTS = 8;
 
 /**
  * Score `text` against `query`. A contiguous substring wins (score by earliness,
@@ -96,14 +98,14 @@ function rankMatches(
  * header before each group run, capped at MAX_RESULTS_EMPTY (sessions excluded -
  * they never crowd the default list). Non-empty query → `items` matches ranked by
  * score (stable on ties), no headers, capped at MAX_RESULTS_QUERY, then any
- * matching `sessions` under their own trailing header, capped at
- * MAX_SESSION_RESULTS in the order given (live-first upstream). Item rows carry a
+ * matching query-only pools under their own trailing headers. Item rows carry a
  * contiguous selectable `index` across both groups.
  */
 export function buildRows(
   items: PaletteItem[],
   query: string,
   sessions: PaletteItem[] = [],
+  views: PaletteItem[] = [],
 ): PaletteRow[] {
   const q = query.trim().toLowerCase();
 
@@ -127,10 +129,14 @@ export function buildRows(
     rows.push({ kind: 'item', item: m.item, index: index++, highlight: m.highlight });
   }
 
-  const sessionMatches = rankMatches(sessions, q, MAX_SESSION_RESULTS);
-  if (sessionMatches.length) {
-    rows.push({ kind: 'group', label: 'sessions' });
-    for (const m of sessionMatches) {
+  for (const [label, pool, limit] of [
+    ['views', views, MAX_VIEW_RESULTS],
+    ['sessions', sessions, MAX_SESSION_RESULTS],
+  ] as const) {
+    const matches = rankMatches(pool, q, limit);
+    if (!matches.length) continue;
+    rows.push({ kind: 'group', label });
+    for (const m of matches) {
       rows.push({ kind: 'item', item: m.item, index: index++, highlight: m.highlight });
     }
   }

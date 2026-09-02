@@ -42,6 +42,7 @@
   import {
     buildPaletteItems,
     buildSessionItems,
+    buildViewItems,
     commandPaletteAction,
     runPaletteHref,
     type CommandLike,
@@ -245,9 +246,9 @@
       .then((res) => (commands = res.commands))
       .catch(() => (commands = []));
   });
+  const paletteViewItems = $derived(buildViewItems(allViews()));
   const paletteItems = $derived(
     buildPaletteItems({
-      views: allViews().map((v) => ({ id: v.id, label: v.label, icon: v.icon })),
       surfaces: pluginsMeta.surfaces,
       themes: theme.list,
       currentTheme: theme.current,
@@ -537,6 +538,7 @@
   bind:open={paletteOpen}
   items={paletteItems}
   {sessionItems}
+  viewItems={paletteViewItems}
   onSelect={(item) => runPaletteHref(item.href, paletteCtx)}
 />
 <HelpOverlay bind:open={helpOpen} />

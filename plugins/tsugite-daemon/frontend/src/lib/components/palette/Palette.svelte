@@ -9,6 +9,7 @@
     open = $bindable(false),
     items = [],
     sessionItems = [],
+    viewItems = [],
     onSelect,
     placeholder = 'jump to session, job, pty, schedule, file…',
     inline = false,
@@ -21,6 +22,8 @@
     /** Chat sessions, query-only: hidden on the default list, surfaced under their
      *  own header once a query matches a title/topic. */
     sessionItems?: PaletteItem[];
+    /** Registered views, query-only: hidden on the default list but still reachable on phones. */
+    viewItems?: PaletteItem[];
     /** Fired when a row is chosen; the app handles navigation / the quick action. */
     onSelect?: (item: PaletteItem) => void;
     placeholder?: string;
@@ -40,7 +43,7 @@
   let opener: HTMLElement | null = null;
 
   const visible = $derived(inline || open);
-  const rows = $derived(buildRows(items, ui.query, sessionItems));
+  const rows = $derived(buildRows(items, ui.query, sessionItems, viewItems));
   const itemRows = $derived(rows.filter((r) => r.kind === 'item'));
   const hasResults = $derived(itemRows.length > 0);
   const trimmed = $derived(ui.query.trim());

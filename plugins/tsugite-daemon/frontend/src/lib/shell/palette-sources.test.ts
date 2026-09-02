@@ -1,7 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
+import { buildRows } from '$lib/components/palette/palette-match';
+import { views } from '../../views';
 import {
   buildPaletteItems,
   buildSessionItems,
+  buildViewItems,
   commandArgParam,
   commandNeedsInput,
   commandPaletteAction,
@@ -9,11 +12,12 @@ import {
   type PaletteData,
 } from './palette-sources';
 
+const viewRows = [
+  { id: 'chats', label: 'Chats', icon: 'chat' },
+  { id: 'jobs', label: 'Jobs', icon: 'jobs' },
+] as const;
+
 const data: PaletteData = {
-  views: [
-    { id: 'chats', label: 'Chats', icon: 'chat' },
-    { id: 'jobs', label: 'Jobs', icon: 'jobs' },
-  ],
   surfaces: [{ kind: 'plugin/demo/board', label: 'Board', icon: 'grid' }],
   themes: ['mocha', 'latte'],
   currentTheme: 'mocha',
@@ -39,7 +43,7 @@ const data: PaletteData = {
 describe('buildPaletteItems', () => {
   test('encodes every row as a dispatchable command href', () => {
     const items = buildPaletteItems(data);
-    expect(items.find((i) => i.label === 'Jobs')?.href).toBe('view:jobs');
+    expect(items.find((i) => i.label === 'Jobs')).toBeUndefined();
     expect(items.find((i) => i.label === 'Ops')?.href).toBe('space:s2');
     expect(items.find((i) => i.label === 'latte')?.href).toBe('theme:latte');
     expect(items.some((i) => i.href === 'action:settings')).toBe(true);
@@ -52,14 +56,14 @@ describe('buildPaletteItems', () => {
     expect(items.find((i) => i.href === 'theme:latte')?.meta).not.toBe('current');
   });
 
-  test('carries the view glyph so the palette row matches the nav rail', () => {
+  test('keeps view rows out of the default list', () => {
     const items = buildPaletteItems(data);
-    expect(items.find((i) => i.href === 'view:jobs')?.icon).toBe('jobs');
+    expect(items.some((i) => i.group === 'views')).toBe(false);
   });
 
-  test('groups in scannable order: views, plugins, spaces, theme, actions, commands', () => {
+  test('groups in scannable order: plugins, spaces, theme, actions, commands', () => {
     const groups = [...new Set(buildPaletteItems(data).map((i) => i.group))];
-    expect(groups).toEqual(['views', 'plugins', 'spaces', 'theme', 'actions', 'commands']);
+    expect(groups).toEqual(['plugins', 'spaces', 'theme', 'actions', 'commands']);
   });
 
   test('leads the actions group with a searchable new-chat row', () => {
@@ -92,6 +96,28 @@ describe('buildPaletteItems', () => {
       commands: [{ name: 'ping', description: '', params: [] }],
     });
     expect(items.find((i) => i.href === 'command:ping')?.meta).toBe('command');
+  });
+});
+
+describe('buildViewItems', () => {
+  test('maps views to query-only view rows', () => {
+    const items = buildViewItems([...viewRows]);
+    expect(items.find((i) => i.href === 'view:jobs')?.icon).toBe('jobs');
+    expect(items.every((i) => i.group === 'views')).toBe(true);
+  });
+
+  test('keeps every registered view reachable by query for phone navigation', () => {
+    const defaultRows = buildRows(buildPaletteItems(data), '', [], buildViewItems(views));
+    const defaultHrefs = defaultRows
+      .filter((row) => row.kind === 'item')
+      .map((row) => row.item.href);
+    expect(defaultHrefs.some((href) => href?.startsWith('view:'))).toBe(false);
+
+    for (const view of views) {
+      const rows = buildRows(buildPaletteItems(data), view.label, [], buildViewItems(views));
+      const hrefs = rows.filter((row) => row.kind === 'item').map((row) => row.item.href);
+      expect(hrefs).toContain(`view:${view.id}`);
+    }
   });
 });
 
