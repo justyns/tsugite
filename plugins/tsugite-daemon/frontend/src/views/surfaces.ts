@@ -11,6 +11,7 @@ import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
 import ChatSurface from './chats/Surface.svelte';
 import TerminalSurface from './terminals/Surface.svelte';
 import FileSurface from './files/Surface.svelte';
+import ArtifactSurface from './artifacts/Surface.svelte';
 
 export type SurfaceProps = {
   params?: Record<string, string>;
@@ -27,6 +28,8 @@ const SURFACES: Record<string, Component<SurfaceProps>> = {
   chat: ChatSurface as Component<SurfaceProps>,
   terminal: TerminalSurface as Component<SurfaceProps>,
   file: FileSurface as Component<SurfaceProps>,
+  // Opened by the agent's open_artifact tool, never from the nav rail.
+  artifact: ArtifactSurface as Component<SurfaceProps>,
 };
 
 export function surfaceComponent(kind: string): Component<SurfaceProps> | undefined {

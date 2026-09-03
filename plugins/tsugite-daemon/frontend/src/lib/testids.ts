@@ -163,6 +163,14 @@ export const TESTID = {
   filesStale: 'files-stale',
   filesHtmlFrame: 'files-html-frame',
   fileNode: (path: string) => `file-node-${path}`,
+  // Agent artifact pane: a document the agent opened beside the chat.
+  artifactPane: 'artifact-pane',
+  /** "opened by the agent" marker on the pane header. */
+  artifactAgentBadge: 'artifact-agent-badge',
+  /** Rendered/source toggle inside the artifact pane. */
+  artifactModeSeg: 'artifact-mode-seg',
+  artifactHtmlFrame: 'artifact-html-frame',
+  artifactClose: 'artifact-close',
   // Agents builder view
   agentsRoster: 'agents-roster',
   agentsSearch: 'agents-search',

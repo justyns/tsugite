@@ -12,6 +12,7 @@ import {
   moveTab,
   closeAllTabs,
   closeOtherTabs,
+  openBeside,
   openInPane,
   openPreview,
   pinTab,
@@ -751,5 +752,97 @@ describe('plugin surfaces', () => {
     const l = seeded({ kind: 'plugin/uninstalled/thing' });
     const restored = deserializeLayout(serializeLayout(l));
     expect(collectLeaves(restored.root)[0]!.tabs[0]!.kind).toBe('plugin/uninstalled/thing');
+  });
+});
+
+describe('openBeside', () => {
+  const artifact = { kind: 'artifact', params: { id: 'agent' }, title: 'notes.md' };
+
+  test('splits the focused pane so the original surface stays visible', () => {
+    const base = seeded({ kind: 'chat', title: 'Chat' });
+    const chatPaneId = base.root.id;
+
+    const next = openBeside(base, artifact, 'row');
+
+    const root = asSplit(next.root);
+    expect(root.dir).toBe('row');
+    expect(root.children).toHaveLength(2);
+    const [chat, pane] = root.children.map(asLeaf) as [LeafNode, LeafNode];
+    expect(chat.id).toBe(chatPaneId);
+    expect(chat.tabs[0]!.kind).toBe('chat');
+    expect(pane.tabs[0]!.kind).toBe('artifact');
+  });
+
+  test('leaves focus where it was, so the agent does not hijack the next open', () => {
+    const base = seeded({ kind: 'chat' });
+    const next = openBeside(base, artifact, 'row');
+    expect(next.focusedPaneId).toBe(base.focusedPaneId);
+  });
+
+  test('a second open reuses the same pane instead of splitting again', () => {
+    const base = seeded({ kind: 'chat' });
+    const once = openBeside(base, artifact, 'row');
+    const twice = openBeside(once, { ...artifact, title: 'cov.html' }, 'row');
+
+    expect(collectLeaves(twice.root)).toHaveLength(2);
+    const tabs = collectLeaves(twice.root).flatMap((l) => l.tabs);
+    expect(tabs.filter((t) => t.kind === 'artifact')).toHaveLength(1);
+    expect(tabs.find((t) => t.kind === 'artifact')!.title).toBe('cov.html');
+  });
+
+  test('reuse keeps the tab id stable and re-activates it in its pane', () => {
+    const base = seeded({ kind: 'chat' });
+    const once = openBeside(base, artifact, 'row');
+    const pane = collectLeaves(once.root).find((l) => l.tabs.some((t) => t.kind === 'artifact'))!;
+    const tabId = pane.tabs[0]!.id;
+    // Something else takes over the pane's active slot.
+    const busy = dockAsTab(once, pane.id, { kind: 'chat', title: 'Other' });
+    expect(findLeaf(busy, pane.id)!.activeTabId).not.toBe(tabId);
+
+    const again = openBeside(busy, artifact, 'row');
+    expect(findLeaf(again, pane.id)!.activeTabId).toBe(tabId);
+    expect(findLeaf(again, pane.id)!.tabs.find((t) => t.id === tabId)).toBeTruthy();
+  });
+
+  test('a different artifact id opens its own pane rather than replacing', () => {
+    const base = seeded({ kind: 'chat' });
+    const once = openBeside(base, artifact, 'row');
+    const twice = openBeside(once, { kind: 'artifact', params: { id: 'x2' } }, 'row');
+
+    const artifacts = collectLeaves(twice.root)
+      .flatMap((l) => l.tabs)
+      .filter((t) => t.kind === 'artifact');
+    expect(artifacts).toHaveLength(2);
+    expect(collectLeaves(twice.root)).toHaveLength(3);
+  });
+
+  test("'col' places the pane below instead of beside", () => {
+    const next = openBeside(seeded({ kind: 'chat' }), artifact, 'col');
+    expect(asSplit(next.root).dir).toBe('col');
+  });
+
+  test('closing the artifact tab collapses its pane and leaves the chat alone', () => {
+    const base = seeded({ kind: 'chat' });
+    const opened = openBeside(base, artifact, 'row');
+    const pane = collectLeaves(opened.root).find((l) => l.tabs.some((t) => t.kind === 'artifact'))!;
+
+    const closed = closeTab(opened, pane.id, pane.tabs[0]!.id);
+
+    expect(asLeaf(closed.root).id).toBe(base.root.id);
+    expect(asLeaf(closed.root).tabs.map((t) => t.kind)).toEqual(['chat']);
+  });
+
+  test('an existing multi-pane layout keeps its other panes', () => {
+    const base = seeded({ kind: 'chat' });
+    const withTerm = splitPane(base, base.root.id, 'row', { kind: 'terminal' });
+
+    const next = openBeside(withTerm, artifact, 'row');
+
+    const kinds = collectLeaves(next.root)
+      .flatMap((l) => l.tabs)
+      .map((t) => t.kind);
+    expect(kinds).toContain('chat');
+    expect(kinds).toContain('terminal');
+    expect(kinds).toContain('artifact');
   });
 });

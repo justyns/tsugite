@@ -261,6 +261,7 @@ def get_tools_by_category(category: str) -> List[str]:
 
 
 _OPTIONAL_CATEGORIES = {
+    "artifacts",
     "schedule",
     "notify",
     "sessions",
@@ -435,6 +436,7 @@ def _ensure_tools_loaded():
 
     # Import tool modules (they need to import 'tool' decorator from this module)
     from . import agents as agents  # noqa: E402, F401
+    from . import artifacts as artifacts  # noqa: E402, F401
     from . import daemon_control as daemon_control  # noqa: E402, F401
     from . import fs as fs  # noqa: E402, F401
     from . import history as history  # noqa: E402, F401

@@ -31,6 +31,19 @@ MAX_WORKSPACE_ENTRIES = 20000
 MAX_WORKSPACE_RAW_SIZE = 10 * 1024 * 1024
 
 
+def _session_workspace_dir(adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> Path:
+    """The session's `workspace_override` (a job worker's provisioned worktree) if
+    it has one, else the daemon default. An unknown session falls back."""
+    if session_id:
+        try:
+            session = adapter.session_store.get_session(session_id)
+        except (ValueError, KeyError):
+            session = None
+        if session is not None and session.workspace_override:
+            return Path(session.workspace_override)
+    return adapter.runtime.workspace_dir
+
+
 class WorkspaceFilesMixin:
     def _workspace_routes(self) -> list:
         return [
@@ -42,10 +55,14 @@ class WorkspaceFilesMixin:
         ]
 
     def _validate_workspace_path(
-        self, adapter: "HTTPAgentAdapter", path_str: str
+        self, adapter: "HTTPAgentAdapter", path_str: str, session_id: Optional[str] = None
     ) -> tuple[Path, Optional[JSONResponse]]:
-        """Validate a workspace file path stays within the workspace directory."""
-        workspace_dir = adapter.runtime.workspace_dir
+        """Validate a workspace file path stays within the workspace directory.
+
+        `session_id` picks the root: that session's workspace, so a read for a job
+        worker lands in its worktree. Without one the root is the daemon workspace.
+        """
+        workspace_dir = _session_workspace_dir(adapter, session_id)
         try:
             resolved = (workspace_dir / path_str).resolve()
         except (ValueError, OSError):
@@ -156,7 +173,7 @@ class WorkspaceFilesMixin:
         if not path_str:
             return JSONResponse({"error": "path parameter required"}, status_code=400)
 
-        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        resolved, path_err = self._validate_workspace_path(adapter, path_str, request.query_params.get("session_id"))
         if path_err:
             return path_err
         if not resolved.exists():
@@ -199,7 +216,7 @@ class WorkspaceFilesMixin:
         if not path_str:
             return JSONResponse({"error": "path parameter required"}, status_code=400)
 
-        resolved, path_err = self._validate_workspace_path(adapter, path_str)
+        resolved, path_err = self._validate_workspace_path(adapter, path_str, request.query_params.get("session_id"))
         if path_err:
             return path_err
         if not resolved.exists() or resolved.is_dir():

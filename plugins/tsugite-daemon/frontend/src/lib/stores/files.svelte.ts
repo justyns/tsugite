@@ -65,9 +65,11 @@ export class FilesStore {
     }
   }
 
-  async read(path: string): Promise<WorkspaceFile> {
-    const qs = new URLSearchParams({ path }).toString();
-    return api.get<WorkspaceFile>(`/api/workspace/content?${qs}`);
+  /** `sessionId` scopes the read to that session's workspace, which for a job
+   *  worker is its provisioned worktree. */
+  async read(path: string, sessionId?: string | null): Promise<WorkspaceFile> {
+    const qs = new URLSearchParams({ path, ...(sessionId ? { session_id: sessionId } : {}) });
+    return api.get<WorkspaceFile>(`/api/workspace/content?${qs.toString()}`);
   }
 
   async write(path: string, content: string): Promise<void> {

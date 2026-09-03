@@ -129,7 +129,7 @@ Tsugite is an agentic CLI that executes AI agents defined as markdown files with
    - Code execution via `LocalExecutor`
 
 8. **Tool System** (`tsugite/tools/`)
-   - Tool registry with built-in tools (fs, http, shell, agents, skills, history, interactive) plus optional categories (notify, schedule, sessions, secrets, tmux — gated by `_OPTIONAL_CATEGORIES` in `tools/__init__.py`)
+   - Tool registry with built-in tools (fs, http, shell, agents, skills, history, interactive) plus optional categories (notify, schedule, sessions, secrets, tmux, artifacts - gated by `_OPTIONAL_CATEGORIES` in `tools/__init__.py`)
    - Custom shell tools (config-based command wrappers in `tools/shell_tools.py`)
    - Tool expansion supports globs (`*_search`), categories (`@fs`), and exclusions (`-delete_file`)
 
@@ -506,6 +506,18 @@ Source lives at `plugins/tsugite-daemon/frontend/` (**Svelte 5 runes + TypeScrip
 - `mise run web-build` - production build into `tsugite_daemon/web/` (gitignored; never committed).
 - `mise run web-check` - svelte-check + vitest unit project + prettier check. It does not run component tests (`*.svelte.test.ts`); those need `npm --prefix plugins/tsugite-daemon/frontend run test:browser`.
 
+### Rendered HTML + agent artifact panes
+
+- A workspace `.html`/`.htm` file gets a rendered/raw/edit toggle in the file
+  surface. The isolation policy for that frame (`sandbox=""` plus an injected
+  `default-src 'none'` CSP, and the same-workspace asset inlining) lives in
+  `lib/media/htmlPreview.ts`; the frame itself is `lib/components/media/HtmlPreview.svelte`.
+- The `open_artifact` agent tool (daemon-only, `tsugite/tools/artifacts.py`,
+  category `@artifacts`) broadcasts one `session_event` frame with
+  `event_type: "artifact_open"`. The shell records it in
+  `lib/stores/artifacts.svelte.ts`, keyed by the daemon's `artifact_id` slot, and
+  docks it with the `openBeside` layout reducer. Paths are validated daemon-side.
+
 ### Theme tokens
 
 - Design tokens ride `[data-theme]`: surfaces `--bg0..--bg4` (app shell → panel → surface → raised → hover), text `--tx0..--tx3` (strong → faint), lines `--bd0..--bd2`, accent `--acc`/`--on-acc`/`--brand`, semantic states `--st-ok/-verify/-warn/-err/-info/-queue/-mute`, radii `--r-sm/-md/-lg/-full`, spacing `--sp-0..6`, motion `--t-1..3` + `--ease`. Five themes: mocha (default), macchiato, frappe, latte, gruvbox.
@@ -515,7 +527,7 @@ Source lives at `plugins/tsugite-daemon/frontend/` (**Svelte 5 runes + TypeScrip
 
 - e2e selectors use `data-testid` values from `frontend/src/lib/testids.ts` (a frozen contract - extend, don't rename). App readiness marker: `[data-testid="app-ready"]`. There are no window-global test hooks; drive the real DOM and seed over HTTP.
 - Frontend behavioral logic (stores, SSE replay, parsers/reducers) is vitest-tested (`frontend/src/**/*.test.ts`), failing-test-first.
-- Browser verification on UI changes is mandatory. Daemon spinup + Playwright wiring recipe: project memory `project_daemon_ui_smoketest.md` (its DOM selector list predates the Svelte rebuild - trust the testids contract instead).
+- Browser verification on UI changes is mandatory. The reproducible harness is `tests/e2e/` (`mise run e2e`): a real uvicorn daemon on a free port plus a real chromium, seeded through the daemon fixtures. `tests/e2e/conftest.py` owns the spinup; `tests/e2e/helpers.py` owns readiness + nav. Ad-hoc alternative: project memory `project_daemon_ui_smoketest.md` (its DOM selector list predates the Svelte rebuild - trust the testids contract instead).
 
 ## Code Review Policy
 

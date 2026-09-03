@@ -16,20 +16,23 @@
   let {
     html,
     docPath = '',
+    sessionId = null,
     title,
     testid,
   }: {
     html: string;
     /** Workspace path the document lives at, for resolving relative assets. */
     docPath?: string;
+    /** Session whose workspace the assets live in; null for the daemon default. */
+    sessionId?: string | null;
     /** Iframe accessible name - screen readers announce the frame by it. */
     title: string;
     testid: string;
   } = $props();
 
   const readers: AssetReaders = {
-    readText: async (path) => (await files.read(path)).content ?? '',
-    readDataUri: (path) => loadWorkspaceDataURL(path),
+    readText: async (path) => (await files.read(path, sessionId)).content ?? '',
+    readDataUri: (path) => loadWorkspaceDataURL(path, sessionId),
   };
 
   let srcdoc = $state('');

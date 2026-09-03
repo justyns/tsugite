@@ -5,9 +5,9 @@
  */
 import { authHeaders } from '$lib/api/client';
 
-async function fetchWorkspaceBlob(path: string): Promise<Blob> {
-  const url = `/api/workspace/raw?path=${encodeURIComponent(path)}`;
-  const resp = await fetch(url, { headers: authHeaders() });
+async function fetchWorkspaceBlob(path: string, sessionId?: string | null): Promise<Blob> {
+  const qs = new URLSearchParams({ path, ...(sessionId ? { session_id: sessionId } : {}) });
+  const resp = await fetch(`/api/workspace/raw?${qs.toString()}`, { headers: authHeaders() });
   if (!resp.ok) throw new Error(`workspace raw ${resp.status}`);
   return await resp.blob();
 }
@@ -28,9 +28,10 @@ export async function loadWorkspaceObjectURL(path: string): Promise<string> {
  */
 export async function loadWorkspaceDataURL(
   path: string,
+  sessionId?: string | null,
   maxBytes = 2 * 1024 * 1024,
 ): Promise<string> {
-  const blob = await fetchWorkspaceBlob(path);
+  const blob = await fetchWorkspaceBlob(path, sessionId);
   if (blob.size > maxBytes) throw new Error(`workspace raw too large: ${blob.size}`);
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

@@ -28,6 +28,7 @@
   import { schedules } from '$lib/stores/schedules.svelte';
   import { terminals } from '$lib/stores/terminals.svelte';
   import { files } from '$lib/stores/files.svelte';
+  import { artifacts } from '$lib/stores/artifacts.svelte';
   import { usage } from '$lib/stores/usage.svelte';
   import { formatTokensCompact, formatUsd } from './views/usage/format';
   import { isEditableTarget } from '$lib/dom';
@@ -353,6 +354,7 @@
       sessions.applySessionEvent(data);
       // Carries the agent's file writes too, which open file tabs follow.
       files.applySessionEvent(data);
+      openAgentArtifact(data);
     },
     onSessionUpdate: (data) => sessions.applySessionUpdate(data),
     onCompactionStarted: (data) => sessions.applyCompaction(data, true),
@@ -361,6 +363,15 @@
     onScheduleUpdate: (data) => schedules.applyScheduleUpdate(data),
     onTerminalState: (data) => terminals.applyTerminalState(data),
   };
+
+  function openAgentArtifact(data: Record<string, unknown>) {
+    const opened = artifacts.applySessionEvent(data);
+    if (!opened) return;
+    spaces.openBeside(
+      { kind: 'artifact', params: { id: opened.id }, title: opened.title },
+      opened.placement === 'below' ? 'col' : 'row',
+    );
+  }
 
   // The shell holds the origin's one event stream for everyone on it, and the
   // shell's own handlers and the open plugin surfaces are independent consumers:

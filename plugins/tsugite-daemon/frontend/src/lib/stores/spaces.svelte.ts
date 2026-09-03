@@ -26,6 +26,7 @@ import {
   findLeaf,
   focusPane,
   moveTab,
+  openBeside,
   openInPane,
   openPreview,
   pinTab,
@@ -34,6 +35,7 @@ import {
   retitleTab,
   selectTab,
   splitPane,
+  surfaceKey,
 } from '$lib/shell/mux/layout';
 import { moveItem } from '$lib/reorder';
 import { readLocal, writeLocal } from '$lib/storage';
@@ -229,6 +231,24 @@ export class SpacesStore {
    *  tab (the next preview replaces it) unless the surface is already pinned. */
   openPreview(ref: SurfaceRef, targetPaneId?: string): void {
     this.apply((l) => openPreview(l, ref, targetPaneId));
+  }
+  /** Open a surface in a pane beside (dir 'row') or below (dir 'col') the focused
+   *  one, reusing its tab if that surface is already docked. Used by the agent
+   *  artifact pane, which must add to the user's layout, never rearrange it. */
+  openBeside(ref: SurfaceRef, dir: SplitDir = 'row'): void {
+    this.apply((l) => openBeside(l, ref, dir));
+  }
+  /** Close the tab holding `ref`, wherever it is docked - a surface dismissing
+   *  itself, which knows its own identity but not which pane it landed in. */
+  closeSurface(ref: SurfaceRef): void {
+    const key = surfaceKey(ref);
+    for (const leaf of collectLeaves(this.active.layout.root)) {
+      const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
+      if (tab) {
+        this.closeTab(leaf.id, tab.id);
+        return;
+      }
+    }
   }
   /** Rename a docked tab from the surface mounted in it (a plugin surface titling
    *  itself over the bridge). A plugin may push a title per internal navigation,

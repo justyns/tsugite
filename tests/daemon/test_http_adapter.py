@@ -1226,6 +1226,59 @@ class TestWorkspaceRawEndpoint:
         assert resp.status_code == 413
 
 
+class TestWorkspaceSessionScope:
+    """A job worker session runs in a provisioned worktree, so a read for that
+    session resolves inside the worktree; the daemon workspace stays the default."""
+
+    @pytest.fixture
+    def worktree(self, tmp_path, mock_adapter):
+        from tsugite_daemon.session_store import Session
+
+        wt = tmp_path / "worktree"
+        wt.mkdir()
+        (wt / "README.md").write_text("# worktree\n")
+        (wt / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\nworktree")
+        mock_adapter.session_store.create_session(Session(id="job-1", workspace_override=str(wt)))
+        return wt
+
+    def _get(self, client, test_token, route, params):
+        return client.get(route, params=params, headers={"Authorization": f"Bearer {test_token}"})
+
+    def test_content_reads_the_session_worktree(self, client, test_token, tmp_workspace, worktree):
+        (tmp_workspace / "README.md").write_text("# daemon\n")
+        resp = self._get(client, test_token, "/api/workspace/content", {"path": "README.md", "session_id": "job-1"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["content"] == "# worktree\n"
+
+    def test_raw_reads_the_session_worktree(self, client, test_token, tmp_workspace, worktree):
+        (tmp_workspace / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\ndaemon")
+        resp = self._get(client, test_token, "/api/workspace/raw", {"path": "logo.png", "session_id": "job-1"})
+        assert resp.status_code == 200, resp.text
+        assert resp.content == b"\x89PNG\r\n\x1a\nworktree"
+
+    def test_a_worktree_file_is_unreachable_without_the_session(self, client, test_token, worktree):
+        resp = self._get(client, test_token, "/api/workspace/content", {"path": "README.md"})
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "session",
+        [{}, {"session_id": "gone"}, {"session_id": "plain-1"}],
+        ids=["no session id", "unknown session", "session without an override"],
+    )
+    def test_reads_the_daemon_workspace(self, client, test_token, tmp_workspace, mock_adapter, session):
+        from tsugite_daemon.session_store import Session
+
+        mock_adapter.session_store.create_session(Session(id="plain-1"))
+        (tmp_workspace / "README.md").write_text("# daemon\n")
+        resp = self._get(client, test_token, "/api/workspace/content", {"path": "README.md", **session})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["content"] == "# daemon\n"
+
+    def test_traversal_out_of_the_session_worktree_is_refused(self, client, test_token, worktree):
+        resp = self._get(client, test_token, "/api/workspace/content", {"path": "../escape.md", "session_id": "job-1"})
+        assert resp.status_code == 403
+
+
 class TestWorkspaceListEndpoint:
     def _get(self, client, test_token, query=""):
         return client.get(

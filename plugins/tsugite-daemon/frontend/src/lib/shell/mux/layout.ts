@@ -296,6 +296,37 @@ export function pinTab(layout: Layout, paneId: string, tabId: string): Layout {
   return next;
 }
 
+/**
+ * Open `ref` in a pane beside (or below) the focused one, without disturbing what
+ * is already docked - the agent artifact pane's opening move.
+ *
+ * If the surface is already docked anywhere, that tab is reused: its title
+ * refreshes and it becomes its pane's active tab, so repeated opens of the same
+ * artifact slot update one pane instead of stacking panes. Otherwise the focused
+ * pane splits along `dir`, which keeps the chat visible next to the new pane.
+ *
+ * Focus stays on the pane that had it, so an agent-driven open does not
+ * retarget where the user's next rail click or palette open lands.
+ */
+export function openBeside(layout: Layout, ref: SurfaceRef, dir: SplitDir = 'row'): Layout {
+  const key = surfaceKey(ref);
+  const next = clone(layout);
+  for (const leaf of collectLeaves(next.root)) {
+    const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
+    if (!tab) continue;
+    if (ref.title != null) tab.title = ref.title;
+    if (ref.state != null) tab.state = ref.state;
+    leaf.activeTabId = tab.id;
+    return next;
+  }
+  const target =
+    (layout.focusedPaneId && findLeaf(layout, layout.focusedPaneId)?.id) ||
+    collectLeaves(layout.root)[0]!.id;
+  const split = splitPane(layout, target, dir, ref, 'after');
+  split.focusedPaneId = layout.focusedPaneId;
+  return split;
+}
+
 // ---------- split ----------
 
 export function splitPane(

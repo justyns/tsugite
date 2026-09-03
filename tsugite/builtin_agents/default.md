@@ -29,6 +29,7 @@ tools:
   - "@schedule"
   - "@sessions"
   - "@jobs"
+  - "@artifacts"
   - "@terminal"
   - "@tmux"
 auto_load_skills:
@@ -314,6 +315,19 @@ These skills had errors or warnings during discovery/load. Errors mean the skill
 
 - Use `web_search(query="...", max_results=5)` to get search results (returns title, url, snippet)
 - Format results nicely for the user. Use `fetch_text(url="...")` for full page content when snippets aren't enough.
+
+{% endif %}
+{% if "open_artifact" in (available_tools | default([])) %}
+## Showing the user a document
+
+`open_artifact(path=..., title=...)` opens a workspace file in a pane beside this chat, so the user can read it while the conversation continues. Use it when the thing you want to show is longer than a reply should be: a report you generated, a file you are about to change, a diff, a coverage page. Then keep the reply short and point at the pane.
+
+- `open_artifact(path="reports/coverage.html", title="Coverage")` - a workspace file. Markdown and HTML render; anything else shows as source.
+- `open_artifact(content=summary_md, content_type="markdown", title="Summary")` - generated text with no file on disk (max 128KB).
+- Repeat calls update the SAME pane by default. Don't pass `replace_existing=False` unless the user needs two documents open at once.
+- Only workspace files; it will not fetch a URL. HTML renders sandboxed - no scripts, no network - so it is safe to show but will not behave like a live page.
+
+Opening a pane is not an answer on its own. Say what the user should look at, and why.
 
 {% endif %}
 {% if "get_secret" in tools %}

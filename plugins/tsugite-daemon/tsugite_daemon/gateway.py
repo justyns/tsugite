@@ -293,6 +293,11 @@ class Gateway:
             # Wire up event_bus on the adapter so it can broadcast compaction state
             http_adapter.event_bus = self._http_server.event_bus
 
+            # Give open_artifact the workspace root and the browser's event bus.
+            from tsugite.tools.artifacts import set_artifact_bridge
+
+            set_artifact_bridge(http_adapter, self._http_server.event_bus)
+
             # Always init push store when HTTP is enabled so subscribe/unsubscribe API works
             try:
                 from tsugite_daemon.push import PushSubscriptionStore, get_or_create_vapid_keys
@@ -644,6 +649,7 @@ class Gateway:
         from tsugite_pty.tools import set_terminal_runtime
 
         from tsugite.tools import set_daemon_mode
+        from tsugite.tools.artifacts import set_artifact_bridge
         from tsugite.tools.daemon_control import set_restart_controller
         from tsugite.tools.jobs import set_jobs_orchestrator
         from tsugite.tools.notify import set_notifier
@@ -651,6 +657,7 @@ class Gateway:
         from tsugite.tools.sessions import set_session_runner
 
         set_notifier(None)
+        set_artifact_bridge(None, None)
         set_scheduler(None)
         set_session_runner(None)
         set_jobs_orchestrator(None, None)
