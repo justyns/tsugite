@@ -519,6 +519,120 @@ async def test_followup_on_live_pty_types_via_write_stdin(tmp_path, runtime):
 
 
 @pytest.mark.asyncio
+async def test_wrap_up_types_the_nudge_without_refreshing_the_continue_budget(tmp_path, runtime):
+    """The wrap-up nudge reaches the live TUI the same way a followup does, but must
+    leave consecutive_continues alone: topping the budget up at the deadline hands
+    the worker a fresh run of Stop nudges exactly when it should be finishing."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    orch._jobs.add(job)
+    ex = _executor(tmp_path, orch)
+
+    session = spawn_terminal(store=store, manager=manager, cmd="cat", cwd=str(tmp_path), sandbox_ctx=None)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = session.id
+    st.consecutive_continues = 4
+
+    writes = []
+    orig = manager.write_stdin
+    manager.write_stdin = lambda tid, data: (writes.append(data), orig(tid, data))[1]
+
+    await ex.wrap_up(job, minutes_left=5)
+
+    proc = manager.get(session.id)
+    proc.wait_drain(timeout=1.0)
+    sent = b"".join(writes)
+    assert b"5 minutes" in sent, "the nudge must reach the live PTY"
+    assert b"CCDRIVER_WRAPPED_UP" in sent, "the worker needs a marker it can emit over unfinished work"
+    assert b"\r" in sent, "the TUI submits on carriage return, not newline"
+    assert st.consecutive_continues == 4, "the wrap-up nudge must not refresh the continue budget"
+    assert st.terminal_id == session.id, "wrapping up must never respawn the worker"
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_is_a_noop_when_the_pty_is_gone(tmp_path, runtime):
+    """A worker whose PTY already exited has nothing to nudge; wrap_up must not
+    respawn claude to deliver it."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    orch._jobs.add(job)
+    ex = _executor(tmp_path, orch)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = "gone"
+
+    await ex.wrap_up(job, minutes_left=3)
+
+    assert store.list_all() == [], "wrap_up must not spawn a terminal"
+    assert orch.failed == []
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_skips_a_worker_waiting_on_a_permission_prompt(tmp_path, runtime):
+    """A job sitting on a permission prompt stays RUNNING, so the nudge timer still
+    fires. The prompt is the TUI's foreground element, so the nudge would be typed
+    into the dialog rather than the worker."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    orch._jobs.add(job)
+    ex = _executor(tmp_path, orch)
+
+    session = spawn_terminal(store=store, manager=manager, cmd="cat", cwd=str(tmp_path), sandbox_ctx=None)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = session.id
+    st.attention_flagged = True
+
+    writes = []
+    orig = manager.write_stdin
+    manager.write_stdin = lambda tid, data: (writes.append(data), orig(tid, data))[1]
+
+    await ex.wrap_up(job, minutes_left=5)
+
+    assert writes == [], "nothing may be typed while a prompt is on screen"
+
+
+@pytest.mark.asyncio
+async def test_start_survives_drive_state_removed_mid_write(tmp_path, runtime):
+    """Typing a followup awaits between the text and the carriage return, and
+    cancel() drops the job's DriveState from the same loop."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    orch._jobs.add(job)
+    ex = _executor(tmp_path, orch)
+
+    session = spawn_terminal(store=store, manager=manager, cmd="cat", cwd=str(tmp_path), sandbox_ctx=None)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = session.id
+
+    orig = manager.write_stdin
+
+    def evict_then_write(terminal_id, data):
+        ex.drive_state.remove("job-1")
+        return orig(terminal_id, data)
+
+    manager.write_stdin = evict_then_write
+
+    await ex.start(job, followup="please keep going")
+
+    assert ex.drive_state.get("job-1") is None
+    assert len(store.list_all()) == 1, "the followup must not respawn claude"
+
+
+def test_wrap_up_lead_defaults_to_a_tenth_of_the_timeout(tmp_path):
+    ex = _executor(tmp_path, FakeOrchestrator())
+    assert ex.wrap_up_lead_minutes(90) == 9
+    assert ex.wrap_up_lead_minutes(20) == 3, "short jobs still get a 3 minute floor"
+
+
+def test_wrap_up_lead_is_configurable_and_zero_disables(tmp_path):
+    assert _executor(tmp_path, FakeOrchestrator(), wrap_up_lead_minutes=15).wrap_up_lead_minutes(90) == 15
+    assert _executor(tmp_path, FakeOrchestrator(), wrap_up_lead_minutes=0).wrap_up_lead_minutes(90) == 0
+
+
+@pytest.mark.asyncio
 async def test_untrusted_workspace_fails_worker_when_provisioning_disabled(tmp_path, runtime, monkeypatch):
     manager, store = runtime
     orch = FakeOrchestrator()

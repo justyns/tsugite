@@ -42,10 +42,17 @@ class CCDriverConfig(BaseModel):
     # self-service. Off = require the user to pre-trust each workspace once.
     provision_trust: bool = True
     max_consecutive_continues: int = 5
+    # Minutes before a job's phase deadline to nudge the worker to commit and
+    # summarize while it is still alive. None computes it from the timeout
+    # (a tenth of it, at least 3 minutes); 0 disables the nudge.
+    wrap_up_lead_minutes: Optional[int] = None
     completion_marker: str = "CCDRIVER_GOAL_COMPLETE"
     # Marker the driven claude emits when it is blocked on supervisor input;
     # pauses the job in awaiting_input instead of nudging it to guess.
     needs_input_marker: str = "CCDRIVER_NEED_INPUT"
+    # Marker the driven claude ends its wrap-up summary with when it hands over
+    # unfinished work at the deadline; ends the attempt for the verifier to grade.
+    wrap_up_marker: str = "CCDRIVER_WRAPPED_UP"
     # Opt-in: render flat, screen-reader-friendly PTY output (no decorative
     # borders or animations) via --ax-screen-reader. Cleaner failure-tail capture
     # and fewer xterm escape edge cases, but off by default so the live terminal
@@ -153,6 +160,7 @@ class CCDriverAdapter(BaseAdapter):
                 max_consecutive_continues=self.config.max_consecutive_continues,
                 completion_marker=self.config.completion_marker,
                 needs_input_marker=self.config.needs_input_marker,
+                wrap_up_marker=self.config.wrap_up_marker,
             )
             state.consecutive_continues = decision.new_consecutive_continues
             if decision.complete:

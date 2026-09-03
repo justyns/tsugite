@@ -1,8 +1,9 @@
 """CCExecutor: the non-agent job executor that drives an interactive `claude`.
 
-Implements the orchestrator's executor contract (async start/cancel) and reports
-outcomes via complete_worker/fail_worker (called from the hook route in adapter.py
-and, on an unexpected PTY exit, from here).
+Implements the orchestrator's executor contract (async start/cancel plus the
+optional wrap_up_lead_minutes/wrap_up nudge pair) and reports outcomes via
+complete_worker/fail_worker (called from the hook route in adapter.py and, on an
+unexpected PTY exit, from here).
 
 DriveState is in-memory per active job; it dies with the daemon (orphaned jobs are
 recovered as ERRORED by the existing restart machinery - no new persistence).
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from tsugite_cc_driver.hooks import build_initial_prompt
+from tsugite_cc_driver.hooks import build_initial_prompt, wrap_up_instruction
 from tsugite_cc_driver.settings import build_settings, cleanup, write_run_settings
 
 logger = logging.getLogger(__name__)
@@ -314,21 +315,53 @@ class CCExecutor:
         """Executor contract entry point. followup=None on the initial attempt; on
         a retry, drive the SAME live session (write_stdin) when the PTY is alive,
         else respawn (with --resume when the cc session id is known)."""
+        # Captured before typing: that awaits, and cancel() can drop the state.
+        state = self.drive_state.get(job.id)
+        if followup is not None and await self._type_into_live_session(job.id, followup):
+            state.consecutive_continues = 0
+            return
+        await self._spawn(job, followup)
+
+    async def _type_into_live_session(self, job_id: str, text: str) -> bool:
+        """Type `text` into the job's live claude TUI. False when there is no live
+        PTY to type into, leaving the caller to decide whether to respawn."""
         from tsugite_pty.tools import get_terminal_runtime
 
+        state = self.drive_state.get(job_id)
+        if state is None or not state.terminal_id:
+            return False
+        pty_manager, _store, _cb = get_terminal_runtime()
+        proc = pty_manager.get(state.terminal_id) if pty_manager else None
+        if proc is None or proc.exit_code is not None:
+            return False
+        # claude's Ink TUI submits on carriage return, not newline, and debounces
+        # paste, so the text and the \r must be sent separately.
+        pty_manager.write_stdin(state.terminal_id, text.strip().encode())
+        await asyncio.sleep(0.2)
+        pty_manager.write_stdin(state.terminal_id, b"\r")
+        return True
+
+    def wrap_up_lead_minutes(self, timeout_minutes: int) -> int:
+        """Minutes before the phase deadline to nudge the worker to wrap up."""
+        configured = self.config.wrap_up_lead_minutes
+        return max(3, timeout_minutes // 10) if configured is None else configured
+
+    async def wrap_up(self, job, minutes_left: int) -> None:
+        """Tell the live worker to land its work before the deadline."""
         state = self.drive_state.get(job.id)
-        if followup is not None and state is not None and state.terminal_id:
-            pty_manager, _store, _cb = get_terminal_runtime()
-            proc = pty_manager.get(state.terminal_id) if pty_manager else None
-            if proc is not None and proc.exit_code is None:
-                # claude's Ink TUI submits on carriage return, not newline, and
-                # debounces paste, so the text and the \r must be sent separately.
-                pty_manager.write_stdin(state.terminal_id, followup.strip().encode())
-                await asyncio.sleep(0.2)
-                pty_manager.write_stdin(state.terminal_id, b"\r")
-                state.consecutive_continues = 0
-                return
-        await self._spawn(job, followup)
+        if state is None:
+            return
+        if state.attention_flagged:
+            # A permission prompt is the TUI's foreground element, so the nudge
+            # would land in the dialog rather than the worker. A job parked on a
+            # prompt is not progressing, so skipping the nudge costs nothing.
+            logger.debug("Skipping wrap-up for job '%s': a permission prompt is on screen", job.id)
+            return
+        text = wrap_up_instruction(
+            self.config.completion_marker, minutes_left, wrap_up_marker=self.config.wrap_up_marker
+        )
+        if not await self._type_into_live_session(job.id, text):
+            logger.debug("No live session to wrap up for job '%s'", job.id)
 
     async def _spawn(self, job, followup: Optional[str]) -> None:
         import secrets

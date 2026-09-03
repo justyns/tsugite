@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from collections import namedtuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -2381,3 +2382,145 @@ def test_context_block_excludes_another_session(store, orchestrator, runner):
     runner.store.sessions["other"] = Session(id="other")
 
     assert orchestrator.render_context_xml("other") == ""
+
+
+# ── wrap-up nudge ──
+
+
+_Timer = namedtuple("_Timer", "delay callback args handle")
+
+
+class _WrapUpExecutor:
+    """Non-agent executor offering the optional wrap-up hooks."""
+
+    def __init__(self, lead_minutes: int = 3):
+        self.lead_minutes = lead_minutes
+        self.wrap_ups: list[tuple[str, int]] = []
+
+    def wrap_up_lead_minutes(self, timeout_minutes: int) -> int:
+        return self.lead_minutes
+
+    async def wrap_up(self, job, minutes_left: int) -> None:
+        self.wrap_ups.append((job.id, minutes_left))
+
+    async def cancel(self, job) -> None:
+        pass
+
+
+def _capture_timers(monkeypatch) -> list[_Timer]:
+    """Record loop.call_later scheduling so timer tests don't wait out real minutes."""
+    loop = asyncio.get_running_loop()
+    timers: list[_Timer] = []
+
+    def call_later(delay, callback, *args):
+        handle = MagicMock()
+        timers.append(_Timer(delay, callback, args, handle))
+        return handle
+
+    monkeypatch.setattr(loop, "call_later", call_later)
+    return timers
+
+
+def _seed_cc_job(store, timeout_minutes=30):
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="do the thing",
+            executor="cc",
+            timeout_minutes=timeout_minutes,
+        )
+    )
+    return store.get(job.id)
+
+
+async def _drain(orchestrator):
+    await asyncio.gather(*list(orchestrator._bg_tasks))
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_nudge_lands_before_the_hard_timeout(store, orchestrator, monkeypatch):
+    """A job nearing its phase deadline gets told to wrap up while it is still
+    alive; the hard timeout still reaps it if that doesn't finish the work."""
+    ex = _WrapUpExecutor(lead_minutes=3)
+    orchestrator.register_executor("cc", ex)
+    job = _seed_cc_job(store)
+    timers = _capture_timers(monkeypatch)
+
+    orchestrator.register_worker(job.id, None, timeout_minutes=30)
+
+    soft, hard = sorted(timers, key=lambda t: t.delay)
+    assert soft.delay == 27 * 60, "the nudge fires a lead's worth of minutes before the deadline"
+    assert hard.delay == 30 * 60
+
+    soft.callback(*soft.args)
+    await _drain(orchestrator)
+    assert ex.wrap_ups == [(job.id, 3)], "the executor must be asked to wrap the job up"
+    assert store.get(job.id).state == JobState.RUNNING.value, "the nudge must not end the job"
+
+    hard.callback(*hard.args)
+    assert store.get(job.id).state == JobState.STUCK.value
+
+
+@pytest.mark.asyncio
+async def test_phase_transition_rearms_the_nudge_and_cancels_the_stale_one(store, orchestrator, monkeypatch):
+    """An answered question resumes the worker on a fresh phase timer. The previous
+    phase's nudge must be cancelled or it lands in the middle of the new phase."""
+    orchestrator.register_executor("cc", _WrapUpExecutor(lead_minutes=3))
+    job = _seed_cc_job(store)
+    timers = _capture_timers(monkeypatch)
+    orchestrator.register_worker(job.id, None, timeout_minutes=30)
+    first_soft, first_hard = sorted(timers, key=lambda t: t.delay)
+
+    store.update_state(job.id, JobState.AWAITING_INPUT.value)
+    await orchestrator.resume_worker(job.id)
+
+    assert first_soft.handle.cancel.called, "a stale nudge must not survive into the next phase"
+    assert first_hard.handle.cancel.called
+    second_soft, _second_hard = sorted(timers[2:], key=lambda t: t.delay)
+    assert orchestrator._wrap_up_handles[job.id] is second_soft.handle
+
+
+@pytest.mark.asyncio
+async def test_nudge_is_skipped_once_the_job_left_the_running_phase(store, orchestrator, monkeypatch):
+    """The verifier round re-arms the phase timer. Nudging then would tell a worker
+    that already reported done to wrap up again."""
+    ex = _WrapUpExecutor(lead_minutes=3)
+    orchestrator.register_executor("cc", ex)
+    job = _seed_cc_job(store)
+    timers = _capture_timers(monkeypatch)
+    orchestrator.register_worker(job.id, None, timeout_minutes=30)
+    soft, _hard = sorted(timers, key=lambda t: t.delay)
+
+    store.update_state(job.id, JobState.VERIFYING.value)
+    soft.callback(*soft.args)
+    await _drain(orchestrator)
+
+    assert ex.wrap_ups == []
+
+
+@pytest.mark.asyncio
+async def test_agent_job_arms_no_wrap_up_timer(store, orchestrator, monkeypatch):
+    """The agent executor has no live session to type into, so it gets one timer."""
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="x"))
+    timers = _capture_timers(monkeypatch)
+
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+
+    assert [t.delay for t in timers] == [30 * 60]
+    assert job.id not in orchestrator._wrap_up_handles
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lead_minutes", [0, 30])
+async def test_no_nudge_when_the_lead_is_disabled_or_covers_the_whole_phase(
+    store, orchestrator, monkeypatch, lead_minutes
+):
+    orchestrator.register_executor("cc", _WrapUpExecutor(lead_minutes=lead_minutes))
+    job = _seed_cc_job(store)
+    timers = _capture_timers(monkeypatch)
+
+    orchestrator.register_worker(job.id, None, timeout_minutes=30)
+
+    assert [t.delay for t in timers] == [30 * 60]
+    assert job.id not in orchestrator._wrap_up_handles

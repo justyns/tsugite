@@ -41,8 +41,10 @@ by typing at any time.
 | `sandbox` | `true` | run claude under bubblewrap (see below) |
 | `provision_trust` | `true` | auto-write Claude Code trust for a job's workspace (see below); `false` = require pre-trusted workspaces |
 | `max_consecutive_continues` | `5` | Stop nudges before an attempt is handed to the verifier anyway |
+| `wrap_up_lead_minutes` | `null` | minutes before a job's phase deadline to nudge the worker to commit and summarize; `null` uses a tenth of the timeout (min 3), `0` disables it |
 | `completion_marker` | `CCDRIVER_GOAL_COMPLETE` | token claude ends its reply with when done |
 | `needs_input_marker` | `CCDRIVER_NEED_INPUT` | line claude emits to pause the job for supervisor input |
+| `wrap_up_marker` | `CCDRIVER_WRAPPED_UP` | token claude ends its wrap-up summary with when it hands over unfinished work |
 | `ax_screen_reader` | `false` | opt in to `--ax-screen-reader` (flat text, cleaner PTY capture; off keeps the normal TUI) |
 | `effort` | `null` | default `--effort` (low/medium/high/xhigh/max); per-job `effort` overrides, null uses claude's own default |
 | `base_url` | `http://127.0.0.1:8374` | daemon URL the hook receiver is reached at |

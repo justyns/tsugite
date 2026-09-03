@@ -47,6 +47,23 @@ def continue_instruction(completion_marker: str, needs_input_marker: str) -> str
     )
 
 
+def wrap_up_instruction(completion_marker: str, minutes_left: int, *, wrap_up_marker: str) -> str:
+    """Typed into the live session as the phase deadline nears, so the worker
+    lands its work instead of being killed mid-thought. Offers both markers: a
+    worker handing over unfinished work will not claim the completion one."""
+    return (
+        f"About {minutes_left} minutes remain before this task's time limit, after "
+        "which the session ends and any uncommitted work is lost. Please start "
+        "wrapping up now rather than opening new lines of investigation. Commit "
+        "whatever you have, even if it is half-finished, saying in the commit "
+        "message that it is work in progress. Then reply with a short summary of "
+        "what you did, what still needs doing, and anything you were partway "
+        f"through. End that reply with the token {completion_marker} if the task "
+        f"is genuinely complete, or {wrap_up_marker} if you are handing over "
+        "unfinished work."
+    )
+
+
 @dataclass
 class StopDecision:
     """Outcome of a Stop hook: the JSON body to return to Claude plus whether the
@@ -67,6 +84,7 @@ def decide_stop(
     max_consecutive_continues: int,
     completion_marker: str,
     needs_input_marker: str,
+    wrap_up_marker: str = "",
 ) -> StopDecision:
     """Decide what to do when Claude stops.
 
@@ -74,8 +92,9 @@ def decide_stop(
     attempt (the verifier then grades it); the needs-input marker pauses the
     attempt - checked BEFORE budget exhaustion, or a blocked worker near the
     nudge cap would be force-completed into a verification it already knows it
-    can't pass; an exhausted continue budget also ends the attempt (maybe it IS
-    done - let the verifier decide); otherwise return a `decision: block` that
+    can't pass; the wrap-up marker ends the attempt with the handover summary the
+    nudge asked for; an exhausted continue budget also ends the attempt (maybe it
+    IS done - let the verifier decide); otherwise return a `decision: block` that
     drives one more turn.
     """
     last_msg = payload.get("last_assistant_message") or ""
@@ -95,6 +114,10 @@ def decide_stop(
             new_consecutive_continues=count,
             needs_input=question or "the worker asked for supervisor input (no question text)",
         )
+
+    if wrap_up_marker and wrap_up_marker in last_msg:
+        # Ends the attempt for the same reason as budget exhaustion below.
+        return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)
 
     if count >= max_consecutive_continues:
         return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)

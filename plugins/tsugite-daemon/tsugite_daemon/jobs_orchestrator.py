@@ -90,6 +90,7 @@ class JobsOrchestrator:
         # xterm without a separate /api/terminals probe per tile.
         self._terminal_store = terminal_store
         self._timeout_handles: dict[str, asyncio.TimerHandle] = {}
+        self._wrap_up_handles: dict[str, asyncio.TimerHandle] = {}
         # Strong refs to in-flight notify tasks; asyncio only weak-refs scheduled
         # tasks, so without this a notify could be GC'd mid-send.
         self._notify_tasks: set[asyncio.Task] = set()
@@ -116,6 +117,13 @@ class JobsOrchestrator:
                 spawned a fresh worker with (failed-AC / hint guidance), which the
                 executor should feed into its live session. The executor reports
                 the outcome back via orchestrator.complete_worker / fail_worker.
+
+            def wrap_up_lead_minutes(self, timeout_minutes: int) -> int  [optional]
+            async def wrap_up(self, job, minutes_left: int) -> None      [optional]
+                Together these opt the executor into a wrap-up nudge: `minutes_left`
+                minutes before the phase deadline kills the worker, the orchestrator
+                asks the executor to tell its worker to land the work it has. An
+                executor without them is never nudged; a lead of 0 turns it off.
 
             async def cancel(self, job) -> None
                 Tear down the executor's child (e.g. kill the PTY). Called on
@@ -158,9 +166,10 @@ class JobsOrchestrator:
     def shutdown(self) -> None:
         """Cancel pending timers and in-flight background tasks at daemon shutdown
         so they don't die with 'Task was destroyed but it is pending'."""
-        for handle in self._timeout_handles.values():
-            handle.cancel()
-        self._timeout_handles.clear()
+        for handles in (self._timeout_handles, self._wrap_up_handles):
+            for handle in handles.values():
+                handle.cancel()
+            handles.clear()
         for task in list(self._notify_tasks) + list(self._bg_tasks):
             task.cancel()
 
@@ -1411,13 +1420,43 @@ class JobsOrchestrator:
         except RuntimeError:
             logger.debug("No running loop; skipping timeout schedule for job '%s'", job_id)
             return
-        handle = loop.call_later(max(timeout_minutes, 1) * 60, self._on_timeout, job_id)
-        self._timeout_handles[job_id] = handle
+        minutes = max(timeout_minutes, 1)
+        self._timeout_handles[job_id] = loop.call_later(minutes * 60, self._on_timeout, job_id)
+        lead = self._wrap_up_lead(job_id, minutes)
+        if lead:
+            self._wrap_up_handles[job_id] = loop.call_later((minutes - lead) * 60, self._on_wrap_up, job_id, lead)
+
+    def _wrap_up_lead(self, job_id: str, timeout_minutes: int) -> int:
+        """Minutes before the deadline this job's executor wants to be nudged to wrap
+        up. 0 when the executor offers no wrap-up, disables it, or asks for a lead
+        covering the whole phase (which would nudge the job the moment it starts)."""
+        job = self._jobs.get(job_id)
+        executor = self._executors.get(job.executor) if job else None
+        lead_minutes = getattr(executor, "wrap_up_lead_minutes", None)
+        if lead_minutes is None:
+            return 0
+        lead = lead_minutes(timeout_minutes)
+        return lead if 0 < lead < timeout_minutes else 0
 
     def _cancel_timeout(self, job_id: str) -> None:
-        handle = self._timeout_handles.pop(job_id, None)
-        if handle:
-            handle.cancel()
+        for handles in (self._timeout_handles, self._wrap_up_handles):
+            handle = handles.pop(job_id, None)
+            if handle:
+                handle.cancel()
+
+    def _on_wrap_up(self, job_id: str, minutes_left: int) -> None:
+        """Ask the executor to tell its worker to land the work it has before the
+        phase deadline reaps it. Only while the job is still RUNNING: a paused
+        worker keeps both its PTY and its phase timer, so nudging one would type
+        the wrap-up text in as the answer to the question it is waiting on."""
+        self._wrap_up_handles.pop(job_id, None)
+        job = self._jobs.get(job_id)
+        if job is None or job.state != JobState.RUNNING.value:
+            return
+        executor = self._executors.get(job.executor)
+        if executor is None:
+            return
+        self._spawn_bg(lambda: executor.wrap_up(job, minutes_left))
 
     def _on_timeout(self, job_id: str) -> None:
         job = self._jobs.get(job_id)

@@ -13,10 +13,12 @@ from tsugite_cc_driver.hooks import (
     decide_stop,
     decide_stop_failure,
     notification_attention,
+    wrap_up_instruction,
 )
 
 MARKER = "CCDRIVER_GOAL_COMPLETE"
 NEED_INPUT = "CCDRIVER_NEED_INPUT"
+WRAPPED_UP = "CCDRIVER_WRAPPED_UP"
 
 
 # ── fakes ──
@@ -212,6 +214,51 @@ def test_decide_stop_need_input_checked_before_budget_exhaustion():
     assert d.needs_input == "which environment should I target?"
 
 
+def test_decide_stop_wrap_up_marker_completes_with_the_summary():
+    # Out of time and not finished: the worker commits, summarizes and marks the
+    # handover. Blocking that reply discards the summary, and the phase deadline
+    # then finalizes the job STUCK with nothing.
+    d = decide_stop(
+        _stop_payload(last_assistant_message=f"committed the parser, tests still red\n{WRAPPED_UP}"),
+        consecutive_continues=1,
+        max_consecutive_continues=5,
+        completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
+        wrap_up_marker=WRAPPED_UP,
+    )
+    assert d.complete is True, "the wrap-up summary must reach the verifier"
+    assert d.summary == f"committed the parser, tests still red\n{WRAPPED_UP}"
+    assert d.response == {}
+
+
+def test_decide_stop_completion_marker_wins_over_the_wrap_up_marker():
+    d = decide_stop(
+        _stop_payload(last_assistant_message=f"all done {MARKER}\n{WRAPPED_UP}"),
+        consecutive_continues=0,
+        max_consecutive_continues=5,
+        completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
+        wrap_up_marker=WRAPPED_UP,
+    )
+    assert d.complete is True
+    assert d.needs_input is None
+
+
+def test_decide_stop_need_input_wins_over_the_wrap_up_marker():
+    # Blocked and out of time at once: the pause still wins, or the worker is
+    # force-completed into a verification it already knows it can't pass.
+    d = decide_stop(
+        _stop_payload(last_assistant_message=f"{WRAPPED_UP}\n{NEED_INPUT}: which environment?"),
+        consecutive_continues=1,
+        max_consecutive_continues=5,
+        completion_marker=MARKER,
+        needs_input_marker=NEED_INPUT,
+        wrap_up_marker=WRAPPED_UP,
+    )
+    assert d.complete is False
+    assert d.needs_input == "which environment?"
+
+
 def test_decide_stop_bare_need_input_marker_still_pauses():
     d = decide_stop(
         _stop_payload(last_assistant_message=f"blocked. {NEED_INPUT}:"),
@@ -228,6 +275,31 @@ def test_initial_prompt_teaches_both_markers():
     text = build_initial_prompt("do the thing", MARKER, needs_input_marker=NEED_INPUT)
     assert MARKER in text
     assert NEED_INPUT in text, "the worker can only ask for input if the protocol is in its prompt"
+
+
+def test_wrap_up_instruction_asks_to_commit_and_summarize():
+    text = wrap_up_instruction(MARKER, minutes_left=7, wrap_up_marker=WRAPPED_UP)
+    assert MARKER in text, "the worker can only close the job out if the completion marker is in the nudge"
+    assert "7 minutes" in text, "the nudge must say how much time is left so the worker can size the wrap-up"
+    assert "commit" in text.lower()
+    assert "summar" in text.lower()
+    assert "exactly" not in text.lower(), "injection-shaped phrasing gets refused"
+
+
+def test_wrap_up_instruction_asks_for_a_work_in_progress_commit():
+    # "commit the finished work" reads as "nothing qualifies" to a worker halfway
+    # through a refactor, which commits nothing and loses the whole attempt.
+    text = wrap_up_instruction(MARKER, minutes_left=7, wrap_up_marker=WRAPPED_UP).lower()
+    assert "half-finished" in text or "work in progress" in text, "an incomplete commit must be asked for explicitly"
+    assert "uncommitted" in text and "lost" in text, "the worker needs to know uncommitted work does not survive"
+
+
+def test_wrap_up_instruction_offers_a_marker_for_unfinished_work():
+    # A worker handing over half-done work will not claim GOAL_COMPLETE, so without
+    # its own marker it has nothing to end the summary with and the reply is blocked.
+    text = wrap_up_instruction(MARKER, minutes_left=7, wrap_up_marker=WRAPPED_UP)
+    assert WRAPPED_UP in text
+    assert MARKER in text, "a worker that did finish still ends on the completion marker"
 
 
 def test_decide_stop_failure_extracts_reason():
@@ -275,6 +347,17 @@ def test_route_stop_block_does_not_complete_and_increments(tmp_path):
     assert body["decision"] == "block"
     assert orch.completed == []
     assert st.consecutive_continues == 1, "route must persist the incremented budget onto DriveState"
+
+
+def test_route_stop_wrap_up_marker_completes_worker(tmp_path):
+    adapter, orch = _wired_adapter(state_dir=str(tmp_path))
+    _seed(adapter, orch)
+    resp = _client(adapter).post(
+        "/hook/tok-1", json=_stop_payload(last_assistant_message=f"committed, notes below\n{WRAPPED_UP}")
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {}, "a handed-over attempt must let claude stop"
+    assert orch.completed == [("job-1", f"committed, notes below\n{WRAPPED_UP}")]
 
 
 def test_route_stop_records_cc_session_id(tmp_path):
