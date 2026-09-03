@@ -13,7 +13,8 @@ interface Entry {
 
 const INITIAL_CONTENT: Record<string, string> = {
   'index.md': '# Home\n\ntags: #home\n\nStart at [[alpha]].\n',
-  'ops/alpha.md': '# Alpha\n\ntags: #ops #x\n\nSee [[beta]] and [[ghost]].\n\n## Section\n\nbody\n',
+  'ops/alpha.md':
+    '# Alpha\n\ntags: #ops #x\n\nSee [[beta]] and [[ghost]].\n\n## Section\n\nselectable paragraph\n',
   'ops/beta.md': '# Beta\n\ntags: #ops #x\n\nBack to [[alpha]] for context.\n',
   // A generated report: a relative stylesheet, an external one it must not
   // fetch, and a script that must never run.

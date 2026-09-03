@@ -249,8 +249,20 @@ export function buildTree(entries: WorkspaceEntry[]): TreeNode[] {
 // Prose renderer (which shares the package-level `marked` singleton). A
 // module-scoped resolver is set for the duration of each synchronous parse.
 let activeResolver: (target: string) => string | null = () => null;
+const SCRIPT_URL = /^\s*(?:javascript|vbscript):/i;
 const md = new Marked();
 md.use({
+  // Nothing written into a workspace file gets to run here: raw HTML renders as
+  // escaped source text, HTML comments drop out, and a script URL keeps its
+  // label but loses the anchor.
+  renderer: {
+    html({ text }) {
+      return text.trimStart().startsWith('<!--') ? '' : escapeHtml(text);
+    },
+    link(token) {
+      return SCRIPT_URL.test(token.href) ? this.parser.parseInline(token.tokens) : false;
+    },
+  },
   extensions: [
     {
       name: 'wikilink',
@@ -288,8 +300,9 @@ md.use({
  * anchors (`data-wk-nav="<path>"`) or missing-page markers. `resolve` maps a
  * link target to a workspace path, or null when no such file exists.
  *
- * Content originates from the trusted daemon workspace; like the chat `Prose`
- * component this renderer owns no sanitization policy.
+ * Raw HTML written in the source renders as escaped text rather than markup,
+ * and a `javascript:` target renders as its bare label - see the renderer
+ * overrides on the `Marked` instance above.
  */
 export function renderMarkdown(
   content: string,

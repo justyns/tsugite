@@ -249,4 +249,39 @@ describe('renderMarkdown', () => {
   it('never throws on an unterminated frontmatter fence', () => {
     expect(() => renderMarkdown('---\ntitle: x\nno closing fence', resolve)).not.toThrow();
   });
+
+  it('escapes inline raw HTML instead of passing it through', () => {
+    const html = renderMarkdown('before <img src=x onerror="alert(1)"> after', resolve);
+    expect(html).toBe('<p>before &lt;img src=x onerror=&quot;alert(1)&quot;&gt; after</p>\n');
+  });
+
+  it('escapes a block-level raw HTML element instead of passing it through', () => {
+    const html = renderMarkdown('<div onclick="alert(1)">hi</div>', resolve);
+    expect(html).not.toContain('<div');
+    expect(html).not.toContain('onclick="');
+    expect(html).toContain('&lt;div onclick=&quot;alert(1)&quot;&gt;hi&lt;/div&gt;');
+  });
+
+  it('still emits the wikilink extension anchor tags unescaped alongside neighbouring raw HTML', () => {
+    const html = renderMarkdown('<b>bold</b> see [[backup-retention]]', resolve);
+    expect(html).not.toContain('<b>');
+    expect(html).toContain('data-wk-nav="ops/backup-retention.md"');
+  });
+
+  it('drops an HTML comment rather than showing its source', () => {
+    expect(renderMarkdown('one\n\n<!-- hidden note -->\n\ntwo', resolve)).toBe(
+      '<p>one</p>\n<p>two</p>\n',
+    );
+  });
+
+  it('renders a javascript: link target as its bare label, with no anchor', () => {
+    expect(renderMarkdown('[click](javascript:alert(1))', resolve)).toBe('<p>click</p>\n');
+    expect(renderMarkdown('[b](JaVaScRiPt:alert(1))', resolve)).toBe('<p>b</p>\n');
+  });
+
+  it('leaves ordinary link targets alone', () => {
+    const html = renderMarkdown('[docs](https://example.test/a) and [rel](./b.md)', resolve);
+    expect(html).toContain('href="https://example.test/a"');
+    expect(html).toContain('href="./b.md"');
+  });
 });

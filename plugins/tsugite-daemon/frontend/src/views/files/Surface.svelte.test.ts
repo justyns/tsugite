@@ -1,5 +1,5 @@
 /// <reference types="@vitest/browser/context" />
-import { page } from '@vitest/browser/context';
+import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { expect, test, vi, beforeEach } from 'vitest';
 import { WORKSPACE } from './__fixtures__/workspace';
@@ -55,6 +55,63 @@ test('wikilinks resolve, missing pages are flagged, and navigation follows them'
 
   await beta.click();
   await expect.element(page.getByRole('heading', { name: 'Beta', level: 1 })).toBeInTheDocument();
+});
+
+test('a focused wikilink activates on Enter and on Space, like a click', async () => {
+  await mountSurface('ops/alpha.md');
+  await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
+
+  const beta = page.getByRole('link', { name: /\[\[beta\]\]/ });
+  (beta.element() as HTMLElement).focus();
+  await userEvent.keyboard('{Enter}');
+  await expect.element(page.getByRole('heading', { name: 'Beta', level: 1 })).toBeInTheDocument();
+
+  const alpha = page.getByRole('link', { name: /\[\[alpha\]\]/ });
+  (alpha.element() as HTMLElement).focus();
+  await userEvent.keyboard(' ');
+  await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
+});
+
+test('a note carrying raw HTML and a script URL renders inert', async () => {
+  WORKSPACE.setContent(
+    'ops/alpha.md',
+    '# Alpha\n\n<img src=x onerror="alert(1)">\n\n[click](javascript:alert(1))\n',
+  );
+  await mountSurface('ops/alpha.md');
+  await expect.element(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeInTheDocument();
+
+  const docEl = page.getByTestId(TESTID.filesDoc).element();
+  expect(docEl.querySelector('img')).toBeNull();
+  expect(docEl.querySelector('a[href]')).toBeNull();
+  expect(docEl.textContent).toContain('<img src=x onerror="alert(1)">');
+});
+
+test('selecting text in the rendered document raises the annotation popover', async () => {
+  await mountSurface('ops/alpha.md');
+  await expect
+    .element(page.getByRole('heading', { name: 'Section', level: 2 }))
+    .toBeInTheDocument();
+
+  const popover = page.getByRole('menu', { name: 'Selection actions', includeHidden: true });
+  await expect.element(popover).not.toBeVisible();
+
+  const docEl = page.getByTestId(TESTID.filesDoc).element() as HTMLElement;
+  const para = Array.from(docEl.querySelectorAll('.doc-md p')).find(
+    (p) => p.textContent?.trim() === 'selectable paragraph',
+  ) as HTMLParagraphElement;
+  const textNode = para.firstChild as Text;
+  const range = document.createRange();
+  range.setStart(textNode, 0);
+  range.setEnd(textNode, textNode.length);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  docEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+  await expect.element(popover).toBeVisible();
+
+  await page.getByRole('menuitem', { name: /Copy ref/ }).click();
+  await expect.element(popover).not.toBeVisible();
 });
 
 test('backlinks and related notes appear after the explicit on-demand scan, never eagerly', async () => {
