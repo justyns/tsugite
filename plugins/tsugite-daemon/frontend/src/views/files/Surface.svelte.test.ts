@@ -179,3 +179,52 @@ test('a narrow pane drops the metadata column without reserving its track', asyn
   expect(metaHidden).toBe(true);
   expect(doc).toBeCloseTo(shell, 0);
 });
+
+async function previewFrame(): Promise<HTMLIFrameElement> {
+  const frame = page.getByTestId(TESTID.filesHtmlFrame);
+  await expect.element(frame).toBeInTheDocument();
+  return frame.element() as HTMLIFrameElement;
+}
+
+test('an html file opens in a sandboxed rendered preview by default', async () => {
+  await mountSurface('reports/report.html');
+  const frame = await previewFrame();
+
+  // Empty sandbox: without allow-same-origin the frame cannot reach app state.
+  expect(frame.getAttribute('sandbox')).toBe('');
+  expect(frame.srcdoc).toContain('Content-Security-Policy');
+  expect(frame.srcdoc).toContain("default-src 'none'");
+  expect(frame.srcdoc).toContain('<h1>Coverage</h1>');
+});
+
+test('the preview inlines a same-workspace stylesheet and leaves the external one blocked', async () => {
+  await mountSurface('reports/report.html');
+  const frame = await previewFrame();
+
+  await vi.waitFor(() => expect(frame.srcdoc).toContain('rebeccapurple'));
+  expect(frame.srcdoc).toContain('<style>h1 { color: rebeccapurple }</style>');
+  expect(frame.srcdoc).not.toContain('href="report.css"');
+  // The CDN reference stays as written; the CSP is what stops it loading.
+  expect(frame.srcdoc).toContain('https://cdn.example.com/evil.css');
+});
+
+test('the raw toggle falls back to the source, script tag and all, and rendered comes back', async () => {
+  await mountSurface('reports/report.html');
+  await expect.element(page.getByTestId(TESTID.filesHtmlFrame)).toBeInTheDocument();
+
+  await page.getByRole('button', { name: 'raw', exact: true }).click();
+  await expect.element(page.getByTestId(TESTID.filesHtmlFrame)).not.toBeInTheDocument();
+  await expect.element(page.getByText(/parent\.steal\(\)/)).toBeInTheDocument();
+
+  await page.getByRole('button', { name: 'rendered', exact: true }).click();
+  await expect.element(page.getByTestId(TESTID.filesHtmlFrame)).toBeInTheDocument();
+});
+
+test('a plain text file still opens raw, with no rendered segment offered', async () => {
+  WORKSPACE.setContent('reports/report.css', 'h1 { color: rebeccapurple }');
+  await mountSurface('reports/report.css');
+  await expect.element(page.getByText('rebeccapurple')).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('button', { name: 'rendered', exact: true }))
+    .not.toBeInTheDocument();
+});

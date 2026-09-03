@@ -1,20 +1,41 @@
 /**
- * Read a workspace file's bytes authenticated and wrap them in an object URL.
- *
- * The daemon's Bearer auth is header-only, so an `<img src>` pointing at the raw
- * endpoint can't carry the token. The caller fetches the bytes with authHeaders(),
- * turns them into a blob object URL for an `<img>`, and REVOKES that URL on
- * teardown so a long conversation doesn't leak object URLs.
+ * Read a workspace file's bytes with the daemon's Bearer auth, which is
+ * header-only, so an `<img src>` pointing at the raw endpoint cannot carry the
+ * token.
  */
 import { authHeaders } from '$lib/api/client';
 
-/** Fetch `uploads/<name>` (or any workspace-relative path) as a blob object URL.
- *  Throws on any non-OK response so the caller can show a broken-file placeholder
- *  instead of a dead `<img>`. */
-export async function loadWorkspaceObjectURL(path: string): Promise<string> {
+async function fetchWorkspaceBlob(path: string): Promise<Blob> {
   const url = `/api/workspace/raw?path=${encodeURIComponent(path)}`;
   const resp = await fetch(url, { headers: authHeaders() });
   if (!resp.ok) throw new Error(`workspace raw ${resp.status}`);
-  const blob = await resp.blob();
-  return URL.createObjectURL(blob);
+  return await resp.blob();
+}
+
+/** A blob object URL for an `<img>`. The caller REVOKES it on teardown so a long
+ *  conversation does not leak object URLs. Throws on a non-OK response so the
+ *  caller can show a broken-file placeholder instead of a dead `<img>`. */
+export async function loadWorkspaceObjectURL(path: string): Promise<string> {
+  return URL.createObjectURL(await fetchWorkspaceBlob(path));
+}
+
+/**
+ * The same bytes as a `data:` URI. The HTML preview iframe is sandboxed without
+ * `allow-same-origin`, so it runs in an opaque origin and cannot load a blob
+ * URL from the app's origin; a data: URI carries the bytes inline and is what
+ * the preview's CSP allows. An oversized asset throws rather than
+ * base64-inflating a huge file into the document.
+ */
+export async function loadWorkspaceDataURL(
+  path: string,
+  maxBytes = 2 * 1024 * 1024,
+): Promise<string> {
+  const blob = await fetchWorkspaceBlob(path);
+  if (blob.size > maxBytes) throw new Error(`workspace raw too large: ${blob.size}`);
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('data URI encode failed'));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(blob);
+  });
 }

@@ -15,6 +15,14 @@ const INITIAL_CONTENT: Record<string, string> = {
   'index.md': '# Home\n\ntags: #home\n\nStart at [[alpha]].\n',
   'ops/alpha.md': '# Alpha\n\ntags: #ops #x\n\nSee [[beta]] and [[ghost]].\n\n## Section\n\nbody\n',
   'ops/beta.md': '# Beta\n\ntags: #ops #x\n\nBack to [[alpha]] for context.\n',
+  // A generated report: a relative stylesheet, an external one it must not
+  // fetch, and a script that must never run.
+  'reports/report.html':
+    '<html><head><link rel="stylesheet" href="report.css">' +
+    '<link rel="stylesheet" href="https://cdn.example.com/evil.css"></head>' +
+    '<body><h1>Coverage</h1><script>parent.steal()</scr' +
+    'ipt></body></html>',
+  'reports/report.css': 'h1 { color: rebeccapurple }',
 };
 
 let CONTENT: Record<string, string> = { ...INITIAL_CONTENT };
@@ -22,11 +30,28 @@ let CONTENT: Record<string, string> = { ...INITIAL_CONTENT };
 const DIRS: Record<string, Entry[]> = {
   '': [
     { path: 'ops', name: 'ops', is_dir: true },
+    { path: 'reports', name: 'reports', is_dir: true },
     {
       path: 'index.md',
       name: 'index.md',
       is_dir: false,
       size: 40,
+      modified: '2026-07-14T00:00:00Z',
+    },
+  ],
+  reports: [
+    {
+      path: 'reports/report.html',
+      name: 'report.html',
+      is_dir: false,
+      size: 200,
+      modified: '2026-07-14T00:00:00Z',
+    },
+    {
+      path: 'reports/report.css',
+      name: 'report.css',
+      is_dir: false,
+      size: 30,
       modified: '2026-07-14T00:00:00Z',
     },
   ],

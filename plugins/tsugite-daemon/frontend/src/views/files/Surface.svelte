@@ -19,6 +19,8 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { files } from '$lib/stores/files.svelte';
   import { writeTargetsDoc } from '$lib/stores/fileWrites';
+  import HtmlPreview from '$lib/components/media/HtmlPreview.svelte';
+  import { isHtml } from '$lib/media/htmlPreview';
   import { isMarkdown } from './load';
   import { filesWorkspace } from './workspace.svelte';
   import {
@@ -36,6 +38,8 @@
     path: string;
     content: string;
     markdown: boolean;
+    /** .html/.htm - "rendered" means the sandboxed preview, not marked-up text. */
+    html: boolean;
   }
 
   let { params }: { params?: Record<string, string> } = $props();
@@ -64,6 +68,9 @@
   // (a whole-workspace read) - never as a side effect of just opening a file.
   const indexed = $derived(filesWorkspace.indexState === 'ready');
   const dirty = $derived(doc != null && editBuffer !== doc.content);
+  /** Markdown and HTML both have a rendered view; everything else opens raw. */
+  const renderable = $derived(doc != null && (doc.markdown || doc.html));
+  const showingHtml = $derived(doc != null && doc.html && mode === 'rendered');
   const wsName = $derived(ws?.workspaceDir.split('/').filter(Boolean).pop() ?? 'workspace');
 
   const renderedHtml = $derived(
@@ -126,14 +133,15 @@
     try {
       const file = await files.read(path);
       const markdown = isMarkdown(path);
-      doc = { path, content: file.content ?? '', markdown };
+      const html = isHtml(path);
+      doc = { path, content: file.content ?? '', markdown, html };
       activePath = path;
       editBuffer = file.content ?? '';
       staleOnDisk = false;
       const parts = path.split('/');
       parts.pop();
       browseDir = parts.join('/');
-      mode = file.is_text === false ? 'raw' : markdown ? 'rendered' : 'raw';
+      mode = file.is_text === false ? 'raw' : markdown || html ? 'rendered' : 'raw';
     } catch (err) {
       toasts.push('err', 'Could not open file', {
         body: err instanceof Error ? err.message : String(err),
@@ -167,7 +175,7 @@
 
   function discard() {
     if (doc) editBuffer = doc.content;
-    mode = doc?.markdown ? 'rendered' : 'raw';
+    mode = renderable ? 'rendered' : 'raw';
   }
 
   async function reloadFromDisk() {
@@ -367,7 +375,7 @@
       {#if doc}
         <span data-testid={TESTID.filesModeSeg}>
           <Seg
-            options={doc.markdown ? ['rendered', 'raw', 'edit'] : ['raw', 'edit']}
+            options={renderable ? ['rendered', 'raw', 'edit'] : ['raw', 'edit']}
             bind:value={mode}
             ariaLabel="Document view"
           />
@@ -395,6 +403,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="wk-doc"
+      class:is-frame={showingHtml}
       data-view={mode}
       data-testid={TESTID.filesDoc}
       bind:this={docEl}
@@ -410,7 +419,14 @@
       {:else if filesWorkspace.loading && !doc}
         <PaneState kind="loading" lines={7} />
       {:else if doc}
-        {#if mode === 'rendered'}
+        {#if showingHtml}
+          <HtmlPreview
+            html={doc.content}
+            docPath={doc.path}
+            title={`Rendered ${doc.path}`}
+            testid={TESTID.filesHtmlFrame}
+          />
+        {:else if mode === 'rendered'}
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <div class="doc-md" role="document" onclick={onDocClick} onkeydown={onDocKeydown}>
             {@html docHtml}
@@ -664,6 +680,12 @@
     padding: 16px 20px 30px;
     position: relative;
     min-height: 0;
+  }
+  /* The rendered-HTML preview is full-bleed and scrolls inside its own frame. */
+  .wk-doc.is-frame {
+    display: flex;
+    padding: 0;
+    overflow: hidden;
   }
   .wk-doc :global(.doc-md) {
     font-size: var(--fs-md);
