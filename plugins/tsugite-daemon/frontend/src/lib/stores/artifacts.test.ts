@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest';
-import { ArtifactsStore, parseArtifactOpen, ARTIFACT_EVENT } from './artifacts.svelte';
+import {
+  ArtifactsStore,
+  parseArtifactOpen,
+  ARTIFACT_EVENT,
+  artifactSurfaceParams,
+} from './artifacts.svelte';
 
 /** The frame `open_artifact` puts on the wire (tests/test_artifact_tools.py pins
  *  the Python half against this exact shape). */
@@ -86,8 +91,8 @@ describe('ArtifactsStore', () => {
     const opened = store.applySessionEvent(frame());
 
     expect(opened?.id).toBe('agent');
-    expect(store.get('agent')?.title).toBe('notes.md');
-    expect(store.get('agent')?.rev).toBe(1);
+    expect(store.get('agent', 'sess-1')?.title).toBe('notes.md');
+    expect(store.get('agent', 'sess-1')?.rev).toBe(1);
   });
 
   test('a non-artifact frame is ignored and changes nothing', () => {
@@ -103,8 +108,8 @@ describe('ArtifactsStore', () => {
       frame({ path: 'reports/cov.html', content_type: 'html', title: 'Cov' }),
     );
 
-    expect(Object.keys(store.items)).toEqual(['agent']);
-    const cur = store.get('agent')!;
+    expect(Object.keys(store.items)).toEqual(['sess-1:agent']);
+    const cur = store.get('agent', 'sess-1')!;
     expect(cur.path).toBe('reports/cov.html');
     expect(cur.contentType).toBe('html');
     expect(cur.title).toBe('Cov');
@@ -116,8 +121,56 @@ describe('ArtifactsStore', () => {
     store.applySessionEvent(frame());
     store.applySessionEvent(frame({ artifact_id: 'x2', title: 'Second' }));
 
-    expect(Object.keys(store.items)).toEqual(['agent', 'x2']);
-    expect(store.get('x2')?.rev).toBe(1);
+    expect(Object.keys(store.items).sort()).toEqual(['sess-1:agent', 'sess-1:x2']);
+    expect(store.get('x2', 'sess-1')?.rev).toBe(1);
+  });
+
+  test('agent opens with the same slot are scoped by session', () => {
+    const store = new ArtifactsStore();
+    store.applySessionEvent(frame({ session_id: 'sess-a', path: 'ops/alpha.md', title: 'Alpha' }));
+    store.applySessionEvent(frame({ session_id: 'sess-b', path: 'ops/beta.md', title: 'Beta' }));
+
+    expect(Object.keys(store.items).sort()).toEqual(['sess-a:agent', 'sess-b:agent']);
+    expect(store.get('agent', 'sess-a')?.title).toBe('Alpha');
+    expect(store.get('agent', 'sess-a')?.path).toBe('ops/alpha.md');
+    expect(store.get('agent', 'sess-b')?.title).toBe('Beta');
+    expect(store.agentForSession('sess-a')?.title).toBe('Alpha');
+    expect(store.agentForSession('sess-b')?.title).toBe('Beta');
+  });
+
+  test('repeat opens reuse only that chat pane slot', () => {
+    const store = new ArtifactsStore();
+    store.applySessionEvent(frame({ session_id: 'sess-a', path: 'ops/alpha.md', title: 'Alpha' }));
+    store.applySessionEvent(frame({ session_id: 'sess-b', path: 'ops/beta.md', title: 'Beta' }));
+    store.applySessionEvent(
+      frame({ session_id: 'sess-a', path: 'reports/cov.html', title: 'Cov' }),
+    );
+
+    expect(Object.keys(store.items).sort()).toEqual(['sess-a:agent', 'sess-b:agent']);
+    expect(store.get('agent', 'sess-a')?.title).toBe('Cov');
+    expect(store.get('agent', 'sess-a')?.rev).toBe(2);
+    expect(store.get('agent', 'sess-b')?.title).toBe('Beta');
+    expect(store.get('agent', 'sess-b')?.rev).toBe(1);
+  });
+
+  test('user-opened artifacts remain window-level by slot', () => {
+    const store = new ArtifactsStore();
+    store.applySessionEvent(frame({ session_id: 'sess-a', title: 'A', opened_by: 'user' }));
+    store.applySessionEvent(frame({ session_id: 'sess-b', title: 'B', opened_by: 'user' }));
+
+    expect(Object.keys(store.items)).toEqual(['agent']);
+    expect(store.get('agent')?.title).toBe('B');
+    expect(store.get('agent')?.rev).toBe(2);
+    expect(store.agentArtifacts()).toEqual([]);
+  });
+
+  test('surface params distinguish agent panes by session but not user-opened panes', () => {
+    const store = new ArtifactsStore();
+    const agent = store.applySessionEvent(frame({ session_id: 'sess-a' }))!;
+    const user = store.applySessionEvent(frame({ artifact_id: 'manual', opened_by: 'user' }))!;
+
+    expect(artifactSurfaceParams(agent)).toEqual({ id: 'agent', sessionId: 'sess-a' });
+    expect(artifactSurfaceParams(user)).toEqual({ id: 'manual' });
   });
 
   test('close drops one slot and leaves the others', () => {
@@ -125,16 +178,16 @@ describe('ArtifactsStore', () => {
     store.applySessionEvent(frame());
     store.applySessionEvent(frame({ artifact_id: 'x2' }));
 
-    store.close('agent');
+    store.close('agent', 'sess-1');
 
-    expect(Object.keys(store.items)).toEqual(['x2']);
-    expect(store.get('agent')).toBeUndefined();
+    expect(Object.keys(store.items)).toEqual(['sess-1:x2']);
+    expect(store.get('agent', 'sess-1')).toBeUndefined();
   });
 
   test('closing an unknown slot is a no-op', () => {
     const store = new ArtifactsStore();
     store.applySessionEvent(frame());
     store.close('nope');
-    expect(Object.keys(store.items)).toEqual(['agent']);
+    expect(Object.keys(store.items)).toEqual(['sess-1:agent']);
   });
 });

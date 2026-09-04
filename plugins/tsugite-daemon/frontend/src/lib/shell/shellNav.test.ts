@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { defaultLayout, dockAsTab, splitPane } from './mux/layout';
-import { focusedViewId, surfaceViewId } from './shellNav';
+import { defaultLayout, dockAsTab, focusPane, splitPane } from './mux/layout';
+import { dockedChatSessionId, focusedViewId, surfaceViewId } from './shellNav';
 
 describe('surfaceViewId', () => {
   test('aliases the singular surface kinds to their nav view id', () => {
@@ -33,5 +33,50 @@ describe('focusedViewId', () => {
     const withChat = dockAsTab(base, paneId, { kind: 'chat' });
     const split = splitPane(withChat, paneId, 'row', { kind: 'jobs' });
     expect(focusedViewId(split)).toBe('jobs');
+  });
+});
+
+describe('dockedChatSessionId', () => {
+  test('no chat docked resolves to null', () => {
+    const base = defaultLayout();
+    const withJobs = dockAsTab(base, base.root.id, { kind: 'jobs' });
+    expect(dockedChatSessionId(withJobs)).toBeNull();
+  });
+
+  test('reads the sessionId off the one docked chat tab', () => {
+    const base = defaultLayout();
+    const withChat = dockAsTab(base, base.root.id, {
+      kind: 'chat',
+      params: { sessionId: 'sess-1' },
+    });
+    expect(dockedChatSessionId(withChat)).toBe('sess-1');
+  });
+
+  test('an artifact pane taking focus does not lose the docked chat', () => {
+    const base = defaultLayout();
+    const chatPaneId = base.root.id;
+    const withChat = dockAsTab(base, chatPaneId, {
+      kind: 'chat',
+      params: { sessionId: 'sess-1' },
+    });
+    const split = splitPane(withChat, chatPaneId, 'row', {
+      kind: 'artifact',
+      params: { id: 'agent' },
+    });
+    // splitPane focuses the new pane, giving the artifact pane focus, not the chat.
+    expect(dockedChatSessionId(split)).toBe('sess-1');
+  });
+
+  test('prefers the focused chat tab when two chats are split side by side', () => {
+    const base = defaultLayout();
+    const paneAId = base.root.id;
+    const withA = dockAsTab(base, paneAId, { kind: 'chat', params: { sessionId: 'sess-a' } });
+    const split = splitPane(withA, paneAId, 'row', {
+      kind: 'chat',
+      params: { sessionId: 'sess-b' },
+    });
+    expect(dockedChatSessionId(split)).toBe('sess-b');
+    const backToA = focusPane(split, paneAId);
+    expect(dockedChatSessionId(backToA)).toBe('sess-a');
   });
 });

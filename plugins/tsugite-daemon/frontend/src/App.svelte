@@ -28,14 +28,18 @@
   import { schedules } from '$lib/stores/schedules.svelte';
   import { terminals } from '$lib/stores/terminals.svelte';
   import { files } from '$lib/stores/files.svelte';
-  import { artifacts } from '$lib/stores/artifacts.svelte';
+  import {
+    artifacts,
+    artifactSurfaceParams,
+    type AgentArtifact,
+  } from '$lib/stores/artifacts.svelte';
   import { usage } from '$lib/stores/usage.svelte';
   import { formatTokensCompact, formatUsd } from './views/usage/format';
   import { isEditableTarget } from '$lib/dom';
   import { allViews, dockedSurface, viewById } from './views';
   import { surfaceComponent } from './views/surfaces';
   import { workspacePhoneScreen } from '$lib/shell/phoneNav';
-  import { focusedSurface } from '$lib/shell/shellNav';
+  import { dockedChatSessionId, focusedSurface } from '$lib/shell/shellNav';
   import { followSpaceNav } from '$lib/shell/spaceNav.svelte';
   import { resolveShellShortcut } from '$lib/shell/keymap';
   import { chatsNavBadge, jobsNavBadges, needsYouTotal } from '$lib/shell/navBadges';
@@ -110,9 +114,7 @@
   // The surface with focus in the mux, so the context rail can highlight the row
   // it belongs to and read its params.
   const focused = $derived(focusedSurface(spaces.active.layout));
-  const focusedSessionId = $derived(
-    focused?.kind === 'chat' ? (focused.params.sessionId ?? null) : null,
-  );
+  const focusedSessionId = $derived(dockedChatSessionId(spaces.active.layout));
   const focusedTerminalId = $derived(
     focused?.kind === 'terminal' ? (focused.params.terminalId ?? null) : null,
   );
@@ -364,13 +366,40 @@
     onTerminalState: (data) => terminals.applyTerminalState(data),
   };
 
+  const artifactSignature = $derived(
+    Object.values(artifacts.items)
+      .map((item) => `${item.sessionId ?? ''}:${item.id}:${item.openedByAgent}:${item.rev}`)
+      .join('|'),
+  );
+
+  $effect(() => {
+    const sessionId = focusedSessionId;
+    void artifactSignature;
+    untrack(() => syncAgentArtifactPane(sessionId));
+  });
+
+  function openArtifactPane(artifact: AgentArtifact) {
+    spaces.openBeside(
+      { kind: 'artifact', params: artifactSurfaceParams(artifact), title: artifact.title },
+      artifact.placement === 'below' ? 'col' : 'row',
+    );
+  }
+
+  function syncAgentArtifactPane(sessionId: string | null) {
+    for (const artifact of artifacts.agentArtifacts()) {
+      if (artifact.sessionId !== sessionId) {
+        spaces.closeSurface({ kind: 'artifact', params: artifactSurfaceParams(artifact) });
+      }
+    }
+    const current = artifacts.agentForSession(sessionId);
+    if (current) openArtifactPane(current);
+  }
+
   function openAgentArtifact(data: Record<string, unknown>) {
     const opened = artifacts.applySessionEvent(data);
     if (!opened) return;
-    spaces.openBeside(
-      { kind: 'artifact', params: { id: opened.id }, title: opened.title },
-      opened.placement === 'below' ? 'col' : 'row',
-    );
+    if (!opened.openedByAgent || opened.sessionId === focusedSessionId) openArtifactPane(opened);
+    else syncAgentArtifactPane(focusedSessionId);
   }
 
   // The shell holds the origin's one event stream for everyone on it, and the

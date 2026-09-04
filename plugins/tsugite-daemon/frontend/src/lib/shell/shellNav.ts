@@ -40,3 +40,22 @@ export function focusedViewId(layout: Layout): string {
   const tab = focusedSurface(layout);
   return tab ? surfaceViewId(tab.kind) : '';
 }
+
+/**
+ * The sessionId of the chat currently on screen: the focused pane's chat tab if
+ * focus is on one, else any chat tab docked in the layout (normally just the
+ * one, kept in place by retargetOrOpen). Null when no chat is docked.
+ *
+ * Deliberately independent of pane focus for panes that aren't chats - clicking
+ * into (say) an artifact pane beside the chat must not read as "no chat is open"
+ * for callers scoping that pane to a conversation.
+ */
+export function dockedChatSessionId(layout: Layout): string | null {
+  const focused = focusedSurface(layout);
+  if (focused?.kind === 'chat') return focused.params.sessionId ?? null;
+  for (const leaf of collectLeaves(layout.root)) {
+    const tab = leaf.tabs.find((t) => t.kind === 'chat');
+    if (tab) return tab.params.sessionId ?? null;
+  }
+  return null;
+}

@@ -87,24 +87,50 @@ export function parseArtifactOpen(data: Record<string, unknown>): ArtifactOpen |
   };
 }
 
+function itemKey(id: string, sessionId: string | null, openedByAgent: boolean): string {
+  return openedByAgent && sessionId ? `${sessionId}:${id}` : id;
+}
+
+export function artifactSurfaceParams(
+  artifact: Pick<AgentArtifact, 'id' | 'sessionId' | 'openedByAgent'>,
+): Record<string, string> {
+  if (artifact.openedByAgent && artifact.sessionId)
+    return { id: artifact.id, sessionId: artifact.sessionId };
+  return { id: artifact.id };
+}
+
 export class ArtifactsStore {
-  /** Open artifacts by slot id. */
+  /** Open artifacts by scoped key: agent panes use sessionId + slot; user panes use slot. */
   items = $state<Record<string, AgentArtifact>>({});
 
   applySessionEvent(data: Record<string, unknown>): AgentArtifact | null {
     const open = parseArtifactOpen(data);
     if (!open) return null;
-    const next = { ...open, rev: (this.items[open.id]?.rev ?? 0) + 1 };
-    this.items[open.id] = next;
+    const key = itemKey(open.id, open.sessionId, open.openedByAgent);
+    const next = { ...open, rev: (this.items[key]?.rev ?? 0) + 1 };
+    this.items[key] = next;
     return next;
   }
 
-  get(id: string): AgentArtifact | undefined {
+  get(id: string, sessionId: string | null = null): AgentArtifact | undefined {
+    if (sessionId) return this.items[itemKey(id, sessionId, true)] ?? this.items[id];
     return this.items[id];
   }
 
-  close(id: string): void {
-    delete this.items[id];
+  agentForSession(sessionId: string | null): AgentArtifact | undefined {
+    if (!sessionId) return undefined;
+    return Object.values(this.items).find(
+      (item) => item.openedByAgent && item.sessionId === sessionId,
+    );
+  }
+
+  agentArtifacts(): AgentArtifact[] {
+    return Object.values(this.items).filter((item) => item.openedByAgent);
+  }
+
+  close(id: string, sessionId: string | null = null): void {
+    if (sessionId) delete this.items[itemKey(id, sessionId, true)];
+    else delete this.items[id];
   }
 }
 

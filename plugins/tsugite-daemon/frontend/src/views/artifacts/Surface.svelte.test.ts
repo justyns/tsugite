@@ -40,9 +40,9 @@ async function frameDoc(): Promise<string> {
   return (frame.element() as HTMLIFrameElement).srcdoc;
 }
 
-async function mount(id = 'agent') {
+async function mount(id = 'agent', sessionId: string | null = 'sess-1') {
   const { default: Surface } = await import('./Surface.svelte');
-  return render(Surface, { props: { params: { id } } });
+  return render(Surface, { props: { params: sessionId ? { id, sessionId } : { id } } });
 }
 
 test('a markdown artifact renders, badged as opened by the agent', async () => {
