@@ -55,22 +55,31 @@ def _resolve_session_arg(session_id: Optional[str]) -> str:
 def session_reply(message: str, session_id: Optional[str] = None) -> dict:
     """Send a follow-up message to an existing session, continuing its conversation.
 
+    A session that is already working has the message held until its next turn.
+    A one-shot run that ends without another turn never reads it. The call
+    returns straight away.
+
     Args:
         message: Message to send to the session.
         session_id: Session to reply to, or "name:<alias>" to address one by its alias.
             Defaults to the current session; "current" means the same.
 
     Returns:
-        Dict with session_id and the agent's response.
+        Dict with session_id, `status` ("delivered" or "queued"), and the agent's
+        response when a turn ran.
     """
     session_id = _resolve_session_arg(session_id)
-    # Read here, not in reply_to_session: _call hops to the daemon loop with a fresh
-    # context, and reply_to_session rebinds the current session to the target.
+    # `_call` hops to the daemon loop with a fresh context and `reply_to_session`
+    # rebinds the current session to the target, so this read has to happen first.
     origin = get_current_session_id()
     metadata = {"from_session": origin} if origin and origin != session_id else None
-    # revive: an agent addressing a session by id wants that session, finished or not.
-    result = _call(_session_runner.reply_to_session, session_id, message, metadata=metadata, revive=True, timeout=120)
-    return {"session_id": session_id, "response": str(result)[:2000]}
+    result = _call(_session_runner.reply_or_defer, session_id, message, metadata=metadata, timeout=120)
+    reply = result["response"]
+    return {
+        "session_id": session_id,
+        "status": result["status"],
+        "response": None if reply is None else str(reply)[:2000],
+    }
 
 
 @tool(require_daemon=True)

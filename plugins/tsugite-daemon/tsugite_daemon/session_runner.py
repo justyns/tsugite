@@ -581,6 +581,25 @@ class SessionRunner:
             task.cancel()
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
+    async def reply_or_defer(self, session_id: str, message: str, *, metadata: dict | None = None) -> dict:
+        """Run a turn with `message`, or hold it for the next one when the session
+        is already working. Returns `status` ("delivered" or "queued") and the
+        turn's reply when one ran.
+        """
+        session_id = self.live_id(session_id)
+        if self._store.get_session(session_id).has_live_work:
+            # tsugite/history/reconstruction.py reads `addressed` to frame the card as a steer.
+            await asyncio.to_thread(
+                self.deliver_to_session,
+                session_id,
+                message,
+                source="session",
+                metadata={**(metadata or {}), "addressed": True},
+            )
+            return {"status": "queued", "response": None}
+        reply = await self.reply_to_session(session_id, message, metadata=metadata, revive=True)
+        return {"status": "delivered", "response": reply}
+
     async def reply_to_session(
         self,
         session_id: str,

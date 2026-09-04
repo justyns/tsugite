@@ -162,6 +162,23 @@ class TestEventsToMessagesStateless:
         assert "arrived on its own" in content
         assert "only act on it if the user refers to it" in content.lower()
 
+    def test_an_addressed_card_is_framed_as_meant_for_the_reader(self):
+        """A steer from another agent is the one card the reader should act on."""
+        events = [
+            _ev(
+                "delivery",
+                ts=FIXED_TS,
+                message="stop, the worktree is wrong",
+                source="session",
+                kind="fyi",
+                addressed=True,
+            )
+        ]
+        content = events_to_messages(events)[0]["content"]
+
+        assert "another agent session" in content
+        assert "only act on it if the user refers to it" not in content.lower()
+
     def test_delivery_without_title_omits_the_title_tag(self):
         events = [_ev("delivery", ts=FIXED_TS, message="build finished", source="job", kind="fyi")]
         msgs = events_to_messages(events)
