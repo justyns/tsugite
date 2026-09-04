@@ -164,6 +164,14 @@ describe('ArtifactsStore', () => {
     expect(store.agentArtifacts()).toEqual([]);
   });
 
+  test('a scoped lookup with no record never falls back to the bare slot', () => {
+    const store = new ArtifactsStore();
+    store.applySessionEvent(frame({ session_id: null, title: 'Unscoped' }));
+
+    expect(store.items.agent.title).toBe('Unscoped');
+    expect(store.get('agent', 'sess-a')).toBeUndefined();
+  });
+
   test('surface params distinguish agent panes by session but not user-opened panes', () => {
     const store = new ArtifactsStore();
     const agent = store.applySessionEvent(frame({ session_id: 'sess-a' }))!;

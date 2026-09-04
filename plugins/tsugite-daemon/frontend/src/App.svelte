@@ -114,7 +114,15 @@
   // The surface with focus in the mux, so the context rail can highlight the row
   // it belongs to and read its params.
   const focused = $derived(focusedSurface(spaces.active.layout));
-  const focusedSessionId = $derived(dockedChatSessionId(spaces.active.layout));
+  // The default space's chat tab carries no params, so a docked chat can name no
+  // session at all. Resolve it the way the chat surface and the rail both do, or
+  // an artifact stamped with a real session matches nothing on screen.
+  const focusedSessionId = $derived(
+    resolveDefaultSession(
+      sessions.ordered.filter((r) => !r.superseded_by),
+      dockedChatSessionId(spaces.active.layout),
+    ),
+  );
   const focusedTerminalId = $derived(
     focused?.kind === 'terminal' ? (focused.params.terminalId ?? null) : null,
   );

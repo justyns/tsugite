@@ -113,8 +113,7 @@ export class ArtifactsStore {
   }
 
   get(id: string, sessionId: string | null = null): AgentArtifact | undefined {
-    if (sessionId) return this.items[itemKey(id, sessionId, true)] ?? this.items[id];
-    return this.items[id];
+    return this.items[itemKey(id, sessionId, true)];
   }
 
   agentForSession(sessionId: string | null): AgentArtifact | undefined {
@@ -129,8 +128,7 @@ export class ArtifactsStore {
   }
 
   close(id: string, sessionId: string | null = null): void {
-    if (sessionId) delete this.items[itemKey(id, sessionId, true)];
-    else delete this.items[id];
+    delete this.items[itemKey(id, sessionId, true)];
   }
 }
 

@@ -8,6 +8,7 @@ splits the focused pane, and mounts the artifact surface.
 
 import pytest
 from playwright.sync_api import expect
+from tsugite_daemon.session_runner import _current_session_id
 
 import tsugite.tools.artifacts as artifacts_tool
 from tsugite.tools.artifacts import open_artifact
@@ -21,11 +22,23 @@ CONVERSATION = '[data-testid="chat-conversation"]'
 
 
 @pytest.fixture
-def agent_tool(e2e_server, e2e_adapter, e2e_workspace):
-    """Wire open_artifact onto the live daemon, the way Gateway._start does."""
+def agent_tool(e2e_server, e2e_adapter, e2e_workspace, e2e_session_store):
+    """Wire open_artifact onto the live daemon, the way Gateway._start does, and
+    call it inside a session the way a turn does. `adapters/base.py` sets the
+    session ContextVar for every turn, so a frame stamped with no session cannot
+    reach the UI live; calling the tool bare from this process would emit one."""
     _url, server = e2e_server
     artifacts_tool.set_artifact_bridge(e2e_adapter, server.event_bus)
-    yield open_artifact
+
+    def call(**kwargs):
+        session = e2e_session_store.get_or_create_interactive(E2E_USER_ID)
+        token = _current_session_id.set(session.id)
+        try:
+            return open_artifact(**kwargs)
+        finally:
+            _current_session_id.reset(token)
+
+    yield call
     artifacts_tool.set_artifact_bridge(None, None)
 
 
