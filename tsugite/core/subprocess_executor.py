@@ -474,11 +474,15 @@ if os.path.exists(INJECTIONS_PATH):
     with open(INJECTIONS_PATH, "r") as f:
         namespace.update(json.load(f))
 
-# Load content blocks from files (consumed once per turn)
+# Load content blocks from files (consumed once per turn). They are
+# model-authored, so never let one shadow a tool / builtin (a block named
+# read_file would replace the callable with a str).
 _cb_manifest = os.path.join(os.path.dirname(STATE_PATH), "content_blocks.json")
 if os.path.exists(_cb_manifest):
     with open(_cb_manifest, "r") as f:
         for _cb_name, _cb_path in json.load(f).items():
+            if _cb_name in namespace:
+                continue
             with open(_cb_path, "r") as _cb_f:
                 namespace[_cb_name] = _cb_f.read()
     os.remove(_cb_manifest)

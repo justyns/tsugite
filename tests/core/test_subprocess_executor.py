@@ -524,3 +524,29 @@ async def test_file_events_cross_the_subprocess_boundary(tmp_path):
         assert [e.path for e in reads] == [str(target)], "the read must surface on the parent's bus"
     finally:
         executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_content_block_cannot_shadow_a_tool():
+    """Content blocks are model-authored. One named after a tool must not replace
+    the callable with a str, which would break the tool for the rest of the run."""
+
+    def read_file(path: str = "") -> str:
+        return f"contents of {path}"
+
+    tool = _make_tool("read_file", read_file, parent_only=True)
+    executor = SubprocessExecutor(event_bus=EventBus())
+    executor.set_tools([tool], EventBus())
+    try:
+        await executor.inject_content_blocks({"read_file": "I am not a function"})
+
+        result = await executor.execute("print(read_file(path='x'))")
+        assert result.error is None, f"tool was shadowed by the content block: {result.error}"
+        assert "contents of x" in result.output
+
+        # A block that collides with nothing is still delivered.
+        await executor.inject_content_blocks({"my_doc": "hello doc"})
+        second = await executor.execute("print(my_doc)")
+        assert "hello doc" in second.output
+    finally:
+        executor.cleanup()
