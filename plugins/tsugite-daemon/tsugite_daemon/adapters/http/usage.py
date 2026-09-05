@@ -1,5 +1,7 @@
 """UsageMixin: usage HTTP handlers for HTTPServer."""
 
+import asyncio
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -17,6 +19,7 @@ class UsageMixin:
                     Route("/models", self._usage_models, methods=["GET"]),
                     Route("/total", self._usage_total, methods=["GET"]),
                     Route("/schedules", self._usage_schedules, methods=["GET"]),
+                    Route("/providers", self._usage_providers, methods=["GET"]),
                 ],
             ),
         ]
@@ -82,3 +85,16 @@ class UsageMixin:
         # leaderboard like agents/models. A user's schedule set is small.
         limit = self._parse_limit(request, default=100)
         return JSONResponse(store.by_schedule(since=since, limit=limit))
+
+    async def _usage_providers(self, request: Request) -> JSONResponse:
+        """Current subscription/budget utilization per provider quota source.
+
+        Current state, not a range aggregation, so it takes no query params. A
+        source reads local provider state, which may block, so it runs off the
+        event loop.
+        """
+        if err := self._check_auth(request):
+            return err
+        from tsugite.usage import collect_quota_reports
+
+        return JSONResponse(await asyncio.to_thread(collect_quota_reports))

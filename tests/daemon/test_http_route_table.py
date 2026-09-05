@@ -250,6 +250,7 @@ FULL_ROUTE_TABLE = [
     ("/api/usage/models", ("GET",), "_usage_models"),
     ("/api/usage/total", ("GET",), "_usage_total"),
     ("/api/usage/schedules", ("GET",), "_usage_schedules"),
+    ("/api/usage/providers", ("GET",), "_usage_providers"),
     ("/api/activity", ("GET",), "_api_activity"),
     ("/api/plugins", ("GET",), "_api_list_plugins"),
     ("/api/tools", ("GET",), "_api_list_tools"),

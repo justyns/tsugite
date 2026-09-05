@@ -15,6 +15,7 @@ from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.webhook_store import WebhookStore
 
 import tsugite.usage.store as usage_store_mod
+from tsugite.usage import QuotaReport, QuotaWindow, register_quota_source
 from tsugite.usage.store import UsageStore
 
 SCHEDULER_SOURCE = "scheduler"
@@ -110,3 +111,44 @@ class TestCacheSplitInResponses:
         assert rows
         assert "cache_creation_tokens" in rows[0]
         assert "cache_read_tokens" in rows[0]
+
+
+class TestProvidersEndpoint:
+    def test_requires_auth(self, client):
+        assert client.get("/api/usage/providers").status_code == 401
+
+    def test_returns_a_registered_sources_report(self, client, test_token):
+        register_quota_source(
+            "demo",
+            "Demo",
+            lambda: QuotaReport(
+                provider="demo",
+                label="Demo",
+                as_of="2026-01-01T00:00:00+00:00",
+                windows=(
+                    QuotaWindow(
+                        key="weekly_all",
+                        label="week",
+                        used_pct=73.0,
+                        resets_at="2026-01-08T00:00:00+00:00",
+                    ),
+                ),
+            ),
+        )
+        resp = client.get("/api/usage/providers", headers=_auth(test_token))
+        assert resp.status_code == 200
+        rows = {r["provider"]: r for r in resp.json()}
+        assert rows["demo"] == {
+            "provider": "demo",
+            "label": "Demo",
+            "as_of": "2026-01-01T00:00:00+00:00",
+            "error": None,
+            "windows": [
+                {
+                    "key": "weekly_all",
+                    "label": "week",
+                    "used_pct": 73.0,
+                    "resets_at": "2026-01-08T00:00:00+00:00",
+                }
+            ],
+        }
