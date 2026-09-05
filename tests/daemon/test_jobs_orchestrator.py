@@ -1288,6 +1288,19 @@ def test_render_jobs_context_xml_lists_active_and_recent(store, runner, orchestr
     assert "something done" in xml
 
 
+def test_render_jobs_context_xml_lists_a_job_awaiting_input(store, runner, orchestrator):
+    """A job parked on the user is the one state that needs the agent to act, so it
+    has to reach the agent's context - it is neither running nor finished."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
+    store.update_state(job.id, JobState.AWAITING_INPUT.value)
+    store.update(job.id, pending_question="which branch?")
+
+    xml = orchestrator.render_context_xml("parent-1")
+
+    assert job.id in xml
+    assert JobState.AWAITING_INPUT.value in xml
+
+
 def test_render_jobs_context_xml_truncates_prompt_and_error(store, runner, orchestrator):
     runner.store.sessions["parent-T"] = Session(id="parent-T")
     long = "x" * 200

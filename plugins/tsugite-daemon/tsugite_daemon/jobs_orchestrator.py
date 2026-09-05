@@ -1674,7 +1674,14 @@ def render_jobs_context_xml(jobs: list[Job], recent_limit: int = 3) -> str:
     if not jobs:
         return ""
 
-    active_states = {JobState.QUEUED.value, JobState.RUNNING.value, JobState.VERIFYING.value}
+    # AWAITING_INPUT counts as active: it is parked on the user, not finished, and
+    # it is the one state that needs the agent to do something about it.
+    active_states = {
+        JobState.QUEUED.value,
+        JobState.RUNNING.value,
+        JobState.VERIFYING.value,
+        JobState.AWAITING_INPUT.value,
+    }
 
     active = [j for j in jobs if j.state in active_states]
     recent = [j for j in jobs if j.state in _TERMINAL_STATES]
