@@ -23,6 +23,8 @@
   import {
     formatDayLabel,
     formatLastRun,
+    formatPercent,
+    formatResetAt,
     formatRuns,
     formatTokensCompact,
     formatUsd,
@@ -81,6 +83,37 @@
     </div>
   </div>
 
+  {#if usage.providers.length > 0}
+    <div>
+      <h4 class="d-sec-h">provider limits</h4>
+      <div class="u-quota">
+        {#each usage.providers as row (row.provider)}
+          <div class="u-prov">
+            <span class="u-prov-name">{row.label}</span>
+            {#if row.error}
+              <span class="u-prov-err">{row.error}</span>
+            {:else}
+              {#each row.windows as win (win.key)}
+                {@const reset = formatResetAt(win.resets_at)}
+                <div class="u-win">
+                  <span class="u-win-name">{win.label}</span>
+                  <Meter
+                    value={win.used_pct}
+                    max={100}
+                    label="{row.label} {win.label}"
+                    displayText={formatPercent(win.used_pct)}
+                    warn={win.used_pct >= 80}
+                  />
+                  {#if reset}<span class="u-win-reset mono">{reset}</span>{/if}
+                </div>
+              {/each}
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   {#if usage.loading && !hasData}
     <PaneState kind="loading" lines={6} />
   {:else if usage.error}
@@ -116,6 +149,7 @@
         {formatTokensCompact(row.cache_creation_tokens)}
       </td>
     {/snippet}
+
     <div class="u-cols">
       <div>
         <h4 class="d-sec-h">top agents</h4>
@@ -294,6 +328,52 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: var(--sp-4);
+  }
+
+  /* Provider quota cards: the .t-job card recipe, laid out like .u-cols. */
+  .u-quota {
+    display: grid;
+    /* auto-fill, not auto-fit: one provider keeps a card's width instead of
+       stretching across the pane with its bars marooned at the far edge. */
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--sp-3);
+  }
+  .u-prov {
+    background: var(--bg2);
+    border: 1px solid var(--bd0);
+    border-radius: var(--r-md);
+    padding: 9px 10px;
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+  .u-prov-name {
+    font: 600 var(--fs-sm) var(--font-ui);
+    color: var(--tx0);
+  }
+  .u-prov-err {
+    font-size: var(--fs-xs);
+    color: var(--tx3);
+  }
+  .u-win {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+  .u-win-name {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-xs);
+    color: var(--tx2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .u-win-reset {
+    font-size: var(--fs-2xs);
+    color: var(--tx3);
+    white-space: nowrap;
   }
 
   /* section labels (.d-sec-h) */

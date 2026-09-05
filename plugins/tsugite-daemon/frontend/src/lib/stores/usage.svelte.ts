@@ -1,9 +1,11 @@
 /**
- * Usage store: the cost dashboard's four series (summary trend, top agents, top
- * models, grand total) fetched together on load / range change. All read-only
- * GETs under /api/usage. The range is "last N days": `since` is an ISO date N
- * days back (the store only supports a start bound - the backend accepts an
- * `until` end but no route wires it yet). Exported as a class instance.
+ * Usage store: the cost dashboard's series (summary trend, top agents, top
+ * models, per-schedule breakdown, grand total) plus the providers' current quota
+ * utilization, fetched together on load / range change. All read-only GETs under
+ * /api/usage. The range is "last N days": `since` is an ISO date N days back (the
+ * store only supports a start bound - the backend accepts an `until` end but no
+ * route wires it yet); provider quotas are current state and ignore it. Exported
+ * as a class instance.
  */
 import { api } from '$lib/api/client';
 
@@ -51,6 +53,25 @@ export interface UsageScheduleRow extends UsageCacheSplit {
   last_run: string | null;
 }
 
+export interface UsageQuotaWindow {
+  /** Stable within its report ('session', 'weekly_all'); `label` is what the UI shows. */
+  key: string;
+  label: string;
+  used_pct: number;
+  resets_at: string | null;
+}
+
+/** How much of one provider's subscription or budget is used. Best-effort:
+ *  `error` carries the reason instead of windows when the provider's local
+ *  state was unreadable. */
+export interface UsageProviderRow {
+  provider: string;
+  label: string;
+  as_of: string | null;
+  error: string | null;
+  windows: UsageQuotaWindow[];
+}
+
 export interface UsageTotal extends UsageCacheSplit {
   runs: number;
   total_tokens: number;
@@ -78,6 +99,7 @@ export class UsageStore {
   agents = $state<UsageAgentRow[]>([]);
   models = $state<UsageModelRow[]>([]);
   schedules = $state<UsageScheduleRow[]>([]);
+  providers = $state<UsageProviderRow[]>([]);
   total = $state<UsageTotal | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
@@ -111,18 +133,21 @@ export class UsageStore {
     this.loading = true;
     this.error = null;
     try {
-      const [summary, agents, models, schedules, total] = await Promise.all([
+      const [summary, agents, models, schedules, total, providers] = await Promise.all([
         api.get<UsageSummaryRow[]>(`/api/usage/summary?${summaryParams.toString()}`),
         api.get<UsageAgentRow[]>(`/api/usage/agents?${sinceQs}`),
         api.get<UsageModelRow[]>(`/api/usage/models?${sinceQs}`),
         api.get<UsageScheduleRow[]>(`/api/usage/schedules?${sinceQs}`),
         api.get<UsageTotal>(`/api/usage/total?${sinceQs}`),
+        // Current state, so no range: the provider reports what it reports now.
+        api.get<UsageProviderRow[]>('/api/usage/providers'),
       ]);
       this.summary = summary;
       this.agents = agents;
       this.models = models;
       this.schedules = schedules;
       this.total = total;
+      this.providers = providers;
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
     } finally {

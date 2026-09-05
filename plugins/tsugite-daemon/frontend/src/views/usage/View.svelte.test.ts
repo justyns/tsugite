@@ -70,6 +70,18 @@ const SCHEDULES = [
     last_run: '2026-07-05T22:30:00+00:00',
   },
 ];
+const PROVIDERS = [
+  {
+    provider: 'demo',
+    label: 'Demo Cloud',
+    as_of: '2026-07-15T08:04:00+00:00',
+    error: null,
+    windows: [
+      { key: 'session', label: 'session', used_pct: 0, resets_at: null },
+      { key: 'weekly_all', label: 'week', used_pct: 73, resets_at: '2026-07-19T21:59:00+00:00' },
+    ],
+  },
+];
 const TOTAL = {
   runs: 6,
   total_tokens: 126754,
@@ -86,6 +98,7 @@ function okResponses(path: string): unknown {
   if (path.startsWith('/api/usage/models')) return MODELS;
   if (path.startsWith('/api/usage/schedules')) return SCHEDULES;
   if (path.startsWith('/api/usage/total')) return TOTAL;
+  if (path.startsWith('/api/usage/providers')) return PROVIDERS;
   throw new Error(`unexpected path: ${path}`);
 }
 
@@ -101,6 +114,7 @@ beforeEach(() => {
   usage.agents = [];
   usage.models = [];
   usage.schedules = [];
+  usage.providers = [];
   usage.total = null;
   usage.loading = false;
   usage.error = null;
@@ -259,4 +273,69 @@ test('a null cost_usd sum (unset on some usage rows) renders as $0.00 instead of
 
   await expect.element(page.getByText('no-cost-agent')).toBeInTheDocument();
   await expect.element(page.getByText('$0.00')).toBeInTheDocument();
+});
+
+test('renders each provider limit window as a meter with its reset time', async () => {
+  mockGet((path) => Promise.resolve(okResponses(path)));
+  await render(View);
+
+  await expect.element(page.getByText('provider limits')).toBeInTheDocument();
+  await expect.element(page.getByText('Demo Cloud')).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('meter', { name: 'Demo Cloud week' }))
+    .toHaveAttribute('aria-valuetext', '73%');
+  await expect
+    .element(page.getByRole('meter', { name: 'Demo Cloud session' }))
+    .toHaveAttribute('aria-valuetext', '0%');
+  await expect.element(page.getByText('resets jul 19 21:59')).toBeInTheDocument();
+});
+
+test('a provider whose local state was unreadable shows the message, not a meter', async () => {
+  mockGet((path) =>
+    Promise.resolve(
+      path.startsWith('/api/usage/providers')
+        ? [
+            {
+              provider: 'demo',
+              label: 'Demo Cloud',
+              as_of: null,
+              error: 'Demo Cloud has not cached its usage limits yet',
+              windows: [],
+            },
+          ]
+        : okResponses(path),
+    ),
+  );
+  await render(View);
+
+  await expect
+    .element(page.getByText('Demo Cloud has not cached its usage limits yet'))
+    .toBeInTheDocument();
+  expect(page.getByRole('meter', { name: 'Demo Cloud week' }).query()).toBeNull();
+});
+
+test('hides the provider-limits section when no source reports', async () => {
+  mockGet((path) =>
+    Promise.resolve(path.startsWith('/api/usage/providers') ? [] : okResponses(path)),
+  );
+  await render(View);
+
+  await expect.element(page.getByText('$4.20')).toBeInTheDocument();
+  expect(page.getByText('provider limits').query()).toBeNull();
+});
+
+test('provider limits show even when nothing has been logged yet', async () => {
+  // Quota is current state, not history: a fresh install with no recorded runs
+  // is exactly when someone checks whether they have headroom left.
+  const empty = (path: string) =>
+    path.startsWith('/api/usage/providers')
+      ? okResponses(path)
+      : path.startsWith('/api/usage/total')
+        ? { runs: 0, total_tokens: 0, total_cost: 0 }
+        : [];
+  mockGet((path) => Promise.resolve(empty(path as string)));
+  await render(View);
+
+  await expect.element(page.getByText('provider limits')).toBeInTheDocument();
+  await expect.element(page.getByRole('meter', { name: 'Demo Cloud week' })).toBeInTheDocument();
 });

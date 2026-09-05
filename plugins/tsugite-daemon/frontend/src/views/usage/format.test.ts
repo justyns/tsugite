@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 import {
   formatDayLabel,
   formatLastRun,
+  formatPercent,
+  formatResetAt,
   formatRuns,
   formatTokensCompact,
   formatUsd,
@@ -96,5 +98,32 @@ describe('formatLastRun', () => {
 
   test('an unparseable value falls back to the raw string', () => {
     expect(formatLastRun('whenever')).toBe('whenever');
+  });
+});
+
+describe('formatPercent', () => {
+  test('an integer percent renders without a decimal point', () => {
+    expect(formatPercent(73)).toBe('73%');
+    expect(formatPercent(0)).toBe('0%');
+  });
+
+  test('a float percent keeps one decimal', () => {
+    expect(formatPercent(45.55)).toBe('45.6%');
+  });
+
+  test('null/undefined render as 0%', () => {
+    expect(formatPercent(null)).toBe('0%');
+    expect(formatPercent(undefined)).toBe('0%');
+  });
+});
+
+describe('formatResetAt', () => {
+  test('renders the reset time (UTC, tz-safe string slice)', () => {
+    expect(formatResetAt('2026-07-19T21:59:59+00:00')).toBe('resets jul 19 21:59');
+  });
+
+  test('a window with no reset renders nothing', () => {
+    expect(formatResetAt(null)).toBe('');
+    expect(formatResetAt(undefined)).toBe('');
   });
 });
