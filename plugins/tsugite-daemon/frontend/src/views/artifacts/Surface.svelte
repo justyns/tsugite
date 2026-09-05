@@ -65,7 +65,12 @@
     });
   });
 
+  // Sequence-guarded: a re-open lands while the previous read is still in flight,
+  // and the reply that arrives late belongs to a document nobody is showing.
+  let loadSeq = 0;
+
   async function load(doc: AgentArtifact) {
+    const seq = ++loadSeq;
     error = null;
     if (doc.path === null) {
       body = doc.content;
@@ -74,12 +79,14 @@
     loading = true;
     try {
       const file = await files.read(doc.path, doc.sessionId);
+      if (seq !== loadSeq) return;
       body = file.content ?? '';
     } catch (err) {
+      if (seq !== loadSeq) return;
       body = null;
       error = err instanceof Error ? err.message : String(err);
     } finally {
-      loading = false;
+      if (seq === loadSeq) loading = false;
     }
   }
 

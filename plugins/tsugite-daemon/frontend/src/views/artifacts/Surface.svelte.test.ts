@@ -183,3 +183,26 @@ test('a path-backed html file is left as its author wrote it', async () => {
   expect(await frameDoc()).not.toContain('--bg1');
   expect(getComputedStyle(frameEl()).colorScheme).toBe('light');
 });
+
+test('a slow read never overwrites a newer artifact', async () => {
+  const { files } = await import('$lib/stores/files.svelte');
+  let release: (file: { content: string }) => void = () => {};
+  const read = vi
+    .spyOn(files, 'read')
+    .mockImplementation(() => new Promise((resolve) => (release = resolve as typeof release)));
+
+  await openArtifact({ path: 'ops/alpha.md', title: 'alpha.md' });
+  await mount();
+
+  // The agent replaces the slot while that read is still in flight.
+  await openArtifact({ path: null, content: '# Newer\n', title: 'Newer' });
+  await expect.poll(frameDoc).toContain('<h1>Newer</h1>');
+
+  release({ content: '# Stale\n' });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  const doc = await frameDoc();
+  expect(doc).toContain('<h1>Newer</h1>');
+  expect(doc).not.toContain('Stale');
+  read.mockRestore();
+});
