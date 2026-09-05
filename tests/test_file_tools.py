@@ -881,6 +881,23 @@ def test_list_files_nested_gitignore(temp_dir, file_tools):
     assert ".gitignore" in files  # Local .gitignore should be listed
 
 
+def test_list_files_nested_gitignore_negation_beats_parent(temp_dir, file_tools):
+    """A negation in a nested .gitignore wins over the parent pattern it re-includes,
+    the way `git check-ignore` resolves it."""
+    (temp_dir / ".gitignore").write_text("*.log\n")
+
+    subdir = temp_dir / "subdir"
+    subdir.mkdir()
+    (subdir / ".gitignore").write_text("!keep.log\n")
+    (subdir / "keep.log").write_text("kept")
+    (subdir / "other.log").write_text("dropped")
+
+    files = call_tool("list_files", path=str(subdir))
+
+    assert "keep.log" in files
+    assert "other.log" not in files
+
+
 def test_list_files_no_gitignore(temp_dir, file_tools):
     """Test that list_files works normally when no .gitignore exists."""
     # Create test files without .gitignore
