@@ -124,7 +124,6 @@ class TestProvidersEndpoint:
             lambda: QuotaReport(
                 provider="demo",
                 label="Demo",
-                as_of="2026-01-01T00:00:00+00:00",
                 windows=(
                     QuotaWindow(
                         key="weekly_all",
@@ -141,7 +140,6 @@ class TestProvidersEndpoint:
         assert rows["demo"] == {
             "provider": "demo",
             "label": "Demo",
-            "as_of": "2026-01-01T00:00:00+00:00",
             "error": None,
             "windows": [
                 {

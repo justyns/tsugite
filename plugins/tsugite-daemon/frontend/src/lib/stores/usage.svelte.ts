@@ -54,20 +54,18 @@ export interface UsageScheduleRow extends UsageCacheSplit {
 }
 
 export interface UsageQuotaWindow {
-  /** Stable within its report ('session', 'weekly_all'); `label` is what the UI shows. */
+  /** Stable within its report ('session', 'weekly_all'). */
   key: string;
   label: string;
   used_pct: number;
   resets_at: string | null;
 }
 
-/** How much of one provider's subscription or budget is used. Best-effort:
- *  `error` carries the reason instead of windows when the provider's local
- *  state was unreadable. */
+/** How much of one provider's subscription or budget is used. `error` is set
+ *  instead of windows when the provider's local state was unreadable. */
 export interface UsageProviderRow {
   provider: string;
   label: string;
-  as_of: string | null;
   error: string | null;
   windows: UsageQuotaWindow[];
 }
@@ -139,7 +137,7 @@ export class UsageStore {
         api.get<UsageModelRow[]>(`/api/usage/models?${sinceQs}`),
         api.get<UsageScheduleRow[]>(`/api/usage/schedules?${sinceQs}`),
         api.get<UsageTotal>(`/api/usage/total?${sinceQs}`),
-        // Current state, so no range: the provider reports what it reports now.
+        // Current state, so no range.
         api.get<UsageProviderRow[]>('/api/usage/providers'),
       ]);
       this.summary = summary;

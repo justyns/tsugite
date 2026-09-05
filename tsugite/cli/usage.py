@@ -135,8 +135,7 @@ def total(
 
 
 def _fmt_reset(resets_at: str | None) -> str:
-    # Sliced, not parsed: rendering the provider's own timestamp avoids a
-    # timezone shift between what it reports and what the user reads.
+    # Sliced rather than parsed, so the user reads the provider's own timezone.
     return resets_at[:16].replace("T", " ") if resets_at else "-"
 
 

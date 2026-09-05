@@ -87,11 +87,9 @@ class UsageMixin:
         return JSONResponse(store.by_schedule(since=since, limit=limit))
 
     async def _usage_providers(self, request: Request) -> JSONResponse:
-        """Current subscription/budget utilization per provider quota source.
+        """How much of each provider's subscription or budget is used.
 
-        Current state, not a range aggregation, so it takes no query params. A
-        source reads local provider state, which may block, so it runs off the
-        event loop.
+        Current state rather than a range aggregation, so it takes no query params.
         """
         if err := self._check_auth(request):
             return err

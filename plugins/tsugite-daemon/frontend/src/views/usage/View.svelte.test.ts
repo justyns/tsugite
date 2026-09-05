@@ -325,8 +325,6 @@ test('hides the provider-limits section when no source reports', async () => {
 });
 
 test('provider limits show even when nothing has been logged yet', async () => {
-  // Quota is current state, not history: a fresh install with no recorded runs
-  // is exactly when someone checks whether they have headroom left.
   const empty = (path: string) =>
     path.startsWith('/api/usage/providers')
       ? okResponses(path)
@@ -338,4 +336,30 @@ test('provider limits show even when nothing has been logged yet', async () => {
 
   await expect.element(page.getByText('provider limits')).toBeInTheDocument();
   await expect.element(page.getByRole('meter', { name: 'Demo Cloud week' })).toBeInTheDocument();
+});
+
+test('two windows of the same kind both render', async () => {
+  // Claude reports one `weekly_scoped` limit per scoped model, so the kind is
+  // not unique within a provider.
+  mockGet((path) =>
+    Promise.resolve(
+      path.startsWith('/api/usage/providers')
+        ? [
+            {
+              provider: 'demo',
+              label: 'Demo Cloud',
+              error: null,
+              windows: [
+                { key: 'weekly_scoped', label: 'week · Alpha', used_pct: 10, resets_at: null },
+                { key: 'weekly_scoped', label: 'week · Beta', used_pct: 20, resets_at: null },
+              ],
+            },
+          ]
+        : okResponses(path),
+    ),
+  );
+  await render(View);
+
+  await expect.element(page.getByRole('meter', { name: 'Demo Cloud week · Alpha' })).toBeInTheDocument();
+  await expect.element(page.getByRole('meter', { name: 'Demo Cloud week · Beta' })).toBeInTheDocument();
 });

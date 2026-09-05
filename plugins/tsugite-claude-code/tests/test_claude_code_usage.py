@@ -97,15 +97,6 @@ def test_scoped_limit_without_a_display_name_falls_back_to_its_kind(tmp_path, mo
     assert usage.fetch().windows[0].label == "weekly_scoped"
 
 
-def test_as_of_is_the_fetch_time_in_iso_utc(tmp_path, monkeypatch):
-    _write_config(tmp_path, monkeypatch)
-
-    report = usage.fetch()
-
-    assert report.as_of == "2026-01-01T00:00:00+00:00"
-    assert report.error is None
-
-
 def test_missing_config_reports_an_error_and_no_windows(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
 

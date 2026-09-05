@@ -38,7 +38,7 @@ def no_nest_asyncio_in_tests():
 
     `nest_asyncio.apply()` monkey-patches asyncio internals globally, and on
     Python 3.14 those patches leave `asyncio.current_task()` returning None for
-    subsequent tests — which then breaks `asyncio.wait_for` / `asyncio.Timeout`
+    subsequent tests, which then breaks `asyncio.wait_for` / `asyncio.Timeout`
     in unrelated tests run later in the same worker. Tests already mock the
     questionary calls that need nest_asyncio in real interactive use, so the
     patch is unnecessary here. Pin the flag to True and replace the function

@@ -2,15 +2,14 @@
 
 Read from ``utilization.limits[]`` in the usage cache Claude Code writes to its
 own config. That list is self-describing, so a limit kind tsugite has never seen
-still shows up. The cache's sibling keys carry an account id and a spend figure
-that reads 100% while disabled; neither belongs in a report.
+still shows up. Its sibling keys hold an account id, and a spend figure that
+reads 100% while disabled; neither belongs in a report.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 from tsugite.usage.quota import QuotaReport, QuotaWindow, register_quota_source
@@ -59,11 +58,10 @@ def fetch() -> QuotaReport:
             )
             for limit in cache["utilization"]["limits"]
         )
-        as_of = datetime.fromtimestamp(cache["fetchedAtMs"] / 1000, timezone.utc).isoformat()
     except Exception:
         return _error("Claude Code's cached usage limits are not in a shape tsugite understands")
 
-    return QuotaReport(provider=PROVIDER, label=LABEL, as_of=as_of, windows=windows)
+    return QuotaReport(provider=PROVIDER, label=LABEL, windows=windows)
 
 
 register_quota_source(PROVIDER, LABEL, fetch)

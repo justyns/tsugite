@@ -68,12 +68,12 @@ export function formatLastRun(iso: string | null | undefined): string {
 
 /** A quota window's used share: 73 -> "73%", 45.55 -> "45.6%". A provider may
  * report a float percent where another reports an int. */
-export function formatPercent(pct: number | null | undefined): string {
-  return `${Math.round((pct ?? 0) * 10) / 10}%`;
+export function formatPercent(pct: number): string {
+  return `${Math.round(pct * 10) / 10}%`;
 }
 
 /** A quota window's reset time as "resets jul 19 21:59", or "" when the
  * provider reports none (an idle session window). */
-export function formatResetAt(iso: string | null | undefined): string {
+export function formatResetAt(iso: string | null): string {
   return iso ? `resets ${formatLastRun(iso)}` : '';
 }

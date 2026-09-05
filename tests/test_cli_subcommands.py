@@ -208,7 +208,6 @@ class TestUsageProviders:
                 {
                     "provider": "demo",
                     "label": "Demo",
-                    "as_of": "2026-01-01T00:00:00+00:00",
                     "error": None,
                     "windows": [
                         {"key": "session", "label": "session", "used_pct": 0.0, "resets_at": None},
@@ -230,9 +229,7 @@ class TestUsageProviders:
         assert "2026-01-08" in result.stdout
 
     def test_shows_the_error_for_an_unreadable_provider(self):
-        result = self._invoke(
-            [{"provider": "demo", "label": "Demo", "as_of": None, "error": "state unreadable", "windows": []}]
-        )
+        result = self._invoke([{"provider": "demo", "label": "Demo", "error": "state unreadable", "windows": []}])
 
         assert result.exit_code == 0
         assert "state unreadable" in result.stdout

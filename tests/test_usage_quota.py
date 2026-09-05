@@ -19,7 +19,6 @@ def test_registered_source_round_trips_as_a_dict():
         lambda: QuotaReport(
             provider="demo",
             label="Demo",
-            as_of="2026-01-01T00:00:00+00:00",
             windows=(
                 QuotaWindow(key="session", label="session", used_pct=0.0),
                 QuotaWindow(key="weekly_all", label="week", used_pct=73.0, resets_at="2026-01-08T00:00:00+00:00"),
@@ -30,7 +29,6 @@ def test_registered_source_round_trips_as_a_dict():
     assert _rows_by_provider()["demo"] == {
         "provider": "demo",
         "label": "Demo",
-        "as_of": "2026-01-01T00:00:00+00:00",
         "error": None,
         "windows": [
             {"key": "session", "label": "session", "used_pct": 0.0, "resets_at": None},

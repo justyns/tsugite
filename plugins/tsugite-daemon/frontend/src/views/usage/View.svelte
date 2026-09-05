@@ -93,7 +93,7 @@
             {#if row.error}
               <span class="u-prov-err">{row.error}</span>
             {:else}
-              {#each row.windows as win (win.key)}
+              {#each row.windows as win}
                 {@const reset = formatResetAt(win.resets_at)}
                 <div class="u-win">
                   <span class="u-win-name">{win.label}</span>
@@ -330,11 +330,11 @@
     gap: var(--sp-4);
   }
 
-  /* Provider quota cards: the .t-job card recipe, laid out like .u-cols. */
+  /* Provider quota cards, on the .t-job recipe. */
   .u-quota {
     display: grid;
     /* auto-fill, not auto-fit: one provider keeps a card's width instead of
-       stretching across the pane with its bars marooned at the far edge. */
+       stretching across the pane. */
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: var(--sp-3);
   }

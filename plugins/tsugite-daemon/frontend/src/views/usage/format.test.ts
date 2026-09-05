@@ -110,11 +110,6 @@ describe('formatPercent', () => {
   test('a float percent keeps one decimal', () => {
     expect(formatPercent(45.55)).toBe('45.6%');
   });
-
-  test('null/undefined render as 0%', () => {
-    expect(formatPercent(null)).toBe('0%');
-    expect(formatPercent(undefined)).toBe('0%');
-  });
 });
 
 describe('formatResetAt', () => {
@@ -124,6 +119,5 @@ describe('formatResetAt', () => {
 
   test('a window with no reset renders nothing', () => {
     expect(formatResetAt(null)).toBe('');
-    expect(formatResetAt(undefined)).toBe('');
   });
 });
