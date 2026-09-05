@@ -3,12 +3,17 @@ import { page } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { expect, test, vi, beforeEach } from 'vitest';
 import { TESTID } from '$lib/testids';
+import { theme } from '$lib/stores/theme.svelte';
 import { WORKSPACE } from '../files/__fixtures__/workspace';
+// The pane ships resolved token values into the frame, so the test page needs
+// the real sheet.
+import '../../styles/tokens.css';
 
 vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api }));
 
 beforeEach(async () => {
   await page.viewport(1200, 800);
+  theme.set('mocha');
   WORKSPACE.reset();
   const { artifacts } = await import('$lib/stores/artifacts.svelte');
   artifacts.items = {};
@@ -33,11 +38,14 @@ async function openArtifact(extra: Record<string, unknown> = {}) {
   return artifacts;
 }
 
+function frameEl(): HTMLIFrameElement {
+  return page.getByTestId(TESTID.artifactHtmlFrame).element() as HTMLIFrameElement;
+}
+
 /** The document the pane handed the sandboxed frame. */
 async function frameDoc(): Promise<string> {
-  const frame = page.getByTestId(TESTID.artifactHtmlFrame);
-  await expect.element(frame).toBeInTheDocument();
-  return (frame.element() as HTMLIFrameElement).srcdoc;
+  await expect.element(page.getByTestId(TESTID.artifactHtmlFrame)).toBeInTheDocument();
+  return frameEl().srcdoc;
 }
 
 async function mount(id = 'agent', sessionId: string | null = 'sess-1') {
@@ -136,4 +144,42 @@ test('the close control dismisses the artifact', async () => {
 test('a slot with no record explains itself instead of rendering blank', async () => {
   await mount('gone');
   await expect.element(page.getByText(/no longer open/i)).toBeInTheDocument();
+});
+
+/** `--bg1` as tokens.css resolves it, so the theme assertions are about values
+ *  and not merely the presence of a <style> block. */
+const BG1 = { mocha: '#181825', latte: '#e6e9ef' } as const;
+
+test('a generated markdown artifact renders in the active theme, and follows a switch', async () => {
+  await openArtifact({ path: null, content: '# Summary\n\nall good\n', title: 'Summary' });
+  await mount();
+  expect(await frameDoc()).toContain(BG1.mocha);
+  expect(getComputedStyle(frameEl()).colorScheme).toBe('dark');
+
+  theme.set('latte');
+
+  await expect.poll(frameDoc).toContain(BG1.latte);
+  await expect.poll(() => getComputedStyle(frameEl()).colorScheme).toBe('light');
+});
+
+test("a generated html artifact's own styles win over the injected defaults", async () => {
+  await openArtifact({
+    path: null,
+    content: '<style>body{background:#ffffff}</style><h1>Report</h1>',
+    content_type: 'html',
+    title: 'Report',
+  });
+  await mount();
+
+  const doc = await frameDoc();
+  expect(doc).toContain(BG1.mocha);
+  expect(doc.indexOf(BG1.mocha)).toBeLessThan(doc.indexOf('body{background:#ffffff}'));
+});
+
+test('a path-backed html file is left as its author wrote it', async () => {
+  await openArtifact({ path: 'reports/report.html', content_type: 'html', title: 'report.html' });
+  await mount();
+
+  expect(await frameDoc()).not.toContain('--bg1');
+  expect(getComputedStyle(frameEl()).colorScheme).toBe('light');
 });

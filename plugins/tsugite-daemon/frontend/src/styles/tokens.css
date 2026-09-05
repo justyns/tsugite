@@ -19,6 +19,9 @@ body {
 
 /* ---------- Tokens · default = Catppuccin Mocha ---------- */
 :root {
+  /* `color-scheme` for documents the host renders in an embedded frame, which
+     cannot see this sheet. */
+  --scheme: dark;
   /* surfaces: app shell → panel → surface → raised → hover · default = Catppuccin Mocha */
   --bg0: #11111b;
   --bg1: #181825;
@@ -136,6 +139,7 @@ body {
 }
 
 :root[data-theme='latte'] {
+  --scheme: light;
   --bg0: #dce0e8;
   --bg1: #e6e9ef;
   --bg2: #eff1f5;

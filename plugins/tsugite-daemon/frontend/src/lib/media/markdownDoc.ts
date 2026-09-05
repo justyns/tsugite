@@ -3,10 +3,14 @@
  * (`$lib/media/htmlPreview`), which is where agent-supplied markdown renders so
  * its raw HTML can never touch the app's document.
  *
- * The frame is an opaque origin and cannot see the app's theme tokens, so the
- * document carries its own sheet with literal colors. It is a light document,
- * matching the `color-scheme: light` the frame pins. The frame's CSP allows it
- * through `style-src 'unsafe-inline'`.
+ * The colors come from the theme sheet `$lib/media/docTheme` injects ahead of
+ * this one, so a generated document reads as part of the app on any theme. That
+ * sheet also supplies the page ground, the body text colour and the link colour,
+ * which is why no rule here sets them. The frame's CSP allows both through
+ * `style-src 'unsafe-inline'`.
+ *
+ * The fonts stay literal stacks: the frame reaches no network, so the app's
+ * webfonts would never load in it.
  */
 
 const MARKDOWN_CSS = `
@@ -14,31 +18,29 @@ body {
   margin: 0;
   padding: 16px 20px 30px;
   max-width: 72ch;
-  color: #2b2f36;
   font: 15px/1.62 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   overflow-wrap: break-word;
 }
-h1, h2, h3 { color: #14181d; line-height: 1.3; }
+h1, h2, h3 { color: var(--tx0); line-height: 1.3; }
 h1 { font-size: 1.6em; margin: 0 0 10px; }
-h2 { font-size: 1.25em; margin: 20px 0 7px; padding-bottom: 4px; border-bottom: 1px solid #e4e7eb; }
+h2 { font-size: 1.25em; margin: 20px 0 7px; padding-bottom: 4px; border-bottom: 1px solid var(--bd0); }
 h3 { font-size: 1.05em; margin: 16px 0 6px; }
 p { margin: 7px 0; }
 ul, ol { margin: 6px 0; padding-left: 20px; }
 li { margin: 3px 0; }
-a { color: #1f6feb; }
-strong { color: #14181d; }
+strong { color: var(--tx0); }
 img { max-width: 100%; }
-hr { border: 0; border-top: 1px solid #e4e7eb; margin: 16px 0; }
+hr { border: 0; border-top: 1px solid var(--bd0); margin: 16px 0; }
 code {
   font: 500 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #f2f4f7;
-  border: 1px solid #e4e7eb;
+  background: var(--bg3);
+  border: 1px solid var(--bd0);
   border-radius: 4px;
   padding: 0 4px;
 }
 pre {
-  background: #f7f8fa;
-  border: 1px solid #e4e7eb;
+  background: var(--bg2);
+  border: 1px solid var(--bd0);
   border-radius: 6px;
   padding: 10px 12px;
   overflow-x: auto;
@@ -47,16 +49,16 @@ pre code { background: none; border: 0; padding: 0; }
 table { border-collapse: collapse; margin: 10px 0; font-size: 0.92em; }
 th {
   text-align: left;
-  color: #5b626b;
-  border-bottom: 1px solid #d6dae0;
+  color: var(--tx2);
+  border-bottom: 1px solid var(--bd1);
   padding: 5px 12px 5px 0;
 }
-td { border-bottom: 1px solid #e4e7eb; padding: 5px 12px 5px 0; }
+td { border-bottom: 1px solid var(--bd0); padding: 5px 12px 5px 0; }
 blockquote {
   margin: 10px 0;
   padding: 8px 12px;
-  border-left: 3px solid #b6d4f2;
-  background: #f2f7fd;
+  border-left: 3px solid var(--acc);
+  background: var(--bg2);
   border-radius: 6px;
 }
 blockquote p { margin: 0; }
@@ -64,8 +66,8 @@ blockquote p { margin: 0; }
 .tsu-fm th { width: 14ch; vertical-align: top; }
 .tsu-fm td { overflow-wrap: anywhere; }
 .tsu-fm td pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-.wikilink { color: #8250df; border-bottom: 1px dashed #c8a2f0; text-decoration: none; }
-.wikilink.is-missing { color: #b3261e; border-bottom-color: #e5a9a4; }
+.wikilink { color: var(--brand); border-bottom: 1px dashed var(--brand); text-decoration: none; }
+.wikilink.is-missing { color: var(--st-err); border-bottom-color: var(--st-err); }
 .vh {
   position: absolute;
   width: 1px;

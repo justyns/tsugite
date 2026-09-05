@@ -16,8 +16,10 @@
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import HtmlPreview from '$lib/components/media/HtmlPreview.svelte';
   import { markdownDoc } from '$lib/media/markdownDoc';
+  import { readDocTheme } from '$lib/media/docTheme';
   import { artifacts, type AgentArtifact } from '$lib/stores/artifacts.svelte';
   import { spaces } from '$lib/stores/spaces.svelte';
+  import { theme } from '$lib/stores/theme.svelte';
   import { files } from '$lib/stores/files.svelte';
   import { renderMarkdown } from '../files/wiki';
 
@@ -43,6 +45,12 @@
   );
   const framed = $derived(html || markdown);
   const frameHtml = $derived(html ? (body ?? '') : rendered);
+  // Only an HTML file someone wrote keeps its own design. Rendered markdown
+  // reads its whole palette out of this sheet, so it is not optional there.
+  const docTheme = $derived.by(() => {
+    void theme.current; // the resolved literals change with it
+    return markdown || artifact?.path === null ? readDocTheme(document.documentElement) : null;
+  });
 
   // Re-run per (slot, revision): a second open of the same path still reloads,
   // and a replaced slot swaps content without remounting the tab.
@@ -133,6 +141,7 @@
         html={frameHtml}
         docPath={artifact.path ?? ''}
         sessionId={artifact.sessionId}
+        {docTheme}
         title={`Rendered ${artifact.title}`}
         testid={TESTID.artifactHtmlFrame}
       />
