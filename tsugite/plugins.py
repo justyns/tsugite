@@ -24,6 +24,7 @@ GROUP_SANDBOX = "tsugite.sandbox"
 GROUP_EXECUTORS = "tsugite.executors"
 GROUP_COMMANDS = "tsugite.commands"
 GROUP_CONTEXT_PROVIDERS = "tsugite.context_providers"
+GROUP_USAGE_PROVIDERS = "tsugite.usage_providers"
 PLUGIN_GROUPS = (
     GROUP_PLUGINS,
     GROUP_ADAPTERS,
@@ -35,6 +36,7 @@ PLUGIN_GROUPS = (
     GROUP_EXECUTORS,
     GROUP_COMMANDS,
     GROUP_CONTEXT_PROVIDERS,
+    GROUP_USAGE_PROVIDERS,
 )
 
 _plugin_hooks: dict[str, list] = {}

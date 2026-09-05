@@ -290,6 +290,16 @@ def reset_attachment_handlers_fixture():
 
 
 @pytest.fixture(autouse=True)
+def reset_quota_sources_fixture():
+    """Clear registered quota sources, so one test's source never reports into another's."""
+    from tsugite.usage.quota import reset_quota_sources
+
+    reset_quota_sources()
+    yield
+    reset_quota_sources()
+
+
+@pytest.fixture(autouse=True)
 def reset_ui_surfaces_fixture():
     """Clear registered UI surfaces, so one test's plugin never contributes a page to another's."""
     from tsugite.ui_surfaces import reset_ui_surfaces
