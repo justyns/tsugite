@@ -620,6 +620,18 @@ class TestAutoExpiry:
         assert scheduler.get("job1").last_status == "error"
 
     @pytest.mark.asyncio
+    async def test_run_count_not_incremented_when_the_run_reports_an_error(self, scheduler, run_callback):
+        """max_runs counts successful executions. A run that returns an error status
+        is just as unsuccessful as one that raises, so it must not burn a slot."""
+        run_callback.return_value = RunResult(output="", status="error", error="max_turns reached")
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", max_runs=2)
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        assert scheduler.get("job1").run_count == 0
+        assert scheduler.get("job1").last_status == "error"
+
+    @pytest.mark.asyncio
     async def test_enable_clears_disabled_reason(self, scheduler):
         entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)

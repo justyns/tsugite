@@ -358,7 +358,8 @@ class Scheduler:
                 succeeded = run_result.status == "success"
                 entry.last_status = "success" if succeeded else "error"
                 entry.last_error = None if succeeded else (run_result.error or run_result.status)
-                entry.run_count += 1
+                if succeeded:
+                    entry.run_count += 1
             except AgentSkippedError as e:
                 logger.info("Schedule '%s' skipped: %s", entry.id, e.reason)
                 entry.last_status = "skipped"
