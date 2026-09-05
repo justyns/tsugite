@@ -168,7 +168,7 @@ describe('ArtifactsStore', () => {
     const store = new ArtifactsStore();
     store.applySessionEvent(frame({ session_id: null, title: 'Unscoped' }));
 
-    expect(store.items.agent.title).toBe('Unscoped');
+    expect(store.items.agent?.title).toBe('Unscoped');
     expect(store.get('agent', 'sess-a')).toBeUndefined();
   });
 
