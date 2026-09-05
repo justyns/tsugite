@@ -181,8 +181,7 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
     Returns:
         PathSpec matcher or None if no .gitignore files found
     """
-    # One list per .gitignore, innermost first while walking up.
-    per_file: list[list[str]] = []
+    patterns: list[str] = []
     current = base_path.resolve()
 
     # Walk up the directory tree to find .gitignore files
@@ -193,7 +192,10 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
                 with gitignore_path.open("r", encoding="utf-8") as f:
                     # Parse gitignore patterns (skip empty lines and comments)
                     lines = [line.rstrip("\n\r") for line in f]
-                per_file.append([line for line in lines if line and not line.startswith("#")])
+                # Prepended, because the walk runs inward-out and pathspec takes the
+                # last matching pattern: a nested .gitignore has to come after the
+                # parent it re-includes from.
+                patterns[:0] = [line for line in lines if line and not line.startswith("#")]
             except Exception:
                 pass
 
@@ -202,10 +204,6 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
             break
 
         current = current.parent
-
-    # Outermost first: pathspec takes the last matching pattern, so a nested
-    # .gitignore has to come after the parent it re-includes from.
-    patterns = [pattern for group in reversed(per_file) for pattern in group]
 
     # Always exclude .git/ directory
     patterns.append(".git/")

@@ -85,9 +85,8 @@
       if (seq !== loadSeq) return;
       body = null;
       error = err instanceof Error ? err.message : String(err);
-    } finally {
-      if (seq === loadSeq) loading = false;
     }
+    loading = false;
   }
 
   function dismiss() {

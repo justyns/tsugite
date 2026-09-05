@@ -86,10 +86,10 @@ def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any
         # assigning `.file` would leave the UI printing into a dead buffer.
         console = get_display_console(custom_logger)
         with console.capture() as capture:
-            console.print()  # noqa: T201 - Rendering to buffer
-            console.print(table)  # noqa: T201 - Rendering to buffer
-            console.print()  # noqa: T201 - Rendering to buffer
-            console.print(summary)  # noqa: T201 - Rendering to buffer
-            console.print()  # noqa: T201 - Rendering to buffer
+            console.print()
+            console.print(table)
+            console.print()
+            console.print(summary)
+            console.print()
 
         event_bus.emit(InfoEvent(message=capture.get()))

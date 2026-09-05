@@ -531,16 +531,18 @@ async def test_content_block_cannot_shadow_a_tool():
     """Content blocks are model-authored. One named after a tool must not replace
     the callable with a str, which would break the tool for the rest of the run."""
 
-    def read_file(path: str = "") -> str:
+    # A name that is not a real tsugite tool, so it routes parent-only whatever
+    # state the shared registry is in when this test runs.
+    def probe_file(path: str = "") -> str:
         return f"contents of {path}"
 
-    tool = _make_tool("read_file", read_file, parent_only=True)
+    tool = _make_tool("probe_file", probe_file, parent_only=True)
     executor = SubprocessExecutor(event_bus=EventBus())
     executor.set_tools([tool], EventBus())
     try:
-        await executor.inject_content_blocks({"read_file": "I am not a function"})
+        await executor.inject_content_blocks({"probe_file": "I am not a function"})
 
-        result = await executor.execute("print(read_file(path='x'))")
+        result = await executor.execute("print(probe_file(path='x'))")
         assert result.error is None, f"tool was shadowed by the content block: {result.error}"
         assert "contents of x" in result.output
 

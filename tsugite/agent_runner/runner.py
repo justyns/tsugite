@@ -1358,7 +1358,7 @@ def preview_multistep_agent(
         # assigning `.file` would leave the UI printing into a dead buffer.
         preview_console = get_display_console(custom_logger)
         with preview_console.capture() as capture:
-            preview_console.print(table)  # noqa: T201 - Rendering to buffer, not user console
+            preview_console.print(table)
         event_bus.emit(InfoEvent(message=capture.get()))
     elif console:
         console.print(table)  # noqa: T201 - Intentional fallback when no event system available

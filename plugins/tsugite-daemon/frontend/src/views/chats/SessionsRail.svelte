@@ -188,7 +188,7 @@
       params: { sessionId: row.id },
       title: row.title ?? 'chat',
     });
-    if (row.pinned) pinDrag.start(row.id);
+    if (row.pinned && canReorderPins) pinDrag.start(row.id);
   }
 
   const pinnedIds = $derived(groups.pinned.map((p) => p.id));
@@ -200,12 +200,12 @@
   const canReorderPins = $derived(!isActiveFilter(filter));
 
   function onPinnedDragOver(e: DragEvent, row: Row) {
-    if (!row.pinned || !canReorderPins) return;
+    if (!row.pinned) return;
     pinDrag.over(e, row.id);
   }
 
   function onPinnedDrop(e: DragEvent, row: Row) {
-    if (!row.pinned || !canReorderPins) return;
+    if (!row.pinned) return;
     const move = pinDrag.drop(e);
     if (move)
       void sessions.reorderPins(moveItem(pinnedIds, pinnedIds.indexOf(move.id), move.insertAt));

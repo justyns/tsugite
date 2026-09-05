@@ -225,19 +225,20 @@ def spawn_agent(
         final_result = None
         errors = []
         # The child signals EOF by closing stdout, so one that hangs without
-        # exiting queues nothing at all. The deadline is what bounds that.
+        # exiting queues nothing at all, and one stuck in a chatty loop never
+        # goes quiet. The deadline is what bounds both.
         deadline = time.monotonic() + timeout
 
         while True:
+            if time.monotonic() >= deadline:
+                proc.kill()
+                raise RuntimeError(f"Subagent timed out after {timeout}s")
             # Try to get line from queue with timeout for periodic updates
             try:
                 line = line_queue.get(timeout=0.5)
             except queue.Empty:
                 # No data yet - just waiting for subprocess output
                 # Don't update progress here to avoid too many updates
-                if time.monotonic() >= deadline:
-                    proc.kill()
-                    raise RuntimeError(f"Subagent timed out after {timeout}s")
                 continue
 
             # Check for EOF or reader thread exception
