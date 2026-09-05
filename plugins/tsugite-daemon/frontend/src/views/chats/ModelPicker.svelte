@@ -1,45 +1,15 @@
-<script lang="ts">
-  // Conversation-header model control: a compact chip showing the session's
-  // current model (GET /api/sessions/{id}/settings) that opens a filterable,
-  // keyboard-navigable popover of GET /api/models. The popover groups models
-  // under provider headers and shows each model's context window, price, and
-  // vision/reasoning badges. Selecting a model PATCHes the session settings and
-  // toasts the outcome. The models list (~80 entries) is fetched once and cached
-  // at module scope so reopening / switching sessions is instant.
-  import { tick, untrack } from 'svelte';
-  import Icon from '$lib/components/icon/Icon.svelte';
-  import { pwmIgnore } from '$lib/components/inputs/pwmIgnore';
+<script module lang="ts">
+  // The model registry is process-global, not per session, so the cache belongs
+  // to the module: a second picker (another pane, or a remount) reuses the fetch
+  // rather than issuing its own and showing its own loading state.
   import { api } from '$lib/api/client';
-  import { sessions } from '$lib/stores/sessions.svelte';
-  import { toasts } from '$lib/components/feedback/toast-store.svelte';
-  import { TESTID } from '$lib/testids';
-  import { clipBoundaryLeft } from '$lib/dom';
-  import { modelPickerRequest } from './modelPickerSignal.svelte';
-  import {
-    groupModelsByProvider,
-    formatContext,
-    formatPrice,
-    type PickerModel,
-  } from './modelGrouping';
+  import type { PickerModel } from './modelGrouping';
 
   type Model = PickerModel;
 
-  let {
-    sessionId,
-    resolvedModel = null,
-    onChanged,
-  }: {
-    sessionId: string | null;
-    /** The effective model when no per-session override is set (the agent/global
-     *  default), so the chip can name what "default" actually runs. */
-    resolvedModel?: string | null;
-    /** Fired after a model change is persisted (the effort control refetches). */
-    onChanged?: () => void;
-  } = $props();
-
-  // Module-level cache: the model registry is process-global, not per session.
   let modelCache: Model[] | null = null;
   let modelCachePromise: Promise<Model[]> | null = null;
+
   function loadModels(): Promise<Model[]> {
     if (modelCache) return Promise.resolve(modelCache);
     if (!modelCachePromise) {
@@ -53,6 +23,38 @@
     }
     return modelCachePromise;
   }
+</script>
+
+<script lang="ts">
+  // Conversation-header model control: a compact chip showing the session's
+  // current model (GET /api/sessions/{id}/settings) that opens a filterable,
+  // keyboard-navigable popover of GET /api/models. The popover groups models
+  // under provider headers and shows each model's context window, price, and
+  // vision/reasoning badges. Selecting a model PATCHes the session settings and
+  // toasts the outcome. The models list (~80 entries) is fetched once and cached
+  // at module scope so reopening / switching sessions is instant.
+  import { tick, untrack } from 'svelte';
+  import Icon from '$lib/components/icon/Icon.svelte';
+  import { pwmIgnore } from '$lib/components/inputs/pwmIgnore';
+  import { sessions } from '$lib/stores/sessions.svelte';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
+  import { TESTID } from '$lib/testids';
+  import { clipBoundaryLeft } from '$lib/dom';
+  import { modelPickerRequest } from './modelPickerSignal.svelte';
+  import { groupModelsByProvider, formatContext, formatPrice } from './modelGrouping';
+
+  let {
+    sessionId,
+    resolvedModel = null,
+    onChanged,
+  }: {
+    sessionId: string | null;
+    /** The effective model when no per-session override is set (the agent/global
+     *  default), so the chip can name what "default" actually runs. */
+    resolvedModel?: string | null;
+    /** Fired after a model change is persisted (the effort control refetches). */
+    onChanged?: () => void;
+  } = $props();
 
   let current = $state<string | null>(null);
   let models = $state<Model[]>([]);

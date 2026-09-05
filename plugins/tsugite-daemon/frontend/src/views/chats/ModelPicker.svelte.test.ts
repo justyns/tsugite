@@ -211,3 +211,23 @@ test('keyboard: arrow + Enter selects a filtered model', async () => {
     model: 'openai:gpt-5.4',
   });
 });
+
+test('a second picker reuses the cached model list', async () => {
+  // The registry is process-global. Two pickers (side-by-side panes, or a
+  // remount) must not each fetch it and each sit in their own loading state.
+  const listCalls = () =>
+    vi.mocked(api.get).mock.calls.filter(([path]) => path === '/api/models').length;
+
+  render(ModelPicker, { sessionId: 's1' });
+  await page.getByTestId('chat-model-trigger').click();
+  await expect.element(page.getByTestId('chat-model-opt-openai:gpt-5.4-mini')).toBeInTheDocument();
+  const afterFirst = listCalls();
+  expect(afterFirst).toBeGreaterThan(0);
+
+  cleanup();
+  render(ModelPicker, { sessionId: 's2' });
+  await page.getByTestId('chat-model-trigger').click();
+  await expect.element(page.getByTestId('chat-model-opt-openai:gpt-5.4-mini')).toBeInTheDocument();
+
+  expect(listCalls()).toBe(afterFirst);
+});
