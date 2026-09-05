@@ -11,6 +11,9 @@ dependencies = [
 [project.entry-points."tsugite.providers"]
 claude_code = "tsugite_claude_code:create_provider"
 
+[project.entry-points."tsugite.usage_providers"]
+claude_code = "tsugite_claude_code.usage"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
