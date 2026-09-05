@@ -4,6 +4,7 @@ restart via the boot epoch, and a slow subscriber is told to resync instead of
 silently losing events. Without this, any connection gap (sleep/wake, blip,
 restart) left the client silently stale until a manual reload."""
 
+import asyncio
 import json
 from unittest.mock import patch
 
@@ -144,6 +145,38 @@ class TestEventsEndpoint:
         frames = await _collect_frames(server, "epoch=stale-epoch&last_seq=1", auth, 1)
         assert frames[0]["type"] == "hello"
         assert frames[0]["data"]["resync"] is True, "a restarted daemon (new epoch) must force a full resync"
+
+    @pytest.mark.asyncio
+    async def test_resynced_client_still_receives_live_events(self, server_client):
+        """After a restart the new epoch counts from 1 again, so the client's old
+        cursor says nothing about what it has seen. Carrying it into the dedup
+        filter would swallow every event until the new daemon passed that number."""
+        server, _client, auth = server_client
+
+        resp = await server._events(_request("epoch=stale-epoch&last_seq=500", auth))
+        agen = resp.body_iterator
+        frames = []
+
+        async def read_two():
+            async for chunk in agen:
+                if chunk.startswith("data: "):
+                    frames.append(json.loads(chunk[6:]))
+                if len(frames) == 1:
+                    server.event_bus.emit("session_update", {"title": "after restart"})
+                if len(frames) >= 2:
+                    return
+
+        try:
+            # Bounded so a regression fails here instead of wedging the suite: the
+            # symptom is a stream that goes quiet, which never ends on its own.
+            await asyncio.wait_for(read_two(), timeout=5)
+        except asyncio.TimeoutError:
+            pytest.fail(f"no live event reached a resynced client; got {frames}")
+        finally:
+            await agen.aclose()
+
+        assert frames[0]["data"]["resync"] is True
+        assert frames[1]["data"]["title"] == "after restart"
 
     @pytest.mark.asyncio
     async def test_live_events_dedupe_against_replay(self, server_client):

@@ -451,7 +451,10 @@ class HTTPServer(
         async def generator():
             try:
                 yield f"data: {json.dumps(hello)}\n\n"
-                seen = last_seq
+                # `last_seq` is a cursor in the client's epoch. A restart mints a
+                # new epoch that counts from 1 again, so carrying the old number
+                # into the dedup filter below would swallow every live event.
+                seen = last_seq if client_epoch == self.event_bus.epoch else 0
                 for msg in replay:
                     yield f"data: {json.dumps(msg)}\n\n"
                     seen = msg["seq"]
