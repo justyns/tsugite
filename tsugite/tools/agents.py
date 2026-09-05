@@ -172,6 +172,7 @@ def spawn_agent(
     # Set up progress spinner
     import queue
     import threading
+    import time
 
     from ..ui_context import get_progress, get_ui_handler
 
@@ -223,6 +224,9 @@ def spawn_agent(
         # Read JSONL stream and collect events
         final_result = None
         errors = []
+        # The child signals EOF by closing stdout, so one that hangs without
+        # exiting queues nothing at all. The deadline is what bounds that.
+        deadline = time.monotonic() + timeout
 
         while True:
             # Try to get line from queue with timeout for periodic updates
@@ -231,6 +235,9 @@ def spawn_agent(
             except queue.Empty:
                 # No data yet - just waiting for subprocess output
                 # Don't update progress here to avoid too many updates
+                if time.monotonic() >= deadline:
+                    proc.kill()
+                    raise RuntimeError(f"Subagent timed out after {timeout}s")
                 continue
 
             # Check for EOF or reader thread exception
