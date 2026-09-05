@@ -193,3 +193,52 @@ class TestEveryCommandResolves:
         group = self._group()
         for name in _LAZY_COMMANDS:
             assert _import_command(name).get_short_help_str() == group.commands[name].get_short_help_str()
+
+
+class TestUsageProviders:
+    """`tsu usage providers` renders whatever the quota sources report."""
+
+    def _invoke(self, rows):
+        with patch("tsugite.usage.collect_quota_reports", return_value=rows):
+            return runner.invoke(app, ["usage", "providers"])
+
+    def test_renders_a_window_per_row(self):
+        result = self._invoke(
+            [
+                {
+                    "provider": "demo",
+                    "label": "Demo",
+                    "as_of": "2026-01-01T00:00:00+00:00",
+                    "error": None,
+                    "windows": [
+                        {"key": "session", "label": "session", "used_pct": 0.0, "resets_at": None},
+                        {
+                            "key": "weekly_all",
+                            "label": "week",
+                            "used_pct": 73.0,
+                            "resets_at": "2026-01-08T21:59:59+00:00",
+                        },
+                    ],
+                }
+            ]
+        )
+
+        assert result.exit_code == 0
+        assert "Demo" in result.stdout
+        assert "session" in result.stdout
+        assert "73%" in result.stdout
+        assert "2026-01-08" in result.stdout
+
+    def test_shows_the_error_for_an_unreadable_provider(self):
+        result = self._invoke(
+            [{"provider": "demo", "label": "Demo", "as_of": None, "error": "state unreadable", "windows": []}]
+        )
+
+        assert result.exit_code == 0
+        assert "state unreadable" in result.stdout
+
+    def test_reports_no_sources(self):
+        result = self._invoke([])
+
+        assert result.exit_code == 0
+        assert "No provider" in result.stdout

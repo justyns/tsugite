@@ -132,3 +132,40 @@ def total(
     console.print(f"[bold]Runs:[/bold]   {t['runs']}")
     console.print(f"[bold]Tokens:[/bold] {_fmt_tokens(t['total_tokens'])}")
     console.print(f"[bold]Cost:[/bold]   {_fmt_cost(t['total_cost'])}")
+
+
+def _fmt_reset(resets_at: str | None) -> str:
+    # Sliced, not parsed: rendering the provider's own timestamp avoids a
+    # timezone shift between what it reports and what the user reads.
+    return resets_at[:16].replace("T", " ") if resets_at else "-"
+
+
+@usage_app.command("providers")
+def providers() -> None:
+    """Show how much of each provider's subscription or budget is used."""
+    from tsugite.usage import collect_quota_reports
+
+    rows = collect_quota_reports()
+    if not rows:
+        console.print("[dim]No provider quota sources registered.[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold cyan", padding=(0, 1))
+    table.add_column("Provider")
+    table.add_column("Window")
+    table.add_column("Used", justify="right")
+    table.add_column("Resets")
+
+    for row in rows:
+        if row["error"]:
+            table.add_row(row["label"], f"[red]{row['error']}[/red]", "-", "-")
+            continue
+        for i, window in enumerate(row["windows"]):
+            table.add_row(
+                row["label"] if i == 0 else "",
+                window["label"],
+                f"{window['used_pct']:g}%",
+                _fmt_reset(window["resets_at"]),
+            )
+
+    console.print(table)
