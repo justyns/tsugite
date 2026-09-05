@@ -1416,7 +1416,8 @@ def parse_response_text(content: str) -> ParsedResponse:
 
     first_open = cleaned.find(_EXEC_FENCE)
     prose_end = first_open if first_open != -1 else len(cleaned)
-    thought_start = cleaned.find("Thought:")
+    # Bounded by the fence: a "Thought:" inside the code is not the prose marker.
+    thought_start = cleaned.find("Thought:", 0, prose_end)
     if thought_start != -1:
         thought = cleaned[thought_start + len("Thought:") : prose_end].strip()
     else:

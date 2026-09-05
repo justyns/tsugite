@@ -59,6 +59,13 @@ def test_tail_after_executed_fence():
     assert p.tail == "All done."
 
 
+def test_thought_ignores_a_marker_inside_the_code():
+    # "Thought:" written in the code (a comment, a string) is not the prose
+    # marker; searching past the fence for it would discard the real prose.
+    p = parse_response_text("I will compute the sum.\n\n```python-exec\n# Thought: use sum()\nx = 1\n```")
+    assert p.thought == "I will compute the sum."
+
+
 def test_pure_prose_has_empty_tail():
     p = parse_response_text("Just words.")
     assert p.thought == "Just words."
