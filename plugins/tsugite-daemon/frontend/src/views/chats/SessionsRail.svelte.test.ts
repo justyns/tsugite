@@ -143,6 +143,32 @@ test('dragging a pinned row above another sends the new pinned order', async () 
   expect(reorder).toHaveBeenCalledWith(['p2', 'p1']);
 });
 
+test('a filtered rail refuses to reorder pins', async () => {
+  // The rail only shows part of the pin set under a filter, and the daemon
+  // rewrites positions 0..N-1 for exactly the ids it is sent - so reordering
+  // what is visible would collide the hidden pins onto those positions.
+  const reorder = vi.spyOn(sessions, 'reorderPins').mockResolvedValue(undefined);
+  render(SessionsRail, {
+    ...base,
+    rows: [
+      row('p1', { title: 'alpha pin', pinned: true, pin_position: 0 }),
+      row('p2', { title: 'hidden pin', pinned: true, pin_position: 1 }),
+      row('p3', { title: 'alpha other', pinned: true, pin_position: 2 }),
+    ],
+  });
+
+  await userEvent.fill(page.getByRole('searchbox', { name: 'Filter sessions' }), 'alpha');
+  await expect.element(page.getByText('hidden pin')).not.toBeInTheDocument();
+
+  const first = (await page.getByText('alpha pin').element()).closest('.srow-drag') as HTMLElement;
+  const third = (await page.getByText('alpha other').element()).closest(
+    '.srow-drag',
+  ) as HTMLElement;
+  dragRowOnto(third, first, 'top');
+
+  expect(reorder).not.toHaveBeenCalled();
+});
+
 test('an unpinned row is not a reorder drop target', async () => {
   const reorder = vi.spyOn(sessions, 'reorderPins').mockResolvedValue(undefined);
   render(SessionsRail, {

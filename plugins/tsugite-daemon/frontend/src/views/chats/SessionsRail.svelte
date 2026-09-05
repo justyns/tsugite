@@ -194,13 +194,18 @@
   const pinnedIds = $derived(groups.pinned.map((p) => p.id));
   const pinDrag = new ReorderDrag((id) => pinnedIds.indexOf(id), { axis: 'y' });
 
+  // A filter hides part of the pin set, and the daemon rewrites pin_position
+  // 0..N-1 for exactly the ids it is sent - reordering what is visible would
+  // drop the hidden pins onto positions the visible ones now hold.
+  const canReorderPins = $derived(!isActiveFilter(filter));
+
   function onPinnedDragOver(e: DragEvent, row: Row) {
-    if (!row.pinned) return;
+    if (!row.pinned || !canReorderPins) return;
     pinDrag.over(e, row.id);
   }
 
   function onPinnedDrop(e: DragEvent, row: Row) {
-    if (!row.pinned) return;
+    if (!row.pinned || !canReorderPins) return;
     const move = pinDrag.drop(e);
     if (move)
       void sessions.reorderPins(moveItem(pinnedIds, pinnedIds.indexOf(move.id), move.insertAt));
