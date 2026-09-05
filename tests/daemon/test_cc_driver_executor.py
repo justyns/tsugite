@@ -10,6 +10,7 @@ import shlex
 from pathlib import Path
 
 import pytest
+import tsugite_cc_driver.executor as executor_mod
 from tsugite_cc_driver.adapter import CCDriverConfig
 from tsugite_cc_driver.executor import (
     CCExecutor,
@@ -25,6 +26,10 @@ from tsugite_pty.pty_manager import PtyManager
 from tsugite_pty.terminal_runtime import spawn_terminal
 from tsugite_pty.terminal_store import TerminalSessionStore
 
+from tsugite.core.record_store import now_iso
+
+from .conftest import _wait_until
+
 
 class FakeJob:
     def __init__(self, job_id, *, prompt="do the thing", workspace_path=None, worktree_path=None, model=None):
@@ -34,6 +39,7 @@ class FakeJob:
         self.workspace_path = workspace_path
         self.worktree_path = worktree_path
         self.worker_terminal_id = None
+        self.last_activity_at = None
         self.model = model
 
 
@@ -59,12 +65,17 @@ class FakeOrchestrator:
         self._jobs = FakeJobStore()
         self.failed = []
         self.completed = []
+        self.activity = []
 
     def get_job(self, job_id):
         return self._jobs.get(job_id)
 
     def attach_worker_terminal(self, job_id, terminal_id):
         self._jobs.update(job_id, worker_terminal_id=terminal_id)
+
+    def record_worker_activity(self, job_id):
+        self.activity.append(job_id)
+        self._jobs.update(job_id, last_activity_at=now_iso())
 
     async def fail_worker(self, job_id, error, detail=None):
         self.failed.append((job_id, error, detail))
@@ -826,3 +837,91 @@ async def test_cancel_on_parked_job_kills_pty_but_keeps_resume_state(tmp_path, r
     assert st2 is not None, "parked teardown must keep DriveState so a retry can --resume"
     assert st2.cc_session_id == "cc-abc"
     assert st2.terminal_id is None, "the dead terminal must not look live to a later retry"
+
+
+@pytest.mark.asyncio
+async def test_worker_output_advances_the_liveness_stamp_and_silence_freezes_it(tmp_path, runtime, monkeypatch):
+    """PTY output stamps the job record, and a silent worker stops advancing it."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    orch._jobs.add(job)
+
+    config_dir = tmp_path / "cfgdir"
+    _write_trust_config(config_dir, workspace)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    # Talks for about half a second, then goes quiet without exiting, like a claude
+    # session that is alive but between tool calls. The sentinel is the last thing
+    # it prints, so a test can wait for silence instead of guessing at it.
+    fake = tmp_path / "claude"
+    fake.write_text(
+        "#!/bin/sh\nfor i in 1 2 3 4 5 6 7 8 9 10; do echo tick $i; sleep 0.05; done\necho DONE_TALKING\nsleep 30\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(executor_mod, "_ACTIVITY_THROTTLE_SECONDS", 0.0)
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+
+    assert await _wait_until(lambda: job.last_activity_at is not None), "the spawn must stamp the job record"
+    first = job.last_activity_at
+    assert await _wait_until(lambda: job.last_activity_at != first), "the stamp must advance while the worker talks"
+
+    terminal_id = ex.drive_state.get("job-1").terminal_id
+    assert await _wait_until(lambda: b"DONE_TALKING" in manager.get(terminal_id).buffer), (
+        "the fake must reach its sentinel"
+    )
+    await asyncio.sleep(0.1)  # let the sentinel chunk's callback land
+    quiet = job.last_activity_at
+    await asyncio.sleep(0.3)
+    assert job.last_activity_at == quiet, "a silent worker must not advance the stamp"
+
+
+@pytest.mark.asyncio
+async def test_liveness_stamps_are_throttled(tmp_path):
+    """A claude TUI emits chunks faster than the record should be written."""
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1")
+    orch._jobs.add(job)
+    ex = _executor(tmp_path, orch)
+    state = ex.drive_state.create("job-1", "tok-1")
+    loop = asyncio.get_running_loop()
+
+    for _ in range(20):
+        ex._on_output(state, loop)
+    await asyncio.sleep(0)
+
+    assert job.last_activity_at is not None, "the first chunk must stamp"
+    assert orch.activity == ["job-1"], f"a burst must stamp once, stamped {len(orch.activity)}x"
+
+
+@pytest.mark.asyncio
+async def test_spawn_stamps_liveness_before_any_output(tmp_path, runtime, monkeypatch):
+    """A worker that hangs before its first byte is one of the hangs the stamp exists
+    to catch, so null has to mean "this executor does not report liveness"."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    orch._jobs.add(job)
+
+    config_dir = tmp_path / "cfgdir"
+    _write_trust_config(config_dir, workspace)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    # Never prints anything, like a claude wedged on a dialog before its first turn.
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+
+    assert job.last_activity_at is not None, "spawning the worker must stamp the job record"
+    assert orch.activity == ["job-1"]
+
+    manager.kill(ex.drive_state.get("job-1").terminal_id)

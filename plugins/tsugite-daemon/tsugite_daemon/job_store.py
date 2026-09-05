@@ -190,6 +190,11 @@ class Job:
     # Set once summarised in an "all_done" barrier message; cleared when a retry
     # re-activates the job, putting it back in the next batch.
     barrier_notified: bool = False
+    # Stamped by a non-agent executor when it starts the worker and (throttled)
+    # whenever it sees worker output, so a parent can tell a busy worker from a
+    # hung one, including one that hangs before its first byte. None for agent
+    # jobs - use `session_status` on the worker session instead.
+    last_activity_at: Optional[str] = None
 
     def __post_init__(self):
         if not self.id:
@@ -239,6 +244,7 @@ class Job:
             "spawned_by": self.spawned_by,
             "executor": self.executor,
             "worker_terminal_id": self.worker_terminal_id,
+            "last_activity_at": self.last_activity_at,
         }
 
 
@@ -265,6 +271,17 @@ class JobStore(RecordStore):
     def list_all(self) -> list[Job]:
         """Return every Job record, newest-first by updated_at."""
         return sorted(super().list_all(), key=lambda j: j.updated_at or "", reverse=True)
+
+    def stamp_activity(self, job_id: str, when: str) -> None:
+        """Set last_activity_at without bumping updated_at, which the jobs board
+        renders as a running job's age and sorts on. Unknown ids are a no-op: a
+        stamp can land after the job aged out under the retention cap."""
+        with self._lock:
+            job = self._records.get(job_id)
+            if job is None:
+                return
+            job.last_activity_at = when
+            self._persist(job)
 
     def _coerce_update_value(self, key: str, value):
         if key == "state":

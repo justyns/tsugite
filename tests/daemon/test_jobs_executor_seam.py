@@ -701,3 +701,43 @@ async def test_missing_executor_keeps_the_job_awaiting_input(store, orchestrator
     parked = store.get(job.id)
     assert parked.state == JobState.AWAITING_INPUT.value
     assert parked.pending_question == "which branch?"
+
+
+# ── worker liveness ──
+
+
+@pytest.mark.asyncio
+async def test_record_worker_activity_stamps_the_liveness_field(store, orchestrator):
+    """Worker output stamps the field, each stamp advances it, and `to_payload`
+    includes it."""
+    job = _seed_running_executor_job(store, orchestrator)
+    assert store.get(job.id).last_activity_at is None, "no output yet means no stamp"
+
+    orchestrator.record_worker_activity(job.id)
+
+    fresh = store.get(job.id)
+    first = fresh.last_activity_at
+    assert first is not None, "worker output must stamp last_activity_at"
+    assert fresh.to_payload()["last_activity_at"] == first
+
+    orchestrator.record_worker_activity(job.id)
+    assert store.get(job.id).last_activity_at > first, "each stamp must advance"
+
+
+@pytest.mark.asyncio
+async def test_liveness_stamp_leaves_updated_at_alone(store, orchestrator):
+    """The jobs board renders updated_at as a running job's age and sorts on it, so
+    a heartbeat that moved it would pin every talking worker to the top."""
+    job = _seed_running_executor_job(store, orchestrator)
+    before = store.get(job.id).updated_at
+
+    orchestrator.record_worker_activity(job.id)
+
+    fresh = store.get(job.id)
+    assert fresh.last_activity_at is not None, "the stamp must land"
+    assert fresh.updated_at == before, "a heartbeat is not a record change"
+
+
+def test_record_worker_activity_ignores_an_unknown_job(orchestrator):
+    """A stamp can land after the job aged out under the retention cap."""
+    orchestrator.record_worker_activity("job-does-not-exist")

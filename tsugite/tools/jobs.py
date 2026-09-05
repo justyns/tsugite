@@ -97,6 +97,8 @@ def spawn_job(
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
+        `worker_session_id` is null for a non-agent executor. `get_job` describes
+        how to check on that worker.
     """
     from tsugite_daemon.session_runner import get_current_session_id
 
@@ -159,7 +161,6 @@ def spawn_job(
 
     return {
         "job_id": job.id,
-        # None for a non-agent executor job (no worker Session is spawned).
         "worker_session_id": started.id if started else None,
         "parent_session_id": parent_session_id,
         "notify_when": job.notify_when,
@@ -175,6 +176,17 @@ def get_job(job_id: str) -> dict:
     verifier verdicts (in `result.ac_results` when verifier ran), the
     worker/verifier session ids (so you can navigate via `session_status`),
     state, timestamps, and any error.
+
+    `last_activity_at` is the last time this job's executor saw worker output, or
+    the time it started the worker if there has been none. The stamp is throttled
+    (one write per 10 seconds on the `cc` executor), so a stamp minutes old on a
+    running job means the worker has gone quiet, and one still sitting at the job's
+    `created_at` means it never produced anything. `state` reads `running` in every
+    one of those cases. A null stamp means this executor does not report liveness.
+
+    A job on a non-agent executor (`executor="cc"`) runs a CLI in a PTY, so it has
+    no `worker_session_id` for `session_status`. Pass its `worker_terminal_id` to
+    `pty_capture` to read the worker's recent output.
 
     Args:
         job_id: Job id (e.g. 'job-4f2a1b3c').

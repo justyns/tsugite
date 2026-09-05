@@ -20,10 +20,11 @@ import shlex
 import shutil
 import tempfile
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from tsugite_cc_driver.hooks import build_initial_prompt, wrap_up_instruction
 from tsugite_cc_driver.settings import build_settings, cleanup, write_run_settings
@@ -45,6 +46,9 @@ class DriveState:
     # finishing a turn proves the prompt was answered). Drives the UI's
     # persistent needs-your-input marker via needs_attention/attention_cleared.
     attention_flagged: bool = False
+    # time.monotonic() of the last liveness stamp written to the job record.
+    last_activity_write: float = 0.0
+    unsubscribe_output: Optional[Callable[[], None]] = None
 
 
 class DriveStateStore:
@@ -78,6 +82,10 @@ _EXIT_CODE_HINTS = {
     127: "claude binary not found (PATH, or missing from the sandbox binds)",
     130: "interrupted (SIGINT)",
 }
+
+# A claude TUI emits dozens of output chunks a second. Cap a running job to one
+# liveness write per interval.
+_ACTIVITY_THROTTLE_SECONDS = 10.0
 
 # ANSI escape sequences (CSI colors/cursor, OSC title) to strip from a captured tail.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
@@ -450,11 +458,29 @@ class CCExecutor:
         state.terminal_id = session.id
         state.consecutive_continues = 0
         self._set_worker_terminal(job.id, session.id)
+        # Stamp before any output: a worker wedged before its first byte would
+        # otherwise be indistinguishable from an executor that reports nothing.
+        self._stamp_activity(state)
 
         proc = pty_manager.get(session.id)
         if proc is not None:
             loop = asyncio.get_running_loop()
             proc.on_exit(lambda p: self._on_pty_exit(job.id, p, loop))
+            state.unsubscribe_output = proc.subscribe(lambda _chunk: self._on_output(state, loop))
+
+    def _on_output(self, state: DriveState, loop) -> None:
+        """Called on the PTY reader thread. The throttle closes here rather than in
+        the callback, or a burst of chunks all pass it before the first write lands."""
+        now = time.monotonic()
+        if now - state.last_activity_write < _ACTIVITY_THROTTLE_SECONDS:
+            return
+        state.last_activity_write = now
+        loop.call_soon_threadsafe(self._stamp_activity, state)
+
+    def _stamp_activity(self, state: DriveState) -> None:
+        """Report the worker alive. Loop thread only."""
+        if self.orchestrator is not None:
+            self.orchestrator.record_worker_activity(state.job_id)
 
     async def cancel(self, job) -> None:
         """Tear down the driven session on any terminal finalize (best-effort). A
@@ -463,6 +489,11 @@ class CCExecutor:
         from tsugite_pty.tools import get_terminal_runtime
 
         state = self.drive_state.get(job.id)
+        if state is not None and state.unsubscribe_output:
+            # A worker that ignores SIGTERM keeps dispatching chunks; without this
+            # it would go on stamping a job that has already resolved.
+            state.unsubscribe_output()
+            state.unsubscribe_output = None
         if state is not None and state.terminal_id:
             pty_manager, _store, _cb = get_terminal_runtime()
             if pty_manager is not None:

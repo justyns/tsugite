@@ -13,6 +13,8 @@ from tsugite_daemon import gateway as gateway_mod
 from tsugite_daemon.config import load_daemon_config
 from tsugite_daemon.gateway import Gateway, run_daemon
 
+from .conftest import _wait_until
+
 
 def _write_daemon_config(tmp_path):
     ws = tmp_path / "ws"
@@ -38,16 +40,6 @@ def gateway(tmp_path):
     )
     gateway._drain_poll = 0.01
     return gateway
-
-
-async def _wait_until(predicate, timeout: float = 2.0) -> bool:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() > deadline:
-            return False
-        await asyncio.sleep(0.01)
-    return True
 
 
 class TestRejectsNewChats:

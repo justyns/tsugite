@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Optional
 from xml.sax.saxutils import quoteattr
 
+from tsugite.core.record_store import now_iso
 from tsugite_daemon.attention_store import SOURCE_JOB
 from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_prompts import (
@@ -131,6 +132,10 @@ class JobsOrchestrator:
                 pruned (the child holds the cwd open); on stuck/errored the child
                 is reaped too (or it leaks), but the executor should keep any
                 state a later retry needs to resume the conversation. Best-effort.
+
+        Besides complete_worker / fail_worker, an executor may call
+        attach_worker_terminal (stamp its worker's PTY onto the record) and
+        record_worker_activity (stamp last_activity_at, throttled by the caller).
         """
         self._executors[name] = executor
 
@@ -147,6 +152,11 @@ class JobsOrchestrator:
         """Stamp a job's worker_terminal_id so the web tile embeds that live
         terminal. Executor plugins call this instead of touching the JobStore."""
         self._jobs.update(job_id, worker_terminal_id=terminal_id)
+
+    def record_worker_activity(self, job_id: str) -> None:
+        """Stamp a job's last_activity_at when its executor sees worker output.
+        Every call is a store write, so callers throttle."""
+        self._jobs.stamp_activity(job_id, now_iso())
 
     @property
     def executor_names(self) -> list[str]:
@@ -644,7 +654,7 @@ class JobsOrchestrator:
             if job.error:
                 result["stuck_error_at_override"] = job.error
             self._jobs.update_state(job_id, JobState.DONE.value)
-            self._jobs.update(job_id, result=result, error=None, resolved_at=_iso_now())
+            self._jobs.update(job_id, result=result, error=None, resolved_at=now_iso())
             self.close_batch_barrier(job.parent_session_id)
             # Clean exit: stop a non-agent executor's child BEFORE pruning its cwd.
             await self._cancel_executor(self._jobs.get(job_id))
@@ -1709,9 +1719,3 @@ def render_jobs_context_xml(jobs: list[Job], recent_limit: int = 3) -> str:
         lines.append("    </recent>")
     lines.append("  </jobs>")
     return "\n".join(lines)
-
-
-def _iso_now() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat()
