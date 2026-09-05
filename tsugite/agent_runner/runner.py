@@ -1354,14 +1354,12 @@ def preview_multistep_agent(
 
     # Output table (via console fallback since tables need special rendering)
     if event_bus:
-        # For events, render table to string
-        from io import StringIO
-
-        buffer = StringIO()
-        temp_console = get_display_console(custom_logger)
-        temp_console.file = buffer
-        temp_console.print(table)  # noqa: T201 - Rendering to buffer, not user console
-        event_bus.emit(InfoEvent(message=buffer.getvalue()))
+        # `capture` borrows the live console for its width, then hands it back;
+        # assigning `.file` would leave the UI printing into a dead buffer.
+        preview_console = get_display_console(custom_logger)
+        with preview_console.capture() as capture:
+            preview_console.print(table)  # noqa: T201 - Rendering to buffer, not user console
+        event_bus.emit(InfoEvent(message=capture.get()))
     elif console:
         console.print(table)  # noqa: T201 - Intentional fallback when no event system available
 

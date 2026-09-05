@@ -77,21 +77,19 @@ def display_step_metrics(metrics: List[StepMetrics], custom_logger: Optional[Any
     # Emit through event system
     ui_handler = get_ui_handler(custom_logger)
     if ui_handler:
-        from io import StringIO
-
         from tsugite.events import EventBus, InfoEvent
 
         event_bus = EventBus()
         event_bus.subscribe(ui_handler.handle_event)
 
-        # Render table to string
-        buffer = StringIO()
-        temp_console = get_display_console(custom_logger)
-        temp_console.file = buffer
-        temp_console.print()  # noqa: T201 - Rendering to buffer
-        temp_console.print(table)  # noqa: T201 - Rendering to buffer
-        temp_console.print()  # noqa: T201 - Rendering to buffer
-        temp_console.print(summary)  # noqa: T201 - Rendering to buffer
-        temp_console.print()  # noqa: T201 - Rendering to buffer
+        # `capture` borrows the live console for its width, then hands it back;
+        # assigning `.file` would leave the UI printing into a dead buffer.
+        console = get_display_console(custom_logger)
+        with console.capture() as capture:
+            console.print()  # noqa: T201 - Rendering to buffer
+            console.print(table)  # noqa: T201 - Rendering to buffer
+            console.print()  # noqa: T201 - Rendering to buffer
+            console.print(summary)  # noqa: T201 - Rendering to buffer
+            console.print()  # noqa: T201 - Rendering to buffer
 
-        event_bus.emit(InfoEvent(message=buffer.getvalue()))
+        event_bus.emit(InfoEvent(message=capture.get()))
