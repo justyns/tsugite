@@ -1,5 +1,7 @@
 """Agent orchestration tools for spawning and managing sub-agents."""
 
+import os
+import signal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +31,13 @@ def _build_subagent_cmd(agent_file: Path, model_override: Optional[str], sandbox
         for domain in sandbox_ctx.allow_domains:
             cmd.extend(["--allow-domain", domain])
     return cmd
+
+
+def _kill_process_tree(proc) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def resolve_agent_path(agent_path: str) -> Optional[Path]:
@@ -187,7 +196,6 @@ def spawn_agent(
         emit_info_event(f"🚀 Spawning subagent: [cyan]{agent_name}[/cyan]...")
 
     try:
-        # Spawn subprocess with line buffering
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -196,18 +204,16 @@ def spawn_agent(
             text=True,
             bufsize=1,  # Line buffered for real-time output
             cwd=str(_effective_cwd()),
+            start_new_session=True,
         )
 
-        # Write context to stdin then close it
         proc.stdin.write(context_json)
         proc.stdin.close()
 
-        # Queue for passing lines from reader thread to main thread
         line_queue = queue.Queue()
         reader_exception = None
 
         def read_stdout():
-            """Read stdout lines in separate thread and put in queue."""
             nonlocal reader_exception
             try:
                 for line in proc.stdout:
@@ -217,11 +223,19 @@ def spawn_agent(
                 reader_exception = e
                 line_queue.put(None)
 
-        # Start reader thread
         reader_thread = threading.Thread(target=read_stdout, daemon=True)
         reader_thread.start()
 
-        # Read JSONL stream and collect events
+        # A child that fills the stderr pipe blocks on write(2).
+        stderr_text = ""
+
+        def read_stderr():
+            nonlocal stderr_text
+            stderr_text = proc.stderr.read()
+
+        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+        stderr_thread.start()
+
         final_result = None
         errors = []
         # The child signals EOF by closing stdout, so one that hangs without
@@ -231,7 +245,7 @@ def spawn_agent(
 
         while True:
             if time.monotonic() >= deadline:
-                proc.kill()
+                _kill_process_tree(proc)
                 raise RuntimeError(f"Subagent timed out after {timeout}s")
             # Try to get line from queue with timeout for periodic updates
             try:
@@ -280,17 +294,17 @@ def spawn_agent(
 
         # Wait for completion
         try:
-            return_code = proc.wait(timeout=timeout)
+            return_code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _kill_process_tree(proc)
             raise RuntimeError(f"Subagent timed out after {timeout}s")
 
         # Check for failures
         if return_code != 0:
-            stderr = proc.stderr.read()
+            stderr_thread.join(timeout=1.0)
             error_msg = f"Subagent failed with exit code {return_code}"
-            if stderr:
-                error_msg += f": {stderr}"
+            if stderr_text:
+                error_msg += f": {stderr_text}"
             if errors:
                 error_msg += f"\nErrors: {[e['error'] for e in errors]}"
             raise RuntimeError(error_msg)
