@@ -184,16 +184,20 @@ Each `CommandParam` carries `required`, an optional `choices` list (a fixed enum
 
 ## Context providers
 
-A plugin can contribute **context items** - structured `{key, label, value}` records that get folded into the agent's context (as a `<client_context>` block) and rendered in the web UI's context gutter, the same path the browser's own providers (e.g. location) use. There are two kinds, and one provider may be either or both:
+A plugin can contribute **context items** - `Attachment.context(key, label, value, untrusted=False)` records that get folded into the agent's context (as a `<client_context>` block) and rendered in the web UI's context gutter, the same path the browser's own providers (e.g. location) use. There are three kinds, and one provider may combine them:
 
 - **Menu provider** - appears in the composer's "add context" menu. On pick the daemon runs `capture` server-side. Add `choices` to first offer a submenu; the picked value arrives as `capture`'s `arg` (it is `None` for a direct capture on pick).
 - **Detector** - `detect` scans the outgoing message server-side at send time and attaches an item for anything it recognizes (a URL, a ticket id). Detectors run best-effort: a raising detector is logged and skipped, never breaking the send.
+- **Autocomplete source** - `autocomplete_prefix` plus `search` turn the provider into an `@<prefix> <query>` source in the composer. `search(context, query)` runs server-side as the user types, and picking a result captures it through `capture`.
 
 Register providers at import time via the module-only `tsugite.context_providers` group:
 
 ```python
 # tsugite_my_plugin/context.py
-from tsugite.context import ContextChoice, ContextItem, ContextProvider, register_context_provider
+import re
+
+from tsugite.attachments.base import Attachment
+from tsugite.context import ContextChoice, ContextProvider, register_context_provider
 
 
 # Menu provider (with a submenu). `context` carries {session_id, user_id, agent, workspace_dir}.
@@ -201,10 +205,10 @@ def open_files(context: dict) -> list[ContextChoice]:
     return [ContextChoice(value="README.md", label="README.md")]
 
 
-def capture_file(arg: str | None, context: dict) -> list[ContextItem]:
+def capture_file(arg: str | None, context: dict) -> list[Attachment]:
     if not arg:
         return []
-    return [ContextItem(key=f"file:{arg}", label=arg, value=open(arg).read())]
+    return [Attachment.context(key=f"file:{arg}", label=arg, value=open(arg).read())]
 
 
 register_context_provider(
@@ -213,13 +217,9 @@ register_context_provider(
 
 
 # Detector - attach an item for each ticket id mentioned in the message.
-import re
-
-_TICKET = re.compile(r"\b([A-Z]+-\d+)\b")
-
-
-def detect_tickets(message: str, context: dict) -> list[ContextItem]:
-    return [ContextItem(key=f"ticket:{t}", label=t, value=f"Ticket {t}") for t in dict.fromkeys(_TICKET.findall(message))]
+def detect_tickets(message: str, context: dict) -> list[Attachment]:
+    tickets = dict.fromkeys(re.findall(r"\b[A-Z]+-\d+\b", message))
+    return [Attachment.context(key=f"ticket:{t}", label=t, value=f"Ticket {t}") for t in tickets]
 
 
 register_context_provider(ContextProvider(key="ticket", label="Ticket", icon="tag", detect=detect_tickets))
@@ -230,4 +230,4 @@ register_context_provider(ContextProvider(key="ticket", label="Ticket", icon="ta
 my_plugin = "tsugite_my_plugin.context"
 ```
 
-`ContextProvider(key, label, icon="sparkle", capture=None, choices=None, detect=None)`: `key` is the stable id, `capture(arg, context)` runs a menu pick, `choices(context)` builds its optional submenu, and `detect(message, context)` scans a message. A provider shows in the menu iff it has a `capture`. The daemon exposes menu providers over `/api/context-providers`; detectors run automatically as each message is sent. `examples/tsugite-example-plugin/tsugite_example_plugin/context.py` is a heavily commented, copy-paste reference of both kinds.
+`ContextProvider(key, label, icon="sparkle", capture=None, choices=None, detect=None, picker=False, menu=True, autocomplete_prefix=None, search=None)`: `key` is the stable id, `capture(arg, context)` runs a menu pick, `choices(context)` builds its optional submenu, `detect(message, context)` scans a message, and `search(context, query)` answers a typed `@` query. Set `picker=True` when the choices are large enough to want the searchable overlay, and `menu=False` for a capture reached only by an explicit UI action or an `@` prefix. A provider shows in the menu iff it has a `capture` and `menu` is true. The daemon exposes menu providers over `/api/context-providers`; detectors run automatically as each message is sent. `examples/tsugite-example-plugin/tsugite_example_plugin/context.py` is a heavily commented, copy-paste reference of all three kinds.

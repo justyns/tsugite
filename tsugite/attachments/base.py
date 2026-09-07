@@ -68,8 +68,7 @@ class Attachment:
 
         ``key`` is the stable id used for dedupe and the UI chip; ``label`` is the
         human name the model and UI show; ``value`` is the text. Fills the text
-        content-type so context producers don't repeat it. This is the shape the
-        old ``ContextItem`` carried, now just an Attachment.
+        content-type so context producers don't repeat it.
         """
         return cls(
             name=label,
@@ -88,8 +87,7 @@ class Attachment:
 
     @property
     def value(self) -> str:
-        """The text content (an alias of ``content`` when it is text, else "").
-        Lets context code read ``.value`` the way the old ``ContextItem`` did."""
+        """The text content (an alias of ``content`` when it is text, else "")."""
         return self.content if isinstance(self.content, str) else ""
 
     def to_metadata(self) -> dict:
