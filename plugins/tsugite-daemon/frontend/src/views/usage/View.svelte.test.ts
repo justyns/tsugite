@@ -360,6 +360,10 @@ test('two windows of the same kind both render', async () => {
   );
   await render(View);
 
-  await expect.element(page.getByRole('meter', { name: 'Demo Cloud week · Alpha' })).toBeInTheDocument();
-  await expect.element(page.getByRole('meter', { name: 'Demo Cloud week · Beta' })).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('meter', { name: 'Demo Cloud week · Alpha' }))
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole('meter', { name: 'Demo Cloud week · Beta' }))
+    .toBeInTheDocument();
 });
