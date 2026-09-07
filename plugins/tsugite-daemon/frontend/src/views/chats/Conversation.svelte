@@ -726,9 +726,14 @@
                 meta={block.meta}
               />
             {:else if block.kind === 'content'}
-              <!-- Named content block (a fence-injected variable): its own panel
-                   titled by name, not raw XML inside the prose. -->
-              <CodeBlock code={block.text} lang="content" filename={block.name} collapsed />
+              <!-- Named content block (a fence-injected variable), folded to a row titled by name. -->
+              <CodeBlock
+                code={block.text}
+                lang="content"
+                filename={block.name}
+                summaryLabel={block.name}
+                collapsed
+              />
             {:else if block.kind === 'result'}
               <CodeBlock code={JSON.stringify(block.data, null, 2)} lang="json" collapsed />
             {:else if block.kind === 'error'}
@@ -930,7 +935,7 @@
   .hd-edit:focus {
     outline: none;
   }
-  /* The alias field carries its hint under it, so it takes a header row of its own. */
+  /* The alias field takes a header row of its own, with its hint underneath. */
   .hd-alias {
     flex-basis: 100%;
     min-width: 0;

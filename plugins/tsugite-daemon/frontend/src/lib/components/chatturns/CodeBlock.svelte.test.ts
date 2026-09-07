@@ -59,7 +59,7 @@ test('individual tool calls render as exec disclosure rows with their own output
   await expect.element(page.getByText('file-a file-b')).toBeInTheDocument();
 });
 
-test('auto-collapses when the run finishes; a manual toggle wins until the prop flips', async () => {
+test('auto-collapses when the run finishes; a manual toggle applies until the prop flips', async () => {
   const { rerender } = await render(CodeBlock, {
     code,
     lang: 'python',
@@ -176,7 +176,6 @@ test('a finished block folds its tool calls and output away', async () => {
     calls: [{ tool: 'read_file', status: 'done' as const }],
     output: 'lots of output',
   });
-  // By container, not by text: the folded summary names the tool too.
   expect(container.querySelector('.t-code-calls')).not.toBeVisible();
   await expect.element(page.getByText('lots of output')).not.toBeVisible();
 });
@@ -423,4 +422,57 @@ test('a failed block never folds to a row', async () => {
   expect(container.querySelector('button.t-code-summary')).toBeNull();
   expect(container.querySelector('.t-code-hd')).not.toBeNull();
   await expect.element(page.getByText('HTTPError: 401')).toBeVisible();
+});
+
+test('a content block folds to a one-line row with its name and line count', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'alpha\nbeta\ngamma',
+    lang: 'content',
+    filename: 'new_routes',
+    summaryLabel: 'new_routes',
+    collapsed: true,
+  });
+
+  const row = container.querySelector('button.t-code-summary');
+  expect(row).not.toBeNull();
+  expect(row!.querySelector('.sum')!.textContent).toBe('new_routes');
+  expect(row!.textContent).toContain('3 lines');
+  expect(container.querySelector('.t-code-hd')).toBeNull();
+  expect(container.querySelector('.pre-wrap')).toBeNull();
+});
+
+test('clicking the content row expands it to the full content, which stays copyable', async () => {
+  const onCopy = vi.fn();
+  const { container } = await render(CodeBlock, {
+    code: 'alpha\nbeta\ngamma',
+    lang: 'content',
+    filename: 'new_routes',
+    summaryLabel: 'new_routes',
+    collapsed: true,
+    onCopy,
+  });
+
+  await page.getByRole('button', { name: /new_routes/ }).click();
+
+  expect(container.querySelector('button.t-code-summary')).toBeNull();
+  await expect.element(page.getByText('alpha beta gamma')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Copy code' }).click();
+  expect(onCopy).toHaveBeenCalledWith('alpha\nbeta\ngamma');
+});
+
+test('a code execution with groups keeps its group summary and tool tail', async () => {
+  const { container } = await render(CodeBlock, {
+    code: 'read_file(path="a")',
+    lang: 'python',
+    collapsed: true,
+    calls: [{ tool: 'read_file', status: 'done' as const, groupId: 'g1' }],
+    groups: [{ id: 'g1', title: 'check for exact duplicate issue' }],
+  });
+
+  const row = container.querySelector('button.t-code-summary');
+  expect(row).not.toBeNull();
+  expect(row!.querySelector('.sum')!.textContent).toBe('check for exact duplicate issue');
+  expect(row!.textContent).toContain('1 tool');
+  expect(row!.textContent).not.toContain('line');
 });

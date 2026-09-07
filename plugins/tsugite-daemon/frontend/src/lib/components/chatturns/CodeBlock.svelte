@@ -33,6 +33,7 @@
     output,
     calls = [],
     groups = [],
+    summaryLabel,
     returnValue,
     meta,
     children,
@@ -50,7 +51,7 @@
     // Whether the collapse control is offered.
     collapsible?: boolean;
     // Collapsed state; followed across prop changes so a finished run
-    // auto-collapses its code (a manual toggle wins until the prop next flips).
+    // auto-collapses its code (a manual toggle applies until the prop next flips).
     collapsed?: boolean;
     // Combined run output (persisted code_execution replay; the live path
     // carries per-call outputs on `calls` instead).
@@ -59,6 +60,8 @@
     calls?: CodeCallRow[];
     // `tsu_group` sections; a call carrying a group id renders under that heading.
     groups?: CodeGroupRow[];
+    // Folded-row label for a block that runs nothing (a content block's name).
+    summaryLabel?: string;
     returnValue?: string;
     // Run duration for the header ("0.4s").
     meta?: string;
@@ -86,6 +89,7 @@
   // code peek, which is then the only thing left to show.
   const summary = $derived.by(() => {
     if (!isCollapsed) return '';
+    if (summaryLabel) return summaryLabel;
     const labels = groups.length > 0 ? groups.map((g) => g.title) : calls.map((c) => c.tool);
     return [...new Set(labels)].join(' · ');
   });
@@ -143,7 +147,6 @@
   class:is-run={running}
 >
   {#if summary}
-    <!-- Folded with groups: the agent's own labels say more than a line of code. -->
     <button
       type="button"
       class="t-code-summary"
@@ -157,6 +160,9 @@
       <span class="grow"></span>
       {#if running}<span class="run"><Spin />running</span>{/if}
       {#if failed}<span class="flag">failed</span>{/if}
+      {#if summaryLabel && lineCount > 0}
+        <span class="tail">{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>
+      {/if}
       {#if calls.length > 0}
         <span class="tail">{calls.length} {calls.length === 1 ? 'tool' : 'tools'}</span>
       {/if}
@@ -204,7 +210,7 @@
     </div>
   {/if}
   {#snippet callRow(call: CodeCallRow)}
-    <!-- Running rows stay CLOSED (the header spinner carries the signal):
+    <!-- Running rows stay CLOSED (the header spinner shows it):
          auto-opening each call while a block streams many of them makes the
          timeline flap open/shut. Only failures open themselves. -->
     <ExecBlock
