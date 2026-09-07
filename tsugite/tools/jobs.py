@@ -57,9 +57,11 @@ def spawn_job(
 
     Args:
         prompt: Task instruction for the spawned Job.
-        acceptance_criteria: List of criterion strings the verifier grades
-            against. Empty list short-circuits verification (Job goes straight
-            to done).
+        acceptance_criteria: List of criterion strings. A criterion starting
+            with cmd:<command>, exit_code:<command>:<n> or file_exists:<path>
+            is checked by exit status in the Job's working directory and the
+            verifier grades the rest. Empty list short-circuits verification
+            (Job goes straight to done).
         repo: Repo path (workspace-relative or absolute). The worker runs in a
             fresh git worktree provisioned under `<repo>/.tsugite-jobs/<job_id>`,
             isolated from the parent checkout; it's pruned on done/cancelled and
