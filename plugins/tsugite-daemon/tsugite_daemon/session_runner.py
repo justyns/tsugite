@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any, Callable, Coroutine, Optional
 from uuid import uuid4
 from xml.sax.saxutils import quoteattr
 
+from tsugite.cancellation import set_cancel_event
 from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
@@ -152,6 +154,7 @@ class SessionRunner:
         self._notification_channels = notification_channels or {}
         store.set_turn_end_listener(self._on_turn_end)
         self._active_tasks: dict[str, asyncio.Task] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
         self._completion_listeners: list[NotifyCallback] = []
         if notify_callback:
             self._completion_listeners.append(notify_callback)
@@ -212,14 +215,23 @@ class SessionRunner:
         progress = LoggingProgressHandler(self._store, session.id, broadcaster=self._event_bus)
         progress._emit("session_start", {"prompt": session.prompt[:200]})
 
+        cancel_event = threading.Event()
+        self._cancel_events[session.id] = cancel_event
         loop = asyncio.get_running_loop()
-        task = loop.create_task(self._run_session(session, progress))
+        task = loop.create_task(self._run_session(session, progress, cancel_event))
         self._active_tasks[session.id] = task
-        task.add_done_callback(lambda t: self._active_tasks.pop(session.id, None))
+
+        def _forget(_task: asyncio.Task) -> None:
+            self._active_tasks.pop(session.id, None)
+            self._cancel_events.pop(session.id, None)
+
+        task.add_done_callback(_forget)
 
         return session
 
-    async def _run_session(self, session: Session, progress: LoggingProgressHandler) -> None:
+    async def _run_session(
+        self, session: Session, progress: LoggingProgressHandler, cancel_event: threading.Event
+    ) -> None:
         adapter = self._adapter
 
         from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
@@ -271,6 +283,7 @@ class SessionRunner:
 
         set_current_session_id(session.id)
         set_interaction_backend(NonInteractiveBackend())
+        set_cancel_event(cancel_event)
 
         try:
             result = await adapter.handle_message(
@@ -576,6 +589,9 @@ class SessionRunner:
             logger.debug("Auto-title failed for session '%s': %s", session.id, e)
 
     def cancel_session(self, session_id: str) -> None:
+        event = self._cancel_events.get(session_id)
+        if event:
+            event.set()
         task = self._active_tasks.get(session_id)
         if task and not task.done():
             task.cancel()

@@ -5,17 +5,24 @@ so a turn that dies has to say so in history rather than only on the live SSE
 frame, which is gone after a reload.
 """
 
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import RuntimeDefaults
-from tsugite_daemon.session_store import SessionStore
+from tsugite_daemon.session_runner import SessionRunner
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
+from tsugite.agent_runner.history_integration import record_session_end
 from tsugite.agent_runner.models import AgentSkippedError
+from tsugite.cancellation import is_cancelled
 from tsugite.exceptions import AgentExecutionError
 from tsugite.history import get_history_backend
+
+from .conftest import _wait_until
 
 POISON = "API Error: 400 messages: text content blocks must be non-empty (subtype=success)"
 TOO_LONG = "prompt is too long: 300000 tokens > 200000 maximum"
@@ -236,3 +243,36 @@ async def test_a_post_compaction_retry_runs_as_the_successor_session(adapter, mo
         await _run_turn(adapter)
 
     assert seen == [first.id, successor.id]
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_background_session_records_it_as_cancelled(adapter, monkeypatch):
+    """Without a bound cancel Event the turn runs to completion and records a successful run."""
+    entered = threading.Event()
+
+    def run_agent(*a, **kw):
+        entered.set()
+        deadline = time.monotonic() + 3.0
+        status = "success"
+        while time.monotonic() < deadline:
+            if is_cancelled():
+                status = "cancelled"
+                break
+            time.sleep(0.01)
+        storage = get_history_backend().load("bg-1")
+        storage.record("model_response", raw_content="partial answer")
+        record_session_end(storage, status=status, error_message=None)
+        return SimpleNamespace(token_count=10, cost=0.0, provider_state={})
+
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", run_agent)
+
+    runner = SessionRunner(adapter.session_store, adapter)
+    runner.start_session(Session(id="bg-1", source=SessionSource.BACKGROUND.value, prompt="do the thing"))
+
+    assert await _wait_until(entered.is_set), "the worker never started"
+    runner.cancel_session("bg-1")
+
+    assert await _wait_until(lambda: bool(_session_ends("bg-1")), timeout=3.0), "the run recorded no session_end"
+    ends = _session_ends("bg-1")
+
+    assert [e.data["status"] for e in ends] == ["cancelled"]
