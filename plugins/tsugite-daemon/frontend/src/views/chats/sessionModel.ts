@@ -74,12 +74,20 @@ export function attentionSessions(rows: SessionRow[]): SessionRow[] {
   return liveRows(rows).filter(sessionHasAttention);
 }
 
-export function sessionRowState(row: SessionRow, hints: RowStateHints = {}): SessionState {
+export interface SessionRowDisplay {
+  state: SessionState;
+  needsYou: boolean;
+}
+
+function livenessState(row: SessionRow): SessionState {
   if (row.status === 'failed') return 'failed';
   if (DONE_STATUSES.has(row.status) && !isResumableSession(row)) return 'done';
-  if (hints.needsYou) return 'needs-you';
   if (row.busy) return busyState(row);
   return 'idle';
+}
+
+export function sessionRowState(row: SessionRow, hints: RowStateHints = {}): SessionRowDisplay {
+  return { state: livenessState(row), needsYou: Boolean(hints.needsYou) };
 }
 
 export interface SessionGroups {

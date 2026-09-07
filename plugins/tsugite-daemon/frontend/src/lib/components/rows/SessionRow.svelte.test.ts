@@ -18,21 +18,37 @@ test('renders title, relative time, source tag, and description', async () => {
   await expect.element(page.getByText('streaming a reply')).toBeInTheDocument();
 });
 
-test('a needs-you row carries the state in its accessible name, not just color', async () => {
-  render(SessionRow, {
+test('a busy row with a pending ask keeps its spinner and names both conditions', async () => {
+  const { container } = await render(SessionRow, {
     title: 'ops: nightly backup failing on prune',
     when: '12m',
     description: 'job blocked on a retention question',
-    state: 'needs-you',
+    state: 'thinking',
+    needsYou: true,
     sourceType: 'ops',
   });
+  expect(container.querySelector('.ind .t-spin')).not.toBeNull();
+  expect(container.querySelector('.mk')).not.toBeNull();
   await expect
     .element(
       page.getByRole('button', {
-        name: 'ops: nightly backup failing on prune, awaiting your input',
+        name: 'ops: nightly backup failing on prune, thinking, awaiting your input',
       }),
     )
     .toBeInTheDocument();
+});
+
+test('an unread row with a pending ask keeps the needs-you glyph over the unread dot', async () => {
+  const { container } = await render(SessionRow, {
+    title: 'ops: nightly backup failing on prune',
+    when: '12m',
+    state: 'idle',
+    needsYou: true,
+    isUnread: true,
+    sourceType: 'ops',
+  });
+  expect(container.querySelector('.ind .t-dot')).toBeNull();
+  expect(container.querySelector('.ind svg')).not.toBeNull();
 });
 
 test('the active row is marked aria-current for screen readers', async () => {

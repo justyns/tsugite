@@ -3,21 +3,13 @@ import {
   buildSessionRowAriaLabel,
   checkStatePrefix,
   clampPct,
+  NEEDS_YOU_META,
   sessionStateMeta,
   sourceTypeLabel,
   spaceStateMeta,
 } from './rowState';
 
 describe('sessionStateMeta', () => {
-  it('maps needs-you to the warn color, the q icon, and the card wording', () => {
-    expect(sessionStateMeta('needs-you')).toEqual({
-      label: 'awaiting your input',
-      color: 'var(--st-warn)',
-      spin: false,
-      icon: 'q',
-    });
-  });
-
   it('marks running and thinking as spinning states with distinct colors', () => {
     expect(sessionStateMeta('running')).toMatchObject({ spin: true, color: 'var(--st-ok)' });
     expect(sessionStateMeta('thinking')).toMatchObject({ spin: true, color: 'var(--st-info)' });
@@ -25,10 +17,20 @@ describe('sessionStateMeta', () => {
   });
 
   it('gives every non-spinning state an icon', () => {
-    for (const state of ['idle', 'done', 'failed', 'needs-you'] as const) {
+    for (const state of ['idle', 'done', 'failed'] as const) {
       expect(sessionStateMeta(state).spin).toBe(false);
       expect(sessionStateMeta(state).icon).toBeDefined();
     }
+  });
+});
+
+describe('NEEDS_YOU_META', () => {
+  it('has the warn color, the q icon, and the aria-label wording', () => {
+    expect(NEEDS_YOU_META).toEqual({
+      label: 'awaiting your input',
+      color: 'var(--st-warn)',
+      icon: 'q',
+    });
   });
 });
 
@@ -42,13 +44,14 @@ describe('sourceTypeLabel', () => {
 });
 
 describe('buildSessionRowAriaLabel', () => {
-  it('joins the title and the state word', () => {
+  it('reads both the live state and the pending ask when both hold', () => {
     expect(
       buildSessionRowAriaLabel({
         title: 'ops: nightly backup failing on prune',
-        state: 'needs-you',
+        state: 'thinking',
+        needsYou: true,
       }),
-    ).toBe('ops: nightly backup failing on prune, awaiting your input');
+    ).toBe('ops: nightly backup failing on prune, thinking, awaiting your input');
   });
 
   it('appends unread when the row carries the unread marker', () => {

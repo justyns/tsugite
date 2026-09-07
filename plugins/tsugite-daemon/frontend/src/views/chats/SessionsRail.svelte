@@ -264,6 +264,7 @@
   </div>
 
   {#snippet rowItem(row: Row, index = 0)}
+    {@const display = sessionRowState(row, { needsYou: attn.has(row.id) })}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="srow-drag"
@@ -283,7 +284,8 @@
         title={row.title ?? 'Untitled session'}
         when={formatWhen(row.last_active ?? row.created_at)}
         description={sessionTopic(row)}
-        state={sessionRowState(row, { needsYou: attn.has(row.id) })}
+        state={display.state}
+        needsYou={display.needsYou}
         sourceType={sessionSourceType(row)}
         isActive={row.id === selectedId}
         isPinned={row.pinned}

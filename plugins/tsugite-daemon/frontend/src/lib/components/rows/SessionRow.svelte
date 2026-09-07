@@ -3,6 +3,7 @@
   import Spin from '$lib/components/feedback/Spin.svelte';
   import {
     buildSessionRowAriaLabel,
+    NEEDS_YOU_META,
     sessionStateMeta,
     sourceTypeLabel,
     type SessionSourceType,
@@ -14,6 +15,7 @@
     when,
     description,
     state,
+    needsYou = false,
     sourceType,
     isActive = false,
     isPinned = false,
@@ -27,8 +29,8 @@
     when: string;
     description?: string;
     state: SessionState;
+    needsYou?: boolean;
     sourceType: SessionSourceType;
-    /** The row for the session currently open in the main pane (cool left edge). */
     isActive?: boolean;
     isPinned?: boolean;
     isUnread?: boolean;
@@ -39,12 +41,11 @@
   } = $props();
 
   const meta = $derived(sessionStateMeta(state));
-  // Only idle/done have no ambient glyph to protect, so unread can take the slot.
-  const showUnreadDot = $derived(isUnread && (state === 'idle' || state === 'done'));
-  const ariaLabel = $derived(buildSessionRowAriaLabel({ title, state, isUnread }));
-  const hasMarkers = $derived(
-    state === 'needs-you' || activeJobCount > 0 || waitingOnCount > 0 || isPinned,
-  );
+  // Only a quiet row with nothing pending has no glyph to protect, so unread can
+  // take the slot.
+  const showUnreadDot = $derived(isUnread && !needsYou && (state === 'idle' || state === 'done'));
+  const ariaLabel = $derived(buildSessionRowAriaLabel({ title, state, needsYou, isUnread }));
+  const hasMarkers = $derived(needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned);
   const isEnded = $derived(state === 'done' || state === 'failed');
 
   function handleKeydown(e: KeyboardEvent) {
@@ -58,7 +59,7 @@
 <div
   class="t-srow"
   class:is-active={isActive}
-  class:is-attn={state === 'needs-you'}
+  class:is-attn={needsYou}
   class:is-unread={isUnread}
   class:is-ended={isEnded}
   role="button"
@@ -74,6 +75,8 @@
       <span class="t-dot t-dot--unread" aria-hidden="true"></span>
     {:else if meta.spin}
       <Spin color={meta.color} />
+    {:else if needsYou}
+      <Icon name={NEEDS_YOU_META.icon} color={NEEDS_YOU_META.color} />
     {:else if meta.icon}
       <Icon name={meta.icon} color={meta.color} />
     {/if}
@@ -84,8 +87,8 @@
     {#if description}<span class="desc">{description}</span>{/if}
     {#if hasMarkers}
       <span class="mk">
-        {#if state === 'needs-you'}
-          <Icon name="alert" color="var(--st-warn)" size={10} />
+        {#if needsYou}
+          <Icon name="alert" color={NEEDS_YOU_META.color} size={10} />
         {/if}
         {#if activeJobCount > 0}
           <span

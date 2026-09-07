@@ -7,7 +7,7 @@
 </script>
 
 <section data-testid="gallery-rows">
-  <h3>SessionRow — every state</h3>
+  <h3>SessionRow: every state</h3>
   <div class="list">
     <figure>
       <figcaption>state: running</figcaption>
@@ -75,13 +75,28 @@
       </div>
     </figure>
     <figure>
-      <figcaption>state: needs-you</figcaption>
+      <figcaption>overlay: needs-you</figcaption>
       <div class="frame">
         <SessionRow
           title="ops: nightly backup failing on prune"
           when="12m"
           description="job blocked on a retention question"
-          state="needs-you"
+          state="idle"
+          needsYou
+          sourceType="ops"
+          onSelect={noop}
+        />
+      </div>
+    </figure>
+    <figure>
+      <figcaption>overlay: needs-you while thinking</figcaption>
+      <div class="frame">
+        <SessionRow
+          title="ops: nightly backup failing on prune"
+          when="12m"
+          description="reasoning about the retention window"
+          state="thinking"
+          needsYou
           sourceType="ops"
           onSelect={noop}
         />
@@ -89,7 +104,7 @@
     </figure>
   </div>
 
-  <h3>SessionRow — variants</h3>
+  <h3>SessionRow: variants</h3>
   <div class="list">
     <figure>
       <figcaption>variant: primary (currently open)</figcaption>
@@ -149,7 +164,7 @@
     </figure>
   </div>
 
-  <h3>SpacesRow — per-space rollup states</h3>
+  <h3>SpacesRow: per-space rollup states</h3>
   <div class="list">
     <figure>
       <figcaption>state: working</figcaption>
@@ -220,7 +235,7 @@
     </figure>
   </div>
 
-  <h3>CheckItem — acceptance-criteria states</h3>
+  <h3>CheckItem: acceptance-criteria states</h3>
   <div class="list list--check">
     <figure>
       <figcaption>state: pending</figcaption>

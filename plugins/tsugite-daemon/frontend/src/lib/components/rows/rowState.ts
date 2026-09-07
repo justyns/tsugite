@@ -4,7 +4,7 @@ import type { IconName } from '$lib/components/icon/icons';
 
 // ---------- SessionRow ----------
 
-export type SessionState = 'running' | 'thinking' | 'idle' | 'done' | 'failed' | 'needs-you';
+export type SessionState = 'running' | 'thinking' | 'idle' | 'done' | 'failed';
 export type SessionSourceType = 'ops' | 'code' | 'research' | 'chat';
 
 export type SessionStateMeta = {
@@ -22,7 +22,12 @@ const SESSION_STATE_META: Record<SessionState, SessionStateMeta> = {
   idle: { label: 'idle', color: 'var(--tx3)', spin: false, icon: 'ring' },
   done: { label: 'done', color: 'var(--st-mute)', spin: false, icon: 'check' },
   failed: { label: 'failed', color: 'var(--st-err)', spin: false, icon: 'x' },
-  'needs-you': { label: 'awaiting your input', color: 'var(--st-warn)', spin: false, icon: 'q' },
+};
+
+export const NEEDS_YOU_META: { label: string; color: string; icon: IconName } = {
+  label: 'awaiting your input',
+  color: 'var(--st-warn)',
+  icon: 'q',
 };
 
 export function sessionStateMeta(state: SessionState): SessionStateMeta {
@@ -47,9 +52,11 @@ export function sourceTypeLabel(type: SessionSourceType): string {
 export function buildSessionRowAriaLabel(opts: {
   title: string;
   state: SessionState;
+  needsYou?: boolean;
   isUnread?: boolean;
 }): string {
   const parts = [opts.title, SESSION_STATE_META[opts.state].label];
+  if (opts.needsYou) parts.push(NEEDS_YOU_META.label);
   if (opts.isUnread) parts.push('unread');
   return parts.join(', ');
 }

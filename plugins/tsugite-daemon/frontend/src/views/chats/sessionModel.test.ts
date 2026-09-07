@@ -57,14 +57,30 @@ describe('sessionSourceType', () => {
 
 describe('sessionRowState', () => {
   it('maps failed status to failed', () => {
-    expect(sessionRowState(base({ status: 'failed' }))).toBe('failed');
+    expect(sessionRowState(base({ status: 'failed' })).state).toBe('failed');
   });
   it('maps completed/cancelled to done', () => {
-    expect(sessionRowState(base({ status: 'completed' }))).toBe('done');
-    expect(sessionRowState(base({ status: 'cancelled' }))).toBe('done');
+    expect(sessionRowState(base({ status: 'completed' })).state).toBe('done');
+    expect(sessionRowState(base({ status: 'cancelled' })).state).toBe('done');
   });
-  it('needs-you wins over busy when a question is pending', () => {
-    expect(sessionRowState(base({ busy: true }), { needsYou: true })).toBe('needs-you');
+  it('keeps the live state alongside a pending ask', () => {
+    const waiting = base({
+      busy: true,
+      progress: { status_text: 'Waiting on LLM (12s)' } as never,
+    });
+    expect(sessionRowState(waiting, { needsYou: true })).toEqual({
+      state: 'thinking',
+      needsYou: true,
+    });
+  });
+  it('overlays needs-you on a quiet session', () => {
+    expect(sessionRowState(base(), { needsYou: true })).toEqual({
+      state: 'idle',
+      needsYou: true,
+    });
+  });
+  it('leaves the overlay off a busy session with nothing pending', () => {
+    expect(sessionRowState(base({ busy: true }))).toEqual({ state: 'running', needsYou: false });
   });
   it('busy with an LLM-wait status_text reads as thinking, else running', () => {
     const waiting = base({
@@ -72,11 +88,11 @@ describe('sessionRowState', () => {
       progress: { status_text: 'Waiting on LLM (12s)' } as never,
     });
     const tooling = base({ busy: true, progress: { status_text: 'tool: read_file' } as never });
-    expect(sessionRowState(waiting)).toBe('thinking');
-    expect(sessionRowState(tooling)).toBe('running');
+    expect(sessionRowState(waiting).state).toBe('thinking');
+    expect(sessionRowState(tooling).state).toBe('running');
   });
   it('falls back to idle for an active-but-quiet session', () => {
-    expect(sessionRowState(base({ status: 'active', busy: false }))).toBe('idle');
+    expect(sessionRowState(base({ status: 'active', busy: false })).state).toBe('idle');
   });
 });
 
@@ -108,6 +124,11 @@ describe('groupSessions', () => {
     expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
     // a finished row leaves the recency flow for its own bucket
     expect(g.ended.map((r) => r.id)).toEqual(['done']);
+  });
+  it('keeps a row that is both busy and needs-you in active', () => {
+    const g = groupSessions([base({ id: 'both', busy: true })], { attn: new Set(['both']) });
+    expect(g.active.map((r) => r.id)).toEqual(['both']);
+    expect(g.recent).toHaveLength(0);
   });
   it('sends every finished status to ended, out of recent/active', () => {
     const rows = [
@@ -255,8 +276,8 @@ describe('resumable sessions in the rail', () => {
     expect(g.ended.map((r) => r.id)).toEqual(['done']);
   });
   it('reads as idle, the same as an interactive session awaiting input', () => {
-    expect(sessionRowState(resumable())).toBe('idle');
-    expect(sessionRowState(base({ status: 'completed' }))).toBe('done');
+    expect(sessionRowState(resumable()).state).toBe('idle');
+    expect(sessionRowState(base({ status: 'completed' })).state).toBe('done');
   });
   it('still counts as finished, so it is never auto-selected as the open chat', () => {
     expect(isFinishedSession(resumable())).toBe(true);
