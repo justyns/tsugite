@@ -88,3 +88,31 @@ def test_re_registering_a_provider_replaces_the_previous_source():
 
 def test_a_source_registered_by_one_test_does_not_leak_into_the_next():
     assert "demo" not in _rows_by_provider()
+
+
+def test_a_concurrent_first_read_waits_for_the_sources_to_load(monkeypatch):
+    """The first collect imports the plugin sources; a second collect racing it
+    must see them rather than an empty registry."""
+    import threading
+
+    from tsugite.usage import quota
+
+    started, release = threading.Event(), threading.Event()
+
+    def slow_load(_group):
+        started.set()
+        release.wait(5)
+        register_quota_source("demo", "Demo", lambda: QuotaReport(provider="demo", label="Demo"))
+
+    monkeypatch.setattr(quota, "_loaded", False)
+    monkeypatch.setattr("tsugite.plugins.load_module_only_plugins", slow_load)
+    first = threading.Thread(target=collect_quota_reports)
+    first.start()
+    assert started.wait(5)
+    seen = []
+    second = threading.Thread(target=lambda: seen.append(collect_quota_reports()))
+    second.start()
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert [r["provider"] for r in seen[0]] == ["demo"]

@@ -11,6 +11,7 @@ let the two disagree.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import asdict, dataclass
 from typing import Callable
 
@@ -51,6 +52,7 @@ class QuotaSource:
 
 _registry: dict[str, QuotaSource] = {}
 _loaded = False
+_load_lock = threading.Lock()
 
 
 def register_quota_source(provider: str, label: str, fetch: FetchFn) -> None:
@@ -68,17 +70,22 @@ def reset_quota_sources() -> None:
 
 def ensure_loaded() -> None:
     """Import the ``tsugite.usage_providers`` entry-point modules once, so every
-    ``register_quota_source`` call has run before the registry is read."""
+    ``register_quota_source`` call has run before the registry is read. The
+    daemon collects from worker threads, so a reader racing the first load
+    waits for it rather than seeing an empty registry."""
     global _loaded
     if _loaded:
         return
-    _loaded = True
-    try:
-        from tsugite.plugins import GROUP_USAGE_PROVIDERS, load_module_only_plugins
+    with _load_lock:
+        if _loaded:
+            return
+        try:
+            from tsugite.plugins import GROUP_USAGE_PROVIDERS, load_module_only_plugins
 
-        load_module_only_plugins(GROUP_USAGE_PROVIDERS)
-    except Exception as e:  # never let plugin discovery break a read
-        logger.warning("Loading usage-provider plugins failed: %s", e)
+            load_module_only_plugins(GROUP_USAGE_PROVIDERS)
+        except Exception as e:  # never let plugin discovery break a read
+            logger.warning("Loading usage-provider plugins failed: %s", e)
+        _loaded = True
 
 
 def collect_quota_reports() -> list[dict]:
