@@ -135,8 +135,8 @@ def total(
 
 
 def _fmt_reset(resets_at: str | None) -> str:
-    # Sliced rather than parsed, so the user reads the provider's own timezone.
-    return resets_at[:16].replace("T", " ") if resets_at else "-"
+    # resets_at is UTC by contract; sliced rather than parsed, so say so.
+    return f"{resets_at[:16].replace('T', ' ')} UTC" if resets_at else "-"
 
 
 @usage_app.command("providers")

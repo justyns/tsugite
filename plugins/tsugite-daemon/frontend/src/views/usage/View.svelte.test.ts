@@ -287,7 +287,7 @@ test('renders each provider limit window as a meter with its reset time', async 
   await expect
     .element(page.getByRole('meter', { name: 'Demo Cloud session' }))
     .toHaveAttribute('aria-valuetext', '0%');
-  await expect.element(page.getByText('resets jul 19 21:59')).toBeInTheDocument();
+  await expect.element(page.getByText('resets jul 19 21:59 UTC')).toBeInTheDocument();
 });
 
 test('a provider whose local state was unreadable shows the message, not a meter', async () => {

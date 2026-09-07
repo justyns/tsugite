@@ -114,7 +114,7 @@ describe('formatPercent', () => {
 
 describe('formatResetAt', () => {
   test('renders the reset time (UTC, tz-safe string slice)', () => {
-    expect(formatResetAt('2026-07-19T21:59:59+00:00')).toBe('resets jul 19 21:59');
+    expect(formatResetAt('2026-07-19T21:59:59+00:00')).toBe('resets jul 19 21:59 UTC');
   });
 
   test('a window with no reset renders nothing', () => {

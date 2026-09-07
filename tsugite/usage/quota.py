@@ -25,7 +25,7 @@ class QuotaWindow:
     key: str
     label: str
     used_pct: float
-    resets_at: str | None = None
+    resets_at: str | None = None  # ISO 8601, UTC
 
 
 @dataclass(frozen=True)

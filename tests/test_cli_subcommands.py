@@ -226,7 +226,7 @@ class TestUsageProviders:
         assert "Demo" in result.stdout
         assert "session" in result.stdout
         assert "73%" in result.stdout
-        assert "2026-01-08" in result.stdout
+        assert "2026-01-08 21:59 UTC" in result.stdout
 
     def test_shows_the_error_for_an_unreadable_provider(self):
         result = self._invoke([{"provider": "demo", "label": "Demo", "error": "state unreadable", "windows": []}])

@@ -72,8 +72,9 @@ export function formatPercent(pct: number): string {
   return `${Math.round(pct * 10) / 10}%`;
 }
 
-/** A quota window's reset time as "resets jul 19 21:59", or "" when the
- * provider reports none (an idle session window). */
+/** A quota window's reset time as "resets jul 19 21:59 UTC", or "" when the
+ * provider reports none (an idle session window). `resets_at` is UTC by contract,
+ * and the string is sliced rather than parsed, so the marker has to be spelled out. */
 export function formatResetAt(iso: string | null): string {
-  return iso ? `resets ${formatLastRun(iso)}` : '';
+  return iso ? `resets ${formatLastRun(iso)} UTC` : '';
 }
