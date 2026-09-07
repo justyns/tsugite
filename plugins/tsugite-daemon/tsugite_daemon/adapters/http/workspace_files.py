@@ -183,9 +183,6 @@ class WorkspaceFilesMixin:
 
         st = resolved.stat()
 
-        if not _is_text_mime(resolved):
-            return JSONResponse({"path": path_str, "content": None, "is_text": False, "size": st.st_size})
-
         max_size = self.config.max_workspace_file_size
         if st.st_size > max_size:
             return JSONResponse(

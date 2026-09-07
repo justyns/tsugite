@@ -1130,6 +1130,31 @@ class TestSchedulesEndpoint:
         assert "delivery_mode" in resp.json()["error"]
 
 
+class TestWorkspaceContentTextGate:
+    def test_a_diff_reads_as_text_whatever_its_extension_says(self, client, test_token, tmp_workspace):
+        """open_artifact advertises diffs, and a .patch has no text/ mime type."""
+        (tmp_workspace / "changes.patch").write_text("--- a\n+++ b\n-x\n+y\n")
+        resp = client.get(
+            "/api/workspace/content",
+            params={"path": "changes.patch"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["is_text"] is True
+        assert resp.json()["content"].startswith("--- a")
+
+    def test_a_binary_still_reads_as_not_text(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "blob.bin").write_bytes(b"\x89PNG\r\n\x1a\n\x00\xff")
+        resp = client.get(
+            "/api/workspace/content",
+            params={"path": "blob.bin"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["is_text"] is False
+        assert resp.json()["content"] is None
+
+
 class TestWorkspaceSaveEndpoint:
     def _put(self, client, test_token, path, content):
         return client.put(
