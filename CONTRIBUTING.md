@@ -10,7 +10,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/). Format:
 <type>(<scope>): <subject>
 ```
 
-Keep the subject on one line, lowercase, no trailing period. Body is optional and rarely needed.
+Keep the subject on one line, lowercase, no trailing period. Body is optional; a change someone
+using tsugite would notice carries a `Release-Note:` trailer (below).
 
 ### Allowed types
 
@@ -42,6 +43,24 @@ feat!: drop Python 3.10 support
 Scopes are optional, but should be limited to one of these:
 
 `webui`, `daemon`, `agent`, `cli`, `skills`, `history`, `sandbox`
+
+### Release notes
+
+git-cliff (`cliff.toml`) generates the release notes from the commits, and the line it prints for a
+commit comes from a `Release-Note:` trailer:
+
+```
+fix(webui): scope agent artifact panes by session
+
+Release-Note: Opening an artifact from one chat keeps every other chat's pane as it was.
+```
+
+One line, present tense, stating what the software does now. No "instead of", no because-clause. A
+commit with nothing to tell a user (a test fix, an internal rename) carries no trailer and prints its
+subject instead. `chore`, `docs`, `test` and `ci` commits never appear.
+
+The trailer has to be the last paragraph of the message. When squashing, keep one `Release-Note:`
+line at the end of the squashed message; a trailer buried mid-body is not parsed.
 
 ### Examples
 

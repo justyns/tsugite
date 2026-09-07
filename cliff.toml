@@ -13,7 +13,8 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | split(pat="\n") | first | trim }}{% if commit.id %} ({{ commit.id | truncate(length=7, end="") }}){% endif %}\
+{%- set notes = commit.footers | filter(attribute="token", value="Release-Note") %}
+- {% if notes | length > 0 %}{{ notes.0.value | replace(from="\n", to=" ") | replace(from="  ", to=" ") | trim }}{% else %}{{ commit.message | split(pat="\n") | first | trim }}{% endif %}{% if commit.id %} ({{ commit.id | truncate(length=7, end="") }}){% endif %}\
 {% endfor %}
 {% endfor %}\n
 """
