@@ -8,6 +8,12 @@ import {
   serializeSpaces,
   type Space,
 } from './spaces.svelte';
+import {
+  ARTIFACT_EVENT,
+  artifactSurfaceParams,
+  artifacts,
+  type AgentArtifact,
+} from './artifacts.svelte';
 import { collectLeaves, dockAsTab, type Layout } from '$lib/shell/mux/layout';
 import { writeLocal } from '$lib/storage';
 
@@ -353,5 +359,83 @@ describe('spaces reorder', () => {
     expect(store.activeSpaceId).toBe(b);
     const kinds = collectLeaves(store.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
     expect(kinds).toContain('terminal');
+  });
+});
+
+describe('closing an artifact tab', () => {
+  beforeEach(() => {
+    artifacts.items = {};
+  });
+
+  function record(sessionId: string): AgentArtifact {
+    return artifacts.applySessionEvent({
+      session_id: sessionId,
+      event_type: ARTIFACT_EVENT,
+      artifact_id: 'agent',
+      path: 'notes.md',
+      content_type: 'markdown',
+      title: 'notes.md',
+      opened_by: 'agent',
+    })!;
+  }
+
+  function dockArtifact(store: SpacesStore, sessionId: string): { pane: string; tab: string } {
+    const artifact = record(sessionId);
+    store.openBeside({
+      kind: 'artifact',
+      params: artifactSurfaceParams(artifact),
+      title: artifact.title,
+    });
+    const pane = collectLeaves(store.active.layout.root).find((leaf) =>
+      leaf.tabs.some((t) => t.kind === 'artifact'),
+    )!;
+    return { pane: pane.id, tab: pane.tabs.find((t) => t.kind === 'artifact')!.id };
+  }
+
+  test('the tab strip close forgets the artifact behind the tab', () => {
+    const store = new SpacesStore();
+    const { pane, tab } = dockArtifact(store, 'sess-a');
+
+    store.closeTab(pane, tab);
+
+    expect(artifacts.get('agent', 'sess-a')).toBeUndefined();
+  });
+
+  test('close others forgets the artifact tabs it removed', () => {
+    const store = new SpacesStore();
+    const { pane } = dockArtifact(store, 'sess-a');
+    store.dock(pane, { kind: 'chat', title: 'Chat' });
+    const keep = collectLeaves(store.active.layout.root)
+      .find((leaf) => leaf.id === pane)!
+      .tabs.find((t) => t.kind === 'chat')!.id;
+
+    store.closeOtherTabs(pane, keep);
+
+    expect(artifacts.get('agent', 'sess-a')).toBeUndefined();
+  });
+
+  test('close all forgets the artifact tabs it removed', () => {
+    const store = new SpacesStore();
+    const { pane } = dockArtifact(store, 'sess-a');
+
+    store.closeAllTabs(pane);
+
+    expect(artifacts.get('agent', 'sess-a')).toBeUndefined();
+  });
+
+  test('closeSurface hides a pane without forgetting its artifact', () => {
+    const store = new SpacesStore();
+    const artifact = record('sess-a');
+    store.openBeside({
+      kind: 'artifact',
+      params: artifactSurfaceParams(artifact),
+      title: artifact.title,
+    });
+
+    store.closeSurface({ kind: 'artifact', params: artifactSurfaceParams(artifact) });
+
+    const kinds = collectLeaves(store.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+    expect(kinds).not.toContain('artifact');
+    expect(artifacts.get('agent', 'sess-a')?.title).toBe('notes.md');
   });
 });

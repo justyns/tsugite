@@ -37,6 +37,7 @@ import {
   splitPane,
   surfaceKey,
 } from '$lib/shell/mux/layout';
+import { artifacts } from '$lib/stores/artifacts.svelte';
 import { moveItem } from '$lib/reorder';
 import { readLocal, writeLocal } from '$lib/storage';
 
@@ -175,6 +176,10 @@ export function computeRollup(
   return roll;
 }
 
+function dockedTabs(layout: Layout): PaneTabModel[] {
+  return collectLeaves(layout.root).flatMap((leaf) => leaf.tabs);
+}
+
 /** Trailing debounce for layout writes - coalesces a drag's mutation burst. */
 const PERSIST_DEBOUNCE_MS = 150;
 
@@ -216,6 +221,18 @@ export class SpacesStore {
     this.persist();
   }
 
+  /** A leftover record re-docks its pane on the next focused-session change. */
+  private applyClosing(fn: (layout: Layout) => Layout): void {
+    const before = dockedTabs(this.active.layout);
+    this.apply(fn);
+    const kept = new Set(this.spaces.flatMap((s) => dockedTabs(s.layout)).map((t) => t.id));
+    for (const tab of before) {
+      const id = tab.params.id;
+      if (tab.kind === 'artifact' && id && !kept.has(tab.id))
+        artifacts.close(id, tab.params.sessionId ?? null);
+    }
+  }
+
   dock(paneId: string, ref: SurfaceRef): void {
     this.apply((l) => dockAsTab(l, paneId, ref));
   }
@@ -238,14 +255,16 @@ export class SpacesStore {
   openBeside(ref: SurfaceRef, dir: SplitDir = 'row'): void {
     this.apply((l) => openBeside(l, ref, dir));
   }
-  /** Close the tab holding `ref`, wherever it is docked - a surface dismissing
-   *  itself, which knows its own identity but not which pane it landed in. */
+  /** Undock `ref`, wherever it is docked - a surface dismissing itself, which
+   *  knows its own identity but not which pane it landed in. An artifact keeps
+   *  its store record here. The shell also undocks a background session's
+   *  artifact pane, which re-opens when that session is focused again. */
   closeSurface(ref: SurfaceRef): void {
     const key = surfaceKey(ref);
     for (const leaf of collectLeaves(this.active.layout.root)) {
       const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
       if (tab) {
-        this.closeTab(leaf.id, tab.id);
+        this.apply((l) => closeTab(l, leaf.id, tab.id));
         return;
       }
     }
@@ -254,9 +273,7 @@ export class SpacesStore {
    *  itself over the bridge). A plugin may push a title per internal navigation,
    *  so a no-op rename must not cost a layout clone and a persist. */
   retitleTab(tabId: string, title: string): void {
-    const tab = collectLeaves(this.active.layout.root)
-      .flatMap((leaf) => leaf.tabs)
-      .find((t) => t.id === tabId);
+    const tab = dockedTabs(this.active.layout).find((t) => t.id === tabId);
     if (!tab || tab.title === title) return;
     this.apply((l) => retitleTab(l, tabId, title));
   }
@@ -278,13 +295,13 @@ export class SpacesStore {
     this.apply((l) => splitPane(l, paneId, dir, ref, position));
   }
   closeTab(paneId: string, tabId: string): void {
-    this.apply((l) => closeTab(l, paneId, tabId));
+    this.applyClosing((l) => closeTab(l, paneId, tabId));
   }
   closeOtherTabs(paneId: string, tabId: string): void {
-    this.apply((l) => closeOtherTabs(l, paneId, tabId));
+    this.applyClosing((l) => closeOtherTabs(l, paneId, tabId));
   }
   closeAllTabs(paneId: string): void {
-    this.apply((l) => closeAllTabs(l, paneId));
+    this.applyClosing((l) => closeAllTabs(l, paneId));
   }
   selectTab(paneId: string, tabId: string): void {
     this.apply((l) => selectTab(l, paneId, tabId));
