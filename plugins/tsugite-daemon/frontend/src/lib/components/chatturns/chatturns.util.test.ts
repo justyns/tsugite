@@ -17,6 +17,15 @@ describe('parseMarkdown', () => {
     expect(html.match(/<p>/g)).toHaveLength(1);
   });
 
+  it('renders a backticked context key as code, where the bare form would autolink', () => {
+    // The composer writes `<file:x>` for an attached @ reference. Bare, that is
+    // CommonMark autolink syntax and shows as a dead link in the person's turn.
+    expect(parseMarkdown('see <file:index.md>')).toContain('<a href="file:index.md">');
+    const html = parseMarkdown('see `<file:index.md>`');
+    expect(html).toContain('<code>');
+    expect(html).not.toContain('<a ');
+  });
+
   it('leaves a blank-line paragraph split alone either way', () => {
     for (const breaks of [false, true]) {
       expect(parseMarkdown('one\n\ntwo', breaks).match(/<p>/g)).toHaveLength(2);

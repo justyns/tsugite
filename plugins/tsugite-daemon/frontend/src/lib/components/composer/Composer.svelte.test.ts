@@ -7,7 +7,13 @@ import { TESTID } from '$lib/testids';
 import type { RefItem, RefSource } from './types';
 
 const REF_ITEMS: RefItem[] = [
-  { id: 'f1', kind: 'file', label: '@sse-reconnect.md', detail: 'kb/ops · modified', git: 'm' },
+  {
+    id: 'sse-reconnect.md',
+    kind: 'file',
+    label: '@sse-reconnect.md',
+    detail: 'kb/ops · modified',
+    git: 'm',
+  },
   { id: 'c1', kind: 'chat', label: '@sse-reconnect-backoff', detail: 'chat · working' },
   { id: 'a1', kind: 'agent', label: '@odyn', detail: 'agent · opus-4-8' },
 ];
@@ -47,7 +53,7 @@ test('Enter selects the highlighted reference, inserts it, and closes the popove
   await expect.element(box).not.toHaveAttribute('aria-activedescendant');
 });
 
-test('selecting a file ref with onPickRef attaches it and strips the @token, inserting no text', async () => {
+test('selecting a file ref with onPickRef attaches it and leaves its context key behind', async () => {
   const onPickRef = vi.fn();
   render(Composer, { refItems: REF_ITEMS, onPickRef });
   const box = page.getByRole('textbox', { name: 'Message' });
@@ -55,9 +61,25 @@ test('selecting a file ref with onPickRef attaches it and strips the @token, ins
   await userEvent.fill(box, 'see @sse-reconnect.md');
   await userEvent.keyboard('{Enter}');
   expect(onPickRef).toHaveBeenCalledWith(REF_ITEMS[0]);
-  // Convergence: the ref becomes a chip on the host, so the @query trigger is
-  // removed and nothing is inserted in its place.
-  await expect.element(box).toHaveValue('see ');
+  await expect.element(box).toHaveValue('see `<file:sse-reconnect.md>` ');
+});
+
+test('a second pick leaves a second token after the first', async () => {
+  render(Composer, {
+    refItems: [
+      { id: 'index.md', kind: 'file', label: 'index.md' },
+      { id: 'Projects/Homelab.md', kind: 'file', label: 'Projects/Homelab.md' },
+    ] satisfies RefItem[],
+    onPickRef: vi.fn(),
+  });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await userEvent.fill(box, 'compare @index.md');
+  await userEvent.keyboard('{Enter}');
+  await userEvent.type(box, 'with @Homelab');
+  await userEvent.keyboard('{Enter}');
+  await expect
+    .element(box)
+    .toHaveValue('compare `<file:index.md>` with `<file:Projects/Homelab.md>` ');
 });
 
 test('selecting a non-file ref still inserts its text inline even with onPickRef set', async () => {
@@ -82,9 +104,8 @@ test('a session ref matches by id substring, not just its title, and attaches on
   await userEvent.fill(box, 'ref @abc123');
   await expect.element(page.getByRole('option', { name: /Nightly backup/ })).toBeInTheDocument();
   await userEvent.keyboard('{Enter}');
-  // A session attaches like a file: onPickRef fires and the @token is stripped.
   expect(onPickRef).toHaveBeenCalledWith(items[0]);
-  await expect.element(box).toHaveValue('ref ');
+  await expect.element(box).toHaveValue('ref `<session:sess-abc123>` ');
 });
 
 test('a plain @query filters the built-in list and never queries a prefix source', async () => {
@@ -121,8 +142,7 @@ test('typing @<prefix> <query> fetches the source and a pick attaches the plugin
   await expect.element(page.getByRole('option', { name: /auth login/ })).toBeInTheDocument();
   await userEvent.keyboard('{Enter}');
   expect(onPickRef).toHaveBeenCalledWith(result);
-  // The whole `@jira auth` token is stripped (it attaches, not inserts).
-  await expect.element(box).toHaveValue('see ');
+  await expect.element(box).toHaveValue('see `<jira:PROJ-1>` ');
 });
 
 test('a stale (out-of-order) source response is dropped for the latest query', async () => {

@@ -2,8 +2,7 @@
   import type { RefKind } from './types';
   let _uid = 0;
   const nextUid = () => ++_uid;
-  // Kinds that attach as a context chip (through onPickRef) instead of inserting
-  // their `@label` text; the rest (chat/agent/terminal) insert inline.
+  // Kinds that attach as a context chip through onPickRef; the rest insert their @label inline.
   const ATTACH_KINDS = new Set<RefKind>(['file', 'session', 'plugin']);
   // Debounce a source search so a fast typist fires one request, not one per key.
   const SEARCH_DEBOUNCE_MS = 150;
@@ -92,9 +91,9 @@
     onPickContext?: (item: ContextMenuItem, arg?: string | null) => void;
     /** Load a server provider's submenu options on demand (when it hasChoices). */
     onRequestChoices?: (key: string) => Promise<ContextChoice[]>;
-    /** Commit a file reference from the @ popover: the host attaches it as a
-     *  context item (a chip) rather than inserting `@path` text. Absent, or for a
-     *  non-file ref, the ref inserts inline as text. */
+    /** Attach a file/session/plugin ref picked in the @ popover as a context chip;
+     *  the composer replaces the @query with its <provider:value> key. Absent, or
+     *  for other kinds, the label inserts inline. */
     onPickRef?: (ref: RefItem) => void;
     onRemoveAttachment?: (id: string) => void;
     onRemoveContext?: (key: string) => void;
@@ -347,12 +346,15 @@
     const after = value.slice(mention.end);
     mention.open = false;
     if (onPickRef && ATTACH_KINDS.has(item.kind)) {
-      // Convergence: a file/session/plugin ref attaches as a context chip on the
-      // host, so drop the @query trigger and insert nothing in its place.
-      value = `${before}${after}`;
+      // The token matches the `key` the folded <client_context> block gives this
+      // attachment. Backticked, because a bare `<scheme:rest>` is markdown autolink
+      // syntax and the person's turn renders as a dead link.
+      const token = `\`<${item.providerKey ?? item.kind}:${item.id}>\``;
+      value = `${before}${token} ${after}`;
       onPickRef(item);
       await tick();
-      ta?.setSelectionRange(before.length, before.length);
+      const pos = before.length + token.length + 1;
+      ta?.setSelectionRange(pos, pos);
     } else {
       value = `${before}${item.label} ${after}`;
       await tick();

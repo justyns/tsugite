@@ -287,7 +287,7 @@ test('a many-line paste under the char limit still shows the chooser', async () 
   await render(ChatComposer, { ...base });
   const el = page.getByRole('textbox', { name: 'Message' }).element() as HTMLTextAreaElement;
 
-  // 12 lines, well under 500 chars — the line count alone crosses the threshold.
+  // 12 lines but under 500 chars, so the line count alone crosses the threshold.
   const cancelled = pasteText(el, Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n'));
 
   expect(cancelled).toBe(true);
@@ -730,7 +730,7 @@ test('a picker provider opens the Picker overlay and a pick attaches a chip', as
   await expect.element(page.getByTestId(TESTID.picker)).not.toBeInTheDocument();
 });
 
-test('picking a workspace file from the @ popover attaches a file: chip and strips the @token', async () => {
+test('picking a workspace file from the @ popover attaches a file: chip and leaves its key', async () => {
   const get = vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path.includes('/workspace'))
       return Promise.resolve({
@@ -762,12 +762,10 @@ test('picking a workspace file from the @ popover attaches a file: chip and stri
   await expect
     .element(page.getByTestId(TESTID.composerContextChip('file:kb/ops/sse.md')))
     .toBeInTheDocument();
-  // Convergence: the ref became a chip, so the @query trigger is stripped and no
-  // @path text is left inline.
-  await expect.element(box).toHaveValue('see ');
+  await expect.element(box).toHaveValue('see `<file:kb/ops/sse.md>` ');
 });
 
-test('an @ file whose capture returns no items strips the token but attaches no chip, silently', async () => {
+test('an @ file whose capture returns no items attaches no chip, silently', async () => {
   const get = vi.spyOn(api, 'get').mockImplementation((path: string) => {
     if (path.includes('/workspace'))
       return Promise.resolve({
@@ -793,8 +791,8 @@ test('an @ file whose capture returns no items strips the token but attaches no 
     .element(page.getByTestId(TESTID.composerContextChip('file:image.bin')))
     .not.toBeInTheDocument();
   expect(push).not.toHaveBeenCalled();
-  // The trigger text is still cleaned up even though nothing attached.
-  await expect.element(box).toHaveValue('see ');
+  // The pick is fire-and-forget, so the token is inserted before the capture resolves.
+  await expect.element(box).toHaveValue('see `<file:image.bin>` ');
 });
 
 test('a server capture error toasts and attaches no chip', async () => {
