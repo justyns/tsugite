@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTimeline,
+  retryTarget,
   splitStreamFence,
   type ProseBlock,
   type ExecBlock,
@@ -1859,5 +1860,140 @@ describe('buildTimeline (provider warning notice)', () => {
       { type: 'warning', id: 3 },
     ]);
     expect(notices(t)).toHaveLength(0);
+  });
+});
+
+describe('retryTarget', () => {
+  const failed = { type: 'error', error: 'Provider returned 500.', id: 99 };
+  const text = (t: ReturnType<typeof buildTimeline>) => retryTarget(t.turns)?.text ?? '';
+
+  it('picks the last message the person typed', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'first', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: 'ok', id: 2 },
+      { type: 'user_input', text: 'second', timestamp: '2026-07-14T15:05:00Z', id: 3 },
+      failed,
+    ]);
+    expect(text(t)).toBe('second');
+  });
+
+  it('offers nothing when the newest turn came from a schedule', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'ledger total?', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: '42', id: 2 },
+      {
+        type: 'user_input',
+        text: 'run the nightly report',
+        timestamp: '2026-07-14T15:05:00Z',
+        channel: { source: 'scheduler', schedule_id: 'nightly' },
+        id: 3,
+      },
+      failed,
+    ]);
+    expect(text(t)).toBe('');
+  });
+
+  it('offers nothing when the newest turn came from a job wake-up', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'ledger total?', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: '42', id: 2 },
+      {
+        type: 'user_input',
+        text: 'job-3f22 finished',
+        timestamp: '2026-07-14T15:05:00Z',
+        channel: { source: 'job_complete', job_id: 'job-3f22' },
+        id: 3,
+      },
+      failed,
+    ]);
+    expect(text(t)).toBe('');
+  });
+
+  it('offers nothing when the newest turn came from another session', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'ledger total?', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: '42', id: 2 },
+      {
+        type: 'user_input',
+        text: 'status?',
+        timestamp: '2026-07-14T15:05:00Z',
+        channel: { source: 'session', from_session: 'lead' },
+        id: 3,
+      },
+      failed,
+    ]);
+    expect(text(t)).toBe('');
+  });
+
+  it('offers nothing once a delivery card is the newest activity', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'buy milk', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'final_result', result: 'noted', id: 2 },
+      {
+        type: 'delivery',
+        source: 'schedule',
+        kind: 'needs_ack',
+        delivery_id: 'dlv-1',
+        schedule_id: 'rent',
+        title: 'Rent is due',
+        message: 'The rent run found an unpaid invoice.',
+        timestamp: '2026-07-14T15:10:00Z',
+        id: 3,
+      },
+    ]);
+    expect(text(t)).toBe('');
+  });
+
+  it('offers nothing for a transcript with no typed message at all', () => {
+    const t = buildTimeline([
+      {
+        type: 'user_input',
+        text: 'run the nightly report',
+        timestamp: '2026-07-14T15:00:00Z',
+        channel: { source: 'scheduler', schedule_id: 'nightly' },
+        id: 1,
+      },
+      failed,
+    ]);
+    expect(text(t)).toBe('');
+  });
+
+  it("re-sends the person's prompt when a held delivery flushed after its failure", () => {
+    // The daemon holds a delivery that arrives mid-turn and flushes it after
+    // session_end, so the card lands as its own turn behind the failed one.
+    const t = buildTimeline([
+      { type: 'user_input', text: 'buy milk', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'model_response', raw_content: '[Error: boom]', thought: '[Error: boom]', id: 2 },
+      { type: 'error', error: 'boom', id: 3 },
+      { type: 'session_end', status: 'error', id: 4 },
+      {
+        type: 'delivery',
+        source: 'schedule',
+        kind: 'needs_ack',
+        delivery_id: 'dlv-1',
+        schedule_id: 'rent',
+        title: 'Rent is due',
+        message: 'The rent run found an unpaid invoice.',
+        timestamp: '2026-07-14T15:10:00Z',
+        id: 5,
+      },
+    ]);
+    expect(text(t)).toBe('buy milk');
+  });
+
+  it("still re-sends the person's prompt when an older turn came from a schedule", () => {
+    const t = buildTimeline([
+      {
+        type: 'user_input',
+        text: 'run the nightly report',
+        timestamp: '2026-07-14T15:00:00Z',
+        channel: { source: 'scheduler', schedule_id: 'nightly' },
+        id: 1,
+      },
+      { type: 'final_result', result: '42', id: 2 },
+      { type: 'user_input', text: 'second', timestamp: '2026-07-14T15:05:00Z', id: 3 },
+      failed,
+    ]);
+    expect(text(t)).toBe('second');
   });
 });

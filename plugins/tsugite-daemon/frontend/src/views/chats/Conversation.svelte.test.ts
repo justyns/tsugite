@@ -372,6 +372,81 @@ test('a cancelled last turn shows the prominent Retry too (no error block, keyed
   expect(onRetry).toHaveBeenCalledWith('do the thing');
 });
 
+test('a failed turn after a scheduled message offers no Retry', async () => {
+  // A resume-mode schedule delivers its prompt as a user_input with a schedule routing key.
+  const onRetry = vi.fn();
+  const ERR = 'Provider returned 500.';
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'what is the ledger total?', timestamp: '2026-07-21T05:00:00Z' },
+    { type: 'final_result', result: 'It is 42.' },
+    {
+      type: 'user_input',
+      text: 'run the nightly report',
+      timestamp: '2026-07-21T06:00:00Z',
+      channel: { source: 'scheduler', schedule_id: 'nightly' },
+    },
+    { type: 'model_response', raw_content: `[Error: ${ERR}]`, thought: `[Error: ${ERR}]` },
+    { type: 'session_end', status: 'success' },
+    { type: 'error', error: ERR },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, onRetry });
+
+  await expect.element(page.getByText(ERR)).toBeInTheDocument();
+  await expect.element(page.getByTestId('chat-retry')).not.toBeInTheDocument();
+});
+
+test('a failed turn after a job wake-up offers no Retry', async () => {
+  const onRetry = vi.fn();
+  const ERR = 'Provider returned 500.';
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'what is the ledger total?', timestamp: '2026-07-21T05:00:00Z' },
+    { type: 'final_result', result: 'It is 42.' },
+    {
+      type: 'user_input',
+      text: 'job-3f22 finished',
+      timestamp: '2026-07-21T06:00:00Z',
+      channel: { source: 'job_complete', job_id: 'job-3f22' },
+    },
+    { type: 'model_response', raw_content: `[Error: ${ERR}]`, thought: `[Error: ${ERR}]` },
+    { type: 'session_end', status: 'success' },
+    { type: 'error', error: ERR },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, onRetry });
+
+  await expect.element(page.getByText(ERR)).toBeInTheDocument();
+  await expect.element(page.getByTestId('chat-retry')).not.toBeInTheDocument();
+});
+
+test('a failure on a schedule delivery card offers no Retry for an older typed message', async () => {
+  const onRetry = vi.fn();
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'buy milk', timestamp: '2026-07-21T05:00:00Z' },
+    { type: 'final_result', result: 'noted' },
+    {
+      type: 'delivery',
+      source: 'schedule',
+      kind: 'needs_ack',
+      delivery_id: 'dlv-1',
+      schedule_id: 'rent',
+      title: 'Rent is due',
+      message: 'The rent run found an unpaid invoice.',
+      timestamp: '2026-07-21T06:00:00Z',
+    },
+  ]);
+  const row = {
+    status: 'failed',
+    title: 'c',
+    metadata: {},
+    pinned: false,
+    is_primary: false,
+    busy: false,
+  } as unknown as SessionRow;
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks, onRetry });
+
+  await expect.element(page.getByText('Rent is due')).toBeInTheDocument();
+  await expect.element(page.getByTestId('chat-retry')).not.toBeInTheDocument();
+});
+
 test('a resume_reset renders a calm notice line, not a red error alert', async () => {
   // The backend severed an unresumable provider session and continued from saved
   // history. The user should see a subdued informational line at the head of the
@@ -1423,4 +1498,31 @@ test('flipping the thinking pref collapses a block already on screen', async () 
 
   expandThinking.set(false);
   await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
+test("a held delivery flushed after the person's own failure keeps their Retry", async () => {
+  const onRetry = vi.fn();
+  const ERR = 'Provider returned 500.';
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'buy milk', timestamp: '2026-07-21T05:00:00Z' },
+    { type: 'model_response', raw_content: `[Error: ${ERR}]`, thought: `[Error: ${ERR}]` },
+    { type: 'error', error: ERR },
+    { type: 'session_end', status: 'error' },
+    {
+      type: 'delivery',
+      source: 'schedule',
+      kind: 'needs_ack',
+      delivery_id: 'dlv-1',
+      schedule_id: 'rent',
+      title: 'Rent is due',
+      message: 'The rent run found an unpaid invoice.',
+      timestamp: '2026-07-21T05:10:00Z',
+    },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, onRetry });
+
+  const retry = page.getByTestId('chat-retry');
+  await expect.element(retry).toBeVisible();
+  await retry.click();
+  expect(onRetry).toHaveBeenCalledWith('buy milk');
 });

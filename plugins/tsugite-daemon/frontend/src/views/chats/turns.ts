@@ -1105,3 +1105,32 @@ export function buildTimeline(events: Event[]): Timeline {
     pendingAsk: b.pendingAsk,
   };
 }
+
+export interface RetryTarget {
+  turnId: string;
+  text: string;
+}
+
+/** Where Retry sits and what it re-sends: the newest AI turn carrying an error
+ *  block (the last AI turn when `restartable`, since a cancelled turn carries
+ *  none), when the turn right before it is the person's own message. Null when
+ *  what failed was a schedule, job or cross-session turn, or a delivery card. */
+export function retryTarget(turns: Turn[], restartable = false): RetryTarget | null {
+  let anchor = -1;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]!;
+    if (turn.role !== 'ai') continue;
+    if (anchor < 0 && restartable) anchor = i;
+    if (turn.blocks.some((b) => b.kind === 'error')) {
+      anchor = i;
+      break;
+    }
+  }
+  if (anchor < 1) return null;
+  const failed = turns[anchor]!;
+  const prev = turns[anchor - 1]!;
+  if (failed.blocks.some((b) => b.kind === 'delivery')) return null;
+  if (prev.role !== 'user' || prev.origin || prev.synthetic) return null;
+  const prose = prev.blocks.find((b) => b.kind === 'prose');
+  return prose?.kind === 'prose' && prose.text ? { turnId: failed.id, text: prose.text } : null;
+}

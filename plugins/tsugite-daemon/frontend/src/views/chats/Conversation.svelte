@@ -23,7 +23,13 @@
   import { TESTID } from '$lib/testids';
   import type { ConversationController } from './conversation.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
-  import { splitStreamFence, type Compaction, type DeliveryBlock, type TurnOrigin } from './turns';
+  import {
+    retryTarget,
+    splitStreamFence,
+    type Compaction,
+    type DeliveryBlock,
+    type TurnOrigin,
+  } from './turns';
   import { isValidAlias, suggestAlias } from './alias';
   import { formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
@@ -131,12 +137,7 @@
     );
   }
 
-  // The most recent user prompt, re-sent by the retry affordance on the last turn.
-  const lastUserText = $derived.by(() => {
-    const t = timeline.turns.findLast((t) => t.role === 'user');
-    const p = t?.blocks.find((b) => b.kind === 'prose');
-    return p?.kind === 'prose' ? p.text : '';
-  });
+  const retry = $derived(retryTarget(timeline.turns, canRestart));
 
   // Header status pill. Failed/cancelled sessions map to the session-pill
   // vocabulary's `interrupted` (stopped, kept for the record) with an accurate
@@ -627,7 +628,7 @@
           index={i + 1}
           streaming={turn.streaming}
           retryFailed={failed}
-          onRetry={isLastAi && lastUserText ? () => onRetry(lastUserText) : undefined}
+          onRetry={retry && turn.id === retry.turnId ? () => onRetry(retry.text) : undefined}
         >
           {#if turn.origin}
             <!-- Another agent, a job, or a schedule sent this - never the person.
@@ -858,7 +859,7 @@
 
   {#if !follow.pinned}
     <button type="button" class="jumplive" onclick={() => follow.repin()}>
-      <Icon name="down" size={11} />following paused — jump to live
+      <Icon name="down" size={11} />following paused · jump to live
     </button>
   {/if}
 
