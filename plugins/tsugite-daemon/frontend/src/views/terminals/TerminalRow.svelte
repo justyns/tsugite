@@ -16,6 +16,7 @@
     now,
     isActive = false,
     onSelect,
+    oncontextmenu,
   }: {
     term: Terminal;
     /** Resolved live state (store overlay wins over the record's own field). */
@@ -24,6 +25,7 @@
     now: number;
     isActive?: boolean;
     onSelect?: () => void;
+    oncontextmenu?: (e: MouseEvent) => void;
   } = $props();
 
   const ind = $derived(terminalIndicator(st));
@@ -67,6 +69,7 @@
   ondragstart={onDragStart}
   onclick={() => onSelect?.()}
   onkeydown={onKeydown}
+  {oncontextmenu}
 >
   <span class="ind" data-st={st}>
     {#if ind.spin}

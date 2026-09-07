@@ -16,6 +16,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { terminals, type Terminal, type TerminalState } from '$lib/stores/terminals.svelte';
   import { attachRecordToChat, copyReference } from '../chats/attachRecord';
+  import { killTerminal, restartTerminal } from './actions';
   import TermPill from './TermPill.svelte';
   import { elapsedSeconds, formatBytes, isLiveTerminal, terminalPill } from './termState';
 
@@ -171,27 +172,14 @@
       return;
     }
     disarmKill();
-    try {
-      await terminals.kill(term.id);
-      toasts.push('warn', 'Terminal killed', { body: `${term.cmd.slice(0, 44)} · record kept` });
-    } catch (err) {
-      toasts.push('err', 'Kill failed', { body: err instanceof Error ? err.message : String(err) });
-    }
+    await killTerminal(term);
   }
 
   async function onRestart() {
     restarting = true;
-    try {
-      const next = await terminals.restart(term.id);
-      toasts.push('ok', 'PTY restarted', { body: `${next.id} · restarted from ${term.id}` });
-      onSelectTerminal(next.id);
-    } catch (err) {
-      toasts.push('err', 'Restart failed', {
-        body: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      restarting = false;
-    }
+    const next = await restartTerminal(term);
+    restarting = false;
+    if (next) onSelectTerminal(next.id);
   }
 
   async function onCopy() {

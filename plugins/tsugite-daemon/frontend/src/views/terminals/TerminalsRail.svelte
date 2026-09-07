@@ -8,9 +8,11 @@
   import Button from '$lib/components/buttons/Button.svelte';
   import Input from '$lib/components/inputs/Input.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
+  import ContextMenu, { type ContextMenuItem } from '$lib/components/overlays/ContextMenu.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
-  import { terminals, type TerminalState } from '$lib/stores/terminals.svelte';
+  import { terminals, type Terminal, type TerminalState } from '$lib/stores/terminals.svelte';
   import TerminalRow from './TerminalRow.svelte';
+  import { killTerminal, restartTerminal } from './actions';
 
   const METRICS_POLL_MS = 2500;
 
@@ -55,6 +57,35 @@
       creating = false;
     }
   }
+
+  let menu = $state<{ x: number; y: number; term: Terminal } | null>(null);
+  function openRowMenu(event: MouseEvent, term: Terminal) {
+    event.preventDefault();
+    menu = { x: event.clientX, y: event.clientY, term };
+  }
+  async function copyText(text: string, what: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toasts.push('ok', `${what} copied`, { body: text });
+    } catch {
+      toasts.push('err', `Could not copy ${what.toLowerCase()}`);
+    }
+  }
+  async function restartFromRail(term: Terminal) {
+    const next = await restartTerminal(term);
+    if (next) onOpenTerminal(next.id);
+  }
+  const menuItems = $derived.by<ContextMenuItem[]>(() => {
+    const term = menu?.term;
+    if (!term) return [];
+    return [
+      terminals.isLive(term.id)
+        ? { label: 'Kill', danger: true, run: () => void killTerminal(term) }
+        : { label: 'Restart', run: () => void restartFromRail(term) },
+      { label: 'Copy command', run: () => void copyText(term.cmd, 'Command') },
+      { label: 'Copy terminal id', run: () => void copyText(term.id, 'Terminal id') },
+    ];
+  });
 </script>
 
 <div class="term-rail">
@@ -95,6 +126,7 @@
           st={stateOf(term.id, term.state)}
           isActive={term.id === focusedTerminalId}
           onSelect={() => onOpenTerminal(term.id)}
+          oncontextmenu={(e) => openRowMenu(e, term)}
         />
       {/each}
     {/if}
@@ -113,6 +145,16 @@
     </Button>
   </form>
 </div>
+
+{#if menu}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    label="Terminal actions"
+    items={menuItems}
+    onclose={() => (menu = null)}
+  />
+{/if}
 
 <style>
   .term-rail {
