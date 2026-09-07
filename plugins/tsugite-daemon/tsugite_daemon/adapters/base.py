@@ -813,9 +813,10 @@ class BaseAdapter(ABC):
                 user_id, conv_id, custom_logger, reason="token_threshold", _broadcast_state=_broadcast_state
             )
 
-        from tsugite_daemon.session_runner import set_current_session_id
+        from tsugite_daemon.session_runner import get_current_session_id, set_current_session_id
 
-        set_current_session_id(conv_id)
+        if get_current_session_id() is None:
+            set_current_session_id(conv_id)
 
         metadata = channel_context.to_dict()
 
