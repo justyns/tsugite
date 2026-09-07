@@ -49,6 +49,8 @@ def fetch() -> QuotaReport:
         return _error("Claude Code has not cached its usage limits yet")
 
     try:
+        # A window the cache has not filled in yet carries no percent; skip it
+        # rather than discard the ones it has.
         windows = tuple(
             QuotaWindow(
                 key=limit["kind"],
@@ -57,6 +59,7 @@ def fetch() -> QuotaReport:
                 resets_at=limit.get("resets_at"),
             )
             for limit in cache["utilization"]["limits"]
+            if limit.get("percent") is not None
         )
     except Exception:
         return _error("Claude Code's cached usage limits are not in a shape tsugite understands")

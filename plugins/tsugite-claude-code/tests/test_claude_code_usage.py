@@ -85,6 +85,21 @@ def test_weekly_scoped_label_carries_the_model_display_name(windows):
     assert windows["weekly_scoped"].used_pct == 7.0
 
 
+def test_a_limit_with_no_percent_is_skipped_not_fatal(tmp_path, monkeypatch):
+    # One window the cache has not filled in must not discard the ones it has.
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        limits=[
+            {"kind": "session", "group": "session", "percent": None, "resets_at": None},
+            {"kind": "weekly_all", "group": "weekly", "percent": 23, "resets_at": "2026-01-08T21:59:59+00:00"},
+        ],
+    )
+    report = usage.fetch()
+    assert report.error is None
+    assert [w.key for w in report.windows] == ["weekly_all"]
+
+
 def test_unknown_kind_still_produces_a_window_labeled_by_its_kind(windows):
     assert windows["monthly_experiment"].label == "monthly_experiment"
     assert windows["monthly_experiment"].used_pct == 3.0
