@@ -1119,7 +1119,11 @@ export function retryTarget(turns: Turn[], restartable = false): RetryTarget | n
   let anchor = -1;
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i]!;
-    if (turn.role !== 'ai') continue;
+    if (turn.role !== 'ai') {
+      // Past the person's own turn, an older error is theirs to have moved on from.
+      if (anchor >= 0) break;
+      continue;
+    }
     if (anchor < 0 && restartable) anchor = i;
     if (turn.blocks.some((b) => b.kind === 'error')) {
       anchor = i;

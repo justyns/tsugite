@@ -1996,4 +1996,19 @@ describe('retryTarget', () => {
     ]);
     expect(text(t)).toBe('second');
   });
+  it('anchors a restartable session on its last turn, not an older error', () => {
+    // A cancelled turn carries no error block; an earlier failure the person already
+    // moved past must not win the anchor over it.
+    const t = buildTimeline([
+      { type: 'user_input', text: 'first', timestamp: '2026-07-14T15:00:00Z', id: 1 },
+      { type: 'error', error: 'Provider returned 500.', id: 2 },
+      { type: 'user_input', text: 'second', timestamp: '2026-07-14T15:05:00Z', id: 3 },
+      { type: 'final_result', result: 'ok', id: 4 },
+      { type: 'user_input', text: 'third', timestamp: '2026-07-14T15:10:00Z', id: 5 },
+      { type: 'final_result', result: 'cut short', id: 6 },
+    ]);
+    const target = retryTarget(t.turns, true);
+    expect(target?.text).toBe('third');
+    expect(target?.turnId).toBe(t.turns[t.turns.length - 1]!.id);
+  });
 });
