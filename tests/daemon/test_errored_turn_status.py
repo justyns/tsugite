@@ -210,3 +210,29 @@ async def test_a_skip_keeps_a_conversation_that_already_has_turns(adapter, monke
         await _run_turn(adapter)
 
     assert get_history_backend().exists(session_id), "a skip deleted a conversation that had already run"
+
+
+@pytest.mark.asyncio
+async def test_a_post_compaction_retry_runs_as_the_successor_session(adapter, monkeypatch):
+    """Compaction hands the retry a new session; tools that stamp the current
+    session (open_artifact, spawn_job, session_reply) must see that one."""
+    from tsugite_daemon.session_runner import get_current_session_id
+
+    first = adapter.session_store.get_or_create_interactive("alice")
+    successor = adapter.session_store.get_or_create_interactive("alice-successor")
+    seen = []
+
+    async def compact(*a, **kw):
+        return successor.id
+
+    def run(*a, **kw):
+        seen.append(get_current_session_id())
+        raise AgentExecutionError(TOO_LONG)
+
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", MagicMock(side_effect=run))
+    monkeypatch.setattr(adapter, "_run_compaction", compact)
+
+    with pytest.raises(AgentExecutionError):
+        await _run_turn(adapter)
+
+    assert seen == [first.id, successor.id]

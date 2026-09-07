@@ -813,10 +813,9 @@ class BaseAdapter(ABC):
                 user_id, conv_id, custom_logger, reason="token_threshold", _broadcast_state=_broadcast_state
             )
 
-        from tsugite_daemon.session_runner import get_current_session_id, set_current_session_id
+        from tsugite_daemon.session_runner import set_current_session_id
 
-        if get_current_session_id() is None:
-            set_current_session_id(conv_id)
+        set_current_session_id(conv_id)
 
         metadata = channel_context.to_dict()
 
@@ -983,6 +982,9 @@ class BaseAdapter(ABC):
                 conv_id = await self._run_compaction(
                     user_id, conv_id, custom_logger, reason="prompt_too_long", _broadcast_state=_broadcast_state
                 )
+                # The retry runs in the successor, so everything that stamps the
+                # current session (open_artifact, spawn_job, session_reply) must too.
+                set_current_session_id(conv_id)
                 ctx = contextvars.copy_context()
                 result = await asyncio.to_thread(ctx.run, run_in_workspace)
         except AgentSkippedError:
