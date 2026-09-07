@@ -367,3 +367,16 @@ test('two windows of the same kind both render', async () => {
     .element(page.getByRole('meter', { name: 'Demo Cloud week · Beta' }))
     .toBeInTheDocument();
 });
+
+test('a failed quota fetch leaves the cost dashboard standing', async () => {
+  mockGet((path) =>
+    path.startsWith('/api/usage/providers')
+      ? Promise.reject(new Error('quota unreadable'))
+      : Promise.resolve(okResponses(path)),
+  );
+  await render(View);
+
+  await expect.element(page.getByText('$4.20')).toBeInTheDocument();
+  expect(page.getByText("Couldn't load usage").query()).toBeNull();
+  expect(page.getByText('provider limits').query()).toBeNull();
+});

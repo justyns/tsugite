@@ -137,8 +137,9 @@ export class UsageStore {
         api.get<UsageModelRow[]>(`/api/usage/models?${sinceQs}`),
         api.get<UsageScheduleRow[]>(`/api/usage/schedules?${sinceQs}`),
         api.get<UsageTotal>(`/api/usage/total?${sinceQs}`),
-        // Current state, so no range.
-        api.get<UsageProviderRow[]>('/api/usage/providers'),
+        // Current state, so no range. Best-effort: a failed quota read must not
+        // take the cost tables down with it.
+        api.get<UsageProviderRow[]>('/api/usage/providers').catch((): UsageProviderRow[] => []),
       ]);
       this.summary = summary;
       this.agents = agents;
