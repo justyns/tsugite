@@ -7,14 +7,14 @@ import SpacesRow from './SpacesRow.svelte';
 test('renders the state word, title, who line, and meter readout', async () => {
   render(SpacesRow, {
     title: 'refactor: sse reconnect backoff',
-    who: 'odyn · sonnet-4.6',
+    who: 'hollis · sonnet-4.6',
     state: 'working',
     contextPct: 3,
     contextTokens: '34k',
   });
   await expect.element(page.getByText('working')).toBeInTheDocument();
   await expect.element(page.getByText('refactor: sse reconnect backoff')).toBeInTheDocument();
-  await expect.element(page.getByText('odyn · sonnet-4.6')).toBeInTheDocument();
+  await expect.element(page.getByText('hollis · sonnet-4.6')).toBeInTheDocument();
   await expect.element(page.getByText('3% · 34k')).toBeInTheDocument();
 });
 
@@ -47,7 +47,7 @@ test('the bar width is clamped into [0,100] even with an out-of-range pct', asyn
 test('contextWarn is opt-in and off by default', async () => {
   const { container, rerender } = await render(SpacesRow, {
     title: 'research: local whisper models',
-    who: 'odyn · opus-4.6',
+    who: 'hollis · opus-4.6',
     state: 'idle',
     contextPct: 12,
     contextTokens: '24k',
@@ -56,7 +56,7 @@ test('contextWarn is opt-in and off by default', async () => {
 
   await rerender({
     title: 'research: local whisper models',
-    who: 'odyn · opus-4.6',
+    who: 'hollis · opus-4.6',
     state: 'idle',
     contextPct: 12,
     contextTokens: '24k',
@@ -80,7 +80,7 @@ test('clicking the row fires onSelect', async () => {
   const onSelect = vi.fn();
   render(SpacesRow, {
     title: 'refactor: sse reconnect backoff',
-    who: 'odyn · sonnet-4.6',
+    who: 'hollis · sonnet-4.6',
     state: 'working',
     contextPct: 3,
     contextTokens: '34k',
@@ -94,7 +94,7 @@ test('Enter activates the focused row from the keyboard', async () => {
   const onSelect = vi.fn();
   render(SpacesRow, {
     title: 'refactor: sse reconnect backoff',
-    who: 'odyn · sonnet-4.6',
+    who: 'hollis · sonnet-4.6',
     state: 'working',
     contextPct: 3,
     contextTokens: '34k',
@@ -109,7 +109,7 @@ test('Enter activates the focused row from the keyboard', async () => {
 test('isActive adds the is-active class', async () => {
   const { container } = await render(SpacesRow, {
     title: 'refactor: sse reconnect backoff',
-    who: 'odyn · sonnet-4.6',
+    who: 'hollis · sonnet-4.6',
     state: 'working',
     contextPct: 3,
     contextTokens: '34k',

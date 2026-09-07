@@ -13,11 +13,11 @@ import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
 import View from './View.svelte';
 
-const ODYN_PATH = '/ws/agents/odyn.md';
+const HOLLIS_PATH = '/ws/agents/hollis.md';
 const DEFAULT_PATH = '/builtin/default.md';
 
-const ODYN_SRC = `---
-name: odyn
+const HOLLIS_SRC = `---
+name: hollis
 description: Primary interactive operator agent.
 extends: default
 model: claude_code:opus-4-8
@@ -27,7 +27,7 @@ tools:
   - read_file
   - "@terminal"
 ---
-You are odyn, the primary interactive agent.
+You are hollis, the primary interactive agent.
 `;
 
 const DEFAULT_SRC = `---
@@ -41,8 +41,8 @@ Base agent body.
 
 const FILES = [
   {
-    path: ODYN_PATH,
-    name: 'odyn',
+    path: HOLLIS_PATH,
+    name: 'hollis',
     source: 'project',
     readonly: false,
     description: 'Primary interactive operator agent.',
@@ -64,7 +64,7 @@ const FILES = [
 ];
 
 const RUNTIME = {
-  agent_file: 'odyn',
+  agent_file: 'hollis',
   workspace_dir: '/ws',
   model: null,
   context_limit: null,
@@ -78,7 +78,7 @@ function routeGet(path: string): Promise<unknown> {
     const target = decodeURIComponent(path);
     if (target.includes('default'))
       return Promise.resolve({ path: DEFAULT_PATH, content: DEFAULT_SRC, readonly: true });
-    return Promise.resolve({ path: ODYN_PATH, content: ODYN_SRC, readonly: false });
+    return Promise.resolve({ path: HOLLIS_PATH, content: HOLLIS_SRC, readonly: false });
   }
   return Promise.reject(new Error('unexpected GET ' + path));
 }
@@ -98,10 +98,10 @@ beforeEach(() => {
 
 test('roster lists agent files registered-first, and auto-selects the top agent into the Form tab', async () => {
   render(View);
-  await expect.element(page.getByTestId('agent-row-odyn')).toBeInTheDocument();
-  // Registered odyn carries a running badge; builtin default carries a lock.
-  await expect.element(page.getByTestId('agent-row-odyn')).toHaveTextContent('2');
-  // Auto-selected odyn's Form tab shows its model + inheritance note.
+  await expect.element(page.getByTestId('agent-row-hollis')).toBeInTheDocument();
+  // Registered hollis carries a running badge; builtin default carries a lock.
+  await expect.element(page.getByTestId('agent-row-hollis')).toHaveTextContent('2');
+  // Auto-selected hollis's Form tab shows its model + inheritance note.
   await expect.element(page.getByText('claude_code:opus-4-8')).toBeInTheDocument();
   await expect.element(page.getByText(/Inherits from/)).toBeInTheDocument();
 });
@@ -114,14 +114,14 @@ test('switching to the Markdown tab shows the editable source; Save is disabled 
 
   const ta = container.querySelector<HTMLTextAreaElement>('.agent-src');
   await vi.waitFor(() => expect(ta).not.toBeNull());
-  expect(ta!.value).toContain('name: odyn');
+  expect(ta!.value).toContain('name: hollis');
   expect(ta!.readOnly).toBe(false);
 
   const save = page.getByTestId('agent-save');
   await expect.element(save).toBeDisabled();
 
   // Editing makes the buffer dirty and enables Save.
-  ta!.value = ODYN_SRC + '\n- extra rule\n';
+  ta!.value = HOLLIS_SRC + '\n- extra rule\n';
   ta!.dispatchEvent(new Event('input', { bubbles: true }));
   await expect.element(save).toBeEnabled();
 });
@@ -166,16 +166,16 @@ test('Run opens the launcher, whose Start is gated on a non-empty prompt and doc
   expect(openSpy).toHaveBeenCalledTimes(1);
   const ref = openSpy.mock.calls[0]![0] as { kind: string; params?: Record<string, string> };
   expect(ref.kind).toBe('chat');
-  expect(ref.params?.agent).toBe('odyn');
+  expect(ref.params?.agent).toBe('hollis');
   expect(ref.params?.prompt).toBe('summarise open incidents');
   openSpy.mockRestore();
 });
 
 test('the roster filter narrows the list by name', async () => {
   render(View);
-  await expect.element(page.getByTestId('agent-row-odyn')).toBeInTheDocument();
+  await expect.element(page.getByTestId('agent-row-hollis')).toBeInTheDocument();
 
   await page.getByRole('searchbox', { name: 'Filter agents' }).fill('ops');
   await expect.element(page.getByTestId('agent-row-ops-runner')).toBeInTheDocument();
-  expect(page.getByTestId('agent-row-odyn').elements()).toHaveLength(0);
+  expect(page.getByTestId('agent-row-hollis').elements()).toHaveLength(0);
 });

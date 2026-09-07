@@ -162,7 +162,7 @@
       </figure>
       <figure>
         <figcaption>icon + label</figcaption>
-        <Chip icon={agentIcon}>odyn</Chip>
+        <Chip icon={agentIcon}>hollis</Chip>
       </figure>
       <figure>
         <figcaption>removable</figcaption>

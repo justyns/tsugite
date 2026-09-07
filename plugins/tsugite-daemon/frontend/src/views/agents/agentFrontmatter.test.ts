@@ -9,11 +9,11 @@ import {
 
 describe('splitFrontmatter', () => {
   it('separates a fenced frontmatter block from the body', () => {
-    const src = '---\nname: odyn\n---\nYou are odyn.\n\n- rule one\n';
+    const src = '---\nname: hollis\n---\nYou are hollis.\n\n- rule one\n';
     const r = splitFrontmatter(src);
     expect(r.hasFrontmatter).toBe(true);
-    expect(r.fm).toBe('name: odyn');
-    expect(r.body).toBe('You are odyn.\n\n- rule one\n');
+    expect(r.fm).toBe('name: hollis');
+    expect(r.body).toBe('You are hollis.\n\n- rule one\n');
   });
 
   it('reports no frontmatter when the file does not open with a fence', () => {
@@ -66,8 +66,8 @@ describe('coerceScalar', () => {
 
 describe('parseYamlSubset', () => {
   it('parses scalars with type coercion', () => {
-    const fm = parseYamlSubset('name: odyn\nmax_turns: 40\nspawnable: false\nmodel: null');
-    expect(fm).toEqual({ name: 'odyn', max_turns: 40, spawnable: false, model: null });
+    const fm = parseYamlSubset('name: hollis\nmax_turns: 40\nspawnable: false\nmodel: null');
+    expect(fm).toEqual({ name: 'hollis', max_turns: 40, spawnable: false, model: null });
   });
 
   it('parses a block sequence of scalars', () => {
@@ -112,8 +112,8 @@ describe('parseYamlSubset', () => {
   });
 });
 
-const ODYN = `---
-name: odyn
+const HOLLIS = `---
+name: hollis
 description: Primary interactive operator agent for the console.
 extends: default
 model: claude_code:claude-opus-4-8
@@ -140,22 +140,22 @@ prefetch:
     assign: available_skills
 run_if: mention || schedule
 ---
-You are odyn, the primary interactive agent.
+You are hollis, the primary interactive agent.
 
 - keep session topics short
 `;
 
 describe('summarizeAgent over a realistic agent file', () => {
-  const parsed = parseAgentFile(ODYN);
+  const parsed = parseAgentFile(HOLLIS);
   const s = summarizeAgent(parsed.frontmatter);
 
   it('splits body from frontmatter', () => {
-    expect(parsed.body.startsWith('You are odyn')).toBe(true);
+    expect(parsed.body.startsWith('You are hollis')).toBe(true);
     expect(parsed.hasFrontmatter).toBe(true);
   });
 
   it('extracts scalar fields', () => {
-    expect(s.name).toBe('odyn');
+    expect(s.name).toBe('hollis');
     expect(s.model).toBe('claude_code:claude-opus-4-8');
     expect(s.extends).toBe('default');
     expect(s.effort).toBe('medium');

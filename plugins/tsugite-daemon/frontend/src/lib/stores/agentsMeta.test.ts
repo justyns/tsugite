@@ -10,7 +10,7 @@ describe('AgentsMetaStore.load', () => {
   it('shares one GET between callers that ask while it is in flight', async () => {
     const get = vi
       .spyOn(api, 'get')
-      .mockResolvedValue({ agent_file: 'odyn', workspace_dir: '/ws' } as never);
+      .mockResolvedValue({ agent_file: 'hollis', workspace_dir: '/ws' } as never);
     const store = new AgentsMetaStore();
 
     await Promise.all([store.load(), store.load()]);
@@ -21,7 +21,7 @@ describe('AgentsMetaStore.load', () => {
   it('refetches for a caller that asks after the first load settled', async () => {
     const get = vi
       .spyOn(api, 'get')
-      .mockResolvedValue({ agent_file: 'odyn', workspace_dir: '/ws' } as never);
+      .mockResolvedValue({ agent_file: 'hollis', workspace_dir: '/ws' } as never);
     const store = new AgentsMetaStore();
 
     await store.load();

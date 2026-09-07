@@ -5,7 +5,7 @@ import { JobsStore, type Job } from './jobs.svelte';
 afterEach(() => vi.restoreAllMocks());
 
 function job(id: string, extra: Partial<Job> = {}): Job {
-  return { job_id: id, state: 'running', agent: 'odyn', prompt: '', ...extra } as unknown as Job;
+  return { job_id: id, state: 'running', agent: 'hollis', prompt: '', ...extra } as unknown as Job;
 }
 
 describe('JobsStore.applyJobUpdate', () => {

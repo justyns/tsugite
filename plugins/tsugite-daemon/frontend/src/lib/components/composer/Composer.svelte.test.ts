@@ -15,7 +15,7 @@ const REF_ITEMS: RefItem[] = [
     git: 'm',
   },
   { id: 'c1', kind: 'chat', label: '@sse-reconnect-backoff', detail: 'chat · working' },
-  { id: 'a1', kind: 'agent', label: '@odyn', detail: 'agent · opus-4-8' },
+  { id: 'a1', kind: 'agent', label: '@hollis', detail: 'agent · opus-4-8' },
 ];
 
 test('typing an @ token opens the popover filtered to matching references', async () => {
@@ -23,7 +23,7 @@ test('typing an @ token opens the popover filtered to matching references', asyn
   const box = page.getByRole('textbox', { name: 'Message' });
   await userEvent.fill(box, 'ping @sse');
   await expect.element(page.getByRole('listbox')).toBeInTheDocument();
-  // 'sse' matches the two reconnect refs, not @odyn.
+  // 'sse' matches the two reconnect refs, not @hollis.
   expect(page.getByRole('option').elements()).toHaveLength(2);
 });
 
@@ -86,11 +86,11 @@ test('selecting a non-file ref still inserts its text inline even with onPickRef
   const onPickRef = vi.fn();
   render(Composer, { refItems: REF_ITEMS, onPickRef });
   const box = page.getByRole('textbox', { name: 'Message' });
-  await userEvent.fill(box, 'ping @odyn');
+  await userEvent.fill(box, 'ping @hollis');
   await userEvent.keyboard('{Enter}');
   // A chat/agent ref is not a workspace file: it inserts inline as before.
   expect(onPickRef).not.toHaveBeenCalled();
-  await expect.element(box).toHaveValue('ping @odyn ');
+  await expect.element(box).toHaveValue('ping @hollis ');
 });
 
 test('a session ref matches by id substring, not just its title, and attaches on pick', async () => {

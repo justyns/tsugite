@@ -32,7 +32,7 @@ def session_with_events(store):
     # Add events with increasing timestamps
     base = datetime(2026, 3, 15, 10, 0, 0, tzinfo=timezone.utc)
     events = [
-        {"type": "session_start", "timestamp": (base).isoformat(), "agent": "odyn", "prompt": "Do something"},
+        {"type": "session_start", "timestamp": (base).isoformat(), "agent": "hollis", "prompt": "Do something"},
         {"type": "tool_call", "timestamp": (base + timedelta(seconds=10)).isoformat(), "name": "read_file"},
         {"type": "tool_call", "timestamp": (base + timedelta(seconds=20)).isoformat(), "name": "write_file"},
         {"type": "tool_call", "timestamp": (base + timedelta(seconds=30)).isoformat(), "name": "read_file"},

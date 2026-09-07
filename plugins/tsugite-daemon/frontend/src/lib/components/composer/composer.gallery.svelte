@@ -10,7 +10,7 @@
   const cardItems: RefItem[] = [
     { id: 'f', kind: 'file', label: '@sse-reconnect.md', detail: 'kb/ops · modified' },
     { id: 'c', kind: 'chat', label: '@sse-reconnect-backoff', detail: 'chat · working' },
-    { id: 'a', kind: 'agent', label: '@odyn', detail: 'agent · opus-4-8' },
+    { id: 'a', kind: 'agent', label: '@hollis', detail: 'agent · opus-4-8' },
   ];
 
   // Every git file-state glyph (letter + color + title).
@@ -25,7 +25,7 @@
     { id: 'f', kind: 'file', label: '@sse-reconnect.md', detail: 'kb/ops · modified', git: 'm' },
     { id: 't', kind: 'terminal', label: '@npm test', detail: 'terminal · running' },
     { id: 'c', kind: 'chat', label: '@backup prune', detail: 'chat · idle' },
-    { id: 'a', kind: 'agent', label: '@odyn', detail: 'agent · opus-4-8' },
+    { id: 'a', kind: 'agent', label: '@hollis', detail: 'agent · opus-4-8' },
   ];
 </script>
 

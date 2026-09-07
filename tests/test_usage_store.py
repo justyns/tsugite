@@ -21,7 +21,7 @@ def store(tmp_path):
 
 def _record(store, **kw):
     """Record with sensible defaults so each test only states what it cares about."""
-    defaults = dict(agent="odyn", model="claude_code:opus", total_tokens=1000, cost_usd=0.10)
+    defaults = dict(agent="hollis", model="claude_code:opus", total_tokens=1000, cost_usd=0.10)
     defaults.update(kw)
     store.record(**defaults)
 

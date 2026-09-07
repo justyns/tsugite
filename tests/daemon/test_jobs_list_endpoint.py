@@ -64,13 +64,13 @@ def test_token(token_store):
 def job_store(tmp_path):
     store = JobStore(tmp_path / "jobs.json")
     # Seed a realistic spread across all states so filter logic is exercised.
-    store.add(Job(id="job-r1", parent_session_id="parent-1", prompt="running task", state="running", agent="odyn"))
-    store.add(Job(id="job-v1", parent_session_id="parent-1", prompt="verifying", state="verifying", agent="odyn"))
+    store.add(Job(id="job-r1", parent_session_id="parent-1", prompt="running task", state="running", agent="hollis"))
+    store.add(Job(id="job-v1", parent_session_id="parent-1", prompt="verifying", state="verifying", agent="hollis"))
     store.add(Job(id="job-q1", parent_session_id="parent-1", prompt="queued task", state="queued", agent="assistant"))
-    store.add(Job(id="job-s1", parent_session_id="parent-1", prompt="stuck task", state="stuck", agent="odyn"))
-    store.add(Job(id="job-e1", parent_session_id="parent-1", prompt="errored", state="errored", agent="odyn"))
+    store.add(Job(id="job-s1", parent_session_id="parent-1", prompt="stuck task", state="stuck", agent="hollis"))
+    store.add(Job(id="job-e1", parent_session_id="parent-1", prompt="errored", state="errored", agent="hollis"))
     store.add(
-        Job(id="job-w1", parent_session_id="parent-1", prompt="needs input", state="awaiting_input", agent="odyn")
+        Job(id="job-w1", parent_session_id="parent-1", prompt="needs input", state="awaiting_input", agent="hollis")
     )
     store.add(Job(id="job-d1", parent_session_id="parent-1", prompt="done!", state="done", agent="assistant"))
     store.add(Job(id="job-c1", parent_session_id="parent-1", prompt="cancelled", state="cancelled", agent="assistant"))
@@ -151,7 +151,7 @@ class TestListJobsEndpoint:
         }
         assert expected_keys.issubset(set(job.keys()))
         assert job["state"] == "running"
-        assert job["agent"] == "odyn"
+        assert job["agent"] == "hollis"
         assert job["max_attempts"] == 3
         assert job["notify_when"] == "never"
 

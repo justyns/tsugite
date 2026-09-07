@@ -1049,7 +1049,7 @@ test('raw metadata shows the session fields that live outside the metadata block
     model: 'codex_cli:gpt-5.5',
     model_override: 'claude_code:opus',
     reasoning_effort: 'high',
-    agent_file: 'odyn-daemon',
+    agent_file: 'hollis-daemon',
     metadata: { status_text: 'review posted' },
     prompt: 'SHOULD NOT RENDER',
     result: 'SHOULD NOT RENDER',

@@ -4,7 +4,7 @@ A resumed session-owning transcript (e.g. a Claude Code sidecar) that picked up 
 empty text block gets rejected with `400 ... text content blocks must be
 non-empty` on every resume. The runner retries on a fresh session AND records a
 `resume_reset` boundary so later messages stop re-resolving the dead session id
-from history (which is why odyn's *next* message failed immediately too).
+from history (which is why the session's *next* message failed immediately too).
 """
 
 from tsugite.agent_runner.history_integration import get_resumable_session_state, record_resume_reset

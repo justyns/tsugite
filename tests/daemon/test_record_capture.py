@@ -20,7 +20,7 @@ from tsugite.context import get_context_provider, reset_context_providers, run_c
 from tsugite.history import SessionSummary
 from tsugite.history.models import Event
 
-SESSION_ID = "20260722_042329_odyn_85fc3c"
+SESSION_ID = "20260722_042329_hollis_85fc3c"
 JOB_ID = "job-1a2b3c4d"
 
 
@@ -30,7 +30,7 @@ def _ev(type_: str, **data) -> Event:
 
 def _session_events() -> list[Event]:
     return [
-        _ev("session_start", agent="odyn", model="claude_code:opus"),
+        _ev("session_start", agent="hollis", model="claude_code:opus"),
         _ev("user_input", text="Investigate the flaky test in the parser"),
         _ev("model_response", raw_content="I looked at parser.py and found the bug", usage={"total_tokens": 1200}),
         _ev("user_input", text="Now fix it and add a regression test"),
@@ -101,7 +101,7 @@ def test_capture_session_returns_compact_summary(monkeypatch):
 
 
 def test_capture_session_reports_active_status(monkeypatch):
-    events = [_ev("session_start", agent="odyn", model="m"), _ev("user_input", text="hi")]
+    events = [_ev("session_start", agent="hollis", model="m"), _ev("user_input", text="hi")]
     _wire(monkeypatch, backend=_FakeBackend({SESSION_ID: events}))
 
     value = id_ctx.capture_session(SESSION_ID, {})[0].value
@@ -124,7 +124,7 @@ def test_capture_session_empty_arg_returns_empty(monkeypatch):
 
 def test_capture_session_value_is_capped(monkeypatch):
     events = [
-        _ev("session_start", agent="odyn", model="m"),
+        _ev("session_start", agent="hollis", model="m"),
         _ev("user_input", text="hi"),
         _ev("model_response", raw_content="z" * 10000, usage={"total_tokens": 1}),
     ]

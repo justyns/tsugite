@@ -32,7 +32,7 @@ const SUMMARY = [
 ];
 const AGENTS = [
   {
-    agent: 'odyn',
+    agent: 'hollis',
     runs: 5,
     total_tokens: 90000,
     total_cost: 3.2,
@@ -130,7 +130,7 @@ test('loads on mount and renders totals, top tables, and the per-day meter table
   await render(View);
 
   await expect.element(page.getByText('$4.20')).toBeInTheDocument();
-  await expect.element(page.getByText('odyn')).toBeInTheDocument();
+  await expect.element(page.getByText('hollis')).toBeInTheDocument();
   await expect.element(page.getByText('claude_code:opus')).toBeInTheDocument();
   await expect.element(page.getByText('jul 14')).toBeInTheDocument();
   await expect.element(page.getByRole('meter', { name: 'jul 14 tokens' })).toBeInTheDocument();
@@ -172,7 +172,7 @@ test('top agents table carries the cache split (payload already SUMs it per agen
   await expect
     .element(agentsTbl.getByRole('columnheader', { name: 'cache wr' }))
     .toBeInTheDocument();
-  // odyn: 60000 reads -> "60k", 15000 writes -> "15k".
+  // hollis: 60000 reads -> "60k", 15000 writes -> "15k".
   await expect.element(agentsTbl.getByText('60k')).toBeInTheDocument();
   await expect.element(agentsTbl.getByText('15k')).toBeInTheDocument();
 });

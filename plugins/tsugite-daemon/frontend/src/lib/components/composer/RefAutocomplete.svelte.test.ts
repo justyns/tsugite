@@ -8,7 +8,7 @@ import type { RefItem } from './types';
 const ITEMS: RefItem[] = [
   { id: 'f1', kind: 'file', label: '@sse-reconnect.md', detail: 'kb/ops · modified', git: 'm' },
   { id: 'c1', kind: 'chat', label: '@sse-reconnect-backoff', detail: 'chat · working' },
-  { id: 'a1', kind: 'agent', label: '@odyn', detail: 'agent · opus-4-8' },
+  { id: 'a1', kind: 'agent', label: '@hollis', detail: 'agent · opus-4-8' },
 ];
 
 test('renders every item as a listbox option', async () => {

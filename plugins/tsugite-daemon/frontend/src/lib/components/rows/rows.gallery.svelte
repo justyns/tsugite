@@ -171,7 +171,7 @@
       <div class="frame">
         <SpacesRow
           title="refactor: sse reconnect backoff"
-          who="odyn · sonnet-4.6"
+          who="hollis · sonnet-4.6"
           state="working"
           contextPct={3}
           contextTokens="34k"
@@ -198,7 +198,7 @@
       <div class="frame">
         <SpacesRow
           title="research: local whisper models"
-          who="odyn · opus-4.6"
+          who="hollis · opus-4.6"
           state="idle"
           contextPct={12}
           contextTokens="24k"
@@ -224,7 +224,7 @@
       <div class="frame">
         <SpacesRow
           title="refactor: sse reconnect backoff"
-          who="odyn · sonnet-4.6"
+          who="hollis · sonnet-4.6"
           state="working"
           contextPct={3}
           contextTokens="34k"

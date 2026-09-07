@@ -85,7 +85,7 @@ def test_runtime_property_assembles_defaults():
     """DaemonConfig.runtime collects the default_* keys into one object."""
     config = DaemonConfig(
         default_workspace_dir=Path("/tmp/workspace"),
-        default_agent_file="odyn",
+        default_agent_file="hollis",
         default_model="openai:gpt-4o",
         default_compaction_model="openai:gpt-4o-mini",
         default_context_limit=200000,
@@ -95,7 +95,7 @@ def test_runtime_property_assembles_defaults():
     )
     runtime = config.runtime
     assert runtime.workspace_dir == Path("/tmp/workspace")
-    assert runtime.agent_file == "odyn"
+    assert runtime.agent_file == "hollis"
     assert runtime.model == "openai:gpt-4o"
     assert runtime.compaction_model == "openai:gpt-4o-mini"
     assert runtime.context_limit == 200000

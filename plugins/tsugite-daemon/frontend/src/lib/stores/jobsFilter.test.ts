@@ -10,9 +10,9 @@ import {
 
 describe('parseJobFilter', () => {
   it('splits state:/agent:/# and free-text tokens', () => {
-    expect(parseJobFilter('state:running agent:Odyn #job-abc deploy')).toEqual({
+    expect(parseJobFilter('state:running agent:Hollis #job-abc deploy')).toEqual({
       states: ['running'],
-      agents: ['odyn'],
+      agents: ['hollis'],
       sessions: [],
       terms: ['job-abc', 'deploy'],
     });
@@ -25,7 +25,7 @@ describe('parseJobFilter', () => {
 
 describe('jobMatchesFilter / filterJobs', () => {
   const jobs = [
-    { job_id: 'job-1', state: 'running', agent: 'odyn', prompt: 'deploy the site' },
+    { job_id: 'job-1', state: 'running', agent: 'hollis', prompt: 'deploy the site' },
     { job_id: 'job-2', state: 'done', agent: 'scout', prompt: 'research pricing' },
     { job_id: 'job-3', state: 'running', agent: 'scout', prompt: 'deploy staging' },
   ];
@@ -47,8 +47,8 @@ describe('jobMatchesFilter / filterJobs', () => {
 
 describe('session: axis', () => {
   const jobs = [
-    { job_id: 'job-1', state: 'running', agent: 'odyn', parent_session_id: 'sess-a' },
-    { job_id: 'job-2', state: 'done', agent: 'odyn', parent_session_id: 'sess-b' },
+    { job_id: 'job-1', state: 'running', agent: 'hollis', parent_session_id: 'sess-a' },
+    { job_id: 'job-2', state: 'done', agent: 'hollis', parent_session_id: 'sess-b' },
     { job_id: 'job-3', state: 'running', agent: 'scout', parent_session_id: 'sess-a' },
     { job_id: 'job-4', state: 'running', agent: 'scout', parent_session_id: null },
   ];

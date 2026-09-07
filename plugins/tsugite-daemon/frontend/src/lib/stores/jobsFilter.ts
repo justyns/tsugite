@@ -5,7 +5,7 @@
  *
  * Grammar: whitespace-separated tokens.
  *   state:running   -> restrict to that job state (repeatable, OR within the axis)
- *   agent:odyn      -> restrict to that agent   (repeatable, OR within the axis)
+ *   agent:hollis    -> restrict to that agent   (repeatable, OR within the axis)
  *   session:abc123  -> restrict to jobs spawned by that chat (parent_session_id)
  *   #job-abc123     -> free-text term (the '#' is stripped)
  *   anything else   -> free-text term

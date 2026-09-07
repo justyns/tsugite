@@ -36,7 +36,12 @@ def usage_db(tmp_path):
     store.record(source=SCHEDULER_SOURCE, schedule_name="morning-report", total_tokens=2000, cost_usd=0.20)
     store.record(source=SCHEDULER_SOURCE, schedule_name=None, total_tokens=500, cost_usd=0.05)
     store.record(
-        source="daemon", agent="odyn", total_tokens=1000, cost_usd=0.10, cache_creation_tokens=10, cache_read_tokens=40
+        source="daemon",
+        agent="hollis",
+        total_tokens=1000,
+        cost_usd=0.10,
+        cache_creation_tokens=10,
+        cache_read_tokens=40,
     )
     prev = usage_store_mod._instance
     usage_store_mod._instance = store

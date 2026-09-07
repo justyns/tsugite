@@ -14,9 +14,9 @@ afterEach(() => {
 });
 
 test('parseRefMarker round-trips a copied marker', () => {
-  expect(parseRefMarker(refMarkerHtml('session', '20260722_042329_odyn_85fc3c'))).toEqual({
+  expect(parseRefMarker(refMarkerHtml('session', '20260722_042329_hollis_85fc3c'))).toEqual({
     kind: 'session',
-    id: '20260722_042329_odyn_85fc3c',
+    id: '20260722_042329_hollis_85fc3c',
   });
   expect(parseRefMarker(refMarkerHtml('job', 'job-1a2b3c4d'))).toEqual({
     kind: 'job',
