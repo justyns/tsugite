@@ -17,15 +17,22 @@
   import ChatComposer from './ChatComposer.svelte';
   import { ConversationController, type SendOpts } from './conversation.svelte';
   import { resolveDefaultSession } from './defaultSession';
+  import { liveSessionId } from './sessionModel';
   import { isJobArtifact } from './jobArtifact';
   import { goBackToWorkspaceList, isPhoneWidth } from '$lib/shell/phoneNav';
   import { hasFiles, extractFiles } from './dropFiles';
 
-  let { params }: { params?: Record<string, string> } = $props();
+  let {
+    params,
+    setParams,
+  }: { params?: Record<string, string>; setParams?: (params: Record<string, string>) => void } =
+    $props();
 
   const ctrl = new ConversationController();
   // svelte-ignore state_referenced_locally -- seeds from the initial param; the effect below follows later changes.
-  let selectedId = $state<string | null>(params?.sessionId ?? null);
+  let selectedId = $state<string | null>(
+    params?.sessionId ? liveSessionId(sessions.ordered, params.sessionId) : null,
+  );
 
   // Resolve the selected session's metadata from its record. null until the
   // fetch lands or the id is unknown.
@@ -70,12 +77,16 @@
 
   // A rail click retargets this tab in place (spaces.openReusing rewrites the
   // tab's params; the instance survives) - follow the pointed-at session.
+  // A restored space tab still points at the id it was opened with, which
+  // compaction may have rotated onto a successor.
   const paramSessionId = $derived(params?.sessionId);
+  const liveParamId = $derived(paramSessionId ? liveSessionId(rows, paramSessionId) : undefined);
   $effect(() => {
-    const id = paramSessionId;
+    const id = liveParamId;
     if (!id) return;
     untrack(() => {
       if (id !== selectedId) selectSession(id);
+      if (id !== paramSessionId) setParams?.({ ...params, sessionId: id });
     });
   });
 
@@ -86,8 +97,8 @@
   $effect(() => {
     if (rows.length === 0) return;
     const current = selectedId;
-    if (current && (current === paramSessionId || rows.some((r) => r.id === current))) return;
-    const next = resolveDefaultSession(rows, params?.sessionId);
+    if (current && (current === liveParamId || rows.some((r) => r.id === current))) return;
+    const next = resolveDefaultSession(rows, liveParamId);
     if (next) untrack(() => selectSession(next));
   });
 

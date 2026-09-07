@@ -232,6 +232,18 @@ export function retitleTab(layout: Layout, tabId: string, title: string): Layout
   return next;
 }
 
+export function retargetTab(layout: Layout, tabId: string, params: Record<string, string>): Layout {
+  const next = clone(layout);
+  for (const leaf of collectLeaves(next.root)) {
+    const tab = leaf.tabs.find((t) => t.id === tabId);
+    if (tab) {
+      tab.params = params;
+      return next;
+    }
+  }
+  return next;
+}
+
 export function openInPane(layout: Layout, ref: SurfaceRef, targetPaneId?: string): Layout {
   const target =
     (targetPaneId && findLeaf(layout, targetPaneId)?.id) ||

@@ -32,6 +32,7 @@ import {
   pinTab,
   resizeSplit,
   retargetOrOpen,
+  retargetTab,
   retitleTab,
   selectTab,
   splitPane,
@@ -272,6 +273,9 @@ export class SpacesStore {
   /** Rename a docked tab from the surface mounted in it (a plugin surface titling
    *  itself over the bridge). A plugin may push a title per internal navigation,
    *  so a no-op rename must not cost a layout clone and a persist. */
+  retargetTab(tabId: string, params: Record<string, string>): void {
+    this.apply((l) => retargetTab(l, tabId, params));
+  }
   retitleTab(tabId: string, title: string): void {
     const tab = dockedTabs(this.active.layout).find((t) => t.id === tabId);
     if (!tab || tab.title === title) return;

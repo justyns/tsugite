@@ -62,6 +62,20 @@ export function chatNeedsAnswer(row: SessionRow): boolean {
   return sessionAttention(row).some((record) => record.source !== 'job');
 }
 
+/** Walks the `superseded_by` chain (repeated compaction makes it multi-hop) to
+ *  the newest row `rows` still holds. Returns `id` when nothing superseded it,
+ *  when the successor is absent from `rows`, or on a cycle. */
+export function liveSessionId(rows: SessionRow[], id: string): string {
+  const seen = new Set([id]);
+  let current = id;
+  for (;;) {
+    const next = rows.find((row) => row.id === current)?.superseded_by;
+    if (!next || seen.has(next) || !rows.some((row) => row.id === next)) return current;
+    seen.add(next);
+    current = next;
+  }
+}
+
 function liveRows(rows: SessionRow[]): SessionRow[] {
   return rows.filter((row) => !row.superseded_by && !isFinishedSession(row));
 }

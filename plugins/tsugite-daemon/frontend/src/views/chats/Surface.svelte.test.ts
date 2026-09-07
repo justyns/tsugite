@@ -8,6 +8,7 @@ import { sessions } from '$lib/stores/sessions.svelte';
 import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
 import { api } from '$lib/api/client';
 import { routeHistory } from '$lib/router.svelte';
+import { sessionRow as row } from './__fixtures__/sessionRow';
 
 const realGetInfo = sessions.getInfo.bind(sessions);
 
@@ -48,9 +49,11 @@ function dragEvent(type: 'dragover' | 'drop', dt: DataTransfer): DragEvent {
 const surfaceEl = () => document.querySelector('.chat-surface') as HTMLElement;
 const composerTa = () =>
   document.querySelector('.chat-surface textarea') as HTMLTextAreaElement | null;
+const headerTitle = () => document.querySelector('.chat-surface .title-btn')?.textContent;
 
 afterEach(async () => {
   sessions.getInfo = realGetInfo;
+  sessions.rows = [];
   vi.restoreAllMocks();
   await page.viewport(1440, 900);
 });
@@ -214,6 +217,35 @@ test('auto-focus never fires for a read-only (job artifact) surface', async () =
   await expect.element(page.getByTestId('chat-readonly')).toBeInTheDocument();
   expect(composerTa()).toBeFalsy();
   expect(focusSpy).not.toHaveBeenCalled();
+});
+
+test('a restored tab pointing at a compacted session opens the live successor and retargets the tab', async () => {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [
+    row('session-old', { title: 'archived transcript', superseded_by: 'session-mid' }),
+    row('session-mid', { title: 'middle transcript', superseded_by: 'session-live' }),
+    row('session-live', { title: 'newest chapter' }),
+  ];
+  const setParams = vi.fn();
+
+  render(Surface, { params: { sessionId: 'session-old' }, setParams });
+
+  await vi.waitFor(() => expect(headerTitle()).toBe('newest chapter'));
+  expect(setParams).toHaveBeenCalledWith({ sessionId: 'session-live' });
+  expect(setParams).toHaveBeenCalledTimes(1);
+});
+
+test('a tab already pointing at a live session is left alone', async () => {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [row('session-live', { title: 'newest chapter' })];
+  const setParams = vi.fn();
+
+  render(Surface, { params: { sessionId: 'session-live' }, setParams });
+
+  await vi.waitFor(() => expect(headerTitle()).toBe('newest chapter'));
+  expect(setParams).not.toHaveBeenCalled();
 });
 
 test('the phone back affordance clears the sessionId to the list hash', async () => {

@@ -12,6 +12,7 @@ import {
   sessionHasAttention,
   chatsNeedingAnswer,
   attentionSessions,
+  liveSessionId,
 } from './sessionModel';
 import { attentionRecord as rec } from './__fixtures__/sessionRow';
 
@@ -281,5 +282,26 @@ describe('resumable sessions in the rail', () => {
   });
   it('still counts as finished, so it is never auto-selected as the open chat', () => {
     expect(isFinishedSession(resumable())).toBe(true);
+  });
+});
+
+describe('liveSessionId', () => {
+  const chain = (...links: [string, string | null][]) =>
+    links.map(([id, next]) => base({ id, superseded_by: next }));
+
+  it('returns the id unchanged when nothing superseded it', () => {
+    expect(liveSessionId(chain(['a', null]), 'a')).toBe('a');
+  });
+  it('follows a chain of repeated compactions to the newest row', () => {
+    expect(liveSessionId(chain(['a', 'b'], ['b', 'c'], ['c', null]), 'a')).toBe('c');
+  });
+  it('terminates on a cycle instead of looping', () => {
+    expect(liveSessionId(chain(['a', 'b'], ['b', 'a']), 'a')).toBe('b');
+  });
+  it('stops at the last id the rows still hold when the successor is missing', () => {
+    expect(liveSessionId(chain(['a', 'b'], ['b', 'gone']), 'a')).toBe('b');
+  });
+  it('returns an id the rows do not hold at all', () => {
+    expect(liveSessionId(chain(['a', null]), 'unknown')).toBe('unknown');
   });
 });

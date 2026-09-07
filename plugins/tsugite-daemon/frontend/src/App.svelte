@@ -556,6 +556,7 @@
                         params={tab.params}
                         kind={tab.kind}
                         setTitle={(title) => spaces.retitleTab(tab.id, title)}
+                        setParams={(params) => spaces.retargetTab(tab.id, params)}
                         {focusPane}
                       />
                     {/if}
