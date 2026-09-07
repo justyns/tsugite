@@ -10,8 +10,8 @@ Use [Conventional Commits](https://www.conventionalcommits.org/). Format:
 <type>(<scope>): <subject>
 ```
 
-Keep the subject on one line, lowercase, no trailing period. Body is optional; a change someone
-using tsugite would notice carries a `Release-Note:` trailer (below).
+Keep the subject on one line, lowercase, no trailing period. Prefer no body. When the subject alone
+does not say what changed for someone using tsugite, add a `Release-Note:` trailer (below).
 
 ### Allowed types
 
@@ -46,8 +46,8 @@ Scopes are optional, but should be limited to one of these:
 
 ### Release notes
 
-git-cliff (`cliff.toml`) generates the release notes from the commits, and the line it prints for a
-commit comes from a `Release-Note:` trailer:
+git-cliff (`cliff.toml`) generates the release notes from the commits. A subject that already reads
+as the change is the release line; when it reads as the patch instead, add a `Release-Note:` trailer:
 
 ```
 fix(webui): scope agent artifact panes by session
