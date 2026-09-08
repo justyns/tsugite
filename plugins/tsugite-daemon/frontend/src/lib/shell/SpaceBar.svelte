@@ -36,6 +36,12 @@
 
   const drag = new ReorderDrag((id) => spaces.findIndex((s) => s.id === id));
 
+  // Firefox cancels a drag whose data store is empty.
+  function onChipDragStart(event: DragEvent, id: string) {
+    event.dataTransfer?.setData('application/x-tsugite-space', id);
+    drag.start(id);
+  }
+
   function onChipDragOver(event: DragEvent, id: string) {
     if (!onReorder) return;
     drag.over(event, id);
@@ -106,7 +112,7 @@
       class:drop-before={drag.dropAt === i}
       class:drop-after={drag.dropAt === i + 1 && i === spaces.length - 1}
       draggable={onReorder && editingId !== space.id ? 'true' : undefined}
-      ondragstart={() => drag.start(space.id)}
+      ondragstart={(event) => onChipDragStart(event, space.id)}
       ondragend={() => drag.end()}
       ondragover={(event) => onChipDragOver(event, space.id)}
       ondrop={onChipDrop}

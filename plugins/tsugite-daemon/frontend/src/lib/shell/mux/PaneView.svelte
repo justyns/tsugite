@@ -119,7 +119,12 @@
       return;
     }
     if (intent.action === 'dock') handlers.onDock?.(pane.id, ref);
-    else handlers.onSplit?.(pane.id, intent.dir, ref, intent.position);
+    else if (handlers.onSplit) {
+      if (origin?.paneId === pane.id && pane.tabs.length === 1) return;
+      // Closing the source first keeps focus on the leaf the split creates.
+      if (origin) handlers.onCloseTab?.(origin.paneId, origin.tabId);
+      handlers.onSplit(pane.id, intent.dir, ref, intent.position);
+    }
   }
 
   function onDragTab(tabId: string, dt: DataTransfer) {
@@ -160,8 +165,8 @@
     {#snippet tabs()}
       {#if pane.tabs.length > 0}
         <!-- The strip is the pane's only chrome: per-tab close, bulk actions on
-             right-click, + and split at the end. Surfaces carry their own
-             titles, so a second header bar would just repeat them. -->
+             right-click, + and split at the end. Surfaces show their own
+             titles, so a second header bar would repeat them. -->
         <TabStrip
           tabs={stripTabs}
           activeId={pane.activeTabId ?? undefined}
@@ -246,7 +251,7 @@
     border-radius: var(--r-sm);
   }
 
-  /* The wrapper exists only to carry `hidden`: `display: contents` leaves the
+  /* The wrapper exists only to hold `hidden`. `display: contents` leaves the
      surface itself a direct flex child of the pane body, so a kept-alive pane
      lays out exactly as a single-tab one does. */
   .mux-surf {

@@ -116,6 +116,14 @@ test('right-click opens a menu offering rename and close', async () => {
   expect(p.onClose).toHaveBeenCalledWith('s2');
 });
 
+test('starting a chip drag writes drag data, which Firefox needs to keep the drag alive', async () => {
+  const { container } = await render(SpaceBar, props({ onReorder: vi.fn() }));
+  const chip = container.querySelectorAll<HTMLElement>('.sp')[1]!;
+  const dataTransfer = new DataTransfer();
+  chip.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));
+  expect(dataTransfer.getData('application/x-tsugite-space')).toBe('s2');
+});
+
 function dragChip(from: HTMLElement, to: HTMLElement, half: 'left' | 'right') {
   const dataTransfer = new DataTransfer();
   from.dispatchEvent(new DragEvent('dragstart', { dataTransfer, bubbles: true }));

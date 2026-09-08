@@ -384,6 +384,22 @@ test('dragging a tab onto another pane moves it there rather than leaving a copy
   expect([...kinds].sort()).toEqual(['chat', 'terminal']);
 });
 
+test('dropping a dragged tab on a pane edge splits it there without leaving a copy behind', async () => {
+  const mux = await mountMux(seeded({ kind: 'chat' }));
+  dropSurface(mux.panes()[0]!, { kind: 'terminal' }, 0.9);
+  await expect.poll(() => mux.panes().length).toBe(2);
+
+  const panes = mux.panes();
+  const chatTab = panes[0]!.querySelector<HTMLElement>('[data-tab-id]')!;
+  dragTabToPane(chatTab, panes[1]!, 0.9);
+
+  await expect.poll(() => mux.panes().length).toBe(2);
+  const kinds = collectLeaves(mux.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+  expect([...kinds].sort()).toEqual(['chat', 'terminal']);
+  const focused = collectLeaves(mux.layout.root).find((l) => l.id === mux.layout.focusedPaneId);
+  expect(focused?.tabs.map((t) => t.kind)).toEqual(['chat']);
+});
+
 test('reordering tabs inside a pane does not also split that pane', async () => {
   // Found in a browser: without stopPropagation the reorder also split the pane.
   const mux = await mountMux(seeded({ kind: 'chat' }));
