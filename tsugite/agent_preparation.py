@@ -119,8 +119,9 @@ class AgentPreparer:
         placeholders: Dict[str, str] = {}
         modified = content
         for d in directives:
-            if d.assign_var:
-                placeholders[d.assign_var] = f"[{kind} directive: {d.name}(...) - not executed in render mode]"
+            for var in (d.assign_var, getattr(d, "stdout_assign", None)):
+                if var:
+                    placeholders[var] = f"[{kind} directive: {d.name}(...) - not executed in render mode]"
             if rewrite_to is not None:
                 modified = modified.replace(d.raw_match, rewrite_to(d))
         return modified, placeholders

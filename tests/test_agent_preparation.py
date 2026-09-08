@@ -105,3 +105,27 @@ Answer: {{ answer }}
         # The placeholder mentions the directive name so users can see what was skipped
         assert "compute" in prepared.rendered_prompt
         assert "not executed" in prepared.rendered_prompt.lower()
+
+    def test_prepare_agent_no_exec_flag_placeholders_stdout_assign(self, tmp_path):
+        """stdout_assign binds a variable on the executing path, so the skipped path
+        has to define it too."""
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text("""---
+name: skip_exec_stdout
+extends: none
+tools: []
+---
+
+<!-- tsu:exec name="calc" assign="val" stdout_assign="logs" -->
+print("working")
+7
+<!-- /tsu:exec -->
+
+Value: {{ val }}
+Logs: {{ logs }}
+""")
+
+        agent = parse_agent_file(agent_file)
+        prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, skip_exec_directives=True)
+
+        assert prepared.rendered_prompt.count("not executed in render mode") == 2

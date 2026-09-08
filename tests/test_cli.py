@@ -1,5 +1,6 @@
 """Tests for the CLI interface."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -162,6 +163,26 @@ def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_exec
     assert result.exit_code == 0
 
 
+def test_run_command_log_json_emits_json_lines(cli_runner, sample_agent_file):
+    """--log-json puts the JSONL event stream on stdout, with no rendered markdown mixed in."""
+    from tsugite.events import FinalAnswerEvent
+
+    def fake_run_agent(**kwargs):
+        kwargs["custom_logger"].ui_handler.handle_event(FinalAnswerEvent(answer="done", turns=1))
+        return "done"
+
+    with (
+        patch("tsugite.agent_runner.run_agent", side_effect=fake_run_agent),
+        patch("tsugite.md_agents.validate_agent_execution", return_value=(True, "Agent is valid")),
+    ):
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--log-json"])
+
+    assert result.exit_code == 0
+    events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    assert [e["type"] for e in events] == ["final_result"]
+    assert events[0]["result"] == "done"
+
+
 @patch("tsugite.utils.should_use_plain_output", return_value=False)
 @patch("tsugite.ui.create_plain_logger")
 def test_show_reasoning_flag(mock_plain, mock_plain_output, cli_runner, sample_agent_file, mock_agent_execution):
@@ -206,6 +227,18 @@ def test_run_command_custom_history_dir(cli_runner, sample_agent_file, temp_dir,
         ],
     )
     assert result.exit_code == 0
+
+
+def test_run_command_history_dir_holds_the_database(cli_runner, sample_agent_file, tmp_path, mock_agent_execution):
+    """--history-dir is where history lands, not just a directory that gets created."""
+    history_dir = tmp_path / "hd"
+    result = cli_runner.invoke(
+        app,
+        ["run", str(sample_agent_file), "test prompt", "--history-dir", str(history_dir)],
+    )
+
+    assert result.exit_code == 0
+    assert (history_dir / "history.db").exists()
 
 
 def test_run_command_all_options(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):

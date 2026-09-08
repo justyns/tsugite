@@ -1,6 +1,7 @@
 """CLI run command - execute agents."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import typer
@@ -137,10 +138,17 @@ def _execute_agent_with_ui(
     """Execute agent with appropriate UI mode.
 
     Dispatch order:
-      1. --headless / --final-only -> custom_agent_ui with silent progress
-      2. fall-through default -> plain logger (covers no flags, --plain, piped/NO_COLOR)
+      1. --log-json -> JSONL event stream on stdout
+      2. --headless / --final-only -> custom_agent_ui with silent progress
+      3. fall-through default -> plain logger (covers no flags, --plain, piped/NO_COLOR)
     """
     from tsugite.ui import create_plain_logger, custom_agent_ui
+
+    if ui_opts.log_json:
+        from tsugite.ui.jsonl import JSONLUIHandler
+
+        executor_kwargs["custom_logger"] = SimpleNamespace(ui_handler=JSONLUIHandler())
+        return executor(**executor_kwargs)
 
     if ui_opts.headless or ui_opts.final_only:
         stderr_console = get_error_console(True, console)
@@ -187,6 +195,9 @@ def _display_result(result_str: str, ui_opts: UIOptions, stderr_console: Console
     from rich.markdown import Markdown
 
     from tsugite.console import get_stdout_console
+
+    if ui_opts.log_json:
+        return
 
     if not (ui_opts.headless or ui_opts.final_only):
         stderr_console.print()
@@ -358,6 +369,10 @@ def run(
 
     if history_opts.storage_dir:
         history_opts.storage_dir.mkdir(parents=True, exist_ok=True)
+        from tsugite.history import set_history_backend
+        from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
+        set_history_backend(SqliteHistoryBackend(history_opts.storage_dir / "history.db"))
 
     if ui_opts.no_color:
         console.no_color = True
