@@ -231,11 +231,14 @@ def save_run_to_history(
     # agent ran to completion against this storage.
     existing = list(storage.iter_events())
     last_session_start = -1
+    last_user_input = -1
     last_model_response = -1
     last_session_end = -1
     for i, e in enumerate(existing):
         if e.type == "session_start":
             last_session_start = i
+        elif e.type == "user_input":
+            last_user_input = i
         elif e.type == "model_response":
             last_model_response = i
         elif e.type == "session_end":
@@ -244,7 +247,10 @@ def save_run_to_history(
     agent_already_recorded = last_model_response > last_session_start
 
     if agent_already_recorded:
-        if last_session_end <= last_session_start:
+        # A continued conversation pins session_start at index 0, so the current
+        # turn starts at its own user_input.
+        turn_start = max(last_session_start, last_user_input)
+        if last_session_end < turn_start:
             record_session_end(storage, status=status, error_message=error_message)
         return storage.session_id
 

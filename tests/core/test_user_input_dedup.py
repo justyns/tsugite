@@ -74,3 +74,33 @@ def test_save_run_to_history_no_dup_user_input_on_failed_turn(tmp_path: Path):
 
     reloaded = backend.load("failsess")
     assert len([e for e in reloaded.iter_events() if e.type == "user_input"]) == 1
+
+
+def test_failed_continued_turn_is_closed(tmp_path: Path):
+    """Turn 2 of a continued conversation failed before any model_response. The
+    error-path save_run_to_history must close it with a session_end, otherwise the
+    dangling user_input makes the dedupe guard swallow every later message."""
+    backend = get_history_backend()
+    storage = backend.create(agent_name="t", model="openai:gpt-4o-mini", session_id="conv")
+    storage.record("user_input", text="q1")
+    storage.record("model_response", raw_content="a1")
+    storage.record("final_result", result="a1")
+    storage.record("session_end", status="success")
+    storage.record("user_input", text="q2")
+
+    save_run_to_history(
+        agent_path=Path("nonexistent-agent.md"),
+        agent_name="t",
+        prompt="q2",
+        result="[Error: bogus model]",
+        model="openai:gpt-4o-mini",
+        continue_conversation_id="conv",
+        status="error",
+        error_message="bogus model",
+    )
+
+    reloaded = backend.load("conv")
+    assert [e.type for e in reloaded.iter_events()][-1] == "session_end"
+
+    record_user_input(reloaded, "q3")
+    assert [e.data["text"] for e in _user_inputs(reloaded)] == ["q1", "q2", "q3"]
