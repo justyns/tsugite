@@ -15,9 +15,12 @@ vi.mock('$lib/api/client', () => ({
 }));
 
 import { api } from '$lib/api/client';
+import { readSwr } from '$lib/api/swr';
 import { attentionRecord } from '../../views/chats/__fixtures__/sessionRow';
 import { SessionsStore, type SessionRow } from './sessions.svelte';
+import { fakeLocalStorage } from './testLocalStorage';
 
+const CACHE_KEY = 'tsugite_sessions';
 const apiGet = api.get as ReturnType<typeof vi.fn>;
 const apiPost = api.post as ReturnType<typeof vi.fn>;
 
@@ -291,5 +294,45 @@ describe('SessionsStore attention', () => {
     await expect(store.dismissAttention('s1')).rejects.toThrow('offline');
     expect(store.rows[0]!.needs_attention).toBe(true);
     expect(store.rows[0]!.pending_deliveries).toEqual(['dlv-1']);
+  });
+});
+
+describe('SessionsStore list loading', () => {
+  test('an earlier search that lands late does not overwrite the newest result', async () => {
+    const store = new SessionsStore();
+    let settleFirst!: (value: { sessions: SessionRow[] }) => void;
+    apiGet.mockImplementationOnce(
+      () => new Promise<{ sessions: SessionRow[] }>((resolve) => (settleFirst = resolve)),
+    );
+    apiGet.mockResolvedValueOnce({ sessions: [row('newest')] });
+
+    const first = store.load({ q: 'o' });
+    const second = store.load({ q: 'ol' });
+    await second;
+    settleFirst({ sessions: [row('stale')] });
+    await first;
+
+    expect(store.rows.map((r) => r.id)).toEqual(['newest']);
+  });
+});
+
+describe('SessionsStore list cache', () => {
+  beforeEach(() => vi.stubGlobal('window', { localStorage: fakeLocalStorage() }));
+  afterEach(() => vi.unstubAllGlobals());
+
+  test('an unfiltered load caches the list a cold start paints', async () => {
+    const store = new SessionsStore();
+    apiGet.mockResolvedValueOnce({ sessions: [row('s1')] });
+    await store.load();
+    expect(readSwr<SessionRow[]>(CACHE_KEY)?.map((r) => r.id)).toEqual(['s1']);
+  });
+
+  test('a search load leaves the cached list alone', async () => {
+    const store = new SessionsStore();
+    apiGet.mockResolvedValueOnce({ sessions: [row('s1'), row('s2')] });
+    await store.load();
+    apiGet.mockResolvedValueOnce({ sessions: [row('s2')] });
+    await store.search('s2');
+    expect(readSwr<SessionRow[]>(CACHE_KEY)?.map((r) => r.id)).toEqual(['s1', 's2']);
   });
 });

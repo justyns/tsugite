@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { parseSSEFrame, reconcileHello, resumeQuery, splitFrames } from '$lib/api/sse';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  connectEvents,
+  parseSSEFrame,
+  reconcileHello,
+  resumeQuery,
+  splitFrames,
+} from '$lib/api/sse';
 
 describe('parseSSEFrame', () => {
   it('parses a single data line', () => {
@@ -104,5 +110,54 @@ describe('reconcileHello', () => {
 
   it('defaults a missing seq to 0 when resetting', () => {
     expect(reconcileHello({ epoch: null, lastSeq: 0 }, { epoch: 'e1' }).lastSeq).toBe(0);
+  });
+});
+
+describe('connectEvents watchdog', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function silentStream(signal: AbortSignal): Response {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () =>
+            new Promise<never>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(new Error('aborted')));
+            }),
+        }),
+      },
+    } as unknown as Response;
+  }
+
+  it('does not abort a reconnect that has yet to receive its first byte', async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_path: string, init: RequestInit) => {
+        const signal = init.signal as AbortSignal;
+        signals.push(signal);
+        return signals.length === 1
+          ? Promise.resolve(silentStream(signal))
+          : new Promise<Response>(() => {});
+      }),
+    );
+
+    const handle = connectEvents(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signals).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(52_000);
+    expect(signals).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(signals[1]!.aborted).toBe(false);
+
+    handle.close();
   });
 });

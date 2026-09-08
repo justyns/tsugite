@@ -122,6 +122,7 @@ export class SessionsStore {
 
   private lastOpts: SessionListOpts = {};
   private revalidateTimer: ReturnType<typeof setTimeout> | null = null;
+  private loadSeq = 0;
   private burst = new Map<string, Promise<void>>();
   private convSinks = new Map<string, Set<(data: Record<string, unknown>) => void>>();
 
@@ -155,6 +156,7 @@ export class SessionsStore {
   }
 
   private async fetchList(opts: SessionListOpts): Promise<void> {
+    const seq = ++this.loadSeq;
     untrack(() => {
       this.loaded = true;
       this.lastOpts = opts;
@@ -171,12 +173,13 @@ export class SessionsStore {
       const res = await api.get<{ sessions: SessionRow[] }>(
         `/api/chat/sessions${buildQuery(opts)}`,
       );
+      if (seq !== this.loadSeq) return;
       this.rows = orderSessions(res.sessions);
-      writeSwr(CACHE_KEY, res.sessions);
+      if (!opts.q) writeSwr(CACHE_KEY, res.sessions);
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      if (seq === this.loadSeq) this.error = err instanceof Error ? err.message : String(err);
     } finally {
-      this.loading = false;
+      if (seq === this.loadSeq) this.loading = false;
     }
   }
 

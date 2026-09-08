@@ -182,6 +182,7 @@ export function connectEvents(
         continue;
       }
       controller = new AbortController();
+      lastActivity = Date.now();
       try {
         const resp = await fetch('/api/events' + resumeQuery(epoch, lastSeq), {
           headers: authHeaders(),
