@@ -46,6 +46,8 @@
   let sourceLoading = $state(false);
   let sourceError = $state<string | null>(null);
 
+  let sourceSeq = 0;
+
   async function loadCatalog(): Promise<void> {
     loading = true;
     error = null;
@@ -84,15 +86,16 @@
   }
 
   async function fetchSource(row: SkillCatalogRow): Promise<void> {
+    const seq = ++sourceSeq;
     sourceLoading = true;
     sourceError = null;
     try {
       const res = await agentsMeta.readSkillFile(row.path);
       sourceCache[row.path] = res.content;
     } catch (err) {
-      sourceError = err instanceof Error ? err.message : String(err);
+      if (seq === sourceSeq) sourceError = err instanceof Error ? err.message : String(err);
     } finally {
-      sourceLoading = false;
+      if (seq === sourceSeq) sourceLoading = false;
     }
   }
 

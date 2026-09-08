@@ -179,3 +179,30 @@ test('the roster filter narrows the list by name', async () => {
   await expect.element(page.getByTestId('agent-row-ops-runner')).toBeInTheDocument();
   expect(page.getByTestId('agent-row-hollis').elements()).toHaveLength(0);
 });
+
+test('picking a second agent while its read is in flight disables Save, so the first file cannot overwrite it', async () => {
+  vi.mocked(api.get).mockImplementation((async (path: string) => {
+    if (
+      path.startsWith('/api/agent-files/content') &&
+      decodeURIComponent(path).includes('ops-runner')
+    )
+      return new Promise(() => {});
+    return routeGet(path);
+  }) as never);
+
+  const { container } = await render(View);
+  await page.getByRole('button', { name: 'markdown' }).click();
+  const ta = container.querySelector<HTMLTextAreaElement>('.agent-src');
+  await vi.waitFor(() => expect(ta?.value).toContain('name: hollis'));
+
+  ta!.value = HOLLIS_SRC + '\n- extra rule\n';
+  ta!.dispatchEvent(new Event('input', { bubbles: true }));
+  const save = page.getByTestId('agent-save');
+  await expect.element(save).toBeEnabled();
+
+  await page.getByTestId('agent-row-ops-runner').click();
+  await vi.waitFor(() => expect(container.querySelector('.t-skel')).not.toBeNull());
+
+  await expect.element(save).toBeDisabled();
+  expect(vi.mocked(api.put)).not.toHaveBeenCalled();
+});

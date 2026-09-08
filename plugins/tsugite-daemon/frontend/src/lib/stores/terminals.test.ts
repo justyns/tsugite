@@ -1,10 +1,39 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { api } from '$lib/api/client';
 import { TerminalsStore, type Terminal, type TerminalState } from './terminals.svelte';
+import * as terminalsStore from './terminals.svelte';
+import { isLiveTerminal } from '../../views/terminals/termState';
+
+const ALL_STATES: TerminalState[] = [
+  'starting',
+  'running',
+  'succeeded',
+  'failed',
+  'cancelled',
+  'stream_lost',
+];
 
 function term(id: string, state: TerminalState = 'running'): Terminal {
   return { id, state } as unknown as Terminal;
 }
+
+describe('isLiveTerminal', () => {
+  test('the terminals view reads the store predicate, not a second copy', () => {
+    expect(terminalsStore.isLiveTerminal).toBe(isLiveTerminal);
+  });
+
+  test('only starting and running are live', () => {
+    expect(ALL_STATES.filter(isLiveTerminal)).toEqual(['starting', 'running']);
+  });
+
+  test('store.isLive agrees with the predicate for every state', () => {
+    const store = new TerminalsStore();
+    for (const state of ALL_STATES) {
+      store.list = [term('t1', state)];
+      expect(store.isLive('t1')).toBe(isLiveTerminal(state));
+    }
+  });
+});
 
 describe('TerminalsStore.applyTerminalState', () => {
   test('records the live state and patches the matching list row', () => {

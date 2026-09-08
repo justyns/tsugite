@@ -63,3 +63,11 @@ test('the executor picker appears once more than one executor is registered', as
   await render(NewJobDrawer, { ...base, executors: ['agent', 'docker'] });
   await expect.element(page.getByTestId('new-job-executor')).toBeInTheDocument();
 });
+
+test('an empty roster renders a disabled placeholder, not a selectable agent option', async () => {
+  const { container } = await render(NewJobDrawer, { ...base, agents: [] });
+  const values = [...container.querySelectorAll('option')].map((o) => o.value);
+  expect(values).not.toContain('(no agents)');
+  await expect.element(page.getByTestId('new-job-agent')).toHaveTextContent('no agents available');
+  await expect.element(page.getByTestId('new-job-preview')).toHaveTextContent('--agent ?');
+});

@@ -194,3 +194,37 @@ test('selecting a row shows its detail pane with diagnostics and the raw SKILL.m
   await expect.element(detail).toHaveTextContent('name: pdf_extract');
   await expect.element(detail).toHaveTextContent('body');
 });
+
+test('a read that fails after the user moved on keeps its error off the selected skill', async () => {
+  const files = [
+    file({ name: 'log-triage', path: '/skills/log-triage/SKILL.md' }),
+    file({ name: 'pdf-extract', path: '/skills/pdf-extract/SKILL.md' }),
+  ];
+  const reads = new Map<string, (reason: unknown) => void>();
+  vi.mocked(api.get).mockImplementation(async (path: string) => {
+    if (path === '/api/skill-files') return { files };
+    if (path === '/api/skills/issues') return { issues: [] };
+    if (path.startsWith('/api/skill-files/content')) {
+      const target = decodeURIComponent(path.split('path=')[1] ?? '');
+      return new Promise((_resolve, reject) => reads.set(target, reject));
+    }
+    throw new Error(`unexpected path: ${path}`);
+  });
+
+  await render(View);
+  await expect.element(page.getByRole('option', { name: /pdf-extract/ })).toBeInTheDocument();
+  await vi.waitFor(() => expect(reads.has('/skills/log-triage/SKILL.md')).toBe(true));
+
+  await page.getByRole('option', { name: /pdf-extract/ }).click();
+  await vi.waitFor(() => expect(reads.has('/skills/pdf-extract/SKILL.md')).toBe(true));
+
+  const detail = page.getByTestId('skills-drawer');
+  reads.get('/skills/pdf-extract/SKILL.md')!(new Error('pdf-extract read failed'));
+  await expect.element(detail).toHaveTextContent('pdf-extract read failed');
+
+  reads.get('/skills/log-triage/SKILL.md')!(new Error('log-triage read failed'));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  await expect.element(detail).toHaveTextContent('pdf-extract read failed');
+  await expect.element(detail).not.toHaveTextContent('log-triage read failed');
+});

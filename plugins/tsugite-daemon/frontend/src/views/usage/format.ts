@@ -21,23 +21,26 @@ export function formatRuns(n: number | null | undefined): string {
 }
 
 const TOKEN_TIERS: [number, string][] = [
-  [1_000_000_000, 'B'],
-  [1_000_000, 'M'],
   [1_000, 'k'],
+  [1_000_000, 'M'],
+  [1_000_000_000, 'B'],
 ];
 
 /** Compact token count: 999 -> "999", 412000 -> "412k", 40700000 -> "40.7M".
  * Rounds to one decimal and drops a trailing ".0" rather than forcing it. */
 export function formatTokensCompact(n: number | null | undefined): string {
   const value = n ?? 0;
-  const abs = Math.abs(value);
-  for (const [div, suffix] of TOKEN_TIERS) {
-    if (abs >= div) {
-      const scaled = (Math.round((value / div) * 10) / 10).toFixed(1);
-      return `${scaled.endsWith('.0') ? scaled.slice(0, -2) : scaled}${suffix}`;
-    }
+  if (Math.abs(value) < 1_000) return String(Math.round(value));
+  let scaled = 0;
+  let suffix = '';
+  // Rounding can push a count past its tier (999_999 scales to 1000k).
+  for (const [div, tierSuffix] of TOKEN_TIERS) {
+    scaled = Math.round((value / div) * 10) / 10;
+    suffix = tierSuffix;
+    if (Math.abs(scaled) < 1_000) break;
   }
-  return String(Math.round(value));
+  const text = scaled.toFixed(1);
+  return `${text.endsWith('.0') ? text.slice(0, -2) : text}${suffix}`;
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];

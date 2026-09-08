@@ -17,7 +17,10 @@ import { parseNamedSSE } from '$lib/api/sse';
 export type TerminalState =
   'starting' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'stream_lost';
 
-const LIVE_STATES = new Set<TerminalState>(['starting', 'running']);
+/** Whether the terminal is live (accepts stdin / can be killed). */
+export function isLiveTerminal(state: TerminalState): boolean {
+  return state === 'starting' || state === 'running';
+}
 
 export interface Terminal {
   id: string;
@@ -80,7 +83,7 @@ export class TerminalsStore {
 
   isLive(id: string): boolean {
     const state = this.stateOf(id);
-    return state != null && LIVE_STATES.has(state);
+    return state != null && isLiveTerminal(state);
   }
 
   async load(parentSessionId?: string): Promise<void> {

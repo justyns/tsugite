@@ -52,6 +52,13 @@ describe('formatTokensCompact', () => {
     expect(formatTokensCompact(1_250_000_000)).toBe('1.3B');
   });
 
+  test('a count that rounds past its tier renders in the next tier', () => {
+    expect(formatTokensCompact(999_949)).toBe('999.9k');
+    expect(formatTokensCompact(999_950)).toBe('1M');
+    expect(formatTokensCompact(999_999)).toBe('1M');
+    expect(formatTokensCompact(999_999_999)).toBe('1B');
+  });
+
   test('null/undefined render as 0', () => {
     expect(formatTokensCompact(null)).toBe('0');
     expect(formatTokensCompact(undefined)).toBe('0');

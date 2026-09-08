@@ -113,6 +113,8 @@ export class UsageStore {
    *  slot for this ambient widget. */
   today = $state<UsageTotal | null>(null);
 
+  private loadSeq = 0;
+
   async loadToday(): Promise<void> {
     try {
       this.today = await api.get<UsageTotal>(`/api/usage/total?since=${daysAgoISO(0)}`);
@@ -122,6 +124,7 @@ export class UsageStore {
   }
 
   async load(range: Partial<UsageRange> = {}): Promise<void> {
+    const seq = ++this.loadSeq;
     this.range = { ...this.range, ...range };
     const since = daysAgoISO(this.range.sinceDays);
     const summaryParams = new URLSearchParams({ period: this.range.period, since });
@@ -141,16 +144,18 @@ export class UsageStore {
         // take the cost tables down with it.
         api.get<UsageProviderRow[]>('/api/usage/providers').catch((): UsageProviderRow[] => []),
       ]);
-      this.summary = summary;
-      this.agents = agents;
-      this.models = models;
-      this.schedules = schedules;
-      this.total = total;
-      this.providers = providers;
+      if (seq === this.loadSeq) {
+        this.summary = summary;
+        this.agents = agents;
+        this.models = models;
+        this.schedules = schedules;
+        this.total = total;
+        this.providers = providers;
+      }
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      if (seq === this.loadSeq) this.error = err instanceof Error ? err.message : String(err);
     } finally {
-      this.loading = false;
+      if (seq === this.loadSeq) this.loading = false;
     }
   }
 }

@@ -97,6 +97,9 @@
     const seq = ++contentSeq;
     loadingContent = true;
     contentError = null;
+    // Blanking the buffer keeps `dirty` false while the read is in flight.
+    content = '';
+    savedContent = '';
     try {
       const r = await agentsMeta.readAgentFile(path);
       if (seq !== contentSeq) return;

@@ -9,6 +9,8 @@ import type { IconName } from '$lib/components/icon/icons';
 import type { TerminalState } from '$lib/stores/terminals.svelte';
 import type { PaneTabState } from '$lib/shell/mux/layout';
 
+export { isLiveTerminal } from '$lib/stores/terminals.svelte';
+
 /** Header status pill: color + icon + text together (never color alone). `st`
  *  is the `data-st` bucket (reuses the job/state-language pill colors);
  *  `spin` swaps the icon for the braille activity spinner. */
@@ -80,11 +82,6 @@ export function terminalTabState(state: TerminalState): PaneTabState {
     case 'cancelled':
       return 'idle';
   }
-}
-
-/** Whether the terminal is live (accepts stdin / can be killed). */
-export function isLiveTerminal(state: TerminalState): boolean {
-  return state === 'starting' || state === 'running';
 }
 
 /** Byte count -> "915 B" / "48 KB" / "2.1 MB". */

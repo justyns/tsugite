@@ -159,11 +159,11 @@
     <div class="setrow">
       <span class="lbl">agent</span>
       <span data-testid={TESTID.newJobAgent}>
-        <Select
-          options={agents.length ? agents : ['(no agents)']}
-          bind:value={agent}
-          ariaLabel="Host agent"
-        />
+        {#if agents.length}
+          <Select options={agents} bind:value={agent} ariaLabel="Host agent" />
+        {:else}
+          <span class="sub">no agents available</span>
+        {/if}
       </span>
     </div>
 
