@@ -102,6 +102,8 @@
   let outPre = $state<HTMLElement>();
   $effect(() => {
     void output;
+    // A folded section is display:none and measures zero.
+    if (isCollapsed) return;
     if (!outOpen && outPre) outOverflow = outPre.scrollHeight > outPre.clientHeight + 1;
   });
 

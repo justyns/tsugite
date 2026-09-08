@@ -94,6 +94,13 @@ test('a long result expands on click and collapses back via the strip', async ()
   await expect.element(page.getByRole('button', { name: 'expand output' })).toBeInTheDocument();
 });
 
+test('a block that mounts collapsed still offers the output expand once opened', async () => {
+  const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n');
+  render(CodeBlock, { code: 'run()', lang: 'python', output: long, collapsed: true });
+  await page.getByRole('button', { name: 'Expand code' }).click();
+  await expect.element(page.getByRole('button', { name: 'expand output' })).toBeInTheDocument();
+});
+
 test('a short result offers no expand affordance', async () => {
   render(CodeBlock, { code: 'run()', lang: 'python', output: 'ok' });
   await expect.element(page.getByText('ok')).toBeInTheDocument();

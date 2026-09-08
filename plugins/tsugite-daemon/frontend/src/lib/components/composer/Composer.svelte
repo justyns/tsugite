@@ -229,16 +229,20 @@
   // A context chip shows only its short label; clicking it previews the full
   // value (a whole file or fetched page) in a modal rather than in the row.
 
+  let choiceToken = 0;
   function closeCtxMenu() {
     ctxMenuOpen = false;
     submenu = null;
+    choiceToken++;
   }
 
   async function chooseMenuItem(opt: ContextMenuItem) {
     // A large-option (picker) provider skips the inline submenu: the host opens
     // the Picker overlay off the plain onPickContext commit below.
     if (opt.kind === 'server' && opt.hasChoices && !opt.picker) {
+      const token = ++choiceToken;
       const choices = (await onRequestChoices?.(opt.key)) ?? [];
+      if (token !== choiceToken) return;
       // No options to pick (empty set, or a failed load) - nothing to open.
       if (choices.length === 0) closeCtxMenu();
       else submenu = { item: opt, choices };
@@ -474,7 +478,9 @@
       aria-label="Message"
       aria-autocomplete="list"
       aria-controls={listId}
-      aria-activedescendant={showPopover ? `${idBase}-${mention.active}` : undefined}
+      aria-activedescendant={showPopover && visibleItems.length > 0
+        ? `${idBase}-${mention.active}`
+        : undefined}
       oninput={handleInput}
       onkeydown={handleKeydown}
       onpaste={onPaste}></textarea>

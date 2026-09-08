@@ -190,6 +190,19 @@ test('Enter while a source shows "No matches" is swallowed, not sent', async () 
   expect(onSend).not.toHaveBeenCalled();
 });
 
+test('a status-only popover points at no active option', async () => {
+  const search = vi.fn(async () => []); // always empty -> the No-matches state
+  render(Composer, {
+    refItems: [],
+    refSources: [{ prefix: 'jira', label: 'Jira', search }] satisfies RefSource[],
+  });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await userEvent.fill(box, 'go @jira zzz');
+  await expect.element(page.getByText('No matches')).toBeInTheDocument();
+  expect(page.getByRole('option').elements()).toHaveLength(0);
+  await expect.element(box).not.toHaveAttribute('aria-activedescendant');
+});
+
 test('a picker provider commits immediately (no inline submenu) so the host opens the Picker', async () => {
   const onPickContext = vi.fn();
   const onRequestChoices = vi.fn().mockResolvedValue([{ value: 'a.md', label: 'a.md' }]);
@@ -373,6 +386,31 @@ test('a hasChoices provider opens a submenu; picking an option commits it with t
     { key: 'terminal', label: 'Terminal output', icon: 'term', kind: 'server', hasChoices: true },
     't2',
   );
+});
+
+test('a choices reply landing after the menu closed leaves no stale submenu', async () => {
+  type Choice = { value: string; label: string };
+  let resolveChoices: (c: Choice[]) => void = () => {};
+  const onRequestChoices = vi.fn(
+    () => new Promise<Choice[]>((resolve) => (resolveChoices = resolve)),
+  );
+  render(Composer, {
+    contextMenu: [
+      { key: 'terminal', label: 'Terminal output', icon: 'term', kind: 'server', hasChoices: true },
+    ],
+    onRequestChoices,
+  });
+  const btn = page.getByTestId(TESTID.composerContext);
+  await btn.click();
+  (page.getByTestId(TESTID.composerContextOption('terminal')).element() as HTMLElement).click();
+
+  await btn.click();
+  await expect.element(page.getByTestId(TESTID.composerContextMenu)).not.toBeInTheDocument();
+  resolveChoices([{ value: 't1', label: 'npm test' }]);
+
+  await btn.click();
+  await expect.element(page.getByTestId(TESTID.composerContextMenu)).toBeInTheDocument();
+  await expect.element(page.getByTestId(TESTID.composerContextSubmenu)).not.toBeInTheDocument();
 });
 
 test('a context chip shows its short label (not the value) and its X removes it', async () => {

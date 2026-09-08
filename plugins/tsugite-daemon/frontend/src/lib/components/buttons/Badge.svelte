@@ -24,6 +24,7 @@
   class:t-badge--act={variant === 'action'}
   class:t-badge--err={variant === 'err'}
   class:t-badge--dot={variant === 'dot'}
+  role={label ? 'img' : undefined}
   aria-label={label}
 >
   {#if variant !== 'dot' && children}{@render children()}{/if}
