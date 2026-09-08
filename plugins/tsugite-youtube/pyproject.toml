@@ -6,7 +6,7 @@ authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
   "tsugite-cli==0.22.0",
-  "youtube-transcript-api>=0.6.0",
+  "youtube-transcript-api>=1.0",
 ]
 
 [project.entry-points."tsugite.attachments"]

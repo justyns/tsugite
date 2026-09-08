@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -59,12 +60,11 @@ class CodexAuthStore:
         self._home = _resolve_home(home)
         self._auth_path = self._home / "auth.json"
         self._lock_path = self._home / "auth.json.lock"
-        self._async_lock = asyncio.Lock()
+        self._refresh_lock = threading.Lock()
 
     async def get_access_token(self) -> tuple[str, str]:
         """Return (access_token, account_id), refreshing if near expiry."""
-        async with self._async_lock:
-            return await asyncio.to_thread(self._sync_get_or_refresh)
+        return await asyncio.to_thread(self._sync_get_or_refresh)
 
     def _sync_get_or_refresh(self) -> tuple[str, str]:
         if not self._auth_path.exists():
@@ -73,7 +73,7 @@ class CodexAuthStore:
         # Lock the sidecar, not auth.json itself: os.replace unlinks the inode and
         # any waiter blocked on the original file descriptor would never wake.
         self._home.mkdir(parents=True, exist_ok=True)
-        with open(self._lock_path, "a+") as lock_fh:
+        with self._refresh_lock, open(self._lock_path, "a+") as lock_fh:
             portalocker.lock(lock_fh, portalocker.LOCK_EX)
             try:
                 os.chmod(self._lock_path, 0o600)

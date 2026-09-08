@@ -773,6 +773,9 @@ class DiscordAdapter(BaseAdapter):
                     current += line + "\n"
                 else:
                     flush_current()
+                    while len(line) >= limit:
+                        chunks.append(line[:limit])
+                        line = line[limit:]
                     current = line + "\n"
 
         def add_code_block(full_block: str, lang: str, inner: str) -> None:
@@ -791,13 +794,18 @@ class DiscordAdapter(BaseAdapter):
             header = f"```{lang}\n"
             code_chunk = header
 
+            room = limit - len(header) - closing_fence_len
             for line in inner.split("\n"):
                 line_with_newline = line + "\n"
                 if len(code_chunk) + len(line_with_newline) + closing_fence_len <= limit:
                     code_chunk += line_with_newline
-                else:
+                    continue
+                if code_chunk != header:
                     chunks.append(code_chunk.rstrip("\n") + "\n```")
-                    code_chunk = header + line_with_newline
+                while len(line) > room:
+                    chunks.append(header + line[:room] + "\n```")
+                    line = line[room:]
+                code_chunk = header + line + "\n"
 
             if code_chunk != header:
                 current = code_chunk.rstrip("\n") + "\n```"

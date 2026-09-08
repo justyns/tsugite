@@ -25,6 +25,11 @@ def _prefixed(name: str) -> str:
     return f"{SESSION_PREFIX}{name}"
 
 
+def _target(prefixed_name: str) -> str:
+    """A bare -t name also matches by prefix; the `=` marker forces an exact match."""
+    return f"={prefixed_name}"
+
+
 def _strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text)
 
@@ -36,7 +41,7 @@ def _validate_name(name: str) -> None:
 
 def _session_exists(prefixed_name: str) -> bool:
     result = subprocess.run(
-        ["tmux", "has-session", "-t", prefixed_name],
+        ["tmux", "has-session", "-t", _target(prefixed_name)],
         capture_output=True,
     )
     return result.returncode == 0
@@ -203,9 +208,10 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
     if source == "pane":
         prefixed = _require_session(name)
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", prefixed, "-p", "-S", f"-{lines}"],
+            ["tmux", "capture-pane", "-t", _target(prefixed), "-p", "-S", f"-{lines}"],
             capture_output=True,
             text=True,
+            errors="replace",
         )
         if result.returncode != 0:
             raise RuntimeError(f"Failed to capture pane: {result.stderr.strip()}")
@@ -216,7 +222,7 @@ def tmux_read(name: str, lines: int = 50, source: str = "pane") -> str:
         log_file = _get_log_dir() / f"{name}.log"
         if not log_file.exists():
             raise RuntimeError(f"No log file found for session '{name}'.")
-        with open(log_file) as f:
+        with open(log_file, errors="replace") as f:
             tail = deque(f, maxlen=lines)
         return _strip_ansi("".join(tail))
 
@@ -240,7 +246,7 @@ def tmux_send(name: str, keys: str, enter: bool = True) -> str:
     """
     prefixed = _require_session(name)
 
-    cmd = ["tmux", "send-keys", "-t", prefixed, keys]
+    cmd = ["tmux", "send-keys", "-t", _target(prefixed), keys]
     if enter:
         cmd.append("Enter")
 
@@ -276,7 +282,7 @@ def tmux_kill(name: str) -> str:
     prefixed = _require_session(name)
 
     result = subprocess.run(
-        ["tmux", "kill-session", "-t", prefixed],
+        ["tmux", "kill-session", "-t", _target(prefixed)],
         capture_output=True,
         text=True,
     )

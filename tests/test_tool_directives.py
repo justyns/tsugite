@@ -53,6 +53,17 @@ More content
         assert directives[0].args == {"url": "http://example.com", "headers": {"auth": "token"}}
         assert directives[0].assign_var == "api_data"
 
+    def test_extract_tool_directive_with_gt_in_args(self):
+        """A JSON arg value can hold any character, > included."""
+        content = """
+<!-- tsu:tool name="search_repos" args={"query": "language:python stars > 100"} assign="repos" -->
+"""
+        directives = extract_tool_directives(content)
+
+        assert len(directives) == 1
+        assert directives[0].args == {"query": "language:python stars > 100"}
+        assert directives[0].assign_var == "repos"
+
     def test_tool_directive_missing_name_raises_error(self):
         """Test that directive without name raises ValueError."""
         content = """

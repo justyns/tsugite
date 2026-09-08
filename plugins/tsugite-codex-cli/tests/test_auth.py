@@ -7,6 +7,7 @@ import base64
 import json
 import multiprocessing
 import os
+import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
@@ -241,3 +242,47 @@ async def test_concurrent_refresh_serialises(codex_home):
     # File survived without truncation/corruption
     payload = json.loads((codex_home / "auth.json").read_text())
     assert payload["tokens"]["access_token"] == new_access
+
+
+def test_refresh_serialises_across_event_loops(codex_home):
+    """The daemon runs each turn on its own loop, so two of them share one store across loops."""
+    _write_auth(codex_home, access_exp=10)
+
+    new_access = _fake_jwt(3600)
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": new_access, "refresh_token": "rt-new", "id_token": "id-new"}
+
+        @property
+        def text(self):
+            return ""
+
+    def slow_post(*args, **kwargs):
+        time.sleep(0.2)
+        return FakeResp()
+
+    store = CodexAuthStore()
+    start = threading.Barrier(2)
+    results: list[tuple[str, str]] = []
+    errors: list[BaseException] = []
+
+    def worker():
+        start.wait()
+        try:
+            results.append(asyncio.run(store.get_access_token()))
+        except BaseException as exc:
+            errors.append(exc)
+
+    with patch("httpx.post", side_effect=slow_post):
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+    assert not [t for t in threads if t.is_alive()], "a get_access_token call never returned"
+    assert not errors, errors
+    assert [token for token, _ in results] == [new_access, new_access]

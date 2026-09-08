@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from tsugite_tmux import (
     _list_managed_sessions,
+    _session_exists,
     _strip_ansi,
     _validate_name,
     get_tmux_sessions,
@@ -159,9 +160,10 @@ class TestTmuxRead:
 
         assert result == "hello world\n"
         mock_run.assert_called_once_with(
-            ["tmux", "capture-pane", "-t", "tsu-test", "-p", "-S", "-10"],
+            ["tmux", "capture-pane", "-t", "=tsu-test", "-p", "-S", "-10"],
             capture_output=True,
             text=True,
+            errors="replace",
         )
 
     def test_read_log(self, mock_metadata):
@@ -172,6 +174,15 @@ class TestTmuxRead:
         result = tmux_read("test", lines=2, source="log")
 
         assert result == "line3\nline4\n"
+
+    def test_read_log_with_undecodable_bytes(self, mock_metadata):
+        log_file = mock_metadata / "tmux-logs" / "test.log"
+        log_file.write_bytes(b"line one\n\xff\xfe bad\nline three\n")
+
+        result = tmux_read("test", lines=3, source="log")
+
+        assert "line one" in result
+        assert "line three" in result
 
     @patch("tsugite_tmux._session_exists", return_value=False)
     def test_read_nonexistent_pane(self, mock_exists):
@@ -206,7 +217,7 @@ class TestTmuxSend:
         result = tmux_send("test", "ls -la")
 
         mock_run.assert_called_once_with(
-            ["tmux", "send-keys", "-t", "tsu-test", "ls -la", "Enter"],
+            ["tmux", "send-keys", "-t", "=tsu-test", "ls -la", "Enter"],
             capture_output=True,
             text=True,
         )
@@ -220,7 +231,7 @@ class TestTmuxSend:
         result = tmux_send("test", "q", enter=False)
 
         mock_run.assert_called_once_with(
-            ["tmux", "send-keys", "-t", "tsu-test", "q"],
+            ["tmux", "send-keys", "-t", "=tsu-test", "q"],
             capture_output=True,
             text=True,
         )
@@ -317,7 +328,7 @@ class TestTmuxKill:
         result = tmux_kill("test")
 
         mock_run.assert_called_once_with(
-            ["tmux", "kill-session", "-t", "tsu-test"],
+            ["tmux", "kill-session", "-t", "=tsu-test"],
             capture_output=True,
             text=True,
         )
@@ -393,3 +404,42 @@ def test_tmux_tools_denied_when_agent_sandboxed():
                 fn()
     finally:
         set_sandbox_context(None)
+
+
+class TestExactSessionTargets:
+    """A bare -t name also matches by prefix; every call site forces an exact match."""
+
+    @patch("tsugite_tmux.subprocess.run")
+    def test_has_session(self, mock_run):
+        mock_run.return_value = _make_run_result()
+
+        _session_exists("tsu-deploy")
+
+        assert mock_run.call_args.args[0] == ["tmux", "has-session", "-t", "=tsu-deploy"]
+
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
+    def test_capture_pane(self, mock_run, mock_exists):
+        mock_run.return_value = _make_run_result(stdout="")
+
+        tmux_read("deploy")
+
+        assert "=tsu-deploy" in mock_run.call_args.args[0]
+
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
+    def test_send_keys(self, mock_run, mock_exists):
+        mock_run.return_value = _make_run_result()
+
+        tmux_send("deploy", "echo hi")
+
+        assert "=tsu-deploy" in mock_run.call_args.args[0]
+
+    @patch("tsugite_tmux._session_exists", return_value=True)
+    @patch("tsugite_tmux.subprocess.run")
+    def test_kill_session(self, mock_run, mock_exists, mock_metadata):
+        mock_run.return_value = _make_run_result()
+
+        tmux_kill("deploy")
+
+        assert "=tsu-deploy" in mock_run.call_args.args[0]

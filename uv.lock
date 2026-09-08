@@ -2635,7 +2635,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "tsugite-cli", editable = "." },
-    { name = "youtube-transcript-api", specifier = ">=0.6.0" },
+    { name = "youtube-transcript-api", specifier = ">=1.0" },
 ]
 
 [[package]]

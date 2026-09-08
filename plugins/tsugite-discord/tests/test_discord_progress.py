@@ -526,3 +526,23 @@ class TestCodeBlockChunking:
         chunks = adapter._split_respecting_code_blocks(text, 2000)
         for chunk in chunks:
             assert chunk.strip()
+
+    def test_oversize_text_line_is_hard_split(self, adapter):
+        """A single line longer than the limit is split rather than emitted whole."""
+        chunks = adapter._split_respecting_code_blocks("x" * 3000, 2000)
+        assert all(len(chunk) <= 2000 for chunk in chunks)
+        assert "".join(chunks) == "x" * 3000
+
+    def test_oversize_code_line_is_hard_split(self, adapter):
+        """A code block whose single line exceeds the limit stays inside fenced chunks."""
+        code = "```python\n" + "y" * 2500 + "\n```"
+        chunks = adapter._split_respecting_code_blocks(code, 2000)
+        assert all(len(chunk) <= 2000 for chunk in chunks)
+        bodies = []
+        for chunk in chunks:
+            assert chunk.startswith("```python\n")
+            assert chunk.endswith("\n```")
+            body = chunk[len("```python\n") : -len("\n```")]
+            assert body
+            bodies.append(body)
+        assert "".join(bodies) == "y" * 2500

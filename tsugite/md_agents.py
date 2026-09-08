@@ -305,7 +305,7 @@ def extract_tool_directives(content: str) -> List[ToolDirective]:
         {'url': 'http://example.com'}
     """
     directives = []
-    pattern = r"<!--\s*tsu:tool\s+([^>]+?)\s*-->"
+    pattern = r"<!--\s*tsu:tool\s+(.+?)\s*-->"
 
     for match in re.finditer(pattern, content):
         raw_args = match.group(1).strip()
@@ -478,7 +478,7 @@ def extract_step_directives(content: str, include_preamble: bool = True) -> tupl
         True
     """
     steps = []
-    pattern = r"<!--\s*tsu:step\s+([^>]+?)\s*-->"
+    pattern = r"<!--\s*tsu:step\s+(.+?)\s*-->"
     matches = list(re.finditer(pattern, content))
 
     # Extract preamble (content before first step)

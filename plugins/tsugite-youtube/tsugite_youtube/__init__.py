@@ -28,7 +28,7 @@ class YouTubeHandler(AttachmentHandler):
             raise ValueError(f"Could not extract video ID from: {source}")
 
         try:
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)  # pylint: disable=no-member
+            transcript = YouTubeTranscriptApi().fetch(video_id).to_raw_data()
 
             return Attachment(
                 name=f"youtube:{video_id}",

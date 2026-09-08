@@ -170,6 +170,19 @@ Review the diff
         assert steps[0].max_retries == 2
         assert steps[0].timeout == 60
 
+    def test_step_attribute_containing_gt(self):
+        """A comparison operator is what a loop condition needs, so an attribute
+        value has to be allowed to contain >."""
+        content = """
+<!-- tsu:step name="process_items" repeat_while="items | length > 0" max_iterations="10" -->
+Process the next item
+"""
+        preamble, steps = extract_step_directives(content)
+
+        assert len(steps) == 1
+        assert steps[0].repeat_while == "items | length > 0"
+        assert steps[0].max_iterations == 10
+
 
 class TestMultiStepExecution:
     def test_multistep_agent_file(self, tmp_path):

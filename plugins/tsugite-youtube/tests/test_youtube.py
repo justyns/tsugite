@@ -21,14 +21,29 @@ def test_resolves_via_attachment_registry():
     assert isinstance(handler, YouTubeHandler)
 
 
+class _StubFetchedTranscript:
+    def __init__(self, raw):
+        self._raw = raw
+
+    def to_raw_data(self):
+        return self._raw
+
+
+class _StubTranscriptApi:
+    """The youtube-transcript-api 1.x surface: an instance with `fetch` and nothing else."""
+
+    def fetch(self, video_id, languages=("en",), preserve_formatting=False):
+        return _StubFetchedTranscript(
+            [
+                {"start": 0.0, "duration": 5.0, "text": "Hello world"},
+                {"start": 5.0, "duration": 5.0, "text": "This is a test"},
+            ]
+        )
+
+
 def test_fetch_formats_transcript():
     handler = YouTubeHandler()
-    mock_transcript = [
-        {"start": 0.0, "text": "Hello world"},
-        {"start": 5.0, "text": "This is a test"},
-    ]
-    with patch("youtube_transcript_api.YouTubeTranscriptApi") as mock_api:
-        mock_api.get_transcript.return_value = mock_transcript
+    with patch("youtube_transcript_api.YouTubeTranscriptApi", _StubTranscriptApi):
         result = handler.fetch("https://youtube.com/watch?v=test123")
 
     assert result.name == "youtube:test123"
