@@ -3,6 +3,7 @@ import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { expect, test, vi, beforeEach } from 'vitest';
 import { WORKSPACE } from './__fixtures__/workspace';
+import { buildTree } from './wiki';
 
 vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api }));
 
@@ -66,4 +67,26 @@ test('a file double-click asks the shell to pin it (preview-tab keep)', async ()
   });
   await userEvent.dblClick(page.getByTestId('file-node-ops/alpha.md'));
   expect(pinned).toContain('ops/alpha.md');
+});
+
+test('a workspace reload keeps a collapsed directory collapsed', async () => {
+  await mountRail();
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+
+  await page.getByRole('button', { name: 'ops', exact: true }).click();
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).not.toBeInTheDocument();
+
+  const { filesWorkspace } = await import('./workspace.svelte');
+  const before = filesWorkspace.ws!;
+  const dir = before.entries.find((e) => e.is_dir)!;
+  const file = before.entries.find((e) => !e.is_dir)!;
+  const entries = [
+    ...before.entries,
+    { ...dir, path: 'notes', name: 'notes' },
+    { ...file, path: 'notes/todo.md', name: 'todo.md' },
+  ];
+  filesWorkspace.ws = { ...before, entries, tree: buildTree(entries) };
+
+  await expect.element(page.getByTestId('file-node-notes/todo.md')).toBeInTheDocument();
+  expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
 });

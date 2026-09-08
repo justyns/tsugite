@@ -60,7 +60,7 @@ test('is a mux drag source carrying a {kind:terminal} surface ref', async () => 
   const ref = readSurfaceDrag(dt);
   expect(ref).toMatchObject({
     kind: 'terminal',
-    params: { id: 'term-abc123' },
+    params: { terminalId: 'term-abc123' },
     title: 'npm test --watch',
     state: 'busy', // running -> busy tab dot
   });

@@ -11,7 +11,7 @@
   let {
     nodes,
     activePath,
-    expanded,
+    collapsed,
     onToggle,
     onOpenFile,
     onPinFile,
@@ -19,7 +19,7 @@
   }: {
     nodes: TreeNode[];
     activePath: string;
-    expanded: Set<string>;
+    collapsed: Set<string>;
     onToggle: (path: string) => void;
     onOpenFile: (path: string) => void;
     /** Double-click-to-keep: pins the file's preview into a permanent tab. */
@@ -39,7 +39,7 @@
 
 {#each nodes as node (node.path)}
   {#if node.isDir}
-    {@const open = expanded.has(node.path)}
+    {@const open = !collapsed.has(node.path)}
     <div class="wk-dir" class:is-open={open}>
       <button
         type="button"
@@ -55,7 +55,7 @@
           <Self
             nodes={node.children}
             {activePath}
-            {expanded}
+            {collapsed}
             {onToggle}
             {onOpenFile}
             {onPinFile}

@@ -11,6 +11,7 @@ vi.mock('$lib/api/client', () => ({
     get: vi.fn(async (path: string) => {
       if (path.startsWith('/api/jobs')) return { jobs: SEED };
       if (path.startsWith('/api/executors')) return { executors: ['agent'] };
+      if (path.startsWith('/api/agent-files')) return { files: AGENT_FILES };
       return { agent_file: 'hollis', workspace_dir: '/ws' };
     }),
     post: vi.fn(async () => ({})),
@@ -21,6 +22,7 @@ vi.mock('$lib/api/client', () => ({
 }));
 
 import View from './View.svelte';
+import { api } from '$lib/api/client';
 import { jobs, type Job } from '$lib/stores/jobs.svelte';
 import { router } from '$lib/router.svelte';
 import { TESTID } from '$lib/testids';
@@ -59,6 +61,11 @@ function job(job_id: string, parent_session_id: string | null, prompt: string): 
   } as Job;
 }
 
+const AGENT_FILES = [
+  { path: 'agents/coder.md', name: 'coder', source: 'project', readonly: false, description: '' },
+  { path: 'agents/ops.md', name: 'ops', source: 'project', readonly: false, description: '' },
+];
+
 const SEED: Job[] = [
   job('job-1', 'sess-a', 'from this chat'),
   job('job-2', 'sess-b', 'from another chat'),
@@ -69,6 +76,7 @@ beforeEach(() => {
   jobs.jobs = SEED;
   router.view = 'jobs';
   router.params = {};
+  vi.mocked(api.post).mockClear();
 });
 
 afterEach(() => {
@@ -114,4 +122,17 @@ test('typing a filter puts it in the route, so the view is linkable and reload-s
   await expect.element(page.getByTestId(TESTID.jobCard('job-2'))).toBeInTheDocument();
   await expect.element(page.getByTestId(TESTID.jobCard('job-1'))).not.toBeInTheDocument();
   await expect.poll(() => location.hash).toBe('#jobs?q=session%3Asess-b');
+});
+
+test('spawning a job from the form posts the agent the picker chose', async () => {
+  render(View);
+  await page.getByTestId(TESTID.jobsNew).click();
+  const preview = page.getByTestId(TESTID.newJobPreview);
+  await expect.element(preview).toHaveTextContent('--agent coder');
+  await page.getByTestId(TESTID.newJobPrompt).fill('backfill usage rollups');
+  await page.getByTestId(TESTID.newJobSubmit).click();
+
+  await expect
+    .poll(() => vi.mocked(api.post).mock.calls.find((c) => c[0] === '/api/commands/job')?.[1])
+    .toMatchObject({ agent: 'coder' });
 });

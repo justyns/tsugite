@@ -19,7 +19,7 @@
     oncontextmenu,
   }: {
     term: Terminal;
-    /** Resolved live state (store overlay wins over the record's own field). */
+    /** Resolved live state (the store overlay overrides the record's own field). */
     st: TerminalState;
     /** Shared wall-clock tick (ms) so every row's elapsed advances together. */
     now: number;
@@ -43,7 +43,7 @@
     if (!e.dataTransfer) return;
     writeSurfaceDrag(e.dataTransfer, {
       kind: 'terminal',
-      params: { id: term.id },
+      params: { terminalId: term.id },
       title: term.cmd,
       state: terminalTabState(st),
     });

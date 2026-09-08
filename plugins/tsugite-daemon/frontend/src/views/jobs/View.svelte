@@ -161,8 +161,8 @@
   // Focus management for the right-side slot. Only one drawer is mounted at a
   // time (they share the slot), so the Drawer's own closed->open focus never
   // fires; this moves focus into the drawer on open and restores it on close.
-  // `preventScroll` is load-bearing: a plain focus() scrolls the surface
-  // sideways to reveal the still-sliding drawer, dragging everything with it.
+  // Without `preventScroll` a plain focus() scrolls the surface sideways to
+  // reveal the still-sliding drawer, dragging everything with it.
   function drawerFocus(node: HTMLElement) {
     const restoreTo = document.activeElement as HTMLElement | null;
     const target = node.querySelector<HTMLElement>('button, [href], input, textarea, select');
@@ -213,6 +213,7 @@
       const body: Record<string, unknown> = {
         user_id: auth.userId,
         prompt: form.prompt,
+        agent: form.agent,
         max_attempts: form.maxAttempts,
       };
       if (form.acceptanceCriteria.length)

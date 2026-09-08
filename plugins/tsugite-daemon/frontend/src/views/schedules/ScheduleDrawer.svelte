@@ -115,12 +115,17 @@
   // never on every keystroke. The key flips only on those transitions.
   const seedKey = $derived(open ? (schedule?.id ?? '__new__') : '__closed__');
   $effect(() => {
-    seedKey; // track
-    if (!open) return;
+    if (seedKey === '__closed__') return;
     untrack(() => {
       form = seed(schedule);
       enabled = schedule ? schedule.enabled : true;
     });
+  });
+
+  // The roster can land after the drawer opens.
+  $effect(() => {
+    const first = agents[0];
+    if (open && !isEdit && !form.agent && first) form.agent = first;
   });
 
   const cronHelp = $derived(describeCron(form.cron_expr));

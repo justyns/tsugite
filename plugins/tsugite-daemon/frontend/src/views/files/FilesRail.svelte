@@ -32,18 +32,14 @@
   } = $props();
 
   let query = $state('');
-  let expanded = $state<Set<string>>(new Set());
+  let collapsed = $state<Set<string>>(new Set());
 
   const ws = $derived(filesWorkspace.ws);
   const idx = $derived(ws?.index ?? null);
   const wsName = $derived(ws?.workspaceDir.split('/').filter(Boolean).pop() ?? 'workspace');
 
-  // Load the shared workspace, then expand every directory so the tree reads open.
   $effect(() => {
-    void filesWorkspace.ensure().then(() => {
-      if (filesWorkspace.ws)
-        expanded = new Set(filesWorkspace.ws.entries.filter((e) => e.is_dir).map((e) => e.path));
-    });
+    void filesWorkspace.ensure();
   });
 
   // Rail filter: empty -> tree; `#tag` -> files carrying that tag; else path substring.
@@ -68,10 +64,10 @@
   const scanning = $derived(tagQuery && filesWorkspace.indexState !== 'ready');
 
   function toggleDir(path: string) {
-    const next = new Set(expanded);
+    const next = new Set(collapsed);
     if (next.has(path)) next.delete(path);
     else next.add(path);
-    expanded = next;
+    collapsed = next;
   }
 
   function open(path: string) {
@@ -206,7 +202,7 @@
         <TreeNode
           nodes={ws.tree}
           activePath={focusedFilePath ?? ''}
-          {expanded}
+          {collapsed}
           onToggle={toggleDir}
           onOpenFile={open}
           onPinFile={pin}
