@@ -65,6 +65,13 @@ class TestIPAddressDetection:
         assert not _is_ip_address("example.com")
         assert not _is_ip_address("api.github.com")
 
+    def test_non_dotted_quad_ipv4_literals(self):
+        """getaddrinfo resolves all three of these to 127.0.0.1, so the direct-IP
+        guard has to recognize them as addresses."""
+        assert _is_ip_address("2130706433")
+        assert _is_ip_address("0177.0.0.1")
+        assert _is_ip_address("127.1")
+
 
 class TestProxyLifecycle:
     @pytest.mark.asyncio

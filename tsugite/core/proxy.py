@@ -8,6 +8,7 @@ import asyncio
 import fnmatch
 import ipaddress
 import logging
+import socket
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +47,13 @@ def _is_ip_address(host: str) -> bool:
         ipaddress.ip_address(host)
         return True
     except ValueError:
+        pass
+    # inet_aton accepts the integer, octal and short IPv4 forms that
+    # ip_address rejects and getaddrinfo resolves, and rejects hostnames.
+    try:
+        socket.inet_aton(host)
+        return True
+    except OSError:
         return False
 
 
