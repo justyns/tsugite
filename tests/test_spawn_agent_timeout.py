@@ -1,6 +1,7 @@
 """`spawn_agent`'s timeout bounds the whole call, not just the child's exit."""
 
 import os
+import pathlib
 import signal
 import subprocess
 import sys
@@ -94,11 +95,12 @@ def test_timeout_bounds_a_child_that_never_closes_stdout(hanging_agent):
 
 
 def _process_alive(pid: int) -> bool:
+    # A killed orphan stays a zombie where pid 1 does not reap (a CI container).
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        state = pathlib.Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
         return False
-    return True
+    return state != "Z"
 
 
 @pytest.fixture
