@@ -10,6 +10,11 @@ from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 from tsugite_daemon.scheduler import ScheduleEntry, entry_to_dict
 
 
+def _entry_payload(entry: ScheduleEntry) -> dict:
+    """Serialized entry plus the `agent` alias the schedule editor reads and writes."""
+    return {**entry_to_dict(entry), "agent": entry.agent_file}
+
+
 class SchedulesMixin:
     def _schedule_routes(self) -> list:
         return [
@@ -44,7 +49,7 @@ class SchedulesMixin:
     async def _list_schedules(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
             return err
-        return JSONResponse({"schedules": [entry_to_dict(e) for e in self.scheduler.list()]})
+        return JSONResponse({"schedules": [_entry_payload(e) for e in self.scheduler.list()]})
 
     async def _create_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -62,13 +67,16 @@ class SchedulesMixin:
 
         try:
             valid_fields = {f.name for f in dataclass_fields(ScheduleEntry)}
-            entry = ScheduleEntry(**{k: v for k, v in body.items() if k in valid_fields})
+            fields = {k: v for k, v in body.items() if k in valid_fields}
+            if "agent" in body:
+                fields["agent_file"] = body["agent"]
+            entry = ScheduleEntry(**fields)
             entry = self.scheduler.add(entry)
         except (ValueError, TypeError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
 
         self.event_bus.emit("schedule_update", {"action": "created", "id": entry.id})
-        return JSONResponse(entry_to_dict(entry), status_code=201)
+        return JSONResponse(_entry_payload(entry), status_code=201)
 
     async def _get_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -77,7 +85,7 @@ class SchedulesMixin:
             entry = self.scheduler.get(request.path_params["schedule_id"])
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
-        return JSONResponse(entry_to_dict(entry))
+        return JSONResponse(_entry_payload(entry))
 
     async def _update_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):
@@ -108,6 +116,8 @@ class SchedulesMixin:
             "incident_title",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
+        if "agent" in fields:
+            fields["agent_file"] = fields.pop("agent")
         if not fields:
             return JSONResponse({"error": "no updatable fields provided"}, status_code=400)
 
@@ -116,7 +126,7 @@ class SchedulesMixin:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         self.event_bus.emit("schedule_update", {"action": "updated", "id": schedule_id})
-        return JSONResponse(entry_to_dict(entry))
+        return JSONResponse(_entry_payload(entry))
 
     async def _delete_schedule(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_scheduler(request):

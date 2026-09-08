@@ -90,15 +90,24 @@ class JobsMixin:
         from tsugite_daemon.commands import create_job_host_session, parse_acceptance_criteria
 
         parent_session_id = create_job_host_session(adapter, user_id, task)
+        model_ladder = body.get("model_ladder") or None
+        if isinstance(model_ladder, str):
+            model_ladder = model_ladder.split("|")
         try:
             job, _started = await self.jobs_orchestrator.create_and_start_job(
                 parent_session_id=parent_session_id,
                 prompt=task,
                 acceptance_criteria=parse_acceptance_criteria(body.get("acceptance_criteria")),
+                repo=body.get("repo") or None,
                 model=body.get("model") or None,
+                model_ladder=model_ladder,
+                agent=body.get("agent") or None,
+                timeout_minutes=body.get("timeout_minutes") or 30,
                 max_attempts=body.get("max_attempts"),
+                notify_when=body.get("notify_when") or None,
                 spawned_by="user-slash",
                 executor=(body.get("executor") or "agent").strip() or "agent",
+                effort=body.get("effort") or None,
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)

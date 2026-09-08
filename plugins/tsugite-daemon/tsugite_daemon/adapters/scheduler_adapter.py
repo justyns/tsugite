@@ -382,7 +382,7 @@ class SchedulerAdapter:
         if entry.inject_history and adapter:
             await self._deliver_result(adapter, entry, result, resolved_channels)
 
-        return RunResult(output=result)
+        return RunResult(output=result, session_id=conv_id)
 
     async def _run_agent(self, entry: ScheduleEntry) -> RunResult:
         adapter = self._adapter

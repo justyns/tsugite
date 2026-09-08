@@ -7,20 +7,35 @@ fields. Pricing is nullable: CLI / openai-compat models register with no cost.
 
 from starlette.testclient import TestClient
 from tsugite_daemon.adapters.http import HTTPServer
+from tsugite_daemon.auth import TokenStore
 from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.webhook_store import WebhookStore
 
 from tsugite.providers.model_registry import get_model_info
 
 
-def _models_by_id(tmp_path):
+def _server_and_token(tmp_path):
+    token_store = TokenStore(tmp_path / "tokens.json")
+    _st, raw = token_store.create_admin_token(name="models-token")
     server = HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
         adapter=None,
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
+        token_store=token_store,
     )
-    body = TestClient(server.app).get("/api/models").json()
+    return server, raw
+
+
+def _models_by_id(tmp_path):
+    server, token = _server_and_token(tmp_path)
+    body = TestClient(server.app).get("/api/models", headers={"Authorization": f"Bearer {token}"}).json()
     return {m["id"]: m for m in body["models"]}
+
+
+def test_models_endpoint_requires_auth(tmp_path):
+    server, _token = _server_and_token(tmp_path)
+    resp = TestClient(server.app).get("/api/models")
+    assert resp.status_code == 401
 
 
 def test_models_endpoint_serves_pricing_and_limits(tmp_path):

@@ -143,6 +143,31 @@ class TestCreateJobHappyPath:
         assert call["executor"] == "agent"
         assert call["model"] == "gpt"
 
+    def test_forwards_every_option_the_slash_command_accepts(self, client, test_token, server):
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
+            resp = client.post(
+                "/api/jobs",
+                headers=_auth(test_token),
+                json={
+                    "user_id": "u1",
+                    "task": "t",
+                    "repo": "myrepo",
+                    "agent": "custom_worker",
+                    "effort": "high",
+                    "notify_when": "done",
+                    "model_ladder": "gpt|opus",
+                    "timeout_minutes": 90,
+                },
+            )
+        assert resp.status_code == 201, resp.text
+        call = server.jobs_orchestrator.calls[-1]
+        assert call["repo"] == "myrepo"
+        assert call["agent"] == "custom_worker"
+        assert call["effort"] == "high"
+        assert call["notify_when"] == "done"
+        assert call["model_ladder"] == ["gpt", "opus"]
+        assert call["timeout_minutes"] == 90
+
     def test_minimal_body_defaults(self, client, test_token, server):
         with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
             resp = client.post(
@@ -156,6 +181,11 @@ class TestCreateJobHappyPath:
         assert call["executor"] == "agent"
         assert call["max_attempts"] is None
         assert call["model"] is None
+        assert call["timeout_minutes"] == 30
+        assert call["repo"] is None
+        assert call["model_ladder"] is None
+        assert call["effort"] is None
+        assert call["notify_when"] is None
 
 
 class TestCreateJobValidation:

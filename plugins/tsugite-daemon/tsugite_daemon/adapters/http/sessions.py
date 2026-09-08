@@ -267,6 +267,8 @@ class SessionsMixin:
         last_viewed_at = body.get("last_viewed_at")
         if title is None and status is None and pinned is None and not has_pin_position and last_viewed_at is None:
             return JSONResponse({"error": "No updatable fields provided"}, status_code=400)
+        if status is not None and status != "completed":
+            return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
         runner = self.session_runner
         try:
             result = {}
@@ -284,8 +286,6 @@ class SessionsMixin:
                 session = runner.mark_viewed(session_id, ts=last_viewed_at or None)
                 result["last_viewed_at"] = session.last_viewed_at
             if status is not None:
-                if status != "completed":
-                    return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
                 # Clearing `resumable` is what actually ends a background chat: without
                 # it the row would bounce straight back out of the ended bucket.
                 runner.store.update_session(session_id, status=status, resumable=False)

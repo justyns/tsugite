@@ -29,7 +29,12 @@ class PushMixin:
             return err
         if not self.push_store:
             return JSONResponse({"error": "web push not configured"}, status_code=404)
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         if not body.get("endpoint"):
             return JSONResponse({"error": "missing endpoint"}, status_code=400)
         self.push_store.subscribe(body)
@@ -40,7 +45,12 @@ class PushMixin:
             return err
         if not self.push_store:
             return JSONResponse({"error": "web push not configured"}, status_code=404)
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         endpoint = body.get("endpoint")
         if not endpoint:
             return JSONResponse({"error": "missing endpoint"}, status_code=400)

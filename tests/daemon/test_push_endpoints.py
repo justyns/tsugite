@@ -24,6 +24,8 @@ class _FakeRequest:
         self._body = body
 
     async def json(self):
+        if isinstance(self._body, Exception):
+            raise self._body
         return self._body
 
 
@@ -87,6 +89,22 @@ class TestSubscribe:
         assert store.all() == []
 
     @pytest.mark.asyncio
+    async def test_400_on_unparseable_body(self, store):
+        h = _PushHarness(push_store=store)
+        resp = await h._push_subscribe(_FakeRequest(ValueError("no JSON")))
+        assert resp.status_code == 400
+        assert _payload(resp) == {"error": "invalid JSON body"}
+        assert store.all() == []
+
+    @pytest.mark.asyncio
+    async def test_400_on_non_object_body(self, store):
+        h = _PushHarness(push_store=store)
+        resp = await h._push_subscribe(_FakeRequest([SAMPLE]))
+        assert resp.status_code == 400
+        assert _payload(resp) == {"error": "invalid JSON body"}
+        assert store.all() == []
+
+    @pytest.mark.asyncio
     async def test_success_persists_subscription(self, store):
         h = _PushHarness(push_store=store)
         resp = await h._push_subscribe(_FakeRequest(SAMPLE))
@@ -115,6 +133,24 @@ class TestUnsubscribe:
         resp = await h._push_unsubscribe(_FakeRequest({}))
         assert resp.status_code == 400
         assert _payload(resp) == {"error": "missing endpoint"}
+
+    @pytest.mark.asyncio
+    async def test_400_on_unparseable_body(self, store):
+        store.subscribe(SAMPLE)
+        h = _PushHarness(push_store=store)
+        resp = await h._push_unsubscribe(_FakeRequest(ValueError("no JSON")))
+        assert resp.status_code == 400
+        assert _payload(resp) == {"error": "invalid JSON body"}
+        assert len(store.all()) == 1
+
+    @pytest.mark.asyncio
+    async def test_400_on_non_object_body(self, store):
+        store.subscribe(SAMPLE)
+        h = _PushHarness(push_store=store)
+        resp = await h._push_unsubscribe(_FakeRequest("abc"))
+        assert resp.status_code == 400
+        assert _payload(resp) == {"error": "invalid JSON body"}
+        assert len(store.all()) == 1
 
     @pytest.mark.asyncio
     async def test_success_removes_subscription(self, store):

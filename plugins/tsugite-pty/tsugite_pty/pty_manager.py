@@ -126,7 +126,6 @@ class PtyProcess:
             )
         except Exception:
             os.close(master_fd)
-            os.close(slave_fd)
             raise
         finally:
             # The slave end is owned by the child process now; the parent must

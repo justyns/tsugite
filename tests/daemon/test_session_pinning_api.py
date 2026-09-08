@@ -109,6 +109,16 @@ class TestPatchSessionPinFields:
         assert resp.status_code == 200
         assert resp.json()["last_viewed_at"] == ts
 
+    def test_patch_rejects_a_bad_status_without_applying_the_rest(self, client, test_token, session_store):
+        sid = _create_session(session_store, title="orig", suffix="1")
+        resp = client.patch(
+            f"/api/sessions/{sid}",
+            json={"title": "renamed", "status": "bogus"},
+            headers=auth(test_token),
+        )
+        assert resp.status_code == 400
+        assert session_store.get_session(sid).title == "orig"
+
     def test_patch_no_fields_400(self, client, test_token, session_store):
         sid = _create_session(session_store, title="t", suffix="1")
         resp = client.patch(f"/api/sessions/{sid}", json={}, headers=auth(test_token))

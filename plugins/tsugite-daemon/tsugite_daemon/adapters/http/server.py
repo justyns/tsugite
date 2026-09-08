@@ -353,6 +353,8 @@ class HTTPServer(
         )
 
     async def _list_models(self, request: Request) -> JSONResponse:
+        if err := self._check_auth(request):
+            return err
         from tsugite.providers import get_provider, list_all_providers
         from tsugite.providers.model_registry import list_models
 

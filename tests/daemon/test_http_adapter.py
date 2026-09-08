@@ -1120,6 +1120,41 @@ class TestSchedulesEndpoint:
         assert resp.status_code == 400
         assert "prompt" in resp.json()["error"]
 
+    def test_update_maps_the_editor_agent_field_onto_agent_file(self, scheduler_client, test_token):
+        """The schedule editor sends the picked agent as `agent`; it selects the agent file."""
+        resp = scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"prompt": "updated prompt", "agent": "researcher"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["agent_file"] == "researcher"
+        assert body["prompt"] == "updated prompt"
+
+    def test_create_keeps_the_editor_agent_field_as_the_agent_file(self, scheduler_client, test_token):
+        resp = scheduler_client.post(
+            "/api/schedules",
+            json={
+                "id": "job5",
+                "prompt": "hello",
+                "schedule_type": "cron",
+                "cron_expr": "0 10 * * *",
+                "agent": "researcher",
+            },
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["agent_file"] == "researcher"
+
+    def test_read_echoes_the_agent_file_back_as_agent(self, scheduler_client, test_token):
+        headers = {"Authorization": f"Bearer {test_token}"}
+        scheduler_client.patch("/api/schedules/job1", json={"agent": "researcher"}, headers=headers)
+
+        assert scheduler_client.get("/api/schedules/job1", headers=headers).json()["agent"] == "researcher"
+        listed = scheduler_client.get("/api/schedules", headers=headers).json()["schedules"]
+        assert [e["agent"] for e in listed if e["id"] == "job1"] == ["researcher"]
+
     def test_update_rejects_a_bad_delivery_mode(self, scheduler_client, test_token):
         resp = scheduler_client.patch(
             "/api/schedules/job1",

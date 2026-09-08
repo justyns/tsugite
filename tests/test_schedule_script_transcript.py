@@ -64,6 +64,15 @@ async def test_a_completed_script_run_records_its_output_in_its_own_session(tmp_
 
 
 @pytest.mark.asyncio
+async def test_a_script_run_result_links_to_the_run_session(tmp_path, history_dir):
+    sa, store = _make_scheduler_adapter(tmp_path)
+
+    result = await sa._run_script(_script_entry("echo ingested 42 docs"))
+
+    assert result.session_id == _run_session(store).id
+
+
+@pytest.mark.asyncio
 async def test_a_failed_script_run_records_its_stderr_and_exit_code(tmp_path, history_dir):
     sa, store = _make_scheduler_adapter(tmp_path)
 

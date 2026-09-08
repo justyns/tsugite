@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 
@@ -24,6 +25,22 @@ def test_spawn_echo_captures_output_and_exit_zero():
     assert "hello" in output
     assert p.exit_code == 0
     assert p.pid > 0
+
+
+def test_failed_spawn_closes_each_fd_once(monkeypatch):
+    closed: list[int] = []
+    real_close = os.close
+
+    def spy(fd: int) -> None:
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(os, "close", spy)
+    with pytest.raises(FileNotFoundError):
+        PtyProcess.spawn(["/nonexistent-binary-for-pty-spawn-test"])
+    monkeypatch.undo()
+
+    assert len(closed) == len(set(closed)), f"fd closed twice: {closed}"
 
 
 def test_spawn_nonzero_exit_captured():
