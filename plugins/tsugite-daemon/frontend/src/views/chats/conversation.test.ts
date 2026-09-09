@@ -172,16 +172,31 @@ test('a delivered send that errors server-side shows the inline error and fires 
   await ctrl.send('use the bad model');
   const errFrame = { type: 'error', error: 'There is an issue with the selected model' };
   chat.handlers!.onEvent?.({ type: 'turn_start' });
-  chat.handlers!.onEvent?.(errFrame); // applyFrame → inline error block, gotFrame=true
+  chat.handlers!.onEvent?.(errFrame); // applyFrame -> inline error block, gotFrame=true
   chat.handlers!.onError?.(errFrame); // chat.ts routes the error frame here too
   chat.handlers!.onDone?.();
 
   expect(toast.push).not.toHaveBeenCalledWith('err', 'Send failed', expect.anything());
   // The failure is present inline (the reducer renders it as an error block).
   expect(ctrl.events.some((e) => e.type === 'error')).toBe(true);
-  // Not a send failure: the message is kept and no draft is handed back.
-  expect(ctrl.sendFailed).toBeNull();
+  expect(ctrl.sendFailed?.text).toBe('use the bad model');
   expect(ctrl.events.some((e) => e.type === 'user_input' && e.text === 'use the bad model')).toBe(
+    true,
+  );
+});
+
+test('a delivered send that reports a final result before a late stream error does not restore the draft', async () => {
+  const ctrl = controller([{ type: 'user_input', text: 'earlier', timestamp: 't0' }]);
+
+  await ctrl.send('completed request');
+  chat.handlers!.onEvent?.({ type: 'turn_start' });
+  chat.handlers!.onEvent?.({ type: 'final_result', result: 'done' });
+  chat.handlers!.onError?.(new Error('late stream error'));
+  chat.handlers!.onDone?.();
+
+  expect(ctrl.sendFailed).toBeNull();
+  expect(toast.push).not.toHaveBeenCalledWith('err', 'Send failed', expect.anything());
+  expect(ctrl.events.some((e) => e.type === 'user_input' && e.text === 'completed request')).toBe(
     true,
   );
 });

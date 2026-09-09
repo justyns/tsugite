@@ -275,6 +275,7 @@ export class ConversationController {
     this.streaming = true;
     this.sendFailed = null;
     let gotFrame = false;
+    let gotFinalResult = false;
     this.handle = sendChat(
       {
         message: text,
@@ -287,20 +288,19 @@ export class ConversationController {
       {
         onEvent: (frame) => {
           gotFrame = true;
+          if (frame.type === 'final_result') gotFinalResult = true;
           this.applyFrame(frame);
         },
-        // A send failure is non-destructive: keep the existing timeline (never
-        // blank the conversation the user was reading). Once frames arrived, the
-        // turn ran and any error is already an inline error block - a "Send failed"
-        // toast would just double it. So this only fires for a PRE-frame failure
-        // (409 busy, daemon down): nothing rendered inline, the turn never took,
-        // so toast it, drop the optimistic bubble, and hand the text back.
+        // A failed send never blanks the timeline. Once frames arrived the turn ran
+        // and its error is already an inline block, so the toast and the optimistic
+        // bubble removal only fire for a PRE-frame failure (409 busy, daemon down).
+        // The draft comes back either way unless a final result arrived.
         onError: (err) => {
+          if (!gotFinalResult) this.sendFailed = { text, seq: ++this.failSeq };
           if (gotFrame) return;
           const msg = err instanceof Error ? err.message : String((err as ChatFrame).error);
           toasts.push('err', 'Send failed', { body: msg });
           this.events = this.events.filter((e) => e.clientKey !== clientKey);
-          this.sendFailed = { text, seq: ++this.failSeq };
         },
         // The request WAS delivered (a 200 opened the stream) and ran server-side;
         // only the response feed died - the classic mobile background/foreground.
