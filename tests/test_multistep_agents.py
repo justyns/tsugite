@@ -186,10 +186,13 @@ Process the next item
 
 class TestMultiStepExecution:
     def test_multistep_agent_file(self, tmp_path):
-        """Test running a basic multi-step agent."""
+        """Test parsing a basic multi-step agent file."""
+        from tsugite.md_agents import parse_agent_file
+
         agent_file = tmp_path / "multistep.md"
         agent_file.write_text("""---
 name: test_multistep
+extends: none
 model: ollama:qwen2.5-coder:7b
 tools: []
 ---
@@ -202,14 +205,11 @@ Previous result was: {{ result1 }}
 Now return "Step 2 complete"
 """)
 
-        from tsugite.agent_runner import run_agent
+        agent = parse_agent_file(agent_file)
+        _, steps = extract_step_directives(agent.content)
 
-        # Note: This will actually try to run the agent with a model
-        # In a real test environment, you'd mock the model/agent execution
-        # For now, we just test that the function can be called
-        with pytest.raises((RuntimeError, ValueError)):
-            # Will fail because no model available in test, but tests parsing
-            run_agent(agent_file, "test prompt")
+        assert [(step.name, step.assign_var) for step in steps] == [("step1", "result1"), ("step2", None)]
+        assert "Previous result was: {{ result1 }}" in steps[1].content
 
     def test_multistep_detection_integration(self, tmp_path):
         """Test that CLI can detect multi-step agents."""
@@ -307,11 +307,15 @@ Review the diff: HELLO
         assert captured["agent_path"] == str(fixture_path)
         assert "Review the diff: HELLO" in captured["prompt"]
 
-    def test_step_with_prefetch(self, tmp_path):
-        """Test that prefetch works with multi-step agents."""
+    def test_step_with_prefetch(self, tmp_path, monkeypatch):
+        """Test that prefetch works with multi-step agent preparation."""
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import parse_agent_file
+
         agent_file = tmp_path / "with_prefetch.md"
         agent_file.write_text("""---
 name: prefetch_test
+extends: none
 model: ollama:qwen2.5-coder:7b
 prefetch:
   - tool: read_file
@@ -323,15 +327,13 @@ prefetch:
 File content was: {{ file_content }}
 """)
 
-        # Create the test file for prefetch
-        test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello from prefetch")
+        monkeypatch.setattr(
+            "tsugite.agent_runner.execute_prefetch", lambda prefetch: {"file_content": "Hello from prefetch"}
+        )
 
-        from tsugite.agent_runner import run_agent
+        prepared = AgentPreparer().prepare(agent=parse_agent_file(agent_file), prompt="test")
 
-        # This will fail in test due to no model, but validates parsing
-        with pytest.raises((RuntimeError, ValueError)):
-            run_agent(agent_file, "test", context={})
+        assert "File content was: Hello from prefetch" in prepared.rendered_prompt
 
 
 class TestStepValidation:
