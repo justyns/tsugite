@@ -21,7 +21,7 @@ API_BASE = "https://chatgpt.com/backend-api/codex"
 _REASONING_LEVELS = ["low", "medium", "high"]
 # gpt-5.5 added xhigh; older codex models don't accept it.
 _REASONING_LEVELS_V5_5 = ["low", "medium", "high", "xhigh"]
-# gpt-5.6 added max, and its sol/terra tiers also accept ultra (delegating).
+# gpt-5.6 added max; its sol/terra tiers and gpt-6-astra also accept ultra (delegating).
 _REASONING_LEVELS_V5_6 = [*_REASONING_LEVELS_V5_5, "max"]
 _REASONING_LEVELS_V5_6_AGENTIC = [*_REASONING_LEVELS_V5_6, "ultra"]
 
@@ -47,8 +47,7 @@ _CODEX_CLI_MODELS: dict[str, ModelInfo] = {
     "codex_cli/gpt-5.6-terra": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
     "codex_cli/gpt-5.6-luna": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6),
     "codex_cli/gpt-5.5": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_5),
-    "codex_cli/gpt-5.4": _codex_model_info(272_000),
-    "codex_cli/gpt-5.4-mini": _codex_model_info(272_000),
+    "codex_cli/gpt-6-astra": _codex_model_info(272_000, effort_levels=_REASONING_LEVELS_V5_6_AGENTIC),
 }
 
 # Used when /models is unreachable; kept in sync with the registry above.

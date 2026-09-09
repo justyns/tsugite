@@ -395,7 +395,7 @@ async def test_list_models_falls_back_on_auth_error():
     provider = CodexCliProvider()
     with _patched_auth_error(provider):
         models = await provider.list_models()
-    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-6-astra"]
 
 
 @pytest.mark.asyncio
@@ -408,7 +408,7 @@ async def test_list_models_falls_back_on_network_error():
     with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=boom)):
         models = await provider.list_models()
 
-    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-6-astra"]
 
 
 # ── Fix #2: stop() must not break the shared client when concurrent agents share it ──
@@ -527,6 +527,7 @@ _MODELS_PAYLOAD = {
         {"slug": "gpt-5.6-terra", "visibility": "list", "context_window": 272_000},
         {"slug": "gpt-5.6-luna", "visibility": "list", "context_window": 272_000},
         {"slug": "gpt-5.5", "visibility": "list", "context_window": 272_000},
+        {"slug": "gpt-6-astra", "visibility": "list", "context_window": 272_000},
         {"slug": "codex-auto-review", "visibility": "hide", "context_window": 272_000},
     ]
 }
@@ -544,7 +545,7 @@ async def test_list_models_reads_the_backend_model_slugs():
         models = await provider.list_models()
 
     assert "gpt-5.6-sol" in models
-    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"]
+    assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-6-astra"]
 
 
 @pytest.mark.asyncio
@@ -601,6 +602,9 @@ def test_offline_fallback_offers_the_gpt_5_6_models():
     """The fallback list (used when /models is unreachable) mirrors the registry,
     so a logged-out picker offers the current models rather than retired ones."""
     assert "gpt-5.6-sol" in _FALLBACK_MODELS
+    assert "gpt-6-astra" in _FALLBACK_MODELS
+    assert "gpt-5.4" not in _FALLBACK_MODELS
+    assert "gpt-5.4-mini" not in _FALLBACK_MODELS
     assert "gpt-5.4-nano" not in _FALLBACK_MODELS, "no longer offered by the Codex backend"
 
 
