@@ -10,6 +10,7 @@ from tsugite_daemon.memory import SHORT_TITLE_THRESHOLD, compute_session_title
 from tsugite_daemon.session_runner import SessionRunner
 
 LONG_MESSAGE = "x" * (SHORT_TITLE_THRESHOLD + 1)
+UNAVAILABLE_MODEL = "codex_cli:gpt-5-mini"
 
 
 @pytest.fixture
@@ -18,6 +19,8 @@ def captured_models(monkeypatch):
 
     async def fake_llm_complete(system_prompt, user_content, model):
         models.append(model)
+        if model == UNAVAILABLE_MODEL:
+            raise RuntimeError(f"LLM call failed ({model}): model not supported")
         return "A Generated Title"
 
     monkeypatch.setattr("tsugite_daemon.memory._llm_complete", fake_llm_complete)
@@ -41,6 +44,15 @@ async def test_configured_compaction_model_is_used(captured_models):
 async def test_falls_back_to_inferred_model(captured_models):
     await compute_session_title(LONG_MESSAGE, "response", "openai:gpt-4o")
     assert captured_models == ["openai:gpt-4o-mini"]
+
+
+@pytest.mark.asyncio
+async def test_list_config_falls_through_to_next_model(captured_models):
+    title = await compute_session_title(
+        LONG_MESSAGE, "response", "codex_cli:gpt-5", compaction_model=[UNAVAILABLE_MODEL, "openai:gpt-4o-mini"]
+    )
+    assert title == "A Generated Title"
+    assert captured_models == [UNAVAILABLE_MODEL, "openai:gpt-4o-mini"]
 
 
 @pytest.mark.asyncio

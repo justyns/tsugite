@@ -46,7 +46,7 @@ class RuntimeDefaults(BaseModel):
     agent_file: str
     context_limit: Optional[int] = None  # Explicit override; auto-detected from model if unset
     model: Optional[str] = None
-    compaction_model: Optional[str] = None
+    compaction_model: Optional[str | List[str]] = None
     max_turns: Optional[int] = None
     timezone: str = ""  # IANA timezone for display (e.g. "America/Chicago")
     auto_compact: Optional[AutoCompactConfig] = None
@@ -63,7 +63,7 @@ class DiscordBotConfig(BaseModel):
     guild_id: Optional[str] = None  # Sync app commands to this guild only (instant; good for dev)
     dm_policy: Literal["allowlist", "open"] = "allowlist"
     allow_from: List[str] = Field(default_factory=list)
-    # Names the DM route: each Discord user's DMs land in their own session tagged
+    # Route name for DMs. Each Discord user's DMs land in their own session tagged
     # metadata.dm_route == this value. Channels and threads stay shared.
     # Set to "" to fall back to the user's default-interactive session.
     session_name: str = "discord"
@@ -125,7 +125,7 @@ class NotificationChannelConfig(BaseModel):
         elif self.type == "webhook":
             if not self.url:
                 raise ValueError("Webhook notification channels require 'url'")
-        # web-push: no required fields — subscriptions managed via API
+        # web-push has no required fields. Subscriptions are managed via the API.
         return self
 
 
@@ -157,7 +157,7 @@ class DaemonConfig(BaseModel):
     default_workspace_dir: Path
     default_agent_file: str = "default"
     default_model: Optional[str] = None
-    default_compaction_model: Optional[str] = None
+    default_compaction_model: Optional[str | List[str]] = None
     default_context_limit: Optional[int] = None
     default_max_turns: Optional[int] = None
     timezone: str = ""

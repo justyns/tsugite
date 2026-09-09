@@ -104,6 +104,12 @@ def test_runtime_property_assembles_defaults():
     assert runtime.sandbox.allow_domains == ["github.com"]
 
 
+def test_compaction_model_accepts_an_ordered_list():
+    ladder = ["codex_cli:gpt-5-mini", "claude_code:haiku"]
+    config = DaemonConfig(default_workspace_dir=Path("/tmp/workspace"), default_compaction_model=ladder)
+    assert config.runtime.compaction_model == ladder
+
+
 def test_load_daemon_config(tmp_path):
     """Test loading daemon config from YAML."""
     config_file = _write_config(

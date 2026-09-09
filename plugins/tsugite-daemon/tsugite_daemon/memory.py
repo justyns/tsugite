@@ -4,7 +4,10 @@ import asyncio
 import contextvars
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
+
+from tsugite.exceptions import is_prompt_too_long_error
 
 DEFAULT_COMPACT_MODEL = "openai:gpt-4o-mini"
 DEFAULT_CONTEXT_LIMIT = 128_000
@@ -99,6 +102,29 @@ def infer_compaction_model(agent_model: str) -> str:
 
     compact = PROVIDER_COMPACT_MODELS[provider]
     return compact if compact is not None else resolved
+
+
+def compaction_model_ladder(configured: str | list[str] | None, agent_model: str) -> list[str]:
+    """Ordered models to try for summarization and titling."""
+    if not configured:
+        return [infer_compaction_model(agent_model)]
+    return [configured] if isinstance(configured, str) else configured
+
+
+async def walk_model_ladder(ladder: list[str], call: Callable[[str], Awaitable[str]]) -> tuple[str, str]:
+    """Return the first successful result and the model that produced it.
+
+    A context-overflow error re-raises without trying the next rung.
+    """
+    *fallbacks, last = ladder
+    for model in fallbacks:
+        try:
+            return await call(model), model
+        except Exception as e:
+            if is_prompt_too_long_error(e):
+                raise
+            logger.warning("Compaction model %s failed, falling back: %s", model, e)
+    return await call(last), last
 
 
 def get_context_limit(model: str, fallback: int | None = None) -> int:
@@ -349,17 +375,18 @@ async def compute_session_title(
     user_content: str,
     assistant_content: str,
     agent_model: str,
-    compaction_model: str | None = None,
+    compaction_model: str | list[str] | None = None,
 ) -> str:
     """Compute a title for a session. Returns empty string if no title could be generated."""
     if len(user_content) <= SHORT_TITLE_THRESHOLD:
         return user_content
-    model = compaction_model or infer_compaction_model(agent_model)
+    ladder = compaction_model_ladder(compaction_model, agent_model)
     messages = [
         {"role": "user", "content": user_content},
         {"role": "assistant", "content": assistant_content},
     ]
-    return await generate_session_title(messages, model)
+    title, _ = await walk_model_ladder(ladder, lambda model: generate_session_title(messages, model))
+    return title
 
 
 def extract_file_paths_from_events(events: list) -> list[str]:
@@ -405,12 +432,12 @@ def split_events_for_compaction(
         kept_turns += 1
         cutoff = start
     else:
-        # Loop finished without exceeding the budget: every turn is retained, so
-        # there is nothing to summarize. Return empty old_events even when a
-        # session_start/compaction prefix precedes the first user_input — this
-        # lets the caller's `if not old_events` gate skip the no-op compaction
-        # instead of re-rotating (and re-summarizing) an unchanged session on
-        # every scheduled run.
+        # The loop finished within the budget, so every turn is retained and there
+        # is nothing to summarize. Return empty old_events even when a
+        # session_start/compaction prefix precedes the first user_input. The
+        # caller's `if not old_events` gate then skips the no-op compaction rather
+        # than re-rotating (and re-summarizing) an unchanged session on every
+        # scheduled run.
         return [], list(events)
 
     if cutoff is None or cutoff == 0:

@@ -47,7 +47,7 @@ def _seed_session_events(session_id, count=6):
         storage.record("model_response", raw_content=f"reply {i}")
 
 
-def _patches(history_dir):
+def _patches(history_dir, summarize=None):
     """The shared patch list for driving `_compact_session` in isolation."""
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
     recent_events = [
@@ -64,7 +64,7 @@ def _patches(history_dir):
             "tsugite_daemon.memory.split_events_for_compaction",
             return_value=(old_events, recent_events),
         ),
-        patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
+        patch("tsugite_daemon.memory.summarize_session", new=summarize or fake_summarize),
         patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir),
         patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
     ]
@@ -101,8 +101,8 @@ async def test_compact_session_returns_new_session(workspace_dir, history_dir, t
 async def test_post_compaction_counters_update(workspace_dir, history_dir, tmp_path):
     """After `_compact_session`, calling `update_token_count` on the returned
     session id must actually move `cumulative_tokens`, `message_count`, and
-    `last_active`. This is the load-bearing assertion: if the returned id is
-    wrong (the old bug), the update silently no-ops.
+    `last_active`. If the returned id is wrong (the old bug), the update silently
+    no-ops.
     """
     store = SessionStore(tmp_path / "session_store.json", default_context_limit=1_000_000)
     session = store.get_or_create_interactive("test-user")

@@ -1272,17 +1272,19 @@ class BaseAdapter(ABC):
         from tsugite.hooks import fire_compact_hooks
         from tsugite_daemon.memory import (
             RETENTION_BUDGET_RATIO,
+            compaction_model_ladder,
             extract_file_paths_from_events,
             get_context_limit,
-            infer_compaction_model,
             sanitize_for_summary,
             split_events_for_compaction,
             summarize_session,
             track_compaction_usage,
+            walk_model_ladder,
         )
 
         resolved_model = self.resolve_model()
-        model = self.runtime.compaction_model or infer_compaction_model(resolved_model)
+        ladder = compaction_model_ladder(self.runtime.compaction_model, resolved_model)
+        model = ladder[0]
 
         old_conv_id = session_id
         backend = get_history_backend()
@@ -1409,11 +1411,14 @@ class BaseAdapter(ABC):
 
         try:
             with track_compaction_usage() as summary_usage:
-                summary = await summarize_session(
-                    old_messages,
-                    model=model,
-                    max_context_tokens=session_limit_fallback,
-                    progress_callback=progress_callback,
+                summary, summary_model = await walk_model_ladder(
+                    ladder,
+                    lambda m: summarize_session(
+                        old_messages,
+                        model=m,
+                        max_context_tokens=session_limit_fallback,
+                        progress_callback=progress_callback,
+                    ),
                 )
         except Exception:
             logger.exception("Compaction summarization failed")
@@ -1425,16 +1430,14 @@ class BaseAdapter(ABC):
                 summary_usage["completion_tokens"],
                 summary_usage["calls"],
             )
-            # Record summarization spend in the same UsageStore as normal turns
-            # (see _save_history) so `tsugite usage` sees compaction cost under
-            # source="compaction" instead of it being untracked.
+            # Summarization spend goes in the same UsageStore as normal turns (see _save_history).
             try:
                 from tsugite.usage import get_usage_store
 
                 get_usage_store().record(
                     session_id=old_conv_id,
                     agent=self.agent_label,
-                    model=model,
+                    model=summary_model,
                     source="compaction",
                     input_tokens=summary_usage["prompt_tokens"],
                     output_tokens=summary_usage["completion_tokens"],
@@ -1445,10 +1448,6 @@ class BaseAdapter(ABC):
                 logger.debug("Failed to record compaction usage: %s", e)
 
         new_session = self.session_store.compact_session(session_id)
-        # Record the model the new session will actually run with. A mid-session
-        # model override (carried forward by compact_session) drives every turn,
-        # so session_start must reflect it rather than the agent's config default
-        # - otherwise the post-compaction session is born mislabeled.
         new_storage = backend.create(
             agent_name=self.agent_label,
             model=new_session.model_override or resolved_model,
@@ -1470,17 +1469,14 @@ class BaseAdapter(ABC):
         )
         for event in recent_events:
             if event.type == "session_end":
-                # Per-turn lifecycle markers from retained turns must not be
-                # copied: a `session_end` mid-file makes the session structurally
-                # "end" before it really ends. The new session emits its own
-                # single session_end at its real end.
+                # A retained session_end would mark the new session ended mid-file.
+                # The new session records its own at its real end.
                 continue
             data = event.data
             if event.type == "model_response" and "state_delta" in data:
-                # state_delta holds provider-specific runtime IDs (e.g. claude_code
-                # session_id, compaction flags) tied to the pre-compaction session.
-                # Carrying them forward causes the next turn to resume the old
-                # Claude Code session and bypass compaction entirely.
+                # state_delta holds provider runtime ids (e.g. the claude_code session_id
+                # and compaction flags) tied to the pre-compaction session. Copying them
+                # makes the next turn resume the old Claude Code session and skip compaction.
                 data = {k: v for k, v in data.items() if k != "state_delta"}
             # Preserve each event's ORIGINAL ts. Without this the retained turns
             # collapse onto the compaction-spawn instant (the whole timeline of a
@@ -1501,11 +1497,10 @@ class BaseAdapter(ABC):
         for ex in post_compact_execs:
             new_storage.record("hook_execution", **ex.model_dump(exclude_none=True))
 
-        # Forward pointer on the old file. Written after the new file is fully
-        # populated so a crash mid-compaction can't leave an orphan pointer to a
-        # partial successor. Wrapped in try/except: superseded_by in session_store.json
-        # is the load-bearing chain link; this terminal event is a self-describing
-        # convenience for offline log walks and the UI banner.
+        # Forward pointer on the old session, written after the new one is fully
+        # populated. A crash mid-compaction must not leave a pointer to a partial
+        # successor. Sessions chain through superseded_by in session_store.json. This
+        # event only serves offline log walks and the UI banner.
         try:
             storage.record(
                 "compacted_into",
