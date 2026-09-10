@@ -170,31 +170,22 @@ class AutoContextHandler(AttachmentHandler):
         return dirs
 
     def _discover_files(self, search_dirs: List[Path], context_files: List[str]) -> List[tuple[Path, str]]:
-        """Discover context files in search directories.
+        """Return every context file on the walk, outermost directory first.
 
-        Deduplicates by filename to prefer closer (more specific) directories.
-
-        Args:
-            search_dirs: Directories to search
-            context_files: List of filenames to search for
-
-        Returns:
-            List of (file_path, relative_name) tuples for found files
+        Names are relative to the outermost directory that has one. A nested
+        copy reads as `repos/app/AGENTS.md` next to the outer `AGENTS.md`.
         """
-        found = []
-        seen = set()
+        found: List[tuple[Path, str]] = []
+        outermost_dir: Optional[Path] = None
 
-        # Search in order (most specific directory first)
-        for directory in search_dirs:
+        for directory in reversed(search_dirs):
             for filename in context_files:
-                # Skip if we've already found a file with this name
-                if filename in seen:
-                    continue
-
                 file_path = directory / filename
-                if file_path.exists() and file_path.is_file():
-                    found.append((file_path, filename))
-                    seen.add(filename)
+                if not file_path.is_file():
+                    continue
+                if outermost_dir is None:
+                    outermost_dir = directory
+                found.append((file_path, file_path.relative_to(outermost_dir).as_posix()))
 
         return found
 

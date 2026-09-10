@@ -37,7 +37,6 @@ class TestAutoContextHandler:
 
     def test_fetch_discovers_single_file(self, tmp_path, monkeypatch):
         """Test fetch_multiple when one context file exists."""
-        # Create a context file
         context_file = tmp_path / "CONTEXT.md"
         context_file.write_text("# Project Context\nThis is context.")
 
@@ -55,7 +54,6 @@ class TestAutoContextHandler:
 
     def test_fetch_discovers_multiple_files(self, tmp_path, monkeypatch):
         """Test fetch_multiple when multiple context files exist."""
-        # Create multiple context files
         (tmp_path / "CONTEXT.md").write_text("Context content")
         (tmp_path / "AGENTS.md").write_text("Agents content")
         (tmp_path / "CLAUDE.md").write_text("Claude content")
@@ -78,7 +76,6 @@ class TestAutoContextHandler:
 
     def test_fetch_in_tsugite_directory(self, tmp_path, monkeypatch):
         """Test fetch_multiple finds files in .tsugite directory."""
-        # Create .tsugite directory with context
         tsugite_dir = tmp_path / ".tsugite"
         tsugite_dir.mkdir()
         (tsugite_dir / "CONTEXT.md").write_text("Tsugite context")
@@ -92,16 +89,11 @@ class TestAutoContextHandler:
         assert result[0].name == ".tsugite/CONTEXT.md"
         assert "Tsugite context" in result[0].content
 
-    def test_fetch_prefers_closer_files(self, tmp_path, monkeypatch):
-        """Test that files in current dir are preferred over parent dirs."""
-        # Create parent directory with context
+    def test_fetch_loads_parent_and_child_files_outermost_first(self, tmp_path, monkeypatch):
         parent_dir = tmp_path / "parent"
-        parent_dir.mkdir()
-        (parent_dir / "CONTEXT.md").write_text("Parent context")
-
-        # Create child directory with different context
         child_dir = parent_dir / "child"
-        child_dir.mkdir()
+        child_dir.mkdir(parents=True)
+        (parent_dir / "CONTEXT.md").write_text("Parent context")
         (child_dir / "CONTEXT.md").write_text("Child context")
 
         monkeypatch.chdir(child_dir)
@@ -109,11 +101,25 @@ class TestAutoContextHandler:
         handler = AutoContextHandler(context_files=["CONTEXT.md"])
         result = handler.fetch_multiple("auto-context")
 
-        assert len(result) == 1
-        assert result[0].name == "CONTEXT.md"
-        # Should find child version, not parent
-        assert "Child context" in result[0].content
-        assert "Parent context" not in result[0].content
+        assert [(a.name, a.content) for a in result] == [
+            ("CONTEXT.md", "Parent context"),
+            ("child/CONTEXT.md", "Child context"),
+        ]
+
+    def test_fetch_names_a_lone_nested_file_relative_to_the_outermost_hit(self, tmp_path, monkeypatch):
+        parent_dir = tmp_path / "parent"
+        child_dir = parent_dir / "child"
+        child_dir.mkdir(parents=True)
+        (parent_dir / "AGENTS.md").write_text("Parent agents")
+        (child_dir / "AGENTS.md").write_text("Child agents")
+        (child_dir / "CLAUDE.md").write_text("Child claude")
+
+        monkeypatch.chdir(child_dir)
+
+        handler = AutoContextHandler(context_files=["AGENTS.md", "CLAUDE.md"])
+        result = handler.fetch_multiple("auto-context")
+
+        assert [a.name for a in result] == ["AGENTS.md", "child/AGENTS.md", "child/CLAUDE.md"]
 
     @patch("tsugite.attachments.auto_context.subprocess.run")
     def test_find_git_root_success(self, mock_run, tmp_path):
@@ -138,7 +144,6 @@ class TestAutoContextHandler:
 
     def test_get_search_directories_with_git_root(self, tmp_path):
         """Test getting search directories when in a git repo."""
-        # Create directory structure
         repo_root = tmp_path / "repo"
         repo_root.mkdir()
         subdir = repo_root / "src" / "module"
@@ -154,7 +159,6 @@ class TestAutoContextHandler:
 
     def test_get_search_directories_without_git_root(self, tmp_path):
         """Test getting search directories when not in a git repo."""
-        # Create deep directory structure
         deep_dir = tmp_path / "a" / "b" / "c"
         deep_dir.mkdir(parents=True)
 
@@ -167,7 +171,6 @@ class TestAutoContextHandler:
 
     def test_fetch_handles_unreadable_file(self, tmp_path, monkeypatch):
         """Test fetch_multiple handles files that cannot be read."""
-        # Create a file and then mock it to raise an error
         context_file = tmp_path / "CONTEXT.md"
         context_file.write_text("Test")
 
@@ -188,11 +191,7 @@ class TestAutoContextHandler:
     def test_fetch_loads_config_when_no_context_files(self, tmp_path, monkeypatch):
         """Test that fetch_multiple loads config when context_files is None."""
         monkeypatch.chdir(tmp_path)
-
-        # Create config files
         (tmp_path / "CLAUDE.md").write_text("Config content")
-
-        # Create a mock config
         mock_cfg = MagicMock()
         mock_cfg.auto_context_files = ["CLAUDE.md"]
         mock_cfg.auto_context_include_global = False
@@ -208,7 +207,6 @@ class TestAutoContextHandler:
 
     def test_get_global_context_file_exists(self, tmp_path):
         """Test finding global context file when it exists."""
-        # Create a fake global context file
         global_context = tmp_path / "CONTEXT.md"
         global_context.write_text("Global context content")
 
@@ -218,7 +216,6 @@ class TestAutoContextHandler:
         with patch("tsugite.config.get_xdg_config_path", return_value=global_context):
             result = handler._get_global_context_file()
 
-            assert result is not None
             assert result[0] == global_context
             assert "Global Context" in result[1]
 
@@ -236,11 +233,7 @@ class TestAutoContextHandler:
     def test_fetch_includes_global_context(self, tmp_path, monkeypatch):
         """Test that fetch includes global context file when enabled."""
         monkeypatch.chdir(tmp_path)
-
-        # Create project context
         (tmp_path / "AGENTS.md").write_text("Project agents")
-
-        # Create global context
         global_context = tmp_path / "global" / "CONTEXT.md"
         global_context.parent.mkdir()
         global_context.write_text("Global context")
@@ -267,11 +260,7 @@ class TestAutoContextHandler:
     def test_fetch_excludes_global_context_when_disabled(self, tmp_path, monkeypatch):
         """Test that fetch_multiple excludes global context when disabled."""
         monkeypatch.chdir(tmp_path)
-
-        # Create project context
         (tmp_path / "AGENTS.md").write_text("Project agents")
-
-        # Create global context
         global_context = tmp_path / "global" / "CONTEXT.md"
         global_context.parent.mkdir()
         global_context.write_text("Global context")
@@ -294,7 +283,6 @@ class TestAutoContextHandler:
 
     def test_fetch_multiple_returns_list_of_attachments(self, tmp_path, monkeypatch):
         """Test that fetch_multiple returns list of Attachment objects."""
-        # Create multiple context files
         (tmp_path / "CONTEXT.md").write_text("Context content")
         (tmp_path / "AGENTS.md").write_text("Agents content")
 
@@ -345,7 +333,6 @@ class TestAutoContextHandler:
 
     def test_fetch_multiple_preserves_file_names(self, tmp_path, monkeypatch):
         """Test that fetch_multiple uses correct display names."""
-        # Create files including .tsugite directory
         tsugite_dir = tmp_path / ".tsugite"
         tsugite_dir.mkdir()
         (tsugite_dir / "CONTEXT.md").write_text("Tsugite context")
@@ -363,11 +350,7 @@ class TestAutoContextHandler:
     def test_fetch_multiple_with_global_context(self, tmp_path, monkeypatch):
         """Test that fetch_multiple includes global context with proper name."""
         monkeypatch.chdir(tmp_path)
-
-        # Create project context
         (tmp_path / "AGENTS.md").write_text("Project agents")
-
-        # Create global context
         global_context = tmp_path / "global" / "CONTEXT.md"
         global_context.parent.mkdir()
         global_context.write_text("Global context")
@@ -414,7 +397,6 @@ class TestAutoContextHandler:
 
     def test_fetch_multiple_orders_files_correctly(self, tmp_path, monkeypatch):
         """Test that fetch_multiple returns files in discovery order."""
-        # Create files in specific order
         (tmp_path / "CONTEXT.md").write_text("First")
         (tmp_path / "AGENTS.md").write_text("Second")
         (tmp_path / "CLAUDE.md").write_text("Third")
