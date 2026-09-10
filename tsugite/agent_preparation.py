@@ -143,14 +143,17 @@ class AgentPreparer:
         )
 
     def _resolve_attachments(
-        self, agent_config: AgentConfig, attachments: Optional[List[Attachment]]
+        self,
+        agent_config: AgentConfig,
+        attachments: Optional[List[Attachment]],
+        path_context: Optional["PathContext"],
     ) -> Tuple[List[Attachment], Dict[str, Any]]:
         """Merge caller attachments with the agent's own, honoring removals.
 
         Front-matter attachments carry the cache tiers and are the intended
         source, so they dedupe ahead of any same-named attachment the caller
         passed in. Legacy `-filename` string entries drop a same-named entry.
-        Front-matter paths resolve via cwd (workspace_path is None in production).
+        Front-matter paths resolve against the run's effective cwd.
         """
         all_attachments = list(attachments or [])
 
@@ -158,7 +161,8 @@ class AgentPreparer:
         if removals:
             all_attachments = [a for a in all_attachments if a.name not in removals]
 
-        loaded, bindings = resolve_agent_config_attachments(keep_items, None)
+        base_dir = path_context.effective_cwd if path_context else None
+        loaded, bindings = resolve_agent_config_attachments(keep_items, base_dir)
         all_attachments = loaded + all_attachments
 
         seen_names: set[str] = set()
@@ -445,7 +449,7 @@ class AgentPreparer:
 
         agent_config = agent.config
 
-        all_attachments, attachment_bindings = self._resolve_attachments(agent_config, attachments)
+        all_attachments, attachment_bindings = self._resolve_attachments(agent_config, attachments, path_context)
 
         _skill_manager = self._install_skill_manager(agent_config, path_context)
 

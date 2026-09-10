@@ -1,6 +1,7 @@
 """Tests for tsu:exec directive integration in the agent preparation pipeline."""
 
 from tsugite.agent_preparation import AgentPreparer
+from tsugite.cli.helpers import PathContext
 from tsugite.md_agents import parse_agent_file
 
 
@@ -129,3 +130,43 @@ Logs: {{ logs }}
         prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, skip_exec_directives=True)
 
         assert prepared.rendered_prompt.count("not executed in render mode") == 2
+
+
+class TestFrontMatterAttachmentBase:
+    """Front-matter attachment paths resolve against the run's working directory."""
+
+    def _agent(self, path):
+        path.write_text("""---
+name: attach_test
+extends: none
+tools: []
+attachments:
+  - AGENTS.md
+---
+
+Task: {{ user_prompt }}
+""")
+        return parse_agent_file(path)
+
+    def test_relative_attachment_resolves_against_effective_cwd(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "workspace"
+        nested = workspace / "repos" / "nested"
+        nested.mkdir(parents=True)
+        (workspace / "AGENTS.md").write_text("workspace rules")
+        (nested / "AGENTS.md").write_text("nested repo rules")
+        monkeypatch.chdir(nested)
+        path_context = PathContext(invoked_from=workspace, workspace_dir=workspace, effective_cwd=workspace)
+
+        agent = self._agent(tmp_path / "agent.md")
+        prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, path_context=path_context)
+
+        assert [(a.name, a.content) for a in prepared.attachments] == [("AGENTS.md", "workspace rules")]
+
+    def test_relative_attachment_resolves_against_cwd_without_path_context(self, tmp_path, monkeypatch):
+        (tmp_path / "AGENTS.md").write_text("cwd rules")
+        monkeypatch.chdir(tmp_path)
+
+        agent = self._agent(tmp_path / "agent.md")
+        prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={})
+
+        assert [(a.name, a.content) for a in prepared.attachments] == [("AGENTS.md", "cwd rules")]
