@@ -374,7 +374,9 @@ class BaseAdapter(ABC):
                 removals, keep_items = split_attachment_removals(agent.config.attachments or [])
                 if removals:
                     attachments = [a for a in attachments if a.name not in removals]
-                loaded, _ = resolve_agent_config_attachments(keep_items, workspace_path)
+                ws = str(workspace_path) if workspace_path else None
+                template_vars = {"CWD": ws or str(Path.cwd()), "INVOKED_FROM": ws, "WORKSPACE_DIR": ws}
+                loaded, _ = resolve_agent_config_attachments(keep_items, workspace_path, template_vars)
                 attachments.extend(loaded)
             except Exception as e:
                 logger.debug("Failed to load agent config attachments: %s", e)

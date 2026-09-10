@@ -103,7 +103,7 @@ Answer: {{ answer }}
         prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, skip_exec_directives=True)
 
         assert "Answer:" in prepared.rendered_prompt
-        # The placeholder mentions the directive name so users can see what was skipped
+        # The placeholder includes the skipped directive's name.
         assert "compute" in prepared.rendered_prompt
         assert "not executed" in prepared.rendered_prompt.lower()
 
@@ -135,16 +135,16 @@ Logs: {{ logs }}
 class TestFrontMatterAttachmentBase:
     """Front-matter attachment paths resolve against the run's working directory."""
 
-    def _agent(self, path):
-        path.write_text("""---
+    def _agent(self, path, attachment="AGENTS.md"):
+        path.write_text(f"""---
 name: attach_test
 extends: none
 tools: []
 attachments:
-  - AGENTS.md
+  - "{attachment}"
 ---
 
-Task: {{ user_prompt }}
+Task.
 """)
         return parse_agent_file(path)
 
@@ -161,6 +161,29 @@ Task: {{ user_prompt }}
         prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, path_context=path_context)
 
         assert [(a.name, a.content) for a in prepared.attachments] == [("AGENTS.md", "workspace rules")]
+
+    def test_attachment_path_renders_workspace_dir(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "workspace"
+        (workspace / "shared").mkdir(parents=True)
+        (workspace / "shared" / "NOTES.md").write_text("shared notes")
+        monkeypatch.chdir(tmp_path)
+        path_context = PathContext(invoked_from=tmp_path, workspace_dir=workspace, effective_cwd=tmp_path)
+
+        agent = self._agent(tmp_path / "agent.md", "{{ WORKSPACE_DIR }}/shared/NOTES.md")
+        prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={}, path_context=path_context)
+
+        assert [(a.name, a.content) for a in prepared.attachments] == [("NOTES.md", "shared notes")]
+
+    def test_attachment_path_can_guard_on_workspace_dir(self, tmp_path, monkeypatch):
+        (tmp_path / "NOTES.md").write_text("cwd notes")
+        monkeypatch.chdir(tmp_path)
+
+        agent = self._agent(
+            tmp_path / "agent.md", "{% if WORKSPACE_DIR %}{{ WORKSPACE_DIR }}/shared/{% endif %}NOTES.md"
+        )
+        prepared = AgentPreparer().prepare(agent=agent, prompt="run", context={})
+
+        assert [(a.name, a.content) for a in prepared.attachments] == [("NOTES.md", "cwd notes")]
 
     def test_relative_attachment_resolves_against_cwd_without_path_context(self, tmp_path, monkeypatch):
         (tmp_path / "AGENTS.md").write_text("cwd rules")

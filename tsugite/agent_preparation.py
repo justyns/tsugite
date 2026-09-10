@@ -89,7 +89,7 @@ class AgentPreparer:
         _resolve_attachments     caller + frontmatter attachments, removals, dedupe
         _install_skill_manager   workspace-aware SkillManager, made active
         _run_prefetch            frontmatter prefetch tools + agent-list injection
-        _resolve_paths           cwd / invoked_from / workspace_dir
+        _resolve_paths           CWD / INVOKED_FROM / WORKSPACE_DIR
         _build_template_context  the Jinja context and its framework defaults
         _expand_tools            tool specs + capability-based auto-injection
         _load_skills             auto-load, sticky TTL, trigger matching
@@ -146,14 +146,13 @@ class AgentPreparer:
         self,
         agent_config: AgentConfig,
         attachments: Optional[List[Attachment]],
-        path_context: Optional["PathContext"],
+        paths: Dict[str, Optional[str]],
     ) -> Tuple[List[Attachment], Dict[str, Any]]:
         """Merge caller attachments with the agent's own, honoring removals.
 
-        Front-matter attachments carry the cache tiers and are the intended
-        source, so they dedupe ahead of any same-named attachment the caller
-        passed in. Legacy `-filename` string entries drop a same-named entry.
-        Front-matter paths resolve against the run's effective cwd.
+        A front-matter attachment defines its cache tier and replaces a same-named
+        caller attachment. Legacy `-filename` string entries drop a same-named
+        entry. Front-matter paths render with `paths` and resolve against its CWD.
         """
         all_attachments = list(attachments or [])
 
@@ -161,8 +160,7 @@ class AgentPreparer:
         if removals:
             all_attachments = [a for a in all_attachments if a.name not in removals]
 
-        base_dir = path_context.effective_cwd if path_context else None
-        loaded, bindings = resolve_agent_config_attachments(keep_items, base_dir)
+        loaded, bindings = resolve_agent_config_attachments(keep_items, Path(paths["CWD"]), paths)
         all_attachments = loaded + all_attachments
 
         seen_names: set[str] = set()
@@ -206,8 +204,7 @@ class AgentPreparer:
             except Exception:
                 prefetch_context = {}
 
-        # Default agents call list_available_agents() on demand instead of
-        # carrying the full list, so this stays opt-in.
+        # The agent list is opt-in. Default agents call list_available_agents() on demand.
         if "available_agents" not in prefetch_context and (
             agent_config.auto_load_agent_list or agent_config.auto_load_agents
         ):
@@ -259,7 +256,7 @@ class AgentPreparer:
                 continue
             meta = registry.get(name)
             if meta is None:
-                # Skill vanished (renamed/removed) between turns — drop it.
+                # The skill vanished (renamed or removed) between turns.
                 expired_sticky.append(name)
                 continue
             effective_ttl = meta.ttl if meta.ttl is not None else ttl_default
@@ -303,9 +300,8 @@ class AgentPreparer:
     ) -> List[Tool]:
         """Expand the agent's tool specs and apply the capability-based auto-injections.
 
-        Interactive tools are added only when something can actually answer, and
-        stripped otherwise, so a scheduled run cannot offer the model a prompt
-        nobody will see.
+        Interactive tools are added only when something can answer, and stripped
+        otherwise.
         """
         from tsugite.core.tools import create_tool_from_tsugite
         from tsugite.interaction import get_interaction_backend
@@ -337,8 +333,8 @@ class AgentPreparer:
             raise RuntimeError(f"Failed to create tools: {e}") from e
 
     @staticmethod
-    def _resolve_paths(path_context: Optional["PathContext"]) -> Tuple[str, Optional[str], Optional[str]]:
-        """Return (cwd, invoked_from, workspace_dir) as strings for the template context.
+    def _resolve_paths(path_context: Optional["PathContext"]) -> Dict[str, Optional[str]]:
+        """CWD, INVOKED_FROM and WORKSPACE_DIR for the template context.
 
         The daemon supplies an effective_cwd that differs from the process cwd.
         """
@@ -346,9 +342,11 @@ class AgentPreparer:
             cwd = str(path_context.effective_cwd)
         else:
             cwd = str(Path.cwd())
-        invoked_from = str(path_context.invoked_from) if path_context else None
-        workspace_dir = str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None
-        return cwd, invoked_from, workspace_dir
+        return {
+            "CWD": cwd,
+            "INVOKED_FROM": str(path_context.invoked_from) if path_context else None,
+            "WORKSPACE_DIR": str(path_context.workspace_dir) if path_context and path_context.workspace_dir else None,
+        }
 
     def _build_template_context(
         self,
@@ -359,9 +357,7 @@ class AgentPreparer:
         directive_context: Dict[str, Any],
         attachment_bindings: Dict[str, Any],
         interactive_mode: bool,
-        cwd: str,
-        invoked_from: Optional[str],
-        workspace_dir: Optional[str],
+        paths: Dict[str, Optional[str]],
     ) -> Dict[str, Any]:
         """Assemble the Jinja context every agent template renders against.
 
@@ -391,9 +387,7 @@ class AgentPreparer:
             "is_subagent": context.get("is_subagent", False),
             "parent_agent": context.get("parent_agent", None),
             "chat_history": context.get("chat_history", []),
-            "CWD": cwd,
-            "INVOKED_FROM": invoked_from,
-            "WORKSPACE_DIR": workspace_dir,
+            **paths,
         }
 
         # User-specified attachment `assign:` bindings win over built-in or
@@ -449,7 +443,8 @@ class AgentPreparer:
 
         agent_config = agent.config
 
-        all_attachments, attachment_bindings = self._resolve_attachments(agent_config, attachments, path_context)
+        paths = self._resolve_paths(path_context)
+        all_attachments, attachment_bindings = self._resolve_attachments(agent_config, attachments, paths)
 
         _skill_manager = self._install_skill_manager(agent_config, path_context)
 
@@ -474,7 +469,6 @@ class AgentPreparer:
             )
 
         interactive_mode = is_interactive()
-        cwd, invoked_from, workspace_dir = self._resolve_paths(path_context)
         full_context = self._build_template_context(
             agent_config=agent_config,
             prompt=prompt,
@@ -482,9 +476,7 @@ class AgentPreparer:
             directive_context={**prefetch_context, **tool_context, **exec_context},
             attachment_bindings=attachment_bindings,
             interactive_mode=interactive_mode,
-            cwd=cwd,
-            invoked_from=invoked_from,
-            workspace_dir=workspace_dir,
+            paths=paths,
         )
 
         renderer = AgentRenderer()
@@ -540,7 +532,7 @@ class AgentPreparer:
 
         system_message = build_system_prompt(tools, combined_instructions)
 
-        # Add environment context when invoked_from differs from CWD
+        cwd, invoked_from = paths["CWD"], paths["INVOKED_FROM"]
         if invoked_from and invoked_from != cwd:
             env_block = f"""
 ## Environment

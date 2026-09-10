@@ -17,12 +17,12 @@ from tsugite.utils import has_glob_chars
 logger = logging.getLogger(__name__)
 
 
-def _render_path(template: str) -> Optional[str]:
+def _render_path(template: str, template_vars: Dict[str, Any]) -> Optional[str]:
     """Render a Jinja path template; return None on render failure."""
     from tsugite.renderer import AgentRenderer
 
     try:
-        return AgentRenderer().render_string(template)
+        return AgentRenderer().render_string(template, template_vars)
     except Exception as e:
         logger.debug("Failed to render attachment path %r: %s", template, e)
         return None
@@ -67,6 +67,7 @@ def _expand_glob(pattern: str, workspace_path: Optional[Path]) -> List[Path]:
 def resolve_agent_config_attachments(
     items: List[Union[str, AttachmentSpec]],
     workspace_path: Optional[Path] = None,
+    template_vars: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Attachment], Dict[str, Any]]:
     """Resolve agent config attachment items to Attachment objects and Jinja bindings.
 
@@ -76,6 +77,7 @@ def resolve_agent_config_attachments(
     Args:
         items: List of strings or AttachmentSpec objects from agent_config.attachments
         workspace_path: Optional workspace path for resolving relative paths
+        template_vars: Jinja variables for path templates (CWD, INVOKED_FROM, WORKSPACE_DIR)
 
     Returns:
         Tuple of (attachments to inject, dict of {assign_name: bound_value}).
@@ -90,13 +92,14 @@ def resolve_agent_config_attachments(
     file_handler = FileHandler()
     attachments: List[Attachment] = []
     bindings: Dict[str, Any] = {}
+    template_vars = template_vars or {}
 
     for item in items:
         before = len(attachments)
         if isinstance(item, str):
-            _resolve_string_item(item, workspace_path, file_handler, attachments)
+            _resolve_string_item(item, workspace_path, file_handler, attachments, template_vars)
         else:
-            _resolve_spec(item, workspace_path, file_handler, attachments, bindings)
+            _resolve_spec(item, workspace_path, file_handler, attachments, bindings, template_vars)
         # Tag everything this item produced with its cache tier (a spec's tier;
         # plain strings are always tier 0). The context turn renders one cache
         # block per tier so a volatile file only invalidates its own block.
@@ -113,9 +116,10 @@ def _resolve_string_item(
     workspace_path: Optional[Path],
     file_handler: "FileHandler",
     attachments: List[Attachment],
+    template_vars: Dict[str, Any],
 ) -> None:
-    """Legacy string handling: render Jinja, resolve path, fetch single file."""
-    rendered = _render_path(template)
+    """Render the Jinja path, resolve it, fetch the single file."""
+    rendered = _render_path(template, template_vars)
     if rendered is None:
         return
     resolved = _resolve_path(rendered, workspace_path)
@@ -134,9 +138,10 @@ def _resolve_spec(
     file_handler: "FileHandler",
     attachments: List[Attachment],
     bindings: Dict[str, Any],
+    template_vars: Dict[str, Any],
 ) -> None:
     """Resolve a single AttachmentSpec, populating attachments and bindings."""
-    rendered = _render_path(spec.path)
+    rendered = _render_path(spec.path, template_vars)
     if rendered is None:
         if spec.assign:
             bindings[spec.assign] = None
