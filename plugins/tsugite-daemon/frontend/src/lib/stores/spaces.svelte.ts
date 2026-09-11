@@ -216,9 +216,10 @@ export class SpacesStore {
 
   private apply(fn: (layout: Layout) => Layout): void {
     const space = this.active;
-    // Snapshot to hand the reducers a plain (non-proxied) layout, then let the
-    // reassignment re-proxy the result.
-    space.layout = fn($state.snapshot(space.layout) as Layout);
+    // The reducers get the proxy itself. Nodes an op returns by reference keep
+    // their proxies on reassignment, so an op that touches one field re-renders
+    // one pane; the cloning ops re-proxy the whole tree as before.
+    space.layout = fn(space.layout);
     this.persist();
   }
 

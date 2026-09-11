@@ -6,6 +6,8 @@ import { type Snippet, createRawSnippet, mount, unmount } from 'svelte';
 import Mux from './Mux.svelte';
 import { KEEP_ALIVE_MAX } from './PaneView.svelte';
 import KeepAliveHost from './__fixtures__/KeepAliveHost.svelte';
+import StoreDrivenHost from './__fixtures__/StoreDrivenHost.svelte';
+import { paramRuns } from './__fixtures__/ParamsProbe.svelte';
 import { mountCounts } from './__fixtures__/MountCounter.svelte';
 import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
@@ -463,4 +465,45 @@ test('keep-alive holds KEEP_ALIVE_MAX tabs, dropping the least recently active',
   expect(mountCounts.get(kept)).toBe(1);
   await mux.select(evicted);
   expect(mountCounts.get(evicted)).toBe(2);
+});
+
+// ── focus vs remount ──
+
+test('focusing a pane through the store path leaves every surface mounted once', async () => {
+  mountCounts.clear();
+  let layout = seeded({ kind: 'chat', params: { id: 'left' } });
+  const leftId = layout.root.id;
+  layout = splitPane(layout, leftId, 'row', { kind: 'artifact', params: { id: 'right' } });
+  const [left, right] = collectLeaves(layout.root);
+  const screen = await render(StoreDrivenHost, { initial: layout });
+  expect(screen.container.querySelectorAll('[data-mounted]').length).toBe(2);
+  const before = new Map(mountCounts);
+
+  const panes = [...screen.container.querySelectorAll<HTMLElement>('[data-testid="mux-pane"]')];
+  panes[0]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await expect
+    .element(page.getByTestId('mux-pane').first())
+    .toHaveAttribute('data-focused', 'true');
+  panes[1]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await expect.element(page.getByTestId('mux-pane').last()).toHaveAttribute('data-focused', 'true');
+
+  expect(left!.id).not.toBe(right!.id);
+  expect(new Map(mountCounts)).toEqual(before);
+});
+
+test('focusing a pane hands no surface a new params object', async () => {
+  paramRuns.clear();
+  let layout = seeded({ kind: 'chat', params: { id: 'left' } });
+  layout = splitPane(layout, layout.root.id, 'row', { kind: 'artifact', params: { id: 'right' } });
+  const screen = await render(StoreDrivenHost, { initial: layout });
+  const before = new Map(paramRuns);
+  expect([...before.values()]).toEqual([1, 1]);
+
+  const panes = [...screen.container.querySelectorAll<HTMLElement>('[data-testid="mux-pane"]')];
+  panes[0]!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await expect
+    .element(page.getByTestId('mux-pane').first())
+    .toHaveAttribute('data-focused', 'true');
+
+  expect(new Map(paramRuns)).toEqual(before);
 });

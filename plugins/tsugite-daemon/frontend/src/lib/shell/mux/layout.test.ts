@@ -514,6 +514,30 @@ describe('focusPane / selectTab', () => {
     l = selectTab(l, l.root.id, firstId);
     expect(asLeaf(l.root).activeTabId).toBe(firstId);
   });
+
+  test('focusPane keeps the tree by reference and leaves the input untouched', () => {
+    const seed = seeded({ kind: 'chat' });
+    const l = splitPane(seed, seed.root.id, 'row', { kind: 'terminal' });
+    const leftId = collectLeaves(l.root)[0]!.id;
+    const next = focusPane(l, leftId);
+    expect(next.root).toBe(l.root);
+    expect(next.focusedPaneId).toBe(leftId);
+    expect(l.focusedPaneId).not.toBe(leftId);
+  });
+
+  test('selectTab rebuilds only the path to the changed leaf', () => {
+    const seed = seeded({ kind: 'chat', params: { id: 'a' } });
+    let l = dockAsTab(seed, seed.root.id, { kind: 'chat', params: { id: 'b' } });
+    l = splitPane(l, l.root.id, 'row', { kind: 'terminal' });
+    const [left0, right0] = collectLeaves(l.root);
+    const firstId = left0!.tabs[0]!.id;
+    const next = selectTab(l, left0!.id, firstId);
+    const [left1, right1] = collectLeaves(next.root);
+    expect(right1).toBe(right0);
+    expect(left1).not.toBe(left0);
+    expect(left1!.activeTabId).toBe(firstId);
+    expect(left0!.activeTabId).not.toBe(firstId);
+  });
 });
 
 describe('cycleTab', () => {

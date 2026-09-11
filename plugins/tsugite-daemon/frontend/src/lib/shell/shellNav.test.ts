@@ -67,6 +67,32 @@ describe('dockedChatSessionId', () => {
     expect(dockedChatSessionId(split)).toBe('sess-1');
   });
 
+  test('a focused artifact stamped with a session names that session', () => {
+    const base = defaultLayout();
+    const chatPaneId = base.root.id;
+    const withChat = dockAsTab(base, chatPaneId, { kind: 'chat', params: { sessionId: 'sess-1' } });
+    const split = splitPane(withChat, chatPaneId, 'row', {
+      kind: 'artifact',
+      params: { id: 'agent', sessionId: 'sess-1' },
+    });
+    expect(dockedChatSessionId(split)).toBe('sess-1');
+  });
+
+  test('a chat tab hidden behind the active one does not name the docked session', () => {
+    const base = defaultLayout();
+    const paneId = base.root.id;
+    const hiddenFirst = dockAsTab(base, paneId, { kind: 'chat', params: { sessionId: 'hidden' } });
+    const withActive = dockAsTab(hiddenFirst, paneId, {
+      kind: 'chat',
+      params: { sessionId: 'shown' },
+    });
+    const split = splitPane(withActive, paneId, 'row', {
+      kind: 'artifact',
+      params: { id: 'agent' },
+    });
+    expect(dockedChatSessionId(split)).toBe('shown');
+  });
+
   test('prefers the focused chat tab when two chats are split side by side', () => {
     const base = defaultLayout();
     const paneAId = base.root.id;

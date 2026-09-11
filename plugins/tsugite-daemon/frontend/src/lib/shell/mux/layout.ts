@@ -2,10 +2,11 @@
  * Pure layout model for the spaces multiplexer: a tree of split nodes (row/col
  * with per-child size weights) whose leaves hold a stack of docked surface tabs.
  *
- * Everything here is a pure function - each op deep-clones its input and returns
- * a new `Layout`, so the store can treat layouts as immutable snapshots and the
- * reducers are trivially unit-testable in node (no DOM, no Svelte). The docking
- * UI, persistence, and keyboard paths all route through these ops.
+ * Everything here is a pure function - each op returns a new `Layout` and never
+ * mutates its input (the structural ops deep-clone; focusPane and selectTab share
+ * the untouched tree), so the store can treat layouts as immutable snapshots and
+ * the reducers are trivially unit-testable in node (no DOM, no Svelte). The
+ * docking UI, persistence, and keyboard paths all route through these ops.
  *
  * Invariants the ops maintain (and `deserializeLayout` enforces on load):
  *  - the root always exists; the only pane allowed to be empty is a lone root leaf.
@@ -117,16 +118,10 @@ export function defaultLayout(): Layout {
   return { version: LAYOUT_SCHEMA_VERSION, root, focusedPaneId: root.id };
 }
 
-/** Deep clone that tolerates a Svelte `$state` proxy being passed in (which
- *  `structuredClone` rejects with a DataCloneError). The layout is pure JSON, so
- *  the JSON fallback is lossless. Callers on the reactive side should still hand
- *  in a `$state.snapshot`, but this keeps the ops from crashing if they don't. */
+/** Deep clone through JSON: the layout is pure JSON, and the store hands the
+ *  ops its `$state` proxy, which `structuredClone` rejects. */
 function deepClone<T>(value: T): T {
-  try {
-    return structuredClone(value);
-  } catch {
-    return JSON.parse(JSON.stringify(value)) as T;
-  }
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function clone(layout: Layout): Layout {
@@ -555,20 +550,27 @@ function findSplit(node: LayoutNode, splitId: string): SplitNode | null {
 }
 
 // ---------- focus / select ----------
+//
+// These two run on every click, so they share the untouched tree with their
+// input instead of cloning it: the store reassigns the result and only the
+// nodes that changed identity re-render.
 
 export function focusPane(layout: Layout, paneId: string): Layout {
-  if (!findLeaf(layout, paneId)) return clone(layout);
-  const next = clone(layout);
-  next.focusedPaneId = paneId;
-  return next;
+  if (!findLeaf(layout, paneId)) return layout;
+  return { ...layout, focusedPaneId: paneId };
+}
+
+/** `node` with the leaf `paneId` swapped for `next`; every other node is shared. */
+function replaceLeaf(node: LayoutNode, paneId: string, next: LeafNode): LayoutNode {
+  if (node.type === 'leaf') return node.id === paneId ? next : node;
+  const children = node.children.map((c) => replaceLeaf(c, paneId, next));
+  return children.every((c, i) => c === node.children[i]) ? node : { ...node, children };
 }
 
 export function selectTab(layout: Layout, paneId: string, tabId: string): Layout {
-  const next = clone(layout);
-  const leaf = findLeafIn(next.root, paneId);
-  if (!leaf || !leaf.tabs.some((t) => t.id === tabId)) return next;
-  leaf.activeTabId = tabId;
-  return next;
+  const leaf = findLeaf(layout, paneId);
+  if (!leaf || !leaf.tabs.some((t) => t.id === tabId)) return layout;
+  return { ...layout, root: replaceLeaf(layout.root, paneId, { ...leaf, activeTabId: tabId }) };
 }
 
 /** Step the focused pane's active tab one place in `dir` (the ⌘/Ctrl+Shift+[ ]
