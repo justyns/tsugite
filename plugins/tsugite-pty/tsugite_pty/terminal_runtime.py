@@ -12,7 +12,7 @@ import os
 import threading
 from typing import Optional
 
-from tsugite_pty.pty_manager import DEFAULT_BUFFER_CAP, PtyManager, PtyProcess
+from tsugite_pty.pty_manager import DEFAULT_BUFFER_CAP, DEFAULT_COLS, DEFAULT_ROWS, PtyManager, PtyProcess
 from tsugite_pty.terminal_store import (
     TerminalSession,
     TerminalSessionStore,
@@ -125,6 +125,8 @@ def spawn_terminal(
     buffer_cap: int = DEFAULT_BUFFER_CAP,
     on_state_change=None,
     sandbox_ctx=_UNSET,
+    cols: int = DEFAULT_COLS,
+    rows: int = DEFAULT_ROWS,
 ) -> TerminalSession:
     """Create a TerminalSession record + spawn its PTY in one step.
 
@@ -155,7 +157,7 @@ def spawn_terminal(
             argv = maybe_sandbox_argv(argv, cwd, resolve_terminal_sandbox(parent_session_id))
         else:
             argv = maybe_sandbox_argv(argv, cwd, sandbox_ctx, force_no_network=False)
-        proc = manager.spawn(session.id, argv, cwd=cwd, env=env, buffer_cap=buffer_cap)
+        proc = manager.spawn(session.id, argv, cwd=cwd, env=env, buffer_cap=buffer_cap, cols=cols, rows=rows)
     except Exception as e:
         logger.exception("Failed to spawn PTY for terminal '%s': %s", session.id, e)
         try:

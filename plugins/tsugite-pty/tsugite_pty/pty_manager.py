@@ -21,6 +21,7 @@ import logging
 import os
 import pty
 import signal
+import struct
 import subprocess
 import termios
 import threading
@@ -30,6 +31,22 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_BUFFER_CAP = 1024 * 1024  # 1 MB
+
+DEFAULT_COLS = 80
+DEFAULT_ROWS = 24
+MAX_WINSIZE = 65535
+
+
+def validate_winsize(cols: object, rows: object) -> None:
+    for name, value in (("cols", cols), ("rows", rows)):
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_WINSIZE:
+            raise ValueError(f"{name} must be an integer from 1 to {MAX_WINSIZE}, got {value!r}")
+
+
+def _winsize(cols: int, rows: int) -> bytes:
+    """Packed `struct winsize` for TIOCSWINSZ."""
+    validate_winsize(cols, rows)
+    return struct.pack("HHHH", rows, cols, 0, 0)
 
 
 def _acquire_controlling_tty() -> None:
@@ -66,10 +83,14 @@ class PtyProcess:
         master_fd: int,
         cmd: list[str],
         buffer_cap: int = DEFAULT_BUFFER_CAP,
+        cols: int = DEFAULT_COLS,
+        rows: int = DEFAULT_ROWS,
     ):
         self._proc = proc
         self._master_fd = master_fd
         self.cmd = cmd
+        self.cols = cols
+        self.rows = rows
         self._buffer_cap = buffer_cap
         # `deque` with a maxlen would auto-evict, but we need byte-granularity
         # eviction (not per-chunk), so we maintain a flat bytearray and trim.
@@ -96,14 +117,19 @@ class PtyProcess:
         cwd: Optional[str] = None,
         env: Optional[dict] = None,
         buffer_cap: int = DEFAULT_BUFFER_CAP,
+        cols: int = DEFAULT_COLS,
+        rows: int = DEFAULT_ROWS,
     ) -> "PtyProcess":
         """Allocate a PTY pair and exec `cmd` inside the slave.
 
         env defaults to the daemon's env if not provided. We merge user-provided
         env on top so callers can override individual vars without losing PATH.
+        A fresh pty's winsize is 0x0. The slave is sized before exec.
         """
+        winsize = _winsize(cols, rows)
         master_fd, slave_fd = pty.openpty()
         try:
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
             full_env = dict(os.environ)
             if env:
                 full_env.update(env)
@@ -134,7 +160,7 @@ class PtyProcess:
                 os.close(slave_fd)
             except OSError:
                 pass
-        return cls(proc, master_fd, cmd, buffer_cap=buffer_cap)
+        return cls(proc, master_fd, cmd, buffer_cap=buffer_cap, cols=cols, rows=rows)
 
     @property
     def pid(self) -> int:
@@ -224,6 +250,19 @@ class PtyProcess:
                     # Slave closed / fd torn down. Treat as no-op like exit case.
                     return 0
                 raise
+
+    def resize(self, cols: int, rows: int) -> None:
+        """Set the pty's window size and deliver SIGWINCH to the child. No-op after exit.
+
+        The last resize applies. A second viewer at a different size overrides
+        the first.
+        """
+        winsize = _winsize(cols, rows)
+        with self._buffer_lock:
+            if self.exit_code is not None or self._master_fd < 0:
+                return
+            fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
+            self.cols, self.rows = cols, rows
 
     def kill(self) -> None:
         """Send SIGTERM the first time; SIGKILL on subsequent calls or after grace.
@@ -350,12 +389,14 @@ class PtyManager:
         cwd: Optional[str] = None,
         env: Optional[dict] = None,
         buffer_cap: int = DEFAULT_BUFFER_CAP,
+        cols: int = DEFAULT_COLS,
+        rows: int = DEFAULT_ROWS,
     ) -> PtyProcess:
         """Spawn a PTY for `terminal_id`. Raises ValueError on duplicate id."""
         with self._lock:
             if terminal_id in self._procs:
                 raise ValueError(f"Terminal already exists: {terminal_id}")
-        proc = PtyProcess.spawn(cmd, cwd=cwd, env=env, buffer_cap=buffer_cap)
+        proc = PtyProcess.spawn(cmd, cwd=cwd, env=env, buffer_cap=buffer_cap, cols=cols, rows=rows)
         with self._lock:
             self._procs[terminal_id] = proc
         return proc
@@ -375,6 +416,14 @@ class PtyManager:
         if proc is None:
             return 0
         return proc.write_stdin(data)
+
+    def resize(self, terminal_id: str, cols: int, rows: int) -> bool:
+        """Resize a tracked terminal's pty. False when the id has no live pty."""
+        proc = self._procs.get(terminal_id)
+        if proc is None or proc.exit_code is not None:
+            return False
+        proc.resize(cols, rows)
+        return True
 
     def subscribe(self, terminal_id: str, callback: Callable[[bytes], None]) -> Optional[Callable[[], None]]:
         """Subscribe to chunk callbacks. Returns the unsubscribe fn, or None if unknown."""

@@ -11,6 +11,7 @@ from tsugite_pty.pty_manager import (
     DEFAULT_BUFFER_CAP,
     PtyManager,
     PtyProcess,
+    validate_winsize,
 )
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="PTY support is POSIX-only")
@@ -405,3 +406,63 @@ def _wait_for_exit(p: PtyProcess, timeout: float) -> None:
             return
         time.sleep(0.02)
     raise AssertionError(f"PTY did not exit within {timeout}s; pid={p.pid}")
+
+
+# ── window size ──
+
+
+def _wait_for_text(p: PtyProcess, marker: str, timeout: float = 3.0) -> str:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        text = p.buffer.decode("utf-8", errors="replace")
+        if marker in text:
+            return text
+        time.sleep(0.05)
+    return p.buffer.decode("utf-8", errors="replace")
+
+
+def test_spawn_defaults_the_window_to_80x24():
+    p = PtyProcess.spawn(["stty", "size"])
+    assert "24 80" in _drain(p, timeout=3.0)
+
+
+def test_spawn_sets_the_requested_window_size_before_exec():
+    p = PtyProcess.spawn(["stty", "size"], cols=120, rows=40)
+    assert "40 120" in _drain(p, timeout=3.0)
+
+
+def test_resize_delivers_the_new_size_to_the_child():
+    script = 'trap "stty size" WINCH; stty size; while :; do sleep 0.05; done'
+    p = PtyProcess.spawn(["/bin/sh", "-c", script], cols=80, rows=24)
+    assert "24 80" in _wait_for_text(p, "24 80")
+    p.resize(cols=132, rows=50)
+    assert "50 132" in _wait_for_text(p, "50 132")
+    p.kill()
+    _wait_for_exit(p, timeout=5.0)
+
+
+@pytest.mark.parametrize("cols,rows", [(0, 24), (80, -1), (100_000, 24), ("80", 24), (True, 24), (None, 24)])
+def test_validate_winsize_rejects_nonsense(cols, rows):
+    with pytest.raises(ValueError):
+        validate_winsize(cols, rows)
+
+
+def test_spawn_and_resize_validate_the_size():
+    with pytest.raises(ValueError):
+        PtyProcess.spawn(["/bin/sh", "-c", "sleep 30"], cols=0, rows=24)
+    p = PtyProcess.spawn(["/bin/sh", "-c", "sleep 30"])
+    with pytest.raises(ValueError):
+        p.resize(cols=0, rows=24)
+    p.kill()
+    _wait_for_exit(p, timeout=5.0)
+
+
+def test_manager_resize_reports_whether_a_live_pty_took_it():
+    mgr = PtyManager()
+    try:
+        mgr.spawn("t1", ["/bin/sh", "-c", "sleep 30"])
+        assert mgr.resize("t1", cols=100, rows=30) is True
+        assert mgr.get("t1").cols == 100
+        assert mgr.resize("nope", cols=100, rows=30) is False
+    finally:
+        mgr.shutdown()

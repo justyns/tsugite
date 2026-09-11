@@ -408,3 +408,66 @@ def _collect_stream(client, headers, terminal_id: str, timeout: float = 5.0):
                 if current_event == "exit":
                     break
     return events
+
+
+def _wait_for_text(pty_manager, terminal_id, marker, timeout=5.0) -> str:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        proc = pty_manager.get(terminal_id)
+        text = proc.buffer.decode("utf-8", errors="replace") if proc else ""
+        if marker in text:
+            return text
+        time.sleep(0.05)
+    return text
+
+
+class TestWindowSize:
+    SIZE_REPORTER = 'trap "stty size" WINCH; stty size; while :; do sleep 0.05; done'
+
+    def test_create_applies_cols_and_rows(self, client, headers, pty_manager):
+        created = client.post(
+            "/api/terminals", json={"cmd": self.SIZE_REPORTER, "cols": 132, "rows": 43}, headers=headers
+        ).json()
+        assert "43 132" in _wait_for_text(pty_manager, created["id"], "43 132")
+        client.post(f"/api/terminals/{created['id']}/kill", headers=headers)
+
+    def test_create_defaults_to_80x24(self, client, headers, pty_manager):
+        created = client.post("/api/terminals", json={"cmd": "stty size"}, headers=headers).json()
+        assert "24 80" in _wait_for_text(pty_manager, created["id"], "24 80")
+
+    def test_resize_delivers_the_new_size(self, client, headers, pty_manager):
+        created = client.post("/api/terminals", json={"cmd": self.SIZE_REPORTER}, headers=headers).json()
+        _wait_for_text(pty_manager, created["id"], "24 80")
+        resp = client.post(f"/api/terminals/{created['id']}/resize", json={"cols": 120, "rows": 40}, headers=headers)
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "cols": 120, "rows": 40}
+        assert "40 120" in _wait_for_text(pty_manager, created["id"], "40 120")
+        client.post(f"/api/terminals/{created['id']}/kill", headers=headers)
+
+    def test_a_nonsense_size_is_400_on_create_and_resize(self, client, headers):
+        bad = {"cols": True, "rows": 24}
+        assert client.post("/api/terminals", json={"cmd": "sleep 30", **bad}, headers=headers).status_code == 400
+        created = client.post("/api/terminals", json={"cmd": "sleep 30"}, headers=headers).json()
+        assert client.post(f"/api/terminals/{created['id']}/resize", json=bad, headers=headers).status_code == 400
+        client.post(f"/api/terminals/{created['id']}/kill", headers=headers)
+
+    def test_resize_needs_both_cols_and_rows(self, client, headers, pty_manager):
+        created = client.post(
+            "/api/terminals", json={"cmd": self.SIZE_REPORTER, "cols": 120, "rows": 40}, headers=headers
+        ).json()
+        _wait_for_text(pty_manager, created["id"], "40 120")
+        for body in ({}, {"rows": 24}):
+            assert client.post(f"/api/terminals/{created['id']}/resize", json=body, headers=headers).status_code == 400
+        proc = pty_manager.get(created["id"])
+        assert (proc.cols, proc.rows) == (120, 40)
+        client.post(f"/api/terminals/{created['id']}/kill", headers=headers)
+
+    def test_resize_unknown_terminal_is_404(self, client, headers):
+        resp = client.post("/api/terminals/term-nope/resize", json={"cols": 80, "rows": 24}, headers=headers)
+        assert resp.status_code == 404
+
+    def test_resize_after_exit_is_409(self, client, headers, terminal_store):
+        created = client.post("/api/terminals", json={"cmd": "true"}, headers=headers).json()
+        _wait_for_terminal(terminal_store, created["id"], {TerminalState.SUCCEEDED.value}, timeout=5.0)
+        resp = client.post(f"/api/terminals/{created['id']}/resize", json={"cols": 80, "rows": 24}, headers=headers)
+        assert resp.status_code == 409

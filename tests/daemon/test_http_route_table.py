@@ -221,6 +221,7 @@ FULL_ROUTE_TABLE = [
     ("/api/terminals/{terminal_id}", ("GET",), "_api_get_terminal"),
     ("/api/terminals/{terminal_id}/kill", ("POST",), "_api_kill_terminal"),
     ("/api/terminals/{terminal_id}/stdin", ("POST",), "_api_terminal_stdin"),
+    ("/api/terminals/{terminal_id}/resize", ("POST",), "_api_terminal_resize"),
     ("/api/terminals/{terminal_id}/restart", ("POST",), "_api_restart_terminal"),
     ("/api/terminals/{terminal_id}/stream", ("GET",), "_api_terminal_stream"),
     ("/api/terminals", ("GET",), "_api_list_terminals"),

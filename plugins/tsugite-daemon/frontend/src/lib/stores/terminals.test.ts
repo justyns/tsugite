@@ -118,3 +118,22 @@ describe('TerminalsStore.load restarted_from carry-forward', () => {
     expect(store.list[0]!.restarted_from).toBe('fresh');
   });
 });
+
+describe('TerminalsStore window size', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  test('create spawns at the last fitted geometry', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(term('t1', 'running'));
+    const store = new TerminalsStore();
+    store.lastFit = { cols: 132, rows: 43 };
+    await store.create({ cmd: 'top' });
+    expect(post).toHaveBeenCalledWith('/api/terminals/', { cmd: 'top', cols: 132, rows: 43 });
+  });
+
+  test('resize posts the new size to the terminal', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue({ status: 'ok', cols: 120, rows: 40 });
+    const store = new TerminalsStore();
+    await store.resize('t1', 120, 40);
+    expect(post).toHaveBeenCalledWith('/api/terminals/t1/resize', { cols: 120, rows: 40 });
+  });
+});

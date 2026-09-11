@@ -366,3 +366,19 @@ def test_pty_capture_reads_persisted_log_after_eviction(runtime):
     captured = terminal_tools.pty_capture(tid)
     assert "line1" in captured["text"]
     assert "line3" in captured["text"]
+
+
+# ── window size ──
+
+
+def test_pty_create_sizes_the_window(runtime):
+    result = terminal_tools.pty_create(cmd="stty size", cols=100, rows=30)
+    assert "error" not in result
+    assert _wait_for_output(result["terminal_id"], "30 100")
+
+
+def test_pty_create_rejects_a_nonsense_size_without_spawning(runtime):
+    _mgr, store = runtime
+    result = terminal_tools.pty_create(cmd="sleep 30", cols=0, rows=24)
+    assert "error" in result and "cols" in result["error"]
+    assert store.list_all() == []

@@ -19,6 +19,7 @@ import signal as _signal
 from typing import Optional
 
 from tsugite.tools import tool
+from tsugite_pty.pty_manager import DEFAULT_COLS, DEFAULT_ROWS, validate_winsize
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,8 @@ def pty_create(
     cmd: str,
     cwd: Optional[str] = None,
     env: Optional[dict] = None,
+    cols: int = DEFAULT_COLS,
+    rows: int = DEFAULT_ROWS,
 ) -> dict:
     """Spawn a PTY-backed process. Returns {terminal_id, pid, started_at, cmd}.
 
@@ -92,6 +95,8 @@ def pty_create(
         cmd: Shell command line (passed through `sh -c`).
         cwd: Working directory. Defaults to the daemon's cwd.
         env: Extra environment variables merged on top of the daemon env.
+        cols: Terminal width in columns.
+        rows: Terminal height in rows.
 
     Returns:
         Dict with terminal_id, pid, started_at, cmd.
@@ -103,6 +108,10 @@ def pty_create(
 
     from tsugite_pty.terminal_runtime import spawn_terminal
 
+    try:
+        validate_winsize(cols, rows)
+    except ValueError as e:
+        return {"error": str(e)}
     parent_session_id = get_current_session_id()
 
     try:
@@ -114,6 +123,8 @@ def pty_create(
             env=env,
             parent_session_id=parent_session_id,
             on_state_change=_state_change_callback,
+            cols=cols,
+            rows=rows,
         )
     except Exception as e:
         logger.exception("pty_create failed for cmd=%r", cmd)

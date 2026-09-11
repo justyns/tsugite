@@ -26,6 +26,7 @@ class TerminalsMixin:
                     Route("/{terminal_id}", self._api_get_terminal, methods=["GET"]),
                     Route("/{terminal_id}/kill", self._api_kill_terminal, methods=["POST"]),
                     Route("/{terminal_id}/stdin", self._api_terminal_stdin, methods=["POST"]),
+                    Route("/{terminal_id}/resize", self._api_terminal_resize, methods=["POST"]),
                     Route("/{terminal_id}/restart", self._api_restart_terminal, methods=["POST"]),
                     Route("/{terminal_id}/stream", self._api_terminal_stream, methods=["GET"]),
                 ],
@@ -85,8 +86,14 @@ class TerminalsMixin:
         cwd = body.get("cwd")
         parent_session_id = body.get("parent_session_id")
         env = body.get("env") if isinstance(body.get("env"), dict) else None
-
+        from tsugite_pty.pty_manager import DEFAULT_COLS, DEFAULT_ROWS, validate_winsize
         from tsugite_pty.terminal_runtime import spawn_terminal
+
+        cols, rows = body.get("cols", DEFAULT_COLS), body.get("rows", DEFAULT_ROWS)
+        try:
+            validate_winsize(cols, rows)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
 
         try:
             terminal = spawn_terminal(
@@ -97,6 +104,8 @@ class TerminalsMixin:
                 env=env,
                 parent_session_id=parent_session_id,
                 on_state_change=self._emit_terminal_state,
+                cols=cols,
+                rows=rows,
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
@@ -131,6 +140,27 @@ class TerminalsMixin:
             return JSONResponse({"error": "data must be a string"}, status_code=400)
         written = self.pty_manager.write_stdin(terminal_id, data.encode("utf-8", errors="replace"))
         return JSONResponse({"status": "ok", "bytes_written": written})
+
+    async def _api_terminal_resize(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_terminals(request):
+            return err
+        terminal_id = request.path_params["terminal_id"]
+        if self.terminal_store.get(terminal_id) is None:
+            return JSONResponse({"error": f"unknown terminal: {terminal_id}"}, status_code=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        from tsugite_pty.pty_manager import validate_winsize
+
+        cols, rows = body.get("cols"), body.get("rows")
+        try:
+            validate_winsize(cols, rows)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if not self.pty_manager.resize(terminal_id, cols, rows):
+            return JSONResponse({"error": "terminal is not running"}, status_code=409)
+        return JSONResponse({"status": "ok", "cols": cols, "rows": rows})
 
     async def _api_restart_terminal(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_terminals(request):

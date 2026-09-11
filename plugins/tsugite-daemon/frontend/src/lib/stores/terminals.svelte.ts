@@ -123,11 +123,17 @@ export class TerminalsStore {
       );
   }
 
+  lastFit: { cols: number; rows: number } | null = null;
+
   async create(opts: CreateTerminalOpts): Promise<Terminal> {
     const body: Record<string, unknown> = { cmd: opts.cmd };
     if (opts.cwd) body.cwd = opts.cwd;
     if (opts.parentSessionId) body.parent_session_id = opts.parentSessionId;
     if (opts.env) body.env = opts.env;
+    if (this.lastFit) {
+      body.cols = this.lastFit.cols;
+      body.rows = this.lastFit.rows;
+    }
     const term = await api.post<Terminal>('/api/terminals/', body);
     this.list = [term, ...this.list.filter((t) => t.id !== term.id)];
     return term;
@@ -142,6 +148,10 @@ export class TerminalsStore {
     const term = await api.post<Terminal>(`/api/terminals/${encodeURIComponent(id)}/restart`);
     this.list = [term, ...this.list.filter((t) => t.id !== term.id)];
     return term;
+  }
+
+  async resize(id: string, cols: number, rows: number): Promise<void> {
+    await api.post(`/api/terminals/${encodeURIComponent(id)}/resize`, { cols, rows });
   }
 
   async stdin(id: string, data: string): Promise<number> {

@@ -72,6 +72,8 @@
   let killArmed = $state(false);
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   let restarting = $state(false);
+  const RESIZE_DEBOUNCE_MS = 100;
+  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
   // (Re)build the canvas + stream whenever the selected terminal id changes.
   // The effect's cleanup disposes the previous xterm and closes its stream, so
@@ -106,6 +108,18 @@
       fit = new FitAddon();
       t.loadAddon(fit);
       t.open(el);
+      const sendSize = (cols: number, rows: number) => {
+        terminals.lastFit = { cols, rows };
+        if (!isLiveTerminal(terminals.stateOf(id) ?? st)) return;
+        void terminals.resize(id, cols, rows).catch(() => {});
+      };
+      t.onResize(({ cols, rows }) => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          resizeTimer = null;
+          sendSize(cols, rows);
+        }, RESIZE_DEBOUNCE_MS);
+      });
       safeFit(fit);
       xterm = t;
 
@@ -119,7 +133,12 @@
         const buf = t.buffer.active;
         terminals.setFollow(id, buf.viewportY >= buf.baseY);
       });
-      t.textarea?.addEventListener('focus', () => (focused = true));
+      // The pty follows the viewer being typed into when the same terminal is
+      // open in more than one window.
+      t.textarea?.addEventListener('focus', () => {
+        focused = true;
+        sendSize(t.cols, t.rows);
+      });
       t.textarea?.addEventListener('blur', () => (focused = false));
 
       ro = new ResizeObserver(() => fit && safeFit(fit));
@@ -133,6 +152,8 @@
 
     return () => {
       disposed = true;
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = null;
       handle?.close();
       ro?.disconnect();
       xterm?.dispose();
