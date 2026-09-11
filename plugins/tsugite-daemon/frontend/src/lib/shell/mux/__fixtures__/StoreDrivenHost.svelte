@@ -1,7 +1,7 @@
 <script lang="ts">
   // Mirrors the spaces store: the layout lives in `$state`, every reducer gets
   // the proxy itself, and the result is reassigned.
-  import Mux from '../Mux.svelte';
+  import SizedMux from './SizedMux.svelte';
   import { type Layout, focusPane, selectTab } from '../layout';
   import MountCounter from './MountCounter.svelte';
   import ParamsProbe from './ParamsProbe.svelte';
@@ -16,9 +16,8 @@
   }
 </script>
 
-<Mux
+<SizedMux
   {layout}
-  narrow={false}
   onFocusPane={(paneId) => apply((l) => focusPane(l, paneId))}
   onSelectTab={(paneId, tabId) => apply((l) => selectTab(l, paneId, tabId))}
 >
@@ -28,4 +27,4 @@
       <ParamsProbe id={tab.id} params={tab.params} />
     {/key}
   {/snippet}
-</Mux>
+</SizedMux>

@@ -29,13 +29,7 @@
 </script>
 
 {#if node.type === 'leaf'}
-  <PaneView
-    pane={node}
-    focused={node.id === focusedPaneId}
-    showRing={multiPane}
-    {content}
-    {...handlers}
-  />
+  <PaneView pane={node} focused={node.id === focusedPaneId} {multiPane} {content} {...handlers} />
 {:else}
   <div class="mux-split" class:is-col={node.dir === 'col'} role="group" aria-label="Split panes">
     {#each node.children as child, i (child.id)}

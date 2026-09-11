@@ -53,6 +53,7 @@
   let {
     ctrl,
     row,
+    short = false,
     fallbackContext = null,
     railCollapsed,
     onToggleRail,
@@ -74,6 +75,8 @@
   }: {
     ctrl: ConversationController;
     row: SessionRow | null;
+    /** Short pane: a tighter header with the topic inline. */
+    short?: boolean;
     /** Durable context truth (session record) for freshly loaded conversations -
      *  session_info frames are live-only, so replay alone never sets timeline.context. */
     fallbackContext?: { tokens: number; limit: number } | null;
@@ -414,7 +417,12 @@
   });
 </script>
 
-<section class="convo" data-testid={TESTID.chatConversation} aria-label="Conversation">
+<section
+  class="convo"
+  data-testid={TESTID.chatConversation}
+  data-density={short ? 'short' : undefined}
+  aria-label="Conversation"
+>
   <header class="convo-hd">
     <PhoneBack {onBack} label="Back to chats" />
     <Button
@@ -478,6 +486,20 @@
     <span class="t-type" data-k={sourceType}>{sourceType === 'research' ? 'res' : sourceType}</span>
     <Pill st={pillState} label={pillLabel} />
     <ModelEffort sessionId={ctrl.sessionId} />
+    {#if editing === 'topic'}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        class="convo-topic-edit"
+        bind:value={editDraft}
+        onkeydown={editKeydown}
+        onblur={blurEdit}
+        aria-label="Edit topic"
+        placeholder="topic"
+        autofocus
+      />
+    {:else if topic}
+      <button type="button" class="convo-topic" onclick={() => startEdit('topic')}>{topic}</button>
+    {/if}
 
     <div class="grow"></div>
 
@@ -533,20 +555,6 @@
         {onRestart}
       />
     {/if}
-    {#if editing === 'topic'}
-      <!-- svelte-ignore a11y_autofocus -->
-      <input
-        class="convo-topic-edit"
-        bind:value={editDraft}
-        onkeydown={editKeydown}
-        onblur={blurEdit}
-        aria-label="Edit topic"
-        placeholder="topic"
-        autofocus
-      />
-    {:else if topic}
-      <button type="button" class="convo-topic" onclick={() => startEdit('topic')}>{topic}</button>
-    {/if}
   </header>
 
   {#each timeline.compactions as c (c.id)}
@@ -590,7 +598,7 @@
     </div>
   {/if}
 
-  <div class="convo-scroll" bind:this={scrollEl}>
+  <div class="convo-scroll" data-testid={TESTID.chatTranscript} bind:this={scrollEl}>
     {#if ctrl.loading && timeline.turns.length === 0}
       <p class="convo-empty">loading conversation…</p>
     {:else if ctrl.error && timeline.turns.length === 0}
@@ -997,8 +1005,15 @@
   .hd-chip:hover {
     color: var(--acc);
   }
-  .convo-topic {
+  /* The topic sits before .grow in the DOM so a short pane can render it inline.
+     order returns it to its own last row in the full layout, where tab order runs
+     ahead of visual order. */
+  .convo-topic,
+  .convo-topic-edit {
+    order: 100;
     flex-basis: 100%;
+  }
+  .convo-topic {
     min-width: 0;
     text-align: left;
     background: none;
@@ -1021,7 +1036,6 @@
     color: var(--tx2);
   }
   .convo-topic-edit {
-    flex-basis: 100%;
     height: 24px;
     background: var(--bg1);
     border: 1px solid var(--acc);
@@ -1308,6 +1322,17 @@
     border-radius: var(--r-full);
     box-shadow: var(--sh-2);
     cursor: pointer;
+  }
+
+  /* Short pane: a tighter header with the topic inline. */
+  .convo[data-density='short'] .convo-hd {
+    padding: 4px 12px;
+    gap: 6px;
+  }
+  .convo[data-density='short'] :is(.convo-topic, .convo-topic-edit) {
+    order: 0;
+    flex: 0 1 auto;
+    max-width: 28ch;
   }
 
   /* Narrow: shed ambient chrome, keep state truth. */

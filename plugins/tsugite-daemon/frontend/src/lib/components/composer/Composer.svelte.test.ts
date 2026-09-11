@@ -569,3 +569,23 @@ test('double-clicking Send does not stop the turn it just started', async () => 
   await userEvent.click(page.getByRole('button', { name: 'Stop streaming' }));
   expect(onStop).not.toHaveBeenCalled();
 });
+
+// ── short pane ──
+
+test('a short pane puts the attach row beside the send row and drops the shortcut strip', async () => {
+  const { container } = await render(Composer, { short: true, showKbd: true });
+  await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+  const attrow = container.querySelector<HTMLElement>('.attrow')!;
+  const btmrow = container.querySelector<HTMLElement>('.btmrow')!;
+  expect(attrow.textContent).toContain('attach');
+  expect(getComputedStyle(attrow).gridRowStart).toBe('2');
+  expect(getComputedStyle(btmrow).gridRowStart).toBe('2');
+  expect(container.querySelector('.kbd-strip')).toBeNull();
+});
+
+test('a full-height pane stacks the attach row above the textarea and keeps the shortcut strip', async () => {
+  const { container } = await render(Composer, { showKbd: true });
+  await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+  expect(getComputedStyle(container.querySelector('.attrow')!).gridRowStart).toBe('auto');
+  expect(container.querySelector('.kbd-strip')).not.toBeNull();
+});

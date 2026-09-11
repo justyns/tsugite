@@ -25,8 +25,12 @@
   let {
     params,
     setParams,
-  }: { params?: Record<string, string>; setParams?: (params: Record<string, string>) => void } =
-    $props();
+    short = false,
+  }: {
+    params?: Record<string, string>;
+    setParams?: (params: Record<string, string>) => void;
+    short?: boolean;
+  } = $props();
 
   const ctrl = new ConversationController();
   // svelte-ignore state_referenced_locally -- seeds from the initial param; the effect below follows later changes.
@@ -266,6 +270,7 @@
 >
   <Conversation
     {ctrl}
+    {short}
     row={selectedRow}
     fallbackContext={sessionInfo?.contextLimit
       ? { tokens: sessionInfo.cumulativeTokens ?? 0, limit: sessionInfo.contextLimit }
@@ -302,6 +307,7 @@
   {#if canCompose}
     <ChatComposer
       bind:this={composer}
+      {short}
       sessionId={selectedId}
       streaming={ctrl.streaming}
       busy={selectedRow?.busy ?? false}

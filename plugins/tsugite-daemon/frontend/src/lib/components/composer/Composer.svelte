@@ -33,6 +33,7 @@
     placeholder = 'message tsugite · / for commands, ⇧⏎ for newline',
     streaming = false,
     queued = false,
+    short = false,
     rows = 2,
     hint,
     showKbd = false,
@@ -61,6 +62,8 @@
     placeholder?: string;
     /** Streaming turn in flight - flips the primary Send button to a danger Stop. */
     streaming?: boolean;
+    /** Short pane: the attach row shares the send row and the shortcut strip is off. */
+    short?: boolean;
     /** Turn busy - the message will queue and send when the turn finishes. */
     queued?: boolean;
     rows?: number;
@@ -292,8 +295,8 @@
   let lastSubmitAt = 0;
 
   /** Send and Stop are the same control, so a repeated Enter or a double-click
-   *  lands on Stop as soon as the turn starts. Escape names Stop on its own and
-   *  so is never guarded. */
+   *  lands on Stop as soon as the turn starts. Escape triggers Stop on its own
+   *  and is never guarded. */
   function stopIfArmed() {
     if (Date.now() - lastSubmitAt >= SEND_GUARD_MS) onStop?.();
   }
@@ -390,7 +393,12 @@
   });
 </script>
 
-<div class="composer" class:is-queued={queued} bind:this={root}>
+<div
+  class="composer"
+  class:is-queued={queued}
+  data-density={short ? 'short' : undefined}
+  bind:this={root}
+>
   <div class="attrow">
     {@render pasteAffordance?.()}
     <StagedStrip {attachments} {contextItems} {onRemoveAttachment} {onRemoveContext} />
@@ -516,7 +524,7 @@
   </div>
 </div>
 
-{#if showKbd}
+{#if showKbd && !short}
   <div class="kbd-strip" aria-hidden="true">
     <span><span class="t-kbd">/</span> search</span>
     <span><span class="t-kbd">j</span><span class="t-kbd">k</span> sessions</span>
@@ -536,6 +544,22 @@
     display: grid;
     gap: 7px;
     position: relative;
+  }
+  /* Short pane: the attach row and the send row share one grid row under the
+     textarea. Relocating with CSS rather than re-rendering keeps focus on a
+     control across a resize. */
+  .composer[data-density='short'] {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding: 5px 10px 4px;
+  }
+  .composer[data-density='short'] .inwrap {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .composer[data-density='short'] .attrow,
+  .composer[data-density='short'] .btmrow {
+    grid-row: 2;
   }
   .attrow {
     display: flex;

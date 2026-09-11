@@ -1526,3 +1526,31 @@ test("a held delivery flushed after the person's own failure keeps their Retry",
   await retry.click();
   expect(onRetry).toHaveBeenCalledWith('buy milk');
 });
+
+// ── short pane header ──
+
+test('a short pane marks the conversation and keeps the topic inline, editing included', async () => {
+  const ctrl = controllerWith([]);
+  const row = sessionRow('sess-1', { metadata: { topic: 'ship the release' } });
+  render(Conversation, { ctrl, row, railCollapsed: false, short: true, ...callbacks });
+  await expect
+    .element(page.getByTestId(TESTID.chatConversation))
+    .toHaveAttribute('data-density', 'short');
+  const topic = page.getByRole('button', { name: 'ship the release' });
+  expect(getComputedStyle(topic.element()).flexBasis).toBe('auto');
+  await topic.click();
+  const input = page.getByRole('textbox', { name: 'Edit topic' });
+  await expect.element(input).toBeInTheDocument();
+  expect(getComputedStyle(input.element()).flexBasis).toBe('auto');
+});
+
+test('a full-height pane gives the topic a header row of its own', async () => {
+  const ctrl = controllerWith([]);
+  const row = sessionRow('sess-1', { metadata: { topic: 'ship the release' } });
+  render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });
+  await expect
+    .element(page.getByTestId(TESTID.chatConversation))
+    .not.toHaveAttribute('data-density');
+  const topic = page.getByRole('button', { name: 'ship the release' });
+  expect(getComputedStyle(topic.element()).flexBasis).toBe('100%');
+});

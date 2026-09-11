@@ -8,10 +8,12 @@ import { KEEP_ALIVE_MAX } from './PaneView.svelte';
 import KeepAliveHost from './__fixtures__/KeepAliveHost.svelte';
 import StoreDrivenHost from './__fixtures__/StoreDrivenHost.svelte';
 import { paramRuns } from './__fixtures__/ParamsProbe.svelte';
+import SizedMux from './__fixtures__/SizedMux.svelte';
 import { mountCounts } from './__fixtures__/MountCounter.svelte';
 import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
 import { writeSurfaceDrag } from './drag';
+import type { MuxContent } from './types';
 import {
   type Layout,
   type LeafNode,
@@ -38,14 +40,12 @@ function seeded(ref: SurfaceRef = { kind: 'chat' }): Layout {
 
 // Wire Mux to the real reducers so an interaction exercises the whole loop:
 // event -> Mux callback -> layout op -> rerender. Mirrors the chrome's wiring.
-async function mountMux(initial: Layout, content?: Snippet<[PaneTabModel, () => void]>) {
+async function mountMux(initial: Layout, content?: MuxContent) {
   let layout = initial;
   let rerender!: (props: Record<string, unknown>) => Promise<void>;
-  // Force the desktop split tree; the test viewport is narrow enough to trip the
-  // <=700px single-pane mode otherwise.
   const apply = (next: Layout) => {
     layout = next;
-    void rerender({ layout, narrow: false, content, ...handlers });
+    void rerender({ layout, content, ...handlers });
   };
   const handlers = {
     onSplit: (p: string, d: SplitDir, ref: SurfaceRef, pos: 'before' | 'after') =>
@@ -58,7 +58,7 @@ async function mountMux(initial: Layout, content?: Snippet<[PaneTabModel, () => 
     onMoveTab: (f: string, t: string, to: string, pos?: 'before' | 'after' | number) =>
       apply(moveTab(layout, f, t, to, pos)),
   };
-  const screen = await render(Mux, { layout, narrow: false, content, ...handlers });
+  const screen = await render(SizedMux, { layout, content, ...handlers });
   rerender = screen.rerender;
   const panes = () => [
     ...screen.container.querySelectorAll<HTMLElement>('[data-testid="mux-pane"]'),
@@ -179,7 +179,7 @@ test('a surface can claim pane focus itself, the same as a click on the pane', a
 test('a pane grows to fill its slot rather than collapsing to content height', async () => {
   // `.mux-pane` carries no flex-grow, so PaneView's wrapper must set it -
   // otherwise every pane sits at content height with dead space below it.
-  const { container } = await render(Mux, { layout: seeded({ kind: 'chat' }), narrow: false });
+  const { container } = await render(SizedMux, { layout: seeded({ kind: 'chat' }) });
   const pane = container.querySelector<HTMLElement>('[data-testid="mux-pane"] .mux-pane');
   expect(pane).not.toBeNull();
   expect(getComputedStyle(pane!).flexGrow).toBe('1');
@@ -344,7 +344,8 @@ test('clicking into a plugin surface claims the pane without taking focus off th
   await expect.poll(() => chatPane!.dataset.focused).toBe('true');
 
   const frame = document.querySelector('iframe')!;
-  await userEvent.click(frame);
+  // The harness editor sits at the top of the frame, inside the 800px host.
+  await userEvent.click(frame, { position: { x: 20, y: 20 } });
   await expect.poll(() => docPane!.dataset.focused).toBe('true');
   expect(document.activeElement).toBe(frame);
 
@@ -506,4 +507,28 @@ test('focusing a pane hands no surface a new params object', async () => {
     .toHaveAttribute('data-focused', 'true');
 
   expect(new Map(paramRuns)).toEqual(before);
+});
+
+// ── short panes ──
+
+test('only a lone tab in an unsplit short pane hides its tab strip', async () => {
+  const one = seeded({ kind: 'chat' });
+  const short = await render(SizedMux, { layout: one, height: 500 });
+  await expect.element(page.getByTestId('mux-pane')).toBeInTheDocument();
+  await vi.waitFor(() => expect(short.container.querySelector('[role="tablist"]')).toBeNull());
+  cleanup();
+
+  const split = splitPane(one, one.root.id, 'row', { kind: 'terminal' });
+  await render(SizedMux, { layout: split, height: 500 });
+  await expect.element(page.getByRole('tablist').first()).toBeInTheDocument();
+  expect(document.querySelectorAll('[role="tablist"]').length).toBe(2);
+  cleanup();
+
+  const two = dockAsTab(one, one.root.id, { kind: 'terminal' });
+  await render(SizedMux, { layout: two, height: 500 });
+  await expect.element(page.getByRole('tablist')).toBeInTheDocument();
+  cleanup();
+
+  await render(SizedMux, { layout: one, height: 900 });
+  await expect.element(page.getByRole('tablist')).toBeInTheDocument();
 });
