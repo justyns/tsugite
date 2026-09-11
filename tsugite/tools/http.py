@@ -67,12 +67,13 @@ def _simple_request(
     timeout: int,
     body: Optional[Union[str, Dict[str, Any]]] = None,
     follow_redirects: bool = True,
+    raise_for_status: bool = True,
 ) -> httpx.Response:
     """Make an HTTP request and return the raw response.
 
     Redirects are followed by default (bounded by _MAX_REDIRECTS; httpx keeps
     method+body on 307/308). With follow_redirects=False a 3xx response is
-    returned for inspection instead of raising - that's the point of opting out.
+    returned.
     """
     kwargs: Dict[str, Any] = {}
     if isinstance(body, dict):
@@ -82,9 +83,8 @@ def _simple_request(
 
     with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, max_redirects=_MAX_REDIRECTS) as client:
         response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
-        if not follow_redirects and response.is_redirect:
-            return response
-        response.raise_for_status()
+        if raise_for_status and (follow_redirects or not response.is_redirect):
+            response.raise_for_status()
         return response
 
 
@@ -174,6 +174,8 @@ def http_request(
 ) -> HttpResponse:
     """Make an HTTP request. Returns HttpResponse with .status_code, .headers, .text (raw body); call .json() to parse JSON.
 
+    A 4xx or 5xx reply comes back as an HttpResponse. Check .status_code.
+
     Args:
         url: URL to send the request to
         method: HTTP method (GET, POST, PUT, PATCH, DELETE) - defaults to GET (safe, idempotent)
@@ -183,7 +185,9 @@ def http_request(
         follow_redirects: Follow 3xx redirects (default True, max 5 hops); False returns the 3xx response for inspection
     """
     try:
-        response = _simple_request(url, method, headers, timeout, body, follow_redirects=follow_redirects)
+        response = _simple_request(
+            url, method, headers, timeout, body, follow_redirects=follow_redirects, raise_for_status=False
+        )
 
         return HttpResponse(
             status_code=response.status_code,
@@ -195,8 +199,6 @@ def http_request(
         )
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
     except Exception as e:
         raise RuntimeError(f"Request failed: {e}") from e
 

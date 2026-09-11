@@ -123,16 +123,18 @@ def test_http_request_timeout_error(mock_httpx_client):
         http_request("https://api.example.com/slow", timeout=5)
 
 
-def test_http_request_http_error(mock_httpx_client):
-    """HTTP error status raises RuntimeError."""
-    resp = MagicMock(spec=httpx.Response)
-    resp.status_code = 404
-    resp.text = "Not Found"
-    resp.raise_for_status.side_effect = httpx.HTTPStatusError("404", request=MagicMock(), response=resp)
+@pytest.mark.parametrize("status_code", [401, 404, 500])
+def test_http_request_returns_non_2xx_responses(mock_httpx_client, status_code):
+    body = f'{{"error":{status_code}}}'
+    resp = _mock_response(status_code=status_code, text=body)
+    resp.raise_for_status.side_effect = httpx.HTTPStatusError(str(status_code), request=MagicMock(), response=resp)
     mock_httpx_client.request.return_value = resp
 
-    with pytest.raises(RuntimeError, match="HTTP error 404"):
-        http_request("https://api.example.com/missing")
+    result = http_request("https://api.example.com/protected")
+
+    assert isinstance(result, HttpResponse)
+    assert result.status_code == status_code
+    assert result.text == body
 
 
 def test_http_request_non_json_response(mock_httpx_client):
