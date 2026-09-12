@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import subprocess
 from collections import namedtuple
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1001,6 +1003,125 @@ def test_worktree_pruned_on_done(store, runner, orchestrator, tmp_path):
     assert not Path(wt).exists(), f"worktree at {wt} must be pruned after DONE"
 
 
+def _commit_in(worktree, filename="inventory.txt", body="counted\n"):
+    """Commit a file inside `worktree` and return the new HEAD sha."""
+    from pathlib import Path
+
+    (Path(worktree) / filename).write_text(body)
+    subprocess.run(["git", "add", filename], cwd=worktree, check=True)
+    subprocess.run(["git", "commit", "-qm", f"add {filename}"], cwd=worktree, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=worktree, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _rev_parse(repo, rev):
+
+    done = subprocess.run(["git", "rev-parse", rev], cwd=repo, capture_output=True, text=True)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def test_worktree_commit_kept_on_a_job_branch_after_prune(store, runner, orchestrator, tmp_path):
+    """The prune writes `tsugite-jobs/<job-id>` at the worktree HEAD before removing the tree."""
+    repo = tmp_path / "shopfront"
+    _make_git_repo(repo)
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=[],
+            repo=str(repo),
+        )
+    )
+
+    wt = store.get(job.id).worktree_path
+    sha = _commit_in(wt)
+
+    async def _go():
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
+        await asyncio.gather(*list(orchestrator._bg_tasks))
+
+    asyncio.run(_go())
+    assert not Path(wt).exists(), f"worktree at {wt} must be pruned after DONE"
+    assert _rev_parse(repo, f"tsugite-jobs/{job.id}") == sha, (
+        f"tsugite-jobs/{job.id} must point at the job's commit {sha}"
+    )
+    assert _rev_parse(repo, f"{sha}^{{commit}}") == sha, "the job's commit must still be reachable"
+
+
+def test_worktree_commit_kept_on_a_job_branch_after_cancel(store, runner, orchestrator, tmp_path):
+    """A cancelled job's commits get the same branch."""
+    repo = tmp_path / "bakery"
+    _make_git_repo(repo)
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=["x"],
+            repo=str(repo),
+        )
+    )
+
+    wt = store.get(job.id).worktree_path
+    sha = _commit_in(wt, "recipe.txt")
+
+    async def _go():
+        await orchestrator.cancel_job(job.id, reason="user clicked cancel")
+        await asyncio.gather(*list(orchestrator._bg_tasks))
+
+    asyncio.run(_go())
+    assert not Path(wt).exists(), f"worktree at {wt} must be pruned after CANCELLED"
+    assert _rev_parse(repo, f"tsugite-jobs/{job.id}") == sha
+
+
+def test_no_job_branch_when_the_worktree_added_nothing(store, runner, orchestrator, tmp_path):
+    """A job that committed nothing gets no branch."""
+    repo = tmp_path / "cannery"
+    _make_git_repo(repo)
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=[],
+            repo=str(repo),
+        )
+    )
+
+    async def _go():
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
+        await asyncio.gather(*list(orchestrator._bg_tasks))
+
+    asyncio.run(_go())
+    assert _rev_parse(repo, f"tsugite-jobs/{job.id}") is None
+
+
+def test_dirty_worktree_kept_on_done(store, runner, orchestrator, tmp_path):
+    """A dirty worktree survives the prune and `worktree_path` keeps pointing at it."""
+    repo = tmp_path / "cellar"
+    _make_git_repo(repo)
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=[],
+            repo=str(repo),
+        )
+    )
+
+    wt = store.get(job.id).worktree_path
+    (Path(wt) / "README.md").write_text("half-finished edit\n")
+
+    async def _go():
+        await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
+        await asyncio.gather(*list(orchestrator._bg_tasks))
+
+    asyncio.run(_go())
+    assert store.get(job.id).state == JobState.DONE.value
+    assert Path(wt).exists(), f"dirty worktree at {wt} must be kept"
+    assert (Path(wt) / "README.md").read_text() == "half-finished edit\n"
+    assert store.get(job.id).worktree_path == wt, "worktree_path must keep pointing at the kept tree"
+
+
 @pytest.mark.asyncio
 async def test_worktree_prune_runs_off_the_event_loop_thread(store, runner, orchestrator, monkeypatch, tmp_path):
     """`git worktree remove` shells out; running it inline on the daemon's single
@@ -1185,6 +1306,35 @@ def test_worktree_pruned_on_mark_done_manual(store, runner, orchestrator, tmp_pa
     assert final.state == JobState.DONE.value
     assert not Path(wt).exists(), f"worktree at {wt} must be pruned after mark_done_manual"
     assert final.worktree_path is None, "worktree_path must be cleared after pruning"
+
+
+def test_dirty_worktree_kept_on_mark_done_manual(store, runner, orchestrator, tmp_path):
+    """A stuck job's tree is the one most likely to hold uncommitted work."""
+    repo = tmp_path / "orchard"
+    _make_git_repo(repo)
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=["x"],
+            repo=str(repo),
+        )
+    )
+
+    wt = store.get(job.id).worktree_path
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "no"}], "overall_pass": False})
+
+    for i in range(MAX_VERIFY_ATTEMPTS):
+        asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+    assert store.get(job.id).state == JobState.STUCK.value
+    (Path(wt) / "pruning.txt").write_text("notes the worker never committed\n")
+
+    asyncio.run(orchestrator.mark_done_manual(job.id, reason="looks fine to me"))
+    final = store.get(job.id)
+    assert final.state == JobState.DONE.value
+    assert Path(wt).exists(), f"dirty worktree at {wt} must be kept"
+    assert final.worktree_path == wt, "worktree_path must keep pointing at the kept tree"
 
 
 # ── Theme B: tile actions ──

@@ -15,6 +15,30 @@ logger = logging.getLogger(__name__)
 _WORKTREE_SUBDIR = ".tsugite-jobs"
 
 
+def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
+
+
+def _worktree_is_dirty(worktree: Path) -> bool:
+    return bool(_git(["status", "--porcelain"], worktree).stdout.strip())
+
+
+def _keep_head_reachable(worktree: Path, repo_root: Path, job_id: str) -> None:
+    """Point `tsugite-jobs/<job_id>` at the worktree HEAD unless a branch already reaches it."""
+    sha = _git(["rev-parse", "HEAD"], worktree).stdout.strip()
+    if not sha:
+        logger.warning("Cannot read HEAD of worktree %s", worktree)
+        return
+    if _git(["branch", "--contains", sha], repo_root).stdout.strip():
+        return
+    branch = f"tsugite-jobs/{job_id}"
+    written = _git(["branch", "-f", branch, sha], repo_root)
+    if written.returncode != 0:
+        logger.error("Failed to write %s at %s: %s", branch, sha, written.stderr.strip())
+    else:
+        logger.info("Worktree HEAD %s kept on branch %s", sha, branch)
+
+
 def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] = None) -> str:
     """Add a git worktree at `<repo>/.tsugite-jobs/<job_id>` and return its absolute path.
 
@@ -52,10 +76,13 @@ def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] =
     return str(target)
 
 
-def _prune_worktree(worktree_path: str) -> bool:
+def _prune_worktree(worktree_path: str, *, force: bool = False) -> bool:
     """Remove a previously-provisioned worktree, returning True when the tree is
     gone. Errors are logged, not raised - cleanup must not fail a Job finalization
     - but the caller needs the outcome to know whether the path is still live.
+
+    A tree with uncommitted changes is kept and False returned, unless `force`
+    (the caller is recreating the tree from scratch).
 
     Safety: the rmtree fallback REQUIRES the path to live under our own
     `.tsugite-jobs/` subdir, so a corrupted or hand-edited worktree_path
@@ -71,9 +98,14 @@ def _prune_worktree(worktree_path: str) -> bool:
     wt = Path(worktree_path)
     if not wt.exists():
         return True
-    # The worktree path is `<repo>/.tsugite-jobs/<job_id>` - walk up two levels for the repo.
+    # The worktree path is `<repo>/.tsugite-jobs/<job_id>` - walk up two levels for the
+    # repo, and the last component is the job id.
     repo_root = wt.parent.parent if wt.parent.name == _WORKTREE_SUBDIR else None
-    # `git worktree remove --force` works even if the worktree has uncommitted changes.
+    if not force and _worktree_is_dirty(wt):
+        logger.warning("Keeping worktree %s: uncommitted changes", wt)
+        return False
+    if repo_root:
+        _keep_head_reachable(wt, repo_root, wt.name)
     try:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(wt)],

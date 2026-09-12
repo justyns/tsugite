@@ -659,8 +659,7 @@ class JobsOrchestrator:
             # Clean exit: stop a non-agent executor's child BEFORE pruning its cwd.
             await self._cancel_executor(self._jobs.get(job_id))
             if job.worktree_path:
-                await asyncio.to_thread(_prune_worktree, job.worktree_path)
-                self._jobs.update(job_id, worktree_path=None)
+                await self._prune_and_clear(job_id, job.worktree_path)
             self._emit_job_event(self._jobs.get(job_id))
             return self._jobs.get(job_id)
 
@@ -710,7 +709,7 @@ class JobsOrchestrator:
             if fresh_workspace and job.repo:
                 try:
                     if worktree_path and Path(worktree_path).exists():
-                        await asyncio.to_thread(_prune_worktree, worktree_path)
+                        await asyncio.to_thread(_prune_worktree, worktree_path, force=True)
                     workspace_root = self._resolve_workspace_root(job.parent_session_id)
                     worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
                     job = self._jobs.update(job_id, worktree_path=worktree_path)
