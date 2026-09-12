@@ -115,6 +115,18 @@ def _write_trust_config(config_dir: Path, cwd, *, accepted=True) -> Path:
     return path
 
 
+def _fake_linked_worktree(repo: Path, name: str) -> Path:
+    """Lay out a linked-worktree structure by hand, matching what
+    `git worktree add` writes: <repo>/.git/worktrees/<name> plus a worktree
+    under <repo>/.tsugite-jobs/ whose `.git` *file* points at it."""
+    gitdir = repo / ".git" / "worktrees" / name
+    gitdir.mkdir(parents=True)
+    wt = repo / ".tsugite-jobs" / name
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {gitdir}\n")
+    return wt
+
+
 # ── is_workspace_trusted ──
 
 
@@ -134,6 +146,22 @@ def test_is_workspace_trusted_true_for_subdir_of_trusted_ancestor(tmp_path):
     worktree = repo / ".tsugite-jobs" / "job-abc"
     worktree.mkdir(parents=True)
     cfg = _write_trust_config(tmp_path / "cfg", repo)  # trusts the repo root only
+    assert is_workspace_trusted(worktree, config_path=cfg) is True
+
+
+def test_is_workspace_trusted_false_for_nested_repo_under_trusted_ancestor(tmp_path):
+    # Trust does not cross a nested git root.
+    workspace = tmp_path / "ws"
+    worktree = _fake_linked_worktree(workspace / "repos" / "widget", "job-1")
+    cfg = _write_trust_config(tmp_path / "cfg", workspace)  # trusts the workspace root only
+    assert is_workspace_trusted(worktree, config_path=cfg) is False
+
+
+def test_is_workspace_trusted_true_for_worktree_of_trusted_repo_root(tmp_path):
+    # A linked worktree's `.git` is a file, not a repo root.
+    repo = tmp_path / "repo"
+    worktree = _fake_linked_worktree(repo, "job-2")
+    cfg = _write_trust_config(tmp_path / "cfg", repo)
     assert is_workspace_trusted(worktree, config_path=cfg) is True
 
 
@@ -242,18 +270,6 @@ def test_ensure_workspace_trusted_does_not_clobber_malformed_config(tmp_path):
 
 
 # ── trust_provision_target ──
-
-
-def _fake_linked_worktree(repo: Path, name: str) -> Path:
-    """Lay out a linked-worktree structure by hand, matching what
-    `git worktree add` writes: <repo>/.git/worktrees/<name> plus a worktree
-    under <repo>/.tsugite-jobs/ whose `.git` *file* points at it."""
-    gitdir = repo / ".git" / "worktrees" / name
-    gitdir.mkdir(parents=True)
-    wt = repo / ".tsugite-jobs" / name
-    wt.mkdir(parents=True)
-    (wt / ".git").write_text(f"gitdir: {gitdir}\n")
-    return wt
 
 
 def test_trust_provision_target_maps_worktree_to_repo_root(tmp_path):

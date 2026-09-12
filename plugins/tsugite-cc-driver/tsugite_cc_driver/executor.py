@@ -146,12 +146,14 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     """Whether Claude Code already trusts `cwd`, so an unattended spawn won't hang
     on the fresh-cwd "Is this a project you trust?" dialog.
 
-    A dir is trusted when itself OR any ancestor has
-    projects["<abs path>"].hasTrustDialogAccepted == true in the config Claude
-    reads. Claude Code treats a subdir of a trusted project as trusted (verified
-    against claude 2.1.207) - a `--repo` Job's worker runs in a fresh worktree at
-    <repo>/.tsugite-jobs/<id> whose exact path is never trusted, so the ancestor
-    check is what lets those jobs launch.
+    A dir is trusted when itself OR an ancestor up to the first enclosing git
+    root has projects["<abs path>"].hasTrustDialogAccepted == true in the config
+    Claude reads. Claude Code treats a subdir of a trusted project as trusted
+    (verified against claude 2.1.207), which is what lets a `--repo` Job's worker
+    launch in a fresh worktree at <repo>/.tsugite-jobs/<id>. It does not extend
+    trust across a nested git root, so the walk stops at a dir holding a `.git`
+    directory. A linked worktree's `.git` is a file, so the worktree still
+    inherits its repo root's trust.
 
     config_path defaults to <CLAUDE_CONFIG_DIR>/.claude.json (or ~/.claude.json).
     Tolerant: a missing / unreadable / malformed config means "not trusted".
@@ -170,6 +172,8 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
         project = projects.get(str(path))
         if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
             return True
+        if (path / ".git").is_dir():
+            break
     return False
 
 
