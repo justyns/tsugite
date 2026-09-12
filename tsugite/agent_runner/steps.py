@@ -355,8 +355,8 @@ async def _execute_step_with_retries(
             step_duration = time.time() - step_start_time
             return step_result, step_duration
 
-        except asyncio.TimeoutError:
-            error_msg = f"Step timed out after {step.timeout} seconds"
+        except asyncio.TimeoutError as e:
+            error_msg = str(e) or f"Step timed out after {step.timeout} seconds"
             errors.append(error_msg)
             code_executed_this_attempt = False
         except AgentSkippedError:

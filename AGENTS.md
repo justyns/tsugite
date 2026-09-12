@@ -289,7 +289,7 @@ Tsugite supports vision (images), audio, and document understanding through the 
 **How It Works:**
 
 1. **URL Attachments** (Images/Documents):
-   - The provider fetches the URL directly (no download overhead — support varies by provider and content type; see `tsugite/attachments/url.py`)
+   - The provider fetches the URL directly (no download overhead, though support varies by provider and content type; see `tsugite/attachments/url.py`)
    - Example: `tsu run -f https://example.com/chart.png "Describe this chart"`
    - Automatically detected via HTTP HEAD request
 
@@ -425,7 +425,7 @@ See `examples/attachment_assign_demo.md` and `examples/attachment_index_demo.md`
 
 ### Swappable batteries
 
-Subsystems are pluggable behind a uniform seam: (1) a Protocol, (2) a `tsugite.<area>`
+Subsystems are pluggable behind a uniform interface: (1) a Protocol, (2) a `tsugite.<area>`
 entry-point group, (3) a `config.<area>.backend` selector resolved via
 `load_backend_entry_point` (`plugins.py`), with a built-in default. Areas: tools, providers,
 adapters, secrets, hooks, event_subscribers, history, attachments, sandbox, executors.
@@ -448,12 +448,12 @@ For any non-trivial bug fix or feature, write a failing test **first**. Exceptio
 
 The workflow:
 
-1. **Reproduce before fixing.** Write the smallest test that demonstrates the symptom as reported. Run it. If it passes on master, the hypothesis is wrong — do not write a fix. Investigate further, ask the user for more detail, or add logging.
+1. **Reproduce before fixing.** Write the smallest test that demonstrates the symptom as reported. Run it. If it passes on master, the hypothesis is wrong. Do not write a fix. Investigate further, ask the user for more detail, or add logging.
 2. **Implement the fix.** Keep the change minimal. Do not refactor or add adjacent cleanup in the same diff.
-3. **Verify the test is load-bearing.** Temp-revert the production change and re-run. The test must go red again. If it still passes, the test isn't actually exercising the fix — rework it.
+3. **Verify the test is load-bearing.** Temp-revert the production change and re-run. The test must go red again. If it still passes, the test isn't exercising the fix. Rework it.
 4. **Cover adjacent cases before declaring done.** When touching a parser, protocol boundary, or state machine, enumerate at least two adjacent input shapes and add tests for them. Narrow tests let bugs sneak in through the cases you didn't think about.
 5. **Run the local regression suite.** At minimum, the test files next to the modules you changed. Faster than running everything, catches silent breakage of existing tests.
-6. **Honest uncertainty.** If a hypothesis doesn't reproduce, say so. Don't ship a "probably-this" fix with no failing test to anchor it — that's how placebo fixes get merged.
+6. **Honest uncertainty.** If a hypothesis doesn't reproduce, say so. Don't ship a "probably-this" fix with no failing test to anchor it. That's how placebo fixes get merged.
 
 Reproducing tests don't need to be elaborate. A 10-line test that flips red→green is worth more than a 100-line one that nobody understands.
 
@@ -461,7 +461,7 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 
 - **Unit tests**: Individual functions and classes
 - **Pipeline tests**: Mock only `TsugiteAgent` / the provider's `acompletion` but exercise the full pipeline (parsing → rendering → preparation → tool expansion → execution). Most tests in the suite are this style.
-- **Integration tests**: Live under `tests/integration/` (not collected by default — see `pyproject.toml` `norecursedirs`). Run explicitly with `uv run pytest tests/integration/`. Good for concurrency, cwd, and daemon-wiring tests that need real threading or a real workspace.
+- **Integration tests**: Live under `tests/integration/` (not collected by default; see `pyproject.toml` `norecursedirs`). Run explicitly with `uv run pytest tests/integration/`. Good for concurrency, cwd, and daemon-wiring tests that need real threading or a real workspace.
 - **Smoke tests**: `tests/smoke_test.sh` hits a real LLM API (requires `OPENAI_API_KEY`, not run in CI)
 - **Fixtures**: `conftest.py` provides shared test data
 - **Mocking**: Use `@pytest.fixture` for LLM responses
@@ -471,9 +471,16 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 ## Code Style
 
 - Python 3.11+ (type hints on public APIs)
-- Line length: 120 characters (Black)
+- Line length: 120 characters (ruff)
 - Import order: stdlib → third-party → local (blank lines between groups)
-- Errors: `ValueError` for input validation, `RuntimeError` for execution failures
+- Errors, by condition:
+  - `ValueError` - input validation
+  - `RuntimeError` - execution failures
+  - `TimeoutError` - timeouts
+  - `PermissionError` - policy denials
+  - `ToolUnavailableError` - the tool cannot run in this context
+  - `FileNotFoundError` / `IsADirectoryError` / `NotADirectoryError` - paths
+- Never wrap a tool body in a blanket `except Exception`
 - Docstrings: Google style with `Args:` and `Returns:` sections
 - Pydantic models: Use `extra="forbid"` to catch typos in YAML frontmatter
 
@@ -485,7 +492,7 @@ Reproducing tests don't need to be elaborate. A 10-line test that flips red→gr
 4. **Don't hardcode paths**: Use XDG utilities (`get_xdg_config_path()`, etc.)
 5. **Don't use blocking IO in async**: Use `asyncio.to_thread()` for sync tools
 6. **Test both sync and async paths**: Many tools support both execution modes
-7. **Don't embed prompts in adapters/code**: Use context variables + conditional blocks in `default.md` instead. Add new context vars in `_build_agent_context()` (base adapter) and default them in `agent_preparation.py`, then use `{% if var %}` in the agent template. This keeps all prompt content in one place and leverages the existing rendering pipeline.
+7. **Don't embed prompts in adapters/code**: Use context variables + conditional blocks in `default.md` instead. Add new context vars in `_build_agent_context()` (base adapter) and default them in `agent_preparation.py`, then use `{% if var %}` in the agent template. This keeps all prompt content in one place and uses the existing rendering pipeline.
 
 ## Web UI
 

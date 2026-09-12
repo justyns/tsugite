@@ -137,7 +137,7 @@ def test_a_path_outside_the_workspace_never_opens_a_pane(chat_open, agent_tool, 
     (e2e_tmp / "e2e_secret.md").write_text("# Secret\n")
     page = chat_open
 
-    with pytest.raises(ValueError, match="outside the workspace"):
+    with pytest.raises(PermissionError, match="outside the workspace"):
         agent_tool(path="../e2e_secret.md")
 
     expect(page.locator(ARTIFACT)).to_have_count(0)

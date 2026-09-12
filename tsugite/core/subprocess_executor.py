@@ -27,7 +27,6 @@ from .state import load_state, save_state
 
 logger = logging.getLogger(__name__)
 
-# Helpers re-exported so the harness can import them without duplicating code
 _HARNESS_IMPORTS = textwrap.dedent("""\
     import ast
     import contextlib

@@ -12,6 +12,7 @@ from questionary import Style
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
+from ..exceptions import ToolUnavailableError
 from ..tools import tool
 from ..ui_context import paused_progress
 from ..utils import is_interactive
@@ -26,7 +27,7 @@ def _ensure_nest_asyncio():
         from tsugite.tools import _daemon_mode
 
         if _daemon_mode:
-            raise RuntimeError("nest_asyncio cannot be applied in daemon mode")
+            raise ToolUnavailableError("nest_asyncio cannot be applied in daemon mode")
         import nest_asyncio
 
         nest_asyncio.apply()
@@ -36,11 +37,11 @@ def _ensure_nest_asyncio():
 # Custom style for questionary to match Rich theme
 QUESTIONARY_STYLE = Style(
     [
-        ("qmark", "fg:cyan bold"),  # Question mark
-        ("question", "fg:cyan bold"),  # Question text
-        ("answer", "fg:yellow bold"),  # Selected answer
-        ("pointer", "fg:yellow bold"),  # Selection pointer
-        ("highlighted", "fg:yellow bold"),  # Highlighted option
+        ("qmark", "fg:cyan bold"),
+        ("question", "fg:cyan bold"),
+        ("answer", "fg:yellow bold"),
+        ("pointer", "fg:yellow bold"),
+        ("highlighted", "fg:yellow bold"),
         ("selected", "fg:green"),  # Already selected (for checkbox)
         ("instruction", "fg:white"),  # Instructions - white/default for better readability
     ]
@@ -48,23 +49,16 @@ QUESTIONARY_STYLE = Style(
 
 
 def _flush_input_buffer() -> None:
-    """Flush any pending input from stdin to prevent accidental key presses.
-
-    This prevents issues where a user accidentally hits Enter twice and
-    unintentionally confirms a pre-selected option.
-    """
+    """Flush pending stdin so a double Enter does not confirm a pre-selected option."""
     if not is_interactive():
         return
 
     try:
-        # Save current terminal settings
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
 
-        # Flush input buffer
         termios.tcflush(fd, termios.TCIFLUSH)
 
-        # Restore settings
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     except (termios.error, OSError):
         # If we can't flush (e.g., not a real TTY), just continue
@@ -80,14 +74,10 @@ def _generate_id_from_question(question: str) -> str:
     Returns:
         A lowercase, underscored ID based on the question
     """
-    # Remove punctuation and convert to lowercase
     clean = re.sub(r"[^\w\s]", "", question.lower())
-    # Replace spaces with underscores
     id_str = re.sub(r"\s+", "_", clean.strip())
-    # Truncate if too long
     if len(id_str) > 50:
         id_str = id_str[:50]
-    # Remove trailing underscores
     id_str = id_str.rstrip("_")
     return id_str or "question"
 
@@ -97,7 +87,7 @@ def return_value(value) -> None:
     """Return a value (string, dict, list, anything JSON-serializable) and end the run.
 
     Use this when you need to return a structured (non-string) result. For plain text
-    answers, just respond with text and no code block — that ends the loop naturally.
+    answers, just respond with text and no code block. That ends the loop naturally.
 
     Args:
         value: The value to return to the caller
@@ -143,8 +133,7 @@ def send_message(message: str) -> str:
 def ask_user(question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
     """Ask the user a question interactively.
 
-    This tool allows the LLM to ask the user for input during agent execution.
-    It supports three types of questions:
+    Three question types:
     - text: Freeform text input
     - yes_no: Binary yes/no question (returns "yes" or "no")
     - choice: Multiple choice from a list of options
@@ -158,29 +147,26 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
         User's response as a string
 
     Raises:
-        ValueError: If not in interactive mode or invalid parameters
-        RuntimeError: If user interaction fails
+        ValueError: If parameters are invalid
+        ToolUnavailableError: If not in interactive mode
+        RuntimeError: If the user interrupts with Ctrl+C
     """
-    # Validate question type
     valid_types = ["text", "yes_no", "choice"]
     if question_type not in valid_types:
         raise ValueError(f"Invalid question_type '{question_type}': must be one of {', '.join(valid_types)}")
 
-    # Validate options for choice type
     if question_type == "choice":
         if not options or len(options) < 2:
             raise ValueError(f"Invalid options {options}: must provide at least 2 options for choice type questions")
 
-    # Dispatch through interaction backend if one is set
     from tsugite.interaction import get_interaction_backend
 
     backend = get_interaction_backend()
     if backend is not None:
         return backend.ask_user(question, question_type, options)
 
-    # Fall back to TTY behavior
     if not is_interactive():
-        raise RuntimeError(
+        raise ToolUnavailableError(
             "Cannot use ask_user tool in non-interactive mode. "
             "This tool requires a terminal with user input capability."
         )
@@ -190,17 +176,14 @@ def ask_user(question: str, question_type: str = "text", options: Optional[List[
             return handle_question_by_type(question_type, question, options, console, _flush_input_buffer)
     except KeyboardInterrupt:
         raise RuntimeError("User input interrupted by keyboard interrupt")
-    except Exception as e:
-        raise RuntimeError(f"Failed to get user input: {e}")
 
 
 @tool(parent_only=True)
 def ask_user_batch(questions: List[dict]) -> dict:
     """Ask the user multiple questions at once and collect all responses.
 
-    This tool allows the LLM to ask multiple questions in a batch, showing all questions
-    upfront and collecting all answers before returning to the agent. This provides a
-    better user experience for multi-field forms or related questions.
+    Shows all questions upfront and collects every answer before returning to the
+    agent.
 
     Args:
         questions: List of question dictionaries. REQUIRED fields per question:
@@ -215,8 +198,9 @@ def ask_user_batch(questions: List[dict]) -> dict:
         Dictionary mapping question IDs to user responses
 
     Raises:
-        ValueError: If not in interactive mode or invalid question structure
-        RuntimeError: If user interaction fails
+        ValueError: If the question structure is invalid
+        ToolUnavailableError: If not in interactive mode
+        RuntimeError: If the user interrupts with Ctrl+C
 
     Example:
         # With explicit IDs
@@ -235,29 +219,24 @@ def ask_user_batch(questions: List[dict]) -> dict:
         ])
         # Returns: {"what_is_your_name": "Alice", "save_to_file": "yes", "choose_format": "json"}
     """
-    # Validate questions list
     if not questions or not isinstance(questions, list):
         raise ValueError(f"Invalid questions {questions}: must be a non-empty list of question dictionaries")
 
-    # Validate each question structure and auto-generate IDs if needed
     valid_types = ["text", "yes_no", "choice"]
     validate_batch_questions(questions, valid_types)
 
-    # Dispatch through interaction backend if one is set
     from tsugite.interaction import get_interaction_backend
 
     backend = get_interaction_backend()
     if backend is not None:
         return {q["id"]: backend.ask_user(q["question"], q["type"], q.get("options")) for q in questions}
 
-    # Fall back to TTY behavior
     if not is_interactive():
-        raise RuntimeError(
+        raise ToolUnavailableError(
             "Cannot use ask_user_batch tool in non-interactive mode. "
             "This tool requires a terminal with user input capability."
         )
 
-    # Collect responses
     responses = {}
 
     try:
@@ -270,14 +249,11 @@ def ask_user_batch(questions: List[dict]) -> dict:
                 q_type = q["type"]
                 options = q.get("options")
 
-                # Show question number
                 console.print(f"[dim]Question {i}/{len(questions)}[/dim]")
 
-                # Handle question based on type
                 answer = handle_question_by_type(q_type, q_text, options, console, _flush_input_buffer)
                 responses[q_id] = answer
 
-                # Add spacing between questions (except after last one)
                 if i < len(questions):
                     console.print()
 
@@ -290,8 +266,6 @@ def ask_user_batch(questions: List[dict]) -> dict:
 
     except KeyboardInterrupt:
         raise RuntimeError("User input interrupted by keyboard interrupt")
-    except Exception as e:
-        raise RuntimeError(f"Failed to get user input: {e}")
 
     return responses
 
@@ -457,7 +431,6 @@ def validate_batch_questions(questions: List[dict], valid_types: List[str]) -> N
         if q_type not in valid_types:
             raise ValueError(f"Invalid questions[{i}].type '{q_type}': must be one of {', '.join(valid_types)}")
 
-        # Validate options for choice type
         if q_type == "choice":
             if "options" not in q or not q["options"] or len(q["options"]) < 2:
                 raise ValueError(

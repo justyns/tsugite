@@ -108,7 +108,6 @@ class TestSpawnAgentVisibility:
     """Test spawn_agent respects visibility rules."""
 
     def test_private_agent_blocked_without_permission(self, temp_dir):
-        """Private agents should be blocked without permission."""
         agent_file = temp_dir / "private.md"
         agent_file.write_text("""---
 name: private_agent
@@ -121,7 +120,7 @@ Content""")
         set_current_agent("coordinator")
         clear_allowed_agents()
 
-        with pytest.raises(ValueError, match="visibility 'private'"):
+        with pytest.raises(PermissionError, match="visibility 'private'"):
             spawn_agent(str(agent_file), "task")
 
     def test_spawnable_false_blocks_spawning(self, temp_dir):
@@ -138,7 +137,7 @@ Content""")
         set_current_agent("coordinator")
         set_allowed_agents(["blocked_agent"])
 
-        with pytest.raises(ValueError, match="non-spawnable"):
+        with pytest.raises(PermissionError, match="non-spawnable"):
             spawn_agent(str(agent_file), "task")
 
         clear_allowed_agents()
@@ -156,7 +155,7 @@ Content""")
         set_current_agent("coordinator")
         set_allowed_agents(["other_agent"])
 
-        with pytest.raises(ValueError, match="not in the allowed agents list"):
+        with pytest.raises(PermissionError, match="not in the allowed agents list"):
             spawn_agent(str(agent_file), "task")
 
         clear_allowed_agents()

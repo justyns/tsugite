@@ -101,3 +101,31 @@ async def test_retry_still_fires_for_pre_execution_failures(monkeypatch):
     )
     assert result == "ok"
     assert call_count["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_spawn_step_keeps_the_subagents_timeout_message(monkeypatch):
+    step = _make_step(max_retries=0)
+    step.spawn_agent_path = "agents/worker.md"
+
+    def fake_spawn_agent(**kwargs):
+        raise TimeoutError("Subagent timed out after 300s")
+
+    monkeypatch.setattr("tsugite.tools.agents.spawn_agent", fake_spawn_agent)
+    monkeypatch.setattr("tsugite.agent_runner.steps._prepare_step", lambda *a, **k: MagicMock(rendered_prompt="task"))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await _execute_step_with_retries(
+            step=step,
+            step_context={},
+            agent=_agent(),
+            i=1,
+            total_steps=1,
+            steps=[step],
+            step_header="Step 1",
+            prompt="task",
+            setup=_setup(),
+        )
+
+    assert "Subagent timed out after 300s" in str(excinfo.value)
+    assert "Step timed out after None" not in str(excinfo.value)

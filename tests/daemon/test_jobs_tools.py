@@ -356,6 +356,6 @@ def test_spawn_job_timeout_is_generous_and_warns_about_duplicates(monkeypatch):
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
 
-    with pytest.raises(RuntimeError, match="list_jobs"):
+    with pytest.raises(TimeoutError, match="list_jobs"):
         jobs_tool.spawn_job(prompt="x", repo="/some/repo")
     assert seen["timeout"] >= 120, "spawn must allow slow worktree provisioning"

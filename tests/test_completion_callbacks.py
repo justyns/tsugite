@@ -22,6 +22,7 @@ from tsugite_daemon.session_runner import (
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
 from tsugite.agent_runner.models import AgentExecutionResult
+from tsugite.exceptions import ToolUnavailableError
 
 # --- Fixtures & helpers ---
 
@@ -355,7 +356,7 @@ class TestBackgroundTaskTool:
         with (
             patch("tsugite.agent_runner.helpers.get_current_agent", return_value="bot"),
             patch("tsugite_daemon.session_runner.get_current_session_id", return_value=None),
-            pytest.raises(ValueError, match="session context"),
+            pytest.raises(ToolUnavailableError, match="session context"),
         ):
             background_task(prompt="test", on_complete={"action": "reply"})
 

@@ -1,9 +1,9 @@
 """Open a document in a pane beside the chat.
 
 Daemon-gated, so it runs in the daemon's parent process (the subprocess executor
-proxies `require_daemon` tools out of the sandbox): the path validation here is
-the server-side gate, and the daemon serves nothing the browser could not
-already read through `GET /api/workspace/content` for the same session.
+proxies `require_daemon` tools out of the sandbox). The path validation here is
+the server-side gate. The daemon serves nothing the browser could not already
+read through `GET /api/workspace/content` for the same session.
 """
 
 import re
@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..cli.helpers import get_workspace_dir
+from ..exceptions import ToolUnavailableError
 from . import tool
 from .sessions import get_current_session_id
 
@@ -19,11 +20,10 @@ from .sessions import get_current_session_id
 # `://`, so a URL that omits the double slash gets the same error.
 _URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
-# `event_type` of the SSE frame. Frozen: the frontend reducer keys off it.
+# `event_type` of the SSE frame. The frontend reducer keys off it.
 ARTIFACT_EVENT = "artifact_open"
 
-# The one reusable pane slot: every open with `replace_existing=True` (the
-# default) lands here.
+# The one reusable pane slot. `replace_existing=True` (the default) opens into it.
 AGENT_ARTIFACT_ID = "agent"
 
 # Ephemeral content travels inline in the SSE frame, so it is capped well below
@@ -62,18 +62,18 @@ def _infer_content_type(name: str) -> str:
 def _resolve_in_workspace(path: str) -> str:
     """Resolve `path` inside the session workspace and return it workspace-relative, or raise."""
     if path.startswith("//") or _URI_SCHEME.match(path):
-        raise ValueError(f"Invalid path '{path}': open_artifact does not fetch an external URL")
+        raise PermissionError(f"Invalid path '{path}': open_artifact does not fetch an external URL")
 
-    # The workspace CV carries the running session's directory, which a job
-    # worker overrides to its provisioned worktree; every adapter shares the one
-    # runtime workspace, so that is only the fallback.
+    # get_workspace_dir() is the running session's directory, which a job worker
+    # overrides to its provisioned worktree. Every adapter shares the one runtime
+    # workspace.
     workspace_dir = Path(get_workspace_dir() or _adapter.runtime.workspace_dir).resolve()
     try:
         resolved = (workspace_dir / path).resolve()
     except (ValueError, OSError) as e:
         raise ValueError(f"Invalid path '{path}': {e}") from e
     if not resolved.is_relative_to(workspace_dir):
-        raise ValueError(f"Invalid path '{path}': outside the workspace ({workspace_dir})")
+        raise PermissionError(f"Invalid path '{path}': outside the workspace ({workspace_dir})")
     if not resolved.exists():
         raise ValueError(f"Invalid path '{path}': does not exist in the workspace")
     if not resolved.is_file():
@@ -98,13 +98,13 @@ def open_artifact(
 
     Use this when the user should READ something while the conversation keeps
     going: a report you just generated, a file you are about to change, a diff, a
-    coverage page. The chat stays visible and usable; the pane sits next to it and
-    the user can resize or close it. This does not replace answering - it is a
-    place to put the long artifact so your reply can stay short.
+    coverage page. The chat stays visible and usable, and the pane sits next to it
+    so the user can resize or close it. Put the long artifact in the pane so your
+    reply can stay short.
 
     By default every call updates the SAME pane, so opening five documents over a
     turn leaves one pane showing the latest, not five stacked tabs. Pass
-    `replace_existing=False` only when the user genuinely needs two open at once.
+    `replace_existing=False` only when the user needs two open at once.
 
     Only files inside the session's workspace can be opened; the path is validated
     daemon-side and `..`, absolute paths, symlinks out of the tree, and URLs are
@@ -131,15 +131,16 @@ def open_artifact(
         A short confirmation of what was opened.
 
     Raises:
-        ValueError: Bad arguments, or a path outside the workspace.
-        RuntimeError: No daemon is running this agent (no UI to open a pane in).
+        ValueError: Bad arguments.
+        PermissionError: A path outside the workspace, or a URL.
+        ToolUnavailableError: No daemon is running this agent (no UI to open a pane in).
 
     Example:
         open_artifact(path="reports/coverage.html", title="Coverage")
         open_artifact(content=summary_md, content_type="markdown", title="Summary")
     """
     if _adapter is None or _event_bus is None:
-        raise RuntimeError("open_artifact is not available: no daemon is running this agent.")
+        raise ToolUnavailableError("open_artifact is not available: no daemon is running this agent.")
 
     if path and content is not None:
         raise ValueError("Invalid arguments: pass path or content, not both")

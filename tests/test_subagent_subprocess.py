@@ -35,16 +35,6 @@ def test_context_passing(fixtures_dir):
     # Context should be available in the subagent
 
 
-def test_timeout():
-    """Subagent times out correctly."""
-    fixtures_dir = Path(__file__).parent / "fixtures" / "agents"
-    agent_path = str(fixtures_dir / "slow.md")
-
-    with pytest.raises(RuntimeError, match="timed out"):
-        # Very short timeout to force timeout
-        spawn_agent(agent_path, "Sleep for 10 seconds", timeout=2)
-
-
 def test_agent_not_found():
     """Raise error when agent file doesn't exist."""
     with pytest.raises(ValueError, match="Agent not found"):

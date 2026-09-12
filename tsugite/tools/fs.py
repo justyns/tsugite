@@ -70,6 +70,13 @@ def _wrap_file_metadata(
     ).render()
 
 
+def _read_utf8(file_path: Path, path: str) -> str:
+    try:
+        return file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{path} is not UTF-8 text: {e}") from e
+
+
 @tool
 def read_file(
     path: str,
@@ -114,10 +121,7 @@ def read_file(
         if end_line is not None and end_line < start_line:
             raise ValueError(f"end_line ({end_line}) must be >= start_line ({start_line})")
 
-    try:
-        content = file_path.read_text(encoding="utf-8")
-    except Exception as e:
-        raise RuntimeError(f"Failed to read file {path}: {e}") from e
+    content = _read_utf8(file_path, path)
 
     from tsugite.events.helpers import emit_file_read_event
 
@@ -129,8 +133,6 @@ def read_file(
     else:
         lines = content.splitlines()
         total_lines = len(lines)
-        # end_line is usable on its own (defaults start to line 1); previously it
-        # was silently ignored unless start_line was also set.
         eff_start = start_line if start_line is not None else 1
         start_idx = eff_start - 1
         if start_line is not None and start_idx >= total_lines:
@@ -157,10 +159,7 @@ def write_file(path: str, content: str) -> str:
     file_path = resolve_workspace_path(path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        file_path.write_text(content, encoding="utf-8")
-    except Exception as e:
-        raise RuntimeError(f"Failed to write file {path}: {e}") from e
+    file_path.write_text(content, encoding="utf-8")
 
     from tsugite.events.helpers import emit_file_write_event
 
@@ -184,28 +183,24 @@ def _build_gitignore_matcher(base_path: Path) -> Optional[pathspec.PathSpec]:
     patterns: list[str] = []
     current = base_path.resolve()
 
-    # Walk up the directory tree to find .gitignore files
     while True:
         gitignore_path = current / ".gitignore"
         if gitignore_path.exists() and gitignore_path.is_file():
             try:
                 with gitignore_path.open("r", encoding="utf-8") as f:
-                    # Parse gitignore patterns (skip empty lines and comments)
                     lines = [line.rstrip("\n\r") for line in f]
-                # Prepended, because the walk runs inward-out and pathspec takes the
-                # last matching pattern: a nested .gitignore has to come after the
-                # parent it re-includes from.
+                # The walk runs inward-out and pathspec takes the last matching
+                # pattern, so a nested .gitignore has to come after the parent it
+                # re-includes from.
                 patterns[:0] = [line for line in lines if line and not line.startswith("#")]
             except Exception:
                 pass
 
-        # Stop at git root (if .git exists) or filesystem root
         if (current / ".git").exists() or current.parent == current:
             break
 
         current = current.parent
 
-    # Always exclude .git/ directory
     patterns.append(".git/")
 
     return pathspec.PathSpec.from_lines(pathspec.patterns.GitWildMatchPattern, patterns)
@@ -224,7 +219,7 @@ def list_files(
         path: Directory path to list files from
         pattern: Glob pattern to match files
         respect_gitignore: If True (default), respects .gitignore files and excludes .git/ directory.
-                          Follows the behavior of modern tools like ripgrep and fd.
+                          Matches ripgrep and fd.
         with_metadata: If True, returns List[Dict] with `path` and `modified` per
                        file (formatted as "YYYY-MM-DD HH:MM TZ (N units ago)").
                        Default False returns List[str] of paths only.
@@ -240,31 +235,26 @@ def list_files(
     if not dir_path.is_dir():
         raise NotADirectoryError(f"Path is not a directory: {path}")
 
-    try:
-        # Build gitignore matcher if requested
-        gitignore_spec = None
-        if respect_gitignore:
-            gitignore_spec = _build_gitignore_matcher(dir_path)
+    gitignore_spec = None
+    if respect_gitignore:
+        gitignore_spec = _build_gitignore_matcher(dir_path)
 
-        matched: list[Path] = []
-        for item in dir_path.glob(pattern):
-            if item.is_file():
-                rel_path = str(item.relative_to(dir_path))
+    matched: list[Path] = []
+    for item in dir_path.glob(pattern):
+        if item.is_file():
+            rel_path = str(item.relative_to(dir_path))
 
-                # Filter through gitignore if enabled
-                if gitignore_spec and gitignore_spec.match_file(rel_path):
-                    continue
+            if gitignore_spec and gitignore_spec.match_file(rel_path):
+                continue
 
-                matched.append(item)
+            matched.append(item)
 
-        matched.sort(key=lambda p: str(p.relative_to(dir_path)))
+    matched.sort(key=lambda p: str(p.relative_to(dir_path)))
 
-        if not with_metadata:
-            return [str(p.relative_to(dir_path)) for p in matched]
+    if not with_metadata:
+        return [str(p.relative_to(dir_path)) for p in matched]
 
-        return [{"path": str(p.relative_to(dir_path)), "modified": _format_mtime(p)} for p in matched]
-    except Exception as e:
-        raise RuntimeError(f"Failed to list files in directory {path}: {e}") from e
+    return [{"path": str(p.relative_to(dir_path)), "modified": _format_mtime(p)} for p in matched]
 
 
 @tool
@@ -286,11 +276,8 @@ def create_directory(path: str) -> str:
     """
     dir_path = resolve_workspace_path(path)
 
-    try:
-        dir_path.mkdir(parents=True, exist_ok=True)
-        return f"Successfully created directory: {path}"
-    except Exception as e:
-        raise RuntimeError(f"Failed to create directory {path}: {e}") from e
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return f"Successfully created directory: {path}"
 
 
 @tool
@@ -332,23 +319,15 @@ def get_file_info(path: str) -> Dict[str, Any]:
     if file_path.is_dir():
         return info
 
-    try:
-        # Get file stats
-        stats = file_path.stat()
-        info["size_bytes"] = stats.st_size
-        tz = local_tz()
-        mtime = _dt.datetime.fromtimestamp(stats.st_mtime, tz=tz)
-        info["last_modified"] = mtime.isoformat()
-        info["last_modified_relative"] = humanize_relative(mtime, _dt.datetime.now(tz=tz))
+    stats = file_path.stat()
+    info["size_bytes"] = stats.st_size
+    tz = local_tz()
+    mtime = _dt.datetime.fromtimestamp(stats.st_mtime, tz=tz)
+    info["last_modified"] = mtime.isoformat()
+    info["last_modified_relative"] = humanize_relative(mtime, _dt.datetime.now(tz=tz))
+    info["line_count"] = len(_read_utf8(file_path, path).splitlines())
 
-        # Count lines
-        content = file_path.read_text(encoding="utf-8")
-        info["line_count"] = len(content.splitlines())
-
-        return info
-
-    except Exception as e:
-        raise RuntimeError(f"Failed to get info for file {path}: {e}") from e
+    return info
 
 
 def _detect_line_ending(content: str) -> str:
@@ -414,7 +393,7 @@ def _check_expected_mtime(file_path: Path, expected_mtime: str) -> None:
     """
     expected_dt = parse_iso_utc(expected_mtime)
     if expected_dt is None:
-        raise RuntimeError(f"expected_mtime '{expected_mtime}' is not a valid ISO datetime")
+        raise ValueError(f"expected_mtime '{expected_mtime}' is not a valid ISO datetime")
 
     actual_epoch = file_path.stat().st_mtime
     if actual_epoch > expected_dt.timestamp() + 1.0:
@@ -498,62 +477,53 @@ def edit_file(
     if expected_mtime is not None:
         _check_expected_mtime(file_path, expected_mtime)
 
-    try:
-        original_content = file_path.read_text(encoding="utf-8")
-        current_content = original_content.replace("\r\n", "\n")
+    original_content = _read_utf8(file_path, path)
+    current_content = original_content.replace("\r\n", "\n")
 
-        if single_mode:
-            normalized_old = old_string.replace("\r\n", "\n")
-            normalized_new = new_string.replace("\r\n", "\n")
+    if single_mode:
+        normalized_old = old_string.replace("\r\n", "\n")
+        normalized_new = new_string.replace("\r\n", "\n")
 
-            new_content, match_count, error = _apply_exact_replacement(
-                current_content, normalized_old, normalized_new, expected_replacements
-            )
+        new_content, match_count, error = _apply_exact_replacement(
+            current_content, normalized_old, normalized_new, expected_replacements
+        )
+
+        if error:
+            raise RuntimeError(f"Failed to edit {path}: {error}")
+
+        total_replacements = match_count
+
+    else:
+        if not edits:
+            raise ValueError("edits list cannot be empty")
+
+        total_replacements = 0
+        for i, edit in enumerate(edits, 1):
+            if "old_string" not in edit or "new_string" not in edit:
+                raise ValueError(f"Edit #{i} missing required 'old_string' or 'new_string'")
+
+            old_str = edit["old_string"].replace("\r\n", "\n")
+            new_str = edit["new_string"].replace("\r\n", "\n")
+            expected = edit.get("expected_replacements", 1)
+
+            current_content, match_count, error = _apply_exact_replacement(current_content, old_str, new_str, expected)
 
             if error:
-                raise RuntimeError(f"Failed to edit {path}: {error}")
+                raise RuntimeError(f"Edit #{i} failed: {error}")
 
-            total_replacements = match_count
+            total_replacements += match_count
 
-        else:
-            if not edits:
-                raise ValueError("edits list cannot be empty")
+        new_content = current_content
 
-            total_replacements = 0
-            for i, edit in enumerate(edits, 1):
-                if "old_string" not in edit or "new_string" not in edit:
-                    raise ValueError(f"Edit #{i} missing required 'old_string' or 'new_string'")
+    final_content = _preserve_line_ending(original_content, new_content)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(final_content, encoding="utf-8")
 
-                old_str = edit["old_string"].replace("\r\n", "\n")
-                new_str = edit["new_string"].replace("\r\n", "\n")
-                expected = edit.get("expected_replacements", 1)
+    from tsugite.events.helpers import emit_file_write_event
 
-                current_content, match_count, error = _apply_exact_replacement(
-                    current_content, old_str, new_str, expected
-                )
+    emit_file_write_event(str(file_path), final_content, "tool_call")
 
-                if error:
-                    raise RuntimeError(f"Edit #{i} failed: {error}")
-
-                total_replacements += match_count
-
-            new_content = current_content
-            total_edits = len(edits)
-
-        final_content = _preserve_line_ending(original_content, new_content)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(final_content, encoding="utf-8")
-
-        from tsugite.events.helpers import emit_file_write_event
-
-        emit_file_write_event(str(file_path), final_content, "tool_call")
-
-        if batch_mode:
-            return f"Successfully applied {total_edits} edit(s) to {path} ({total_replacements} total replacements)"
-        else:
-            return f"Successfully edited {path}: {total_replacements} replacement(s) made"
-
-    except Exception as e:
-        if isinstance(e, (FileNotFoundError, IsADirectoryError, RuntimeError, ValueError)):
-            raise
-        raise RuntimeError(f"Failed to edit file {path}: {e}") from e
+    if batch_mode:
+        return f"Successfully applied {len(edits)} edit(s) to {path} ({total_replacements} total replacements)"
+    else:
+        return f"Successfully edited {path}: {total_replacements} replacement(s) made"

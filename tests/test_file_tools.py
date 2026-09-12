@@ -64,8 +64,17 @@ def test_write_file_error_handling(temp_dir, file_tools):
     blocker = temp_dir / "not-a-dir"
     blocker.write_text("i am a file")
 
-    with pytest.raises(NotADirectoryError, match="Not a directory"):
+    with pytest.raises(NotADirectoryError):
         call_tool("write_file", path=str(blocker / "sub" / "file.txt"), content="test")
+
+
+def test_read_file_rejects_a_binary_file(temp_dir, file_tools):
+    binary = temp_dir / "image.bin"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00")
+
+    with pytest.raises(ValueError, match="is not UTF-8 text") as excinfo:
+        call_tool("read_file", path=str(binary))
+    assert str(binary) in str(excinfo.value)
 
 
 def test_list_files_basic(temp_dir, file_tools):
@@ -209,7 +218,7 @@ def test_create_directory_error(temp_dir, file_tools):
     blocker = temp_dir / "not-a-dir"
     blocker.write_text("i am a file")
 
-    with pytest.raises(RuntimeError, match="Failed to create directory"):
+    with pytest.raises(NotADirectoryError):
         call_tool("create_directory", path=str(blocker / "sub"))
 
 
@@ -467,6 +476,21 @@ def test_edit_file_expected_mtime_match_succeeds(temp_dir, file_tools):
     )
     assert "1 replacement" in result
     assert test_file.read_text() == "hi world"
+
+
+def test_edit_file_rejects_a_malformed_expected_mtime(temp_dir, file_tools):
+    test_file = temp_dir / "stable.txt"
+    test_file.write_text("hello world")
+
+    with pytest.raises(ValueError, match="not a valid ISO datetime"):
+        call_tool(
+            "edit_file",
+            path=str(test_file),
+            old_string="hello",
+            new_string="hi",
+            expected_mtime="yesterday",
+        )
+    assert test_file.read_text() == "hello world"
 
 
 def test_edit_file_expected_mtime_stale_raises(temp_dir, file_tools):
@@ -773,7 +797,6 @@ def test_edit_file_conflicting_parameters(temp_dir, file_tools):
     test_file = temp_dir / "test.txt"
     test_file.write_text("Hello World")
 
-    # Both single and batch mode parameters
     with pytest.raises(ValueError, match="Provide either old_string/new_string OR edits"):
         call_tool(
             "edit_file",
@@ -789,11 +812,9 @@ def test_edit_file_missing_parameters(temp_dir, file_tools):
     test_file = temp_dir / "test.txt"
     test_file.write_text("Hello World")
 
-    # No mode parameters
     with pytest.raises(ValueError, match="Must provide either"):
         call_tool("edit_file", path=str(test_file))
 
-    # old_string without new_string
     with pytest.raises(ValueError, match="new_string is required"):
         call_tool("edit_file", path=str(test_file), old_string="Hello")
 

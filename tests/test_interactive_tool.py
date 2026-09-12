@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tsugite.exceptions import ToolUnavailableError
 from tsugite.tools import call_tool
 
 
@@ -112,10 +113,9 @@ def test_ask_user_choice_last_option(interactive_tool, monkeypatch):
 
 def test_ask_user_non_interactive_mode(interactive_tool, monkeypatch):
     """Test that tool fails in non-interactive mode."""
-    # Mock TTY check to return False (non-interactive)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-    with pytest.raises(RuntimeError, match="Cannot use ask_user tool in non-interactive mode"):
+    with pytest.raises(ToolUnavailableError, match="Cannot use ask_user tool in non-interactive mode"):
         call_tool("ask_user", question="What is your name?", question_type="text")
 
 
@@ -128,7 +128,6 @@ def test_ask_user_invalid_question_type(interactive_tool, monkeypatch):
 
 
 def test_ask_user_choice_missing_options(interactive_tool, monkeypatch):
-    """Test that choice type requires options parameter."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     with pytest.raises(ValueError, match="at least 2 options"):
@@ -285,7 +284,7 @@ def test_ask_user_batch_non_interactive(interactive_tool, monkeypatch):
 
     questions = [{"id": "name", "question": "Name?", "type": "text"}]
 
-    with pytest.raises(RuntimeError, match="Cannot use ask_user_batch tool in non-interactive mode"):
+    with pytest.raises(ToolUnavailableError, match="Cannot use ask_user_batch tool in non-interactive mode"):
         call_tool("ask_user_batch", questions=questions)
 
 

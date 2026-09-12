@@ -30,6 +30,10 @@ class SandboxToolDeniedError(PermissionError):
     """Raised when a host-exec tool is refused because the agent runs sandboxed."""
 
 
+class ToolUnavailableError(RuntimeError):
+    """Raised when a tool cannot run in the current context."""
+
+
 class AgentExecutionError(RuntimeError):
     """Raised when agent execution fails.
 

@@ -68,7 +68,7 @@ async def test_the_frame_a_browser_receives_carries_the_artifact(wired):
 async def test_a_path_outside_the_adapter_workspace_never_reaches_the_wire(wired):
     queue = wired.subscribe()
 
-    with pytest.raises(ValueError, match="outside the workspace"):
+    with pytest.raises(PermissionError, match="outside the workspace"):
         open_artifact(path="../outside.txt")
 
     assert queue.empty()

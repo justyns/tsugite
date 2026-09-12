@@ -1,12 +1,14 @@
 """Tests for HTTP tools."""
 
 import json
+import sys
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from tsugite.tools.http import HttpResponse, _default_headers, fetch_text, http_request
+from tsugite.exceptions import ToolUnavailableError
+from tsugite.tools.http import HttpResponse, _default_headers, download_file, fetch_json, fetch_text, http_request
 
 # --- http_request tests ---
 
@@ -116,10 +118,9 @@ def test_http_request_get_no_body(mock_httpx_client):
 
 
 def test_http_request_timeout_error(mock_httpx_client):
-    """Timeout raises RuntimeError."""
     mock_httpx_client.request.side_effect = httpx.TimeoutException("timed out")
 
-    with pytest.raises(RuntimeError, match="Request timed out"):
+    with pytest.raises(TimeoutError, match="Request timed out after 5s"):
         http_request("https://api.example.com/slow", timeout=5)
 
 
@@ -249,10 +250,31 @@ def test_fetch_text_extract_article_takes_precedence(mock_httpx_client):
 
 
 def test_fetch_text_timeout_error(mock_httpx_client):
-    """fetch_text raises RuntimeError on timeout."""
     mock_httpx_client.request.side_effect = httpx.TimeoutException("timed out")
-    with pytest.raises(RuntimeError, match="Request timed out"):
+    with pytest.raises(TimeoutError, match="Request timed out after 30s"):
         fetch_text("https://example.com")
+
+
+def test_fetch_json_timeout_error(mock_httpx_client):
+    mock_httpx_client.request.side_effect = httpx.TimeoutException("timed out")
+    with pytest.raises(TimeoutError, match="Request timed out after 5s"):
+        fetch_json("https://api.example.com/slow", timeout=5)
+
+
+def test_fetch_json_non_json_body_is_not_double_wrapped(mock_httpx_client):
+    resp = _mock_response(200, text="not json")
+    resp.json.side_effect = json.JSONDecodeError("Expecting value", "not json", 0)
+    mock_httpx_client.request.return_value = resp
+
+    with pytest.raises(RuntimeError, match=r"\AInvalid JSON response"):
+        fetch_json("https://api.example.com/text")
+
+
+def test_download_file_timeout_error(mock_httpx_client, tmp_path):
+
+    mock_httpx_client.stream.side_effect = httpx.TimeoutException("timed out")
+    with pytest.raises(TimeoutError, match="Request timed out after 60s"):
+        download_file("https://example.com/big", str(tmp_path / "out.bin"))
 
 
 def test_http_request_returns_headers(mock_httpx_client):
@@ -378,8 +400,16 @@ def test_fetch_text_redirect_loop_is_bounded(redirect_transport):
 
 
 def test_download_file_follows_redirects(redirect_transport, tmp_path):
-    from tsugite.tools.http import download_file
 
     target = tmp_path / "out.txt"
     download_file("https://example.com/old", str(target))
     assert target.read_text() == "final"
+
+
+def test_fetch_text_extract_article_without_readability_is_unavailable(mock_httpx_client):
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text="<html><body><p>hi</p></body></html>", headers={"content-type": "text/html"}
+    )
+    with patch.dict(sys.modules, {"readability": None}):
+        with pytest.raises(ToolUnavailableError, match="Article extraction requires readability-lxml"):
+            fetch_text("https://example.com", extract_article=True)

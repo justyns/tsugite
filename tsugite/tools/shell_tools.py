@@ -1,7 +1,6 @@
 """Shell-based custom tools for Tsugite agents.
 
-This module provides a lightweight system for defining tools that wrap shell commands,
-allowing users to create custom tools without writing Python code.
+Tools defined as shell commands, so a custom tool needs no Python.
 """
 
 from typing import Any, Dict, List, Optional
@@ -120,8 +119,6 @@ def create_shell_tool_function(definition: ShellToolDefinition):
     import inspect
 
     def shell_tool_func(**kwargs) -> str:
-        """Dynamically generated shell tool function."""
-        # Validate and process parameters
         processed_params = {}
 
         for param_name, param_def in definition.parameters.items():
@@ -136,13 +133,8 @@ def create_shell_tool_function(definition: ShellToolDefinition):
             else:
                 processed_params[param_name] = validated_value
 
-        # Interpolate command
-        try:
-            command = interpolate_command(definition.command, processed_params)
-        except Exception as e:
-            raise RuntimeError(f"Failed to build command: {e}")
+        command = interpolate_command(definition.command, processed_params)
 
-        # Execute command
         return execute_shell_command(command, timeout=definition.timeout, shell=definition.shell)
 
     # Set function metadata for tool registration
@@ -206,10 +198,9 @@ def register_shell_tools(definitions: List[ShellToolDefinition]) -> None:
 def bind_custom_tools(definitions: List[ShellToolDefinition]) -> list:
     """Register a run's custom shell tools and return a Tool per definition.
 
-    Each Tool is built from the definition it was given. Resolving them back out
-    of the registry by name would instead hand this run whichever agent last
-    registered that name, since the registry is process-global and keyed on name
-    alone - one agent's `deploy` running another's command.
+    Each Tool is built from the definition it was given. The registry is
+    process-global and keyed on name alone, so resolving by name would hand this run
+    whichever agent last registered that name.
     """
     from tsugite.core.tools import create_tool_from_function
 

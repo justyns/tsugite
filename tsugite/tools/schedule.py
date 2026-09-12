@@ -3,6 +3,7 @@
 from typing import Optional
 from uuid import uuid4
 
+from ..exceptions import ToolUnavailableError
 from . import call_on_loop, deny_when_sandboxed, tool
 from .sessions import CURRENT_SESSION, get_current_session_id
 
@@ -56,7 +57,7 @@ def _validate_notify(notify, notify_tool: bool) -> Optional[list[str]]:
 
 
 def _resolve_target_session(target_session: Optional[str], current_session_id: Optional[str]) -> Optional[str]:
-    """Resolved at creation, not fire time: a schedule fires in its own session,
+    """Resolve `target_session` at creation time. A schedule fires in its own session,
     where there is no current chat.
     """
     if target_session != CURRENT_SESSION:
@@ -68,7 +69,7 @@ def _resolve_target_session(target_session: Optional[str], current_session_id: O
                 validate_alias(alias)
         return target_session
     if not current_session_id:
-        raise ValueError('target_session="current" requires a session context (daemon mode)')
+        raise ToolUnavailableError('target_session="current" requires a session context (daemon mode)')
     return current_session_id
 
 
@@ -105,7 +106,7 @@ def schedule_create(
 
     Args:
         id: Unique schedule name (e.g., "daily-backup")
-        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim — interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script". For "session_message" this is the message the target session receives.
+        prompt: Clear, direct instruction for the agent. Do NOT copy the user's words verbatim. Interpret their intent and write a self-contained instruction the agent can execute autonomously. Can be empty when agent_file is set or execution_type is "script". For "session_message" this is the message the target session receives.
         cron: Cron expression for recurring (e.g., "0 9 * * *" = daily at 9am). Mutually exclusive with run_at.
         run_at: ISO datetime for one-off execution (e.g., "2026-02-13T14:00:00-06:00"). Mutually exclusive with cron.
         timezone: IANA timezone (default: UTC)
@@ -113,7 +114,7 @@ def schedule_create(
         notify_tool: If true, gives the agent the notify_user tool so it can send messages during execution. Requires notify to be set.
         inject_history: If true (default), delivers the task result into the recipient's chat session so the agent has context when they reply.
         model: Optional model override (e.g., "openai:gpt-4o-mini"). When set, this schedule uses this model instead of the agent's default.
-        agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run — edit the file and the next execution picks up changes.
+        agent_file: Agent name (e.g., "+reporter") or path to a tsugite agent .md file. Hot-loaded on each run. Edit the file and the next execution picks up changes.
         execution_type: "agent" (default) runs an LLM agent, "script" runs a shell command directly without LLM,
             "session_message" sends `prompt` into target_session and lets that conversation take a turn. Reminders and
             follow-ups ("check on that job in 2 hours") want this one; it requires target_session, usually "current".
@@ -209,7 +210,7 @@ def schedule_list() -> list:
         d = _entry_to_dict(e)
         # Every schedule keeps up to 20 run_history entries; dumping them all can
         # balloon the listing past the exec-output cap. last_run/last_status/
-        # run_count already summarize health, so drop the array here.
+        # run_count already summarize health.
         d.pop("run_history", None)
         result.append(d)
     return result
@@ -376,7 +377,7 @@ def schedule_cleanup() -> dict:
 def schedule_run(id: str) -> dict:
     """Fire an existing schedule immediately in the background.
 
-    The schedule runs asynchronously — this tool returns immediately.
+    The schedule runs in the background and this tool returns immediately.
     Results are delivered via the schedule's configured notification channels.
 
     Args:
@@ -499,7 +500,7 @@ def background_task(
 
     originating_session_id = get_current_session_id()
     if on_complete and not originating_session_id:
-        raise ValueError("on_complete requires a session context (daemon mode)")
+        raise ToolUnavailableError("on_complete requires a session context (daemon mode)")
     chain_depth = get_current_chain_depth() if on_complete else 0
     target_session = _resolve_target_session(target_session, originating_session_id)
 

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Union
 
 import httpx
 
+from tsugite.exceptions import ToolUnavailableError
 from tsugite.secrets.redaction import redact_sensitive_obj
 from tsugite.tools import tool
 from tsugite.user_agent import set_user_agent_header
@@ -23,7 +24,7 @@ def _extract_article(html: str) -> str:
     try:
         from readability import Document
     except ImportError as e:
-        raise RuntimeError(f"Article extraction requires readability-lxml. {_WEB_EXTRA_HINT}") from e
+        raise ToolUnavailableError(f"Article extraction requires readability-lxml. {_WEB_EXTRA_HINT}") from e
     return Document(html).summary()
 
 
@@ -81,11 +82,18 @@ def _simple_request(
     elif isinstance(body, str):
         kwargs["content"] = body
 
-    with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, max_redirects=_MAX_REDIRECTS) as client:
-        response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
-        if raise_for_status and (follow_redirects or not response.is_redirect):
-            response.raise_for_status()
-        return response
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, max_redirects=_MAX_REDIRECTS) as client:
+            response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
+            if raise_for_status and (follow_redirects or not response.is_redirect):
+                response.raise_for_status()
+            return response
+    except httpx.TimeoutException as exc:
+        raise TimeoutError(f"Request timed out after {timeout}s") from exc
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
+    except Exception as e:
+        raise RuntimeError(f"Request failed: {e}") from e
 
 
 @tool
@@ -105,18 +113,12 @@ def fetch_json(
         timeout: Request timeout in seconds
         follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
+    response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
+
     try:
-        response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
-        try:
-            return response.json()
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Invalid JSON response: {e}") from e
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
-    except Exception as e:
-        raise RuntimeError(f"Request failed: {e}") from e
+        return response.json()
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Invalid JSON response: {e}") from e
 
 
 @tool
@@ -140,29 +142,23 @@ def fetch_text(
         extract_article: Extract article content only (strips nav/ads/boilerplate), implies strip_html
         follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
-    try:
-        response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
-        text = response.text
-        content_type = response.headers.get("content-type", "")
+    response = _simple_request(url, method, headers, timeout, follow_redirects=follow_redirects)
 
-        if "text/html" not in content_type or (not strip_html and not extract_article):
-            return text
+    text = response.text
+    content_type = response.headers.get("content-type", "")
 
-        if extract_article:
-            text = _extract_article(text)
-        return convert_html_to_markdown(text)
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
-    except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"HTTP error {e.response.status_code}: {e.response.text}") from e
-    except Exception as e:
-        raise RuntimeError(f"Request failed: {e}") from e
+    if "text/html" not in content_type or (not strip_html and not extract_article):
+        return text
+
+    if extract_article:
+        text = _extract_article(text)
+    return convert_html_to_markdown(text)
 
 
 # No sensitive_args: the built-in key rules already redact Authorization,
 # Cookie, X-API-Key and friends at any depth, which is exactly what a header
 # dict holds. Guessing at body field names here would be a partial list that
-# reads as a guarantee - a caller's body shape is the caller's to declare.
+# reads as a guarantee.
 @tool
 def http_request(
     url: str,
@@ -184,23 +180,17 @@ def http_request(
         timeout: Request timeout in seconds
         follow_redirects: Follow 3xx redirects (default True, max 5 hops); False returns the 3xx response for inspection
     """
-    try:
-        response = _simple_request(
-            url, method, headers, timeout, body, follow_redirects=follow_redirects, raise_for_status=False
-        )
-
-        return HttpResponse(
-            status_code=response.status_code,
-            # Response headers are handed to the model and stringified into the
-            # audit summary, so Set-Cookie must not survive the boundary.
-            headers=redact_sensitive_obj(dict(response.headers)),
-            text=response.text,
-            url=str(response.url),
-        )
-    except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
-    except Exception as e:
-        raise RuntimeError(f"Request failed: {e}") from e
+    response = _simple_request(
+        url, method, headers, timeout, body, follow_redirects=follow_redirects, raise_for_status=False
+    )
+    return HttpResponse(
+        status_code=response.status_code,
+        # Response headers are handed to the model and stringified into the
+        # audit summary, so Set-Cookie must not survive the boundary.
+        headers=redact_sensitive_obj(dict(response.headers)),
+        text=response.text,
+        url=str(response.url),
+    )
 
 
 @tool
@@ -231,7 +221,7 @@ def download_file(url: str, local_path: str, timeout: int = 60, follow_redirects
 
                 return f"Downloaded {total_size} bytes to {local_path}"
     except httpx.TimeoutException as exc:
-        raise RuntimeError(f"Request timed out after {timeout} seconds") from exc
+        raise TimeoutError(f"Request timed out after {timeout}s") from exc
     except httpx.HTTPStatusError as e:
         raise RuntimeError(f"HTTP error {e.response.status_code}") from e
     except OSError as e:

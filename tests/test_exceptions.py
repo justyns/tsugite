@@ -1,6 +1,6 @@
-"""Tests for tsugite.exceptions helpers."""
+"""Tests for tsugite.exceptions."""
 
-from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
+from tsugite.exceptions import AgentExecutionError, ToolUnavailableError, is_prompt_too_long_error
 
 
 def test_is_prompt_too_long_error_matches_real_provider_format():
@@ -15,3 +15,7 @@ def test_is_prompt_too_long_error_rejects_unrelated_failures():
     assert not is_prompt_too_long_error("rate limit exceeded")
     assert not is_prompt_too_long_error("process ended")
     assert not is_prompt_too_long_error("")
+
+
+def test_tool_unavailable_error_is_a_runtime_error():
+    assert issubclass(ToolUnavailableError, RuntimeError)

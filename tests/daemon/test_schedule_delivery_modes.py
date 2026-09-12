@@ -18,6 +18,8 @@ from tsugite_daemon.scheduler import ScheduleEntry, entry_to_dict
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
+from tsugite.exceptions import ToolUnavailableError
+
 
 @pytest.fixture
 def store(tmp_path, history_dir):
@@ -459,7 +461,7 @@ class TestScheduleTargetsTheCallingChat:
     def test_create_rejects_current_outside_a_session(self, mock_scheduler):
         from tsugite.tools.schedule import schedule_create
 
-        with _calling_session(None), pytest.raises(ValueError, match="current"):
+        with _calling_session(None), pytest.raises(ToolUnavailableError, match="current"):
             schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="current")
 
     def test_background_task_records_the_calling_session(self, mock_scheduler):

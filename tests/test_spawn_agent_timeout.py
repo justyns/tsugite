@@ -89,8 +89,8 @@ def test_timeout_bounds_a_child_that_never_closes_stdout(hanging_agent):
     worker.join(timeout=20)
 
     assert not worker.is_alive(), "spawn_agent never returned; the timeout did not bound the read loop"
-    assert isinstance(result.get("error"), RuntimeError)
-    assert "timed out" in str(result["error"])
+    assert isinstance(result.get("error"), TimeoutError)
+    assert "Subagent timed out after 1s" in str(result["error"])
     assert spawned["killed"] == [spawned["proc"].pid], "the timed-out child's process group was left running"
 
 
@@ -130,7 +130,7 @@ def test_timeout_kills_the_subagents_own_children(tmp_path, real_subagent):
         str(pid_file),
     )
 
-    with pytest.raises(RuntimeError, match="timed out"):
+    with pytest.raises(TimeoutError, match="Subagent timed out after 2s"):
         agents_tool.spawn_agent(agent_path=agent_path, prompt="go", timeout=2)
 
     grandchild = int(pid_file.read_text())

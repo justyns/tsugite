@@ -25,8 +25,8 @@ _stderr_console = get_stderr_console()
 _current_agent_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_agent", default=None)
 
 # Active sandbox policy. Presence means "this agent is running sandboxed"; tools
-# read it to propagate the same isolation or to refuse. A nested run leaking its
-# teardown here would fail OPEN, so the reset is load-bearing.
+# read it to propagate the same isolation or to refuse. A nested run that leaks
+# its teardown here fails OPEN.
 _sandbox_context_var: contextvars.ContextVar[Optional["SandboxContext"]] = contextvars.ContextVar(
     "sandbox_context", default=None
 )

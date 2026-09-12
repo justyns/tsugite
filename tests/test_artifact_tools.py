@@ -9,6 +9,7 @@ to that payload).
 import pytest
 
 from tsugite.cli.helpers import set_workspace_dir
+from tsugite.exceptions import ToolUnavailableError
 from tsugite.tools import artifacts as artifacts_tool
 from tsugite.tools.artifacts import AGENT_ARTIFACT_ID, ARTIFACT_EVENT, open_artifact
 
@@ -70,19 +71,19 @@ class TestPathValidation:
         assert bus.last["path"] == "reports/cov.html"
 
     def test_rejects_traversal_out_of_the_workspace(self, bus):
-        with pytest.raises(ValueError, match="outside the workspace"):
+        with pytest.raises(PermissionError, match="outside the workspace"):
             open_artifact(path="../outside.md")
         assert bus.emitted == []
 
     def test_rejects_an_absolute_path(self, bus, tmp_path):
-        with pytest.raises(ValueError, match="outside the workspace"):
+        with pytest.raises(PermissionError, match="outside the workspace"):
             open_artifact(path=str(tmp_path / "outside.md"))
         assert bus.emitted == []
 
     def test_rejects_a_symlink_escaping_the_workspace(self, bus, workspace, tmp_path):
         link = workspace / "escape.md"
         link.symlink_to(tmp_path / "outside.md")
-        with pytest.raises(ValueError, match="outside the workspace"):
+        with pytest.raises(PermissionError, match="outside the workspace"):
             open_artifact(path="escape.md")
         assert bus.emitted == []
 
@@ -95,7 +96,7 @@ class TestPathValidation:
             open_artifact(path="reports")
 
     def test_rejects_an_http_url(self, bus):
-        with pytest.raises(ValueError, match="external URL"):
+        with pytest.raises(PermissionError, match="external URL"):
             open_artifact(path="https://example.com/report.html")
         assert bus.emitted == []
 
@@ -109,7 +110,7 @@ class TestPathValidation:
         ],
     )
     def test_rejects_a_protocol_relative_or_non_http_scheme(self, bus, path):
-        with pytest.raises(ValueError, match="external URL"):
+        with pytest.raises(PermissionError, match="external URL"):
             open_artifact(path=path)
         assert bus.emitted == []
 
@@ -141,7 +142,7 @@ class TestArguments:
 
     def test_refuses_without_a_daemon_bridge(self):
         artifacts_tool.set_artifact_bridge(None, None)
-        with pytest.raises(RuntimeError, match="no daemon"):
+        with pytest.raises(ToolUnavailableError, match="no daemon"):
             open_artifact(content="hi", content_type="text")
 
 
@@ -258,6 +259,6 @@ class TestSessionWorkspace:
     def test_traversal_out_of_the_bound_workspace_is_still_refused(self, bus, worktree, workspace):
         set_workspace_dir(worktree)
 
-        with pytest.raises(ValueError, match="outside the workspace"):
+        with pytest.raises(PermissionError, match="outside the workspace"):
             open_artifact(path="../ws/notes.md")
         assert bus.emitted == []

@@ -19,7 +19,7 @@ def _build_subagent_cmd(agent_file: Path, model_override: Optional[str], sandbox
 
     When the spawning agent runs sandboxed (sandbox_ctx is set), the child gets
     `--sandbox` plus the same network policy so it re-enters the sandbox branch
-    with its own bwrap - inheritance, so spawn_agent can't be used to escape.
+    with its own bwrap, so spawn_agent cannot be used to escape.
     """
     cmd = ["uv", "run", "tsu", "run", str(agent_file), "--subagent-mode"]
     if model_override:
@@ -72,9 +72,9 @@ def spawn_agent(
         model_override: Optional model to use
         timeout: Timeout in seconds (default: 5 minutes)
         files: Optional workspace files to hand the subagent as attachments (paths
-            relative to your workspace). Images reach the child's model as pixels
-            when it supports vision - e.g. ask a cheaper vision model about an image
-            via files=["uploads/photo.jpg"], model_override="claude_code:haiku".
+            relative to your workspace). A vision-capable child model sees images as
+            pixels, e.g. ask a cheaper vision model about an image via
+            files=["uploads/photo.jpg"], model_override="claude_code:haiku".
 
     Returns:
         Subagent's final result as string
@@ -82,7 +82,9 @@ def spawn_agent(
     Raises:
         ValueError: If agent not found, a file escapes the workspace or is missing,
             or context not JSON-serializable
-        RuntimeError: If subagent fails, times out, or errors
+        PermissionError: If the agent is not spawnable, not allowed, or not public
+        TimeoutError: If the subagent exceeds timeout
+        RuntimeError: If subagent fails or errors
     """
     import json
     import subprocess
@@ -93,36 +95,32 @@ def spawn_agent(
     if agent_file is None:
         raise ValueError(f"Agent not found: {agent_path}")
 
-    # Parse agent config to check visibility and spawnable
     content = agent_file.read_text()
     frontmatter, _ = parse_yaml_frontmatter(content, str(agent_file))
     agent_name = frontmatter.get("name", agent_file.stem)
     visibility = frontmatter.get("visibility", "public")
     spawnable = frontmatter.get("spawnable", True)
 
-    # Check spawnable flag (hard block - cannot be overridden)
+    # No allow-list or multi-agent flag overrides this block.
     if not spawnable:
-        raise ValueError(
+        raise PermissionError(
             f"Agent '{agent_name}' is marked as non-spawnable (spawnable: false). "
             f"This agent cannot be spawned by other agents."
         )
 
-    # Check allowed agents list and visibility
     allowed_agents = get_allowed_agents()
     is_explicitly_allowed = allowed_agents is not None and agent_name in allowed_agents
 
-    # If allowed list exists and agent is not in it
     if allowed_agents is not None and not is_explicitly_allowed:
-        raise ValueError(
+        raise PermissionError(
             f"Agent '{agent_name}' is not in the allowed agents list. "
             f"Allowed: {', '.join(allowed_agents)}. "
             f"To spawn this agent, add it to the run command: "
             f'tsugite run +{get_current_agent() or "primary"} +{agent_name} "task"'
         )
 
-    # Check visibility (only if not explicitly allowed via multi-agent mode)
     if not is_explicitly_allowed and visibility in ["private", "internal"]:
-        raise ValueError(
+        raise PermissionError(
             f"Agent '{agent_name}' has visibility '{visibility}' and cannot be spawned. "
             f"Only 'public' agents can be spawned without explicit permission. "
             f"To spawn this agent, use multi-agent mode: "
@@ -130,9 +128,9 @@ def spawn_agent(
         )
 
     # Resolve delegated files against this agent's workspace and gate them for the
-    # child's model. Inline files ride to the child as paths it materializes itself
-    # (no base64 through the pipe); non-inlinable ones (oversize, svg-class, or a
-    # non-vision child) degrade to a path hint on the prompt so they never vanish.
+    # child's model. Inline files go to the child as paths it materializes itself,
+    # with no base64 through the pipe. Oversize, svg-class, and non-vision files
+    # degrade to a path hint on the prompt.
     child_files: List[str] = []
     if files:
         from ..attachments.delegation import (
@@ -149,7 +147,6 @@ def spawn_agent(
         child_files = [str(p) for p in inline_files]
         prompt = prompt + format_delegation_hint(hint_files)
 
-    # Prepare context
     context_data = {
         "prompt": prompt,
         "context": {
@@ -161,11 +158,9 @@ def spawn_agent(
     if child_files:
         context_data["files"] = child_files
 
-    # Validate JSON serializability early
     try:
         context_json = json.dumps(context_data)
     except (TypeError, ValueError) as e:
-        # Try to identify problematic value
         bad_type = "unknown"
         if hasattr(e, "__context__") and e.__context__:
             bad_type = str(type(e.__context__)).split("'")[1]
@@ -174,11 +169,8 @@ def spawn_agent(
             "Only use dicts, lists, strings, numbers, bools, and None."
         ) from e
 
-    # Build command. Inherit the sandbox: if this (parent) agent runs sandboxed,
-    # the subagent must too, otherwise spawn_agent is a trivial escape.
     cmd = _build_subagent_cmd(agent_file, model_override, get_sandbox_context())
 
-    # Set up progress spinner
     import queue
     import threading
     import time
@@ -189,7 +181,6 @@ def spawn_agent(
     ui_handler = get_ui_handler()
     agent_name = agent_file.stem
 
-    # Show initial message through event system
     if ui_handler and not progress:
         from ..events.helpers import emit_info_event
 
@@ -240,14 +231,13 @@ def spawn_agent(
         errors = []
         # The child signals EOF by closing stdout, so one that hangs without
         # exiting queues nothing at all, and one stuck in a chatty loop never
-        # goes quiet. The deadline is what bounds both.
+        # goes quiet. The deadline bounds both.
         deadline = time.monotonic() + timeout
 
         while True:
             if time.monotonic() >= deadline:
                 _kill_process_tree(proc)
-                raise RuntimeError(f"Subagent timed out after {timeout}s")
-            # Try to get line from queue with timeout for periodic updates
+                raise TimeoutError(f"Subagent timed out after {timeout}s")
             try:
                 line = line_queue.get(timeout=0.5)
             except queue.Empty:
@@ -255,13 +245,11 @@ def spawn_agent(
                 # Don't update progress here to avoid too many updates
                 continue
 
-            # Check for EOF or reader thread exception
             if line is None:
                 if reader_exception:
                     raise reader_exception
                 break
 
-            # Process JSONL event
             try:
                 event = json.loads(line.strip())
 
@@ -271,7 +259,6 @@ def spawn_agent(
 
                 event_type = event.get("type")
 
-                # Update progress spinner for key events only
                 if ui_handler:
                     if event_type == "turn_start":
                         ui_handler.update_progress(f"🚀 {agent_name}: Turn {event['turn']}")
@@ -280,7 +267,6 @@ def spawn_agent(
                     elif event_type == "code":
                         ui_handler.update_progress(f"🚀 {agent_name}: Running code...")
 
-                # Collect results/errors
                 if event_type == "final_result":
                     final_result = event["result"]
                 elif event_type == "error":
@@ -289,17 +275,14 @@ def spawn_agent(
             except json.JSONDecodeError:
                 continue  # Skip malformed lines
 
-        # Wait for reader thread to finish
         reader_thread.join(timeout=1.0)
 
-        # Wait for completion
         try:
             return_code = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             _kill_process_tree(proc)
-            raise RuntimeError(f"Subagent timed out after {timeout}s")
+            raise TimeoutError(f"Subagent timed out after {timeout}s")
 
-        # Check for failures
         if return_code != 0:
             stderr_thread.join(timeout=1.0)
             error_msg = f"Subagent failed with exit code {return_code}"
@@ -310,7 +293,6 @@ def spawn_agent(
             raise RuntimeError(error_msg)
 
         if errors and final_result is None:
-            # Errors occurred and no result was returned
             error_details = errors[-1]  # Use most recent error
             raise RuntimeError(
                 f"Subagent error at step {error_details.get('step', 'unknown')}: {error_details['error']}"
@@ -322,7 +304,6 @@ def spawn_agent(
         return final_result
 
     finally:
-        # Restore progress to parent agent state
         if ui_handler:
             ui_handler.update_progress("Agent running...")
 
@@ -410,8 +391,8 @@ def list_agents() -> str:
 def list_available_agents() -> List[Dict[str, str]]:
     """Discover sub-agents that can be delegated to via spawn_agent().
 
-    Call this on demand when you need to delegate; the result is intentionally
-    not always present in your context. Returns one dict per agent with `name`,
+    Call this when you need to delegate. The result is not kept in your context.
+    Returns one dict per agent with `name`,
     `path`, and `description` keys. The currently running agent is excluded so
     you cannot spawn yourself.
     """

@@ -1,8 +1,8 @@
-"""Jobs tool - `spawn_job()` for agents: background work with an optional verification loop."""
+"""`spawn_job()` runs background work for an agent, with an optional verification loop."""
 
-import concurrent.futures
 from typing import Optional
 
+from ..exceptions import ToolUnavailableError
 from . import call_on_loop, tool
 
 _jobs_orchestrator = None
@@ -17,8 +17,7 @@ def set_jobs_orchestrator(orchestrator, loop):
 
 
 def get_jobs_orchestrator():
-    """Public accessor for the wired orchestrator (None outside daemon mode).
-    Used by the adapters for context injection and capability flags."""
+    """The wired orchestrator, or None outside daemon mode."""
     return _jobs_orchestrator
 
 
@@ -51,9 +50,8 @@ def spawn_job(
     result against them; on failure the Job loops back up to `max_attempts`
     times before going `stuck` (default 3).
 
-    With no `acceptance_criteria` this is a light fire-and-forget background run
-    (the worker's result is taken as-is); supply them to get the verification
-    loop above.
+    With no `acceptance_criteria` the worker's result is taken as-is. Supply them to
+    get the verification loop above.
 
     Args:
         prompt: Task instruction for the spawned Job.
@@ -93,8 +91,8 @@ def spawn_job(
             For a cc executor job this maps to claude's --effort; ignored by
             executors that don't support it.
         files: Optional workspace files to attach to the worker's first turn
-            (paths relative to your workspace). Images reach a vision model as
-            pixels - e.g. delegate an image question via files=["uploads/photo.jpg"],
+            (paths relative to your workspace). A vision model sees images as
+            pixels, e.g. delegate an image question via files=["uploads/photo.jpg"],
             model="claude_code:haiku".
 
     Returns:
@@ -108,18 +106,17 @@ def spawn_job(
 
     parent_session_id = get_current_session_id()
     if not parent_session_id:
-        raise RuntimeError("spawn_job requires a current session context")
+        raise ToolUnavailableError("spawn_job requires a current session context")
     if _jobs_orchestrator is None:
-        raise RuntimeError("Jobs orchestrator not initialised")
+        raise ToolUnavailableError("Jobs orchestrator not initialised")
 
-    # Inherit the sandbox: worker + verifier sessions stay sandboxed if this agent
-    # is, and predicate ACs are evaluated inside bwrap by the orchestrator.
+    # Worker + verifier sessions stay sandboxed if this agent is, and predicate ACs
+    # are evaluated inside bwrap by the orchestrator.
     sandbox_override = sandbox_context_to_override()
 
-    # Validate delegated files against this agent's workspace now (clear error to
-    # the caller); the runner materializes them into the worker's first-turn
-    # attachments once the target model is known. Paths only, so nothing bulky
-    # rides the Job record.
+    # Validate delegated files against this agent's workspace now. The runner
+    # materializes them into the worker's first-turn attachments once the target
+    # model is known. The Job record holds paths only.
     delegation_files = None
     if files:
         from pathlib import Path
@@ -131,8 +128,8 @@ def spawn_job(
         delegation_files = [str(p) for p in resolved]
 
     try:
-        # Generous timeout: --repo provisioning runs `git worktree add`, which
-        # can take minutes on a large checkout.
+        # --repo provisioning runs `git worktree add`, which can take minutes on a
+        # large checkout.
         job, started = _call(
             _jobs_orchestrator.create_and_start_job,
             parent_session_id=parent_session_id,
@@ -153,12 +150,10 @@ def spawn_job(
             delegation_files=delegation_files,
             timeout=180,
         )
-    except concurrent.futures.TimeoutError:
-        # The coroutine keeps running on the daemon loop and may still create
-        # the job - a blind retry would duplicate it.
-        raise RuntimeError(
-            "spawn_job timed out waiting for the daemon; the job may still start in the "
-            "background - check list_jobs before retrying to avoid a duplicate"
+    except TimeoutError:
+        raise TimeoutError(
+            "spawn_job timed out waiting for the daemon. The job may still start in the "
+            "background, so check list_jobs before retrying to avoid a duplicate."
         ) from None
 
     return {
@@ -289,7 +284,6 @@ def list_jobs(
         jobs = [j for j in jobs if (j.created_at or "") >= since]
     if until:
         jobs = [j for j in jobs if (j.created_at or "") <= until]
-    # Newest first.
     jobs.sort(key=lambda j: j.created_at or "", reverse=True)
     return [
         {
