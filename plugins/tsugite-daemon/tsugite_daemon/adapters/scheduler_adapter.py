@@ -467,11 +467,13 @@ class SchedulerAdapter:
             if temp_token and self._token_store:
                 self._token_store.revoke(temp_token)
 
+        # Runs before the status update. The on_complete fallback records in this run
+        # session, which `deliver_to_session` refuses once it is finished.
+        await self._handle_on_complete(entry, result, run_session_id=conv_id)
         self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
         logger.info("Schedule '%s' completed", entry.id)
 
         await self._publish_result(adapter, entry, result[:_MAX_RESULT_CHARS], resolved_channels)
-        await self._handle_on_complete(entry, result)
 
         status, error = _recorded_run_outcome(conv_id)
         return RunResult(output=result, session_id=conv_id, status=status, error=error)
@@ -617,8 +619,12 @@ class SchedulerAdapter:
             except Exception as e:
                 logger.error("Delivery for schedule '%s' to session '%s' failed: %s", entry.id, session.id, e)
 
-    async def _handle_on_complete(self, entry: ScheduleEntry, result: str) -> None:
-        """Handle on_complete callback after a background task finishes."""
+    async def _handle_on_complete(self, entry: ScheduleEntry, result: str, run_session_id: str | None = None) -> None:
+        """Handle on_complete callback after a background task finishes.
+
+        `run_session_id` is where the result is recorded when the originating
+        session has ended and takes no reply.
+        """
         if not entry.on_complete or entry.on_complete.get("action") != "reply":
             return
 
@@ -653,7 +659,7 @@ class SchedulerAdapter:
 
         with chain_depth_scope(entry.chain_depth + 1):
             try:
-                await self._session_runner.reply_to_session(
+                reply = await self._session_runner.reply_to_session(
                     session_id,
                     message,
                     source="completion_callback",
@@ -661,3 +667,24 @@ class SchedulerAdapter:
                 )
             except Exception as e:
                 logger.error("on_complete reply to session '%s' failed: %s", session_id, e)
+                return
+
+        if reply is None:
+            await self._record_undelivered_result(entry, run_session_id, result)
+
+    async def _record_undelivered_result(self, entry: ScheduleEntry, run_session_id: str | None, result: str) -> None:
+        """Keep a result the ended originating chat refused in the run's own transcript."""
+        if not run_session_id:
+            logger.warning("on_complete for '%s' has no run session to record the result in", entry.id)
+            return
+        try:
+            await asyncio.to_thread(
+                self._session_runner.deliver_to_session,
+                run_session_id,
+                result[:_MAX_RESULT_CHARS],
+                source="completion_callback",
+                title="Result undelivered: the originating chat has ended",
+                metadata={"schedule_id": entry.id, "completion_callback": True},
+            )
+        except Exception as e:
+            logger.warning("Schedule '%s' could not record its result in %s: %s", entry.id, run_session_id, e)

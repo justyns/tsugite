@@ -285,6 +285,73 @@ class TestRunAgentOnComplete:
         assert mock_handle.call_args[0][0] is entry
 
 
+# --- An ended originating session ---
+
+
+def _real_sa(tmp_path) -> tuple[SchedulerAdapter, SessionStore, MagicMock]:
+    """A SchedulerAdapter on a real SessionRunner, so the finished-session guards run."""
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=128000)
+    inner = MagicMock()
+    inner.agent_name = "bot"
+    inner.session_store = store
+    inner.event_bus = None
+    inner.handle_message = AsyncMock(return_value="task output")
+    inner.resolve_model = MagicMock(return_value="test-model")
+    sa = SchedulerAdapter(adapter=inner, schedules_path=tmp_path / "schedules.json")
+    sa.set_session_runner(SessionRunner(store=store, adapter=inner))
+    return sa, store, inner
+
+
+def _ended_origin(store, status, *, resumable=False, source=SessionSource.INTERACTIVE.value):
+    store.create_session(Session(id="session-abc", source=source, status=SessionStatus.ACTIVE.value))
+    store.update_session("session-abc", status=status, resumable=resumable)
+
+
+def _completion_cards(store, session_id) -> list[dict]:
+    return [
+        e for e in store.read_events(session_id) if e["type"] == "delivery" and e.get("source") == "completion_callback"
+    ]
+
+
+class TestEndedOriginatingSession:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status",
+        [SessionStatus.CANCELLED.value, SessionStatus.COMPLETED.value, SessionStatus.FAILED.value],
+    )
+    async def test_result_lands_on_the_run_session(self, tmp_path, history_dir, status):
+        sa, store, inner = _real_sa(tmp_path)
+        _ended_origin(store, status)
+        entry = _make_entry(on_complete={"action": "reply"}, originating_session_id="session-abc")
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            run = await sa._run_agent(entry)
+
+        cards = _completion_cards(store, run.session_id)
+        assert len(cards) == 1
+        assert "task output" in cards[0]["message"]
+        assert inner.handle_message.await_count == 1, "the ended session took a turn"
+        assert not _completion_cards(store, "session-abc")
+
+    @pytest.mark.asyncio
+    async def test_a_resumable_origin_still_takes_the_reply(self, tmp_path, history_dir):
+        sa, store, inner = _real_sa(tmp_path)
+        _ended_origin(
+            store,
+            SessionStatus.COMPLETED.value,
+            resumable=True,
+            source=SessionSource.BACKGROUND.value,
+        )
+        entry = _make_entry(on_complete={"action": "reply"}, originating_session_id="session-abc")
+
+        with patch("tsugite.interaction.set_interaction_backend"):
+            run = await sa._run_agent(entry)
+
+        assert inner.handle_message.await_count == 2
+        assert "background_task_complete" in inner.handle_message.await_args.kwargs["message"]
+        assert not _completion_cards(store, run.session_id)
+
+
 # --- background_task() tool ---
 
 
