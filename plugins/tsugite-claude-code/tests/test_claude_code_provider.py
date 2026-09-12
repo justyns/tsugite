@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tsugite_claude_code.provider import _ALIASES as _CLAUDE_CODE_MODEL_MAP
+from tsugite_claude_code.provider import _CLAUDE_CODE_MODELS
 
 from tsugite.models import get_model_id, parse_model_string
 
@@ -29,7 +30,7 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:sonnet") == "claude-sonnet-5"
         assert get_model_id("claude_code:opus") == "claude-opus-4-8"
         assert get_model_id("claude_code:haiku") == "claude-haiku-4-5-20251001"
-        assert get_model_id("claude_code:fable") == "claude-fable-5"
+        assert get_model_id("claude_code:fable") == "claude-fable-5-1"
 
     def test_model_id_version_pinned_aliases(self):
         assert get_model_id("claude_code:opus-5") == "claude-opus-5"
@@ -39,6 +40,7 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:sonnet-5") == "claude-sonnet-5"
         assert get_model_id("claude_code:sonnet-4-6") == "claude-sonnet-4-6"
         assert get_model_id("claude_code:fable-5") == "claude-fable-5"
+        assert get_model_id("claude_code:fable-5-1") == "claude-fable-5-1"
 
     def test_model_id_full_id_passthrough(self):
         assert get_model_id("claude_code:claude-sonnet-4-6") == "claude-sonnet-4-6"
@@ -46,6 +48,24 @@ class TestClaudeCodeModelParams:
     def test_model_map_completeness(self):
         for short, full in _CLAUDE_CODE_MODEL_MAP.items():
             assert get_model_id(f"claude_code:{short}") == full
+
+    def test_registry_matches_served_models(self):
+        assert set(_CLAUDE_CODE_MODELS) == {
+            "claude_code/claude-fable-5",
+            "claude_code/claude-fable-5-1",
+            "claude_code/claude-haiku-4-5",
+            "claude_code/claude-haiku-4-5-20251001",
+            "claude_code/claude-opus-4-5",
+            "claude_code/claude-opus-4-5-20251101",
+            "claude_code/claude-opus-4-6",
+            "claude_code/claude-opus-4-7",
+            "claude_code/claude-opus-4-8",
+            "claude_code/claude-opus-5",
+            "claude_code/claude-sonnet-4-5",
+            "claude_code/claude-sonnet-4-5-20250929",
+            "claude_code/claude-sonnet-4-6",
+            "claude_code/claude-sonnet-5",
+        }
 
 
 # ── ClaudeCodeProcess tests ──

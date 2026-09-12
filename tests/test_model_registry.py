@@ -39,14 +39,14 @@ def test_model_info_accepts_supported_effort_levels():
 
 def test_gpt_5_6_family_registered():
     """gpt-5.6 ships as three named tiers (sol/terra/luna) plus a bare `gpt-5.6`
-    alias that routes to Sol. Specs per models.dev / OpenAI's GA announcement:
+    alias that routes to Sol. Specs come from the generated models.dev catalog:
     1.05M context, 128K output, effort ladder up to `max` (`ultra` is not an
     API effort value in the catalog and is deliberately absent)."""
     pricing = {
-        "openai/gpt-5.6": (5.0, 30.0),
-        "openai/gpt-5.6-sol": (5.0, 30.0),
-        "openai/gpt-5.6-terra": (2.5, 15.0),
-        "openai/gpt-5.6-luna": (1.0, 6.0),
+        "openai/gpt-5.6": (4.0, 20.0),
+        "openai/gpt-5.6-sol": (4.0, 20.0),
+        "openai/gpt-5.6-terra": (2.0, 12.0),
+        "openai/gpt-5.6-luna": (0.2, 1.2),
     }
     for key, (input_cost, output_cost) in pricing.items():
         info = _OPENAI_MODELS.get(key)
@@ -58,6 +58,16 @@ def test_gpt_5_6_family_registered():
         assert info.supports_vision is True, key
         assert info.supports_reasoning is True, key
         assert info.supported_effort_levels == ["none", "low", "medium", "high", "xhigh", "max"], key
+
+
+def test_gpt_6_astra_registered():
+    info = _OPENAI_MODELS.get("openai/gpt-6-astra")
+    assert info is not None
+    assert info.max_input_tokens == 1_050_000
+    assert info.max_output_tokens == 128_000
+    assert info.input_cost_per_million == 10.0
+    assert info.output_cost_per_million == 50.0
+    assert info.supported_effort_levels == ["low", "medium", "high", "xhigh", "max"]
 
 
 def test_gpt_5_6_effort_resolution_end_to_end():
