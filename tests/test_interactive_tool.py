@@ -123,7 +123,7 @@ def test_ask_user_invalid_question_type(interactive_tool, monkeypatch):
     """Test validation of question_type parameter."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user' failed"):
+    with pytest.raises(ValueError, match="Invalid question_type 'invalid_type'"):
         call_tool("ask_user", question="Test?", question_type="invalid_type")
 
 
@@ -131,7 +131,7 @@ def test_ask_user_choice_missing_options(interactive_tool, monkeypatch):
     """Test that choice type requires options parameter."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user' failed"):
+    with pytest.raises(ValueError, match="at least 2 options"):
         call_tool("ask_user", question="Choose:", question_type="choice")
 
 
@@ -139,7 +139,7 @@ def test_ask_user_choice_too_few_options(interactive_tool, monkeypatch):
     """Test that choice type requires at least 2 options."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user' failed"):
+    with pytest.raises(ValueError, match="at least 2 options"):
         call_tool("ask_user", question="Choose:", question_type="choice", options=["Only one"])
 
 
@@ -293,7 +293,7 @@ def test_ask_user_batch_empty_list(interactive_tool, monkeypatch):
     """Test validation of empty questions list."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match="non-empty list"):
         call_tool("ask_user_batch", questions=[])
 
 
@@ -317,7 +317,7 @@ def test_ask_user_batch_missing_question(interactive_tool, monkeypatch):
 
     questions = [{"id": "name", "type": "text"}]  # Missing 'question'
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match="missing required field 'question'"):
         call_tool("ask_user_batch", questions=questions)
 
 
@@ -327,7 +327,7 @@ def test_ask_user_batch_missing_type(interactive_tool, monkeypatch):
 
     questions = [{"id": "name", "question": "What is your name?"}]  # Missing 'type'
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match="missing required field 'type'"):
         call_tool("ask_user_batch", questions=questions)
 
 
@@ -337,7 +337,7 @@ def test_ask_user_batch_invalid_type(interactive_tool, monkeypatch):
 
     questions = [{"id": "name", "question": "Name?", "type": "invalid_type"}]
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match=r"Invalid questions\[0\].type 'invalid_type'"):
         call_tool("ask_user_batch", questions=questions)
 
 
@@ -350,7 +350,7 @@ def test_ask_user_batch_duplicate_ids(interactive_tool, monkeypatch):
         {"id": "name", "question": "Last name?", "type": "text"},  # Duplicate ID
     ]
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match="duplicate question ID"):
         call_tool("ask_user_batch", questions=questions)
 
 
@@ -360,7 +360,7 @@ def test_ask_user_batch_choice_missing_options(interactive_tool, monkeypatch):
 
     questions = [{"id": "color", "question": "Favorite color?", "type": "choice"}]  # Missing options
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match=r"Invalid questions\[0\].options None"):
         call_tool("ask_user_batch", questions=questions)
 
 
@@ -370,7 +370,7 @@ def test_ask_user_batch_choice_too_few_options(interactive_tool, monkeypatch):
 
     questions = [{"id": "color", "question": "Favorite color?", "type": "choice", "options": ["red"]}]  # Only 1 option
 
-    with pytest.raises(RuntimeError, match="Tool 'ask_user_batch' failed"):
+    with pytest.raises(ValueError, match="at least 2 options"):
         call_tool("ask_user_batch", questions=questions)
 
 

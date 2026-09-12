@@ -1,5 +1,6 @@
 """Custom exception classes for Tsugite."""
 
+import builtins
 from typing import Any, List, Optional
 
 
@@ -25,8 +26,12 @@ class StateSerializationError(RuntimeError):
         self.reason = reason
 
 
+class SandboxToolDeniedError(PermissionError):
+    """Raised when a host-exec tool is refused because the agent runs sandboxed."""
+
+
 class AgentExecutionError(RuntimeError):
-    """Exception raised when agent execution fails.
+    """Raised when agent execution fails.
 
     Includes execution details for debugging and analysis.
 
@@ -75,3 +80,14 @@ def is_unresumable_history_error(error: BaseException | str) -> bool:
     never succeed, so the caller must abandon it and start a fresh session.
     """
     return "text content blocks must be non-empty" in str(error).lower()
+
+
+def exception_from_name(name: Optional[str], message: str) -> Exception:
+    """Rebuild an exception from a class name looked up in builtins, then this module."""
+    cls = (getattr(builtins, name, None) or globals().get(name)) if name else None
+    if isinstance(cls, type) and issubclass(cls, Exception):
+        try:
+            return cls(message)
+        except TypeError:
+            pass
+    return RuntimeError(f"{name}: {message}" if name else message)

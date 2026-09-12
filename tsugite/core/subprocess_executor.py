@@ -65,6 +65,10 @@ _IPC_HELPER = textwrap.dedent("""\
                 safe[k] = _cap_call_text(repr(v), 500)
         return safe
 
+    def _ipc_error(error_type, message):
+        from tsugite.exceptions import exception_from_name
+        return exception_from_name(error_type, message)
+
     def _ipc_call(msg_type, **kwargs):
         global _call_id_counter
         _call_id_counter += 1
@@ -78,7 +82,7 @@ _IPC_HELPER = textwrap.dedent("""\
             raise RuntimeError("IPC: parent closed connection")
         resp = json.loads(resp_line)
         if resp.get("error"):
-            raise RuntimeError(f"IPC tool error: {resp['error']}")
+            raise _ipc_error(resp.get("error_type"), resp["error"])
         return resp.get("result")
 
     def _ipc_audit(event, tool, **kwargs):
@@ -877,7 +881,12 @@ with open(RESULT_PATH, "w") as f:
                     result = self._ensure_json_serializable(result)
                     resp = {"call_id": call_id, "result": result, "error": None}
                 except Exception as e:
-                    resp = {"call_id": call_id, "result": None, "error": str(e)}
+                    resp = {
+                        "call_id": call_id,
+                        "result": None,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    }
             else:
                 resp = {"call_id": call_id, "result": None, "error": f"Unknown tool: {name}"}
 

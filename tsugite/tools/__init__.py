@@ -146,7 +146,8 @@ def deny_when_sandboxed(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        from tsugite.agent_runner.helpers import SandboxToolDeniedError, get_sandbox_context
+        from tsugite.agent_runner.helpers import get_sandbox_context
+        from tsugite.exceptions import SandboxToolDeniedError
 
         if get_sandbox_context() is not None:
             raise SandboxToolDeniedError(
@@ -211,15 +212,11 @@ def call_tool(tool_name: str, **kwargs) -> Any:
     """Call a tool with the given arguments."""
     tool_info = get_tool(tool_name)
 
-    # Validate required parameters
     for param_name, param_info in tool_info.parameters.items():
         if param_info["required"] and param_name not in kwargs:
             raise ValueError(f"Invalid parameter '{param_name}': missing for tool '{tool_name}'")
 
-    try:
-        return tool_info.func(**kwargs)
-    except Exception as e:
-        raise RuntimeError(f"Tool '{tool_name}' failed to execute: {e}")
+    return tool_info.func(**kwargs)
 
 
 def list_tools() -> List[str]:
@@ -356,9 +353,6 @@ def expand_tool_specs(tool_specs: List[str], strict: bool = False) -> List[str]:
         else:
             inclusions.append(spec)
 
-    # Expand inclusions. Lenient by default: an unknown tool (e.g. from an optional plugin that
-    # isn't installed) is skipped with a warning rather than failing the whole agent. Agents that
-    # require all their tools opt into strict=True (via `strict_tools` frontmatter).
     expanded = []
     for spec in inclusions:
         expanded.extend(_expand_single_spec(spec, strict=strict))
@@ -383,10 +377,9 @@ def expand_tool_specs(tool_specs: List[str], strict: bool = False) -> List[str]:
 
 
 def load_custom_shell_tools() -> None:
-    """Load custom shell tools from config file.
+    """Register the shell tools defined in custom_tools.yaml.
 
-    This is called automatically at module import time to register
-    user-defined shell tools from custom_tools.yaml.
+    Called by `_ensure_tools_loaded()` on first tool use.
     """
     import os
     import sys
@@ -395,10 +388,10 @@ def load_custom_shell_tools() -> None:
     from .shell_tools import register_shell_tools
 
     # Resolved before the try: it is a pure XDG path lookup with no failure mode,
-    # and the handler below exists precisely to name this file. A first-party
-    # import failing here means a broken install, not bad user config, and must
-    # not be swallowed - load_custom_shell_tools runs before the plugin loaders
-    # and before _tools_loaded latches, so silently continuing loses every tool.
+    # and the handler below reports this path. A first-party import failing here
+    # means a broken install, not bad user config. Swallowing it would lose every
+    # tool, since load_custom_shell_tools runs before the plugin loaders and
+    # before _tools_loaded latches.
     config_path = get_custom_tools_config_path()
     if not config_path.exists():
         return

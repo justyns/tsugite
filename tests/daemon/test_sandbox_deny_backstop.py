@@ -53,6 +53,9 @@ class TestDenyWhenSandboxed:
         with pytest.raises(SandboxToolDeniedError, match="some_tool"):
             self._decorated()()
 
+    def test_denial_is_a_permission_error(self):
+        assert issubclass(SandboxToolDeniedError, PermissionError)
+
 
 class TestRequireDaemonRoutesToParent:
     """require_daemon tools need the daemon runtime, which only exists in the

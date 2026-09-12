@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, List, Optional
 from rich.console import Console
 
 from tsugite.console import get_stderr_console
+from tsugite.exceptions import SandboxToolDeniedError  # noqa: F401
 
 if TYPE_CHECKING:
     from tsugite.options import ExecutionOptions
@@ -45,11 +46,6 @@ class SandboxContext:
     extra_rw_binds: List[Path] = field(default_factory=list)
     pass_env: List[str] = field(default_factory=list)
     workspace_dir: Optional[Path] = None
-
-
-class SandboxToolDeniedError(RuntimeError):
-    """Raised when a host-exec tool is refused because the agent runs sandboxed
-    (see the deny_when_sandboxed decorator)."""
 
 
 def set_sandbox_context(ctx: Optional["SandboxContext"]) -> contextvars.Token:

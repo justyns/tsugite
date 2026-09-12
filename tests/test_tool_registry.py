@@ -128,15 +128,15 @@ def test_call_tool_missing_required_param(reset_tool_registry):
         call_tool("requires_param")
 
 
-def test_call_tool_runtime_error(reset_tool_registry):
-    """Test tool that raises an exception during execution."""
+def test_call_tool_propagates_the_tools_exception(reset_tool_registry):
+    """call_tool adds no prefix to the tool's message."""
 
     @tool
     def failing_tool() -> str:
         """A tool that always fails."""
-        raise RuntimeError("Something went wrong")
+        raise LookupError("Something went wrong")
 
-    with pytest.raises(RuntimeError, match="Tool 'failing_tool' failed to execute: Something went wrong"):
+    with pytest.raises(LookupError, match="^Something went wrong$"):
         call_tool("failing_tool")
 
 

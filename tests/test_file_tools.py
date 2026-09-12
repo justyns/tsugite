@@ -41,7 +41,7 @@ def test_read_nonexistent_file(temp_dir, file_tools):
 
     nonexistent = temp_dir / "nonexistent.txt"
 
-    with pytest.raises(RuntimeError, match="Tool 'read_file' failed"):
+    with pytest.raises(FileNotFoundError, match="File not found"):
         call_tool("read_file", path=str(nonexistent))
 
 
@@ -51,7 +51,7 @@ def test_read_directory_as_file(temp_dir, file_tools):
     directory = temp_dir / "subdir"
     directory.mkdir()
 
-    with pytest.raises(RuntimeError, match="Tool 'read_file' failed"):
+    with pytest.raises(IsADirectoryError, match="Path is a directory"):
         call_tool("read_file", path=str(directory))
 
 
@@ -64,7 +64,7 @@ def test_write_file_error_handling(temp_dir, file_tools):
     blocker = temp_dir / "not-a-dir"
     blocker.write_text("i am a file")
 
-    with pytest.raises(RuntimeError, match="Tool 'write_file' failed"):
+    with pytest.raises(NotADirectoryError, match="Not a directory"):
         call_tool("write_file", path=str(blocker / "sub" / "file.txt"), content="test")
 
 
@@ -120,7 +120,7 @@ def test_list_files_nonexistent_directory(temp_dir, file_tools):
 
     nonexistent = temp_dir / "nonexistent"
 
-    with pytest.raises(RuntimeError, match="Tool 'list_files' failed"):
+    with pytest.raises(FileNotFoundError, match="Directory not found"):
         call_tool("list_files", path=str(nonexistent))
 
 
@@ -130,7 +130,7 @@ def test_list_files_file_as_directory(temp_dir, file_tools):
     test_file = temp_dir / "test.txt"
     test_file.write_text("content")
 
-    with pytest.raises(RuntimeError, match="Tool 'list_files' failed"):
+    with pytest.raises(NotADirectoryError, match="Path is not a directory"):
         call_tool("list_files", path=str(test_file))
 
 
@@ -209,7 +209,7 @@ def test_create_directory_error(temp_dir, file_tools):
     blocker = temp_dir / "not-a-dir"
     blocker.write_text("i am a file")
 
-    with pytest.raises(RuntimeError, match="Tool 'create_directory' failed"):
+    with pytest.raises(RuntimeError, match="Failed to create directory"):
         call_tool("create_directory", path=str(blocker / "sub"))
 
 
@@ -344,7 +344,7 @@ def test_read_file_invalid_range(temp_dir, file_tools):
     test_file = temp_dir / "lines.txt"
     test_file.write_text("Line 1\nLine 2")
 
-    with pytest.raises(RuntimeError, match="end_line.*must be"):
+    with pytest.raises(ValueError, match="end_line.*must be"):
         call_tool("read_file", path=str(test_file), start_line=5, end_line=2)
 
 
@@ -753,7 +753,7 @@ def test_edit_file_batch_empty_edits(temp_dir, file_tools):
     test_file = temp_dir / "multiedit.txt"
     test_file.write_text("Hello")
 
-    with pytest.raises(RuntimeError, match="cannot be empty"):
+    with pytest.raises(ValueError, match="cannot be empty"):
         call_tool("edit_file", path=str(test_file), edits=[])
 
 
@@ -764,7 +764,7 @@ def test_edit_file_batch_missing_fields(temp_dir, file_tools):
 
     edits = [{"old_string": "Hello"}]  # Missing new_string
 
-    with pytest.raises(RuntimeError, match="missing required"):
+    with pytest.raises(ValueError, match="missing required"):
         call_tool("edit_file", path=str(test_file), edits=edits)
 
 
@@ -774,7 +774,7 @@ def test_edit_file_conflicting_parameters(temp_dir, file_tools):
     test_file.write_text("Hello World")
 
     # Both single and batch mode parameters
-    with pytest.raises(RuntimeError, match="Provide either old_string/new_string OR edits"):
+    with pytest.raises(ValueError, match="Provide either old_string/new_string OR edits"):
         call_tool(
             "edit_file",
             path=str(test_file),
@@ -790,11 +790,11 @@ def test_edit_file_missing_parameters(temp_dir, file_tools):
     test_file.write_text("Hello World")
 
     # No mode parameters
-    with pytest.raises(RuntimeError, match="Must provide either"):
+    with pytest.raises(ValueError, match="Must provide either"):
         call_tool("edit_file", path=str(test_file))
 
     # old_string without new_string
-    with pytest.raises(RuntimeError, match="new_string is required"):
+    with pytest.raises(ValueError, match="new_string is required"):
         call_tool("edit_file", path=str(test_file), old_string="Hello")
 
 

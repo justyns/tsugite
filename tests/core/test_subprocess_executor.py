@@ -552,3 +552,65 @@ async def test_content_block_cannot_shadow_a_tool():
         assert "hello doc" in second.output
     finally:
         executor.cleanup()
+
+
+class WeirdError(Exception):
+    """The executor child cannot import this class."""
+
+
+@pytest.mark.asyncio
+async def test_parent_only_tool_keeps_its_exception_type():
+    """Code in the child catches the tool's ValueError by type."""
+
+    def boom() -> str:
+        raise ValueError("bad arg")
+
+    tool = _make_tool("boom", boom, parent_only=True)
+    executor = SubprocessExecutor(event_bus=EventBus())
+    executor.set_tools([tool], EventBus())
+    try:
+        caught = await executor.execute(
+            "try:\n    boom()\nexcept ValueError as e:\n    print('caught', type(e).__name__, e)"
+        )
+        assert caught.error is None, caught.error
+        assert "caught ValueError bad arg" in caught.output
+
+        result = await executor.execute("boom()")
+        assert result.error == "ValueError: bad arg"
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_parent_only_tool_keeps_a_tsugite_exception_type():
+    """Exception classes from tsugite.exceptions resolve in the child too."""
+    from tsugite.exceptions import SandboxToolDeniedError
+
+    def denied() -> str:
+        raise SandboxToolDeniedError("denied() is not available while this agent runs sandboxed")
+
+    tool = _make_tool("denied", denied, parent_only=True)
+    executor = SubprocessExecutor(event_bus=EventBus())
+    executor.set_tools([tool], EventBus())
+    try:
+        result = await executor.execute("denied()")
+        assert result.error == "SandboxToolDeniedError: denied() is not available while this agent runs sandboxed"
+    finally:
+        executor.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_exception_type_degrades_to_runtime_error():
+    """An exception class the child cannot import keeps its name in the message."""
+
+    def odd() -> str:
+        raise WeirdError("something odd")
+
+    tool = _make_tool("odd", odd, parent_only=True)
+    executor = SubprocessExecutor(event_bus=EventBus())
+    executor.set_tools([tool], EventBus())
+    try:
+        result = await executor.execute("odd()")
+        assert result.error == "RuntimeError: WeirdError: something odd"
+    finally:
+        executor.cleanup()
