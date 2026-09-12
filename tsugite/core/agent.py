@@ -394,6 +394,8 @@ class TsugiteAgent:
         # cost data at all" (interrupted turn) - only the latter records NULL.
         self.cost_reported = False
         self.total_tokens = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
         self.last_input_tokens = 0
         self.cache_creation_tokens = 0
         self.cache_read_tokens = 0
@@ -1333,6 +1335,8 @@ class TsugiteAgent:
             return cost or 0.0
 
         self.total_tokens += usage.total_tokens
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
         self.last_input_tokens = (
             usage.prompt_tokens + (usage.cache_creation_input_tokens or 0) + (usage.cache_read_input_tokens or 0)
         )

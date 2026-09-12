@@ -5,7 +5,6 @@ schedule pinned to an agent file bills against that file's model. Otherwise the
 Usage tab attributes one provider's spend to another.
 """
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,6 +13,7 @@ from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
 from tsugite.exceptions import AgentExecutionError
+from tsugite.providers.base import Usage
 
 AGENT_MODEL = "codex_cli:gpt-5.5"
 SESSION_MODEL = "anthropic:claude-opus-4"
@@ -40,7 +40,18 @@ def history_calls(monkeypatch):
 
 
 @pytest.fixture
-def adapter(tmp_path, monkeypatch, history_calls):
+def fake_model(monkeypatch):
+    """Faked model call that still reports usage through `_accumulate_usage`."""
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        self._accumulate_usage(Usage(prompt_tokens=1000, completion_tokens=234, total_tokens=1234), cost=4.25)
+        return "OUT"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+
+@pytest.fixture
+def adapter(tmp_path, monkeypatch, history_calls, fake_model):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     agent_file = workspace / "agent.md"
@@ -52,10 +63,6 @@ def adapter(tmp_path, monkeypatch, history_calls):
     monkeypatch.setattr(adapter, "_build_message_context", lambda message, *a, **kw: message)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "tsugite_daemon.adapters.base.run_agent",
-        lambda *a, **kw: SimpleNamespace(token_count=1234, cost=4.25, provider_state={}),
-    )
     return adapter
 
 
@@ -166,14 +173,8 @@ def pinned_adapter(tmp_path, monkeypatch, history_calls):
     ],
 )
 async def test_turn_pinned_to_an_agent_file_runs_on_that_file_model(
-    pinned_adapter, monkeypatch, source, session_override, pin_agent, expected
+    pinned_adapter, fake_model, monkeypatch, source, session_override, pin_agent, expected
 ):
-    runs = []
-    monkeypatch.setattr(
-        "tsugite_daemon.adapters.base.run_agent",
-        lambda *a, **kw: runs.append(kw) or SimpleNamespace(token_count=1234, cost=4.25, provider_state={}),
-    )
-
     opened = {}
     monkeypatch.setattr(
         "tsugite.agent_runner.history_integration.open_or_create_session",
@@ -193,7 +194,8 @@ async def test_turn_pinned_to_an_agent_file_runs_on_that_file_model(
     assert row["model"] == expected
     assert row["source"] == source
     assert opened["model"] == expected
-    assert runs[0]["exec_options"].model_override == expected
+    assert row["agent"] == ("pinned-agent" if pin_agent else "default-agent")
+    assert row["schedule_name"] == ("nightly" if source == "scheduler" else None)
 
 
 @pytest.mark.asyncio

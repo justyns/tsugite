@@ -1058,29 +1058,6 @@ class BaseAdapter(ABC):
         self.session_store.update_token_count(conv_id, context_tokens)
 
         try:
-            from tsugite.usage import get_usage_store
-
-            get_usage_store().record(
-                session_id=conv_id,
-                agent=self.agent_label,
-                model=turn_model,
-                source=channel_context.source if channel_context else "daemon",
-                schedule_name=(channel_context.metadata or {}).get("schedule_id") if channel_context else None,
-                total_tokens=result.token_count or 0,
-                cost_usd=result.cost,
-                duration_ms=getattr(result, "duration_ms", None),
-                # The agent's accumulated cache totals (carried on the result) are
-                # the uniform source - they count OpenAI-family cached reads too,
-                # which provider_state (get_state) omits. Fall back to provider_state
-                # only when the result carries none (older/non-AgentResult paths).
-                cache_creation_tokens=getattr(result, "cache_creation_tokens", None)
-                or ps.get("cache_creation_tokens", 0),
-                cache_read_tokens=getattr(result, "cache_read_tokens", None) or ps.get("cache_read_tokens", 0),
-            )
-        except Exception as e:
-            logger.debug("Failed to record usage: %s", e)
-
-        try:
             session = self.session_store.get_session(conv_id)
             if session and session.message_count <= 1 and not session.title:
                 asyncio.create_task(self._auto_title_session(conv_id, message, str(result)))

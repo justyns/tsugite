@@ -646,10 +646,15 @@ async def _execute_agent_with_prompt(
         try:
             from tsugite.usage import get_usage_store
 
+            meta = channel_metadata or {}
             get_usage_store().record(
+                session_id=continue_conversation_id,
                 agent=prepared.agent_config.name,
                 model=model_string,
-                source="cli",
+                source=meta.get("source") or "cli",
+                schedule_name=meta.get("schedule_id"),
+                input_tokens=agent.prompt_tokens,
+                output_tokens=agent.completion_tokens,
                 total_tokens=agent.total_tokens,
                 cost_usd=agent.reported_cost,
                 cache_creation_tokens=agent.cache_creation_tokens,

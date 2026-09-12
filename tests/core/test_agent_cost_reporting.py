@@ -11,6 +11,8 @@ from tsugite.providers.base import Usage
 def _bare_agent() -> TsugiteAgent:
     a = object.__new__(TsugiteAgent)
     a.total_tokens = 0
+    a.prompt_tokens = 0
+    a.completion_tokens = 0
     a.total_cost = 0.0
     a.cost_reported = False
     a.last_input_tokens = 0
