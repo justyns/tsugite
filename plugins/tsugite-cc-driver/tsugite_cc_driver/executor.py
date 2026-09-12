@@ -18,6 +18,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import tempfile
 import threading
 import time
@@ -89,6 +90,51 @@ _ACTIVITY_THROTTLE_SECONDS = 10.0
 
 # ANSI escape sequences (CSI colors/cursor, OSC title) to strip from a captured tail.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+# Both are stamped on the driven claude and inherited by every descendant, setsid or
+# not. The reaper matches on the token, which nothing shows a user.
+_JOB_ID_ENV = "TSUGITE_JOB_ID"
+_JOB_TOKEN_ENV = "TSUGITE_JOB_TOKEN"
+_REAP_GRACE_SECONDS = 2.0
+
+
+def reap_job_processes(token: str) -> list[int]:
+    """SIGTERM then SIGKILL every live process whose environ carries this job's token.
+
+    Returns the pids signalled. Linux only.
+    """
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return []
+    marker = f"{_JOB_TOKEN_ENV}={token}".encode()
+    own_pid = os.getpid()
+    pids = []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == own_pid:
+            continue
+        try:
+            environ = (entry / "environ").read_bytes()
+        except OSError:
+            continue
+        if marker in environ.split(b"\0"):
+            pids.append(pid)
+    if not pids:
+        return []
+
+    def signal_all(sig) -> None:
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+
+    signal_all(signal.SIGTERM)
+    time.sleep(_REAP_GRACE_SECONDS)
+    signal_all(signal.SIGKILL)
+    return pids
 
 
 def describe_exit(exit_code) -> str:
@@ -448,6 +494,7 @@ class CCExecutor:
                 manager=pty_manager,
                 cmd=cmd,
                 cwd=cwd,
+                env={_JOB_ID_ENV: job.id, _JOB_TOKEN_ENV: state.token},
                 parent_session_id=None,
                 on_state_change=on_state_change,
                 sandbox_ctx=build_sandbox_ctx(
@@ -506,6 +553,13 @@ class CCExecutor:
                 except Exception:
                     logger.exception("cc-driver: failed to kill PTY for job '%s'", job.id)
             state.terminal_id = None
+        if state is not None:
+            try:
+                reaped = await asyncio.to_thread(reap_job_processes, state.token)
+                if reaped:
+                    logger.info("cc-driver: reaped detached processes for job '%s': %s", job.id, reaped)
+            except Exception:
+                logger.exception("cc-driver: failed to reap detached processes for job '%s'", job.id)
         if getattr(job, "state", None) in ("stuck", "errored"):
             return
         cleanup(self.config.state_dir, job.id)

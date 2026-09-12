@@ -6,7 +6,11 @@ script - no real claude, no network.
 
 import asyncio
 import json
+import os
 import shlex
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -19,6 +23,7 @@ from tsugite_cc_driver.executor import (
     build_sandbox_ctx,
     ensure_workspace_trusted,
     is_workspace_trusted,
+    reap_job_processes,
     trust_provision_target,
 )
 from tsugite_cc_driver.settings import build_settings, write_run_settings
@@ -939,5 +944,171 @@ async def test_spawn_stamps_liveness_before_any_output(tmp_path, runtime, monkey
 
     assert job.last_activity_at is not None, "spawning the worker must stamp the job record"
     assert orch.activity == ["job-1"]
+
+    manager.kill(ex.drive_state.get("job-1").terminal_id)
+
+
+# ── detached-descendant reaping ──
+
+
+def _alive(pid: int) -> bool:
+    """A zombie is dead for our purposes: it only awaits a wait() from a parent we do not control."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def _detached_sleeper(token: str) -> subprocess.Popen:
+    """A sleeper in its own session (what `setsid` buys a worker's helper) carrying a job token."""
+    return subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+        env={**os.environ, "TSUGITE_JOB_TOKEN": token},
+    )
+
+
+def test_reap_job_processes_kills_the_marked_session_and_spares_another_job(monkeypatch):
+    monkeypatch.setattr(executor_mod, "_REAP_GRACE_SECONDS", 0.2)
+    marked = _detached_sleeper("tok-reap-a")
+    other = _detached_sleeper("tok-reap-b")
+    try:
+        assert os.getpgid(marked.pid) != os.getpgid(os.getpid()), "the sleeper must be outside our process group"
+
+        reaped = reap_job_processes("tok-reap-a")
+
+        assert marked.pid in reaped, f"the marked process must be reaped, reaped {reaped}"
+        marked.wait(timeout=5)
+        assert other.poll() is None, "a process carrying another job's token must be left alone"
+    finally:
+        for p in (marked, other):
+            p.kill()
+            p.wait(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaps_a_descendant_the_worker_detached_with_setsid(tmp_path, runtime, monkeypatch):
+    """The reported leak: a helper that left the PTY's process group survives the group kill."""
+    manager, store = runtime
+    monkeypatch.setattr(executor_mod, "_REAP_GRACE_SECONDS", 0.2)
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    orch._jobs.add(job)
+
+    config_dir = tmp_path / "cfgdir"
+    _write_trust_config(config_dir, workspace)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    pid_file = tmp_path / "detached.pid"
+    helper = tmp_path / "detach.py"
+    helper.write_text(
+        f"import os, time\nos.setsid()\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)\n"
+    )
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!/bin/sh\n{sys.executable} {helper} &\nsleep 60\n")
+    fake.chmod(0o755)
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+    assert await _wait_until(lambda: pid_file.read_text().strip() if pid_file.exists() else ""), (
+        "the fake worker must detach its helper"
+    )
+    detached = int(pid_file.read_text().strip())
+    terminal_pid = manager.get(ex.drive_state.get("job-1").terminal_id).pid
+    try:
+        assert os.getpgid(detached) != os.getpgid(terminal_pid), "the helper must have escaped the PTY's group"
+
+        await ex.cancel(job)
+
+        assert await _wait_until(lambda: not _alive(detached), timeout=5.0), (
+            "the detached helper must not outlive the job"
+        )
+    finally:
+        try:
+            os.kill(detached, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_cancel_spares_a_process_that_only_exports_the_job_id(tmp_path, runtime, monkeypatch):
+    """A shell that exported the job's id for debugging is not the job's process tree."""
+    monkeypatch.setattr(executor_mod, "_REAP_GRACE_SECONDS", 0.2)
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    ex = _executor(tmp_path, orch)
+    ex.drive_state.create("job-1", "tok-1")
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+        env={**os.environ, "TSUGITE_JOB_ID": "job-1"},
+    )
+    try:
+        await ex.cancel(job)
+        await asyncio.sleep(0.5)
+        assert _alive(bystander.pid), "a process carrying only the job id must be left alone"
+    finally:
+        bystander.kill()
+        bystander.wait(timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["running", "stuck"])
+async def test_cancel_reaps_by_token_on_every_finalize(tmp_path, runtime, monkeypatch, state):
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    job = FakeJob("job-1", workspace_path=str(tmp_path))
+    job.state = state
+    ex = _executor(tmp_path, orch)
+
+    session = spawn_terminal(store=store, manager=manager, cmd="sleep 30", cwd=str(tmp_path), sandbox_ctx=None)
+    st = ex.drive_state.create("job-1", "tok-1")
+    st.terminal_id = session.id
+
+    reaped = []
+    monkeypatch.setattr(executor_mod, "reap_job_processes", lambda token: reaped.append(token) or [])
+
+    await ex.cancel(job)
+
+    assert reaped == ["tok-1"], f"a {state} finalize must reap the job's detached processes"
+
+
+@pytest.mark.asyncio
+async def test_spawn_marks_the_worker_environment_with_the_job_token(tmp_path, runtime, monkeypatch):
+    """The reaper matches on the token every descendant inherits, setsid or not."""
+    manager, store = runtime
+    orch = FakeOrchestrator()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    job = FakeJob("job-1", workspace_path=str(workspace))
+    orch._jobs.add(job)
+
+    config_dir = tmp_path / "cfgdir"
+    _write_trust_config(config_dir, workspace)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    captured = {}
+    import tsugite_pty.terminal_runtime as tr_mod
+
+    real_spawn = tr_mod.spawn_terminal
+
+    def spy_spawn(**kwargs):
+        captured["env"] = kwargs.get("env")
+        return real_spawn(**kwargs)
+
+    monkeypatch.setattr(tr_mod, "spawn_terminal", spy_spawn)
+
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    ex = _executor(tmp_path, orch, claude_binary=str(fake), sandbox=False)
+
+    await ex.start(job, followup=None)
+
+    assert captured["env"]["TSUGITE_JOB_ID"] == "job-1"
+    assert captured["env"]["TSUGITE_JOB_TOKEN"] == ex.drive_state.get("job-1").token
 
     manager.kill(ex.drive_state.get("job-1").terminal_id)
