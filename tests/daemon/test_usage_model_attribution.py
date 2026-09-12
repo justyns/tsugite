@@ -1,7 +1,8 @@
 """Usage rows must record the model the turn actually ran on.
 
-A session running under `/model` bills against the override; otherwise the Usage
-tab attributes one provider's spend to another.
+A session running under `/model` bills against the override. A session or
+schedule pinned to an agent file bills against that file's model. Otherwise the
+Usage tab attributes one provider's spend to another.
 """
 
 from types import SimpleNamespace
@@ -58,7 +59,9 @@ def adapter(tmp_path, monkeypatch, history_calls):
     return adapter
 
 
-async def _run_turn(adapter, monkeypatch, *, session_override=None, turn_override=None) -> dict:
+async def _run_turn(
+    adapter, monkeypatch, *, session_override=None, turn_override=None, source="http", metadata=None
+) -> dict:
     """Drive one full turn, returning the kwargs it recorded to the usage store."""
     captured = {}
     store = MagicMock()
@@ -69,15 +72,19 @@ async def _run_turn(adapter, monkeypatch, *, session_override=None, turn_overrid
     if session_override:
         adapter.session_store.set_model_override(session.id, session_override)
 
+    meta = dict(metadata or {})
+    if turn_override:
+        meta["model_override"] = turn_override
+
     await adapter.handle_message(
         user_id="alice",
         message="hi",
         channel_context=ChannelContext(
-            source="http",
+            source=source,
             channel_id=None,
             user_id="alice",
             reply_to="http:alice",
-            metadata={"model_override": turn_override} if turn_override else {},
+            metadata=meta,
         ),
     )
     return captured
@@ -127,3 +134,78 @@ async def test_history_session_opens_on_the_override_too(adapter, monkeypatch):
     await _run_turn(adapter, monkeypatch, session_override=SESSION_MODEL)
 
     assert opened["model"] == SESSION_MODEL
+
+
+PINNED_AGENT_MODEL = "ollama:pinned-agent-model"
+
+
+@pytest.fixture
+def pinned_adapter(tmp_path, monkeypatch, history_calls):
+    """Adapter with no daemon-wide model and two agent files pinning different models."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "default.md").write_text(f"---\nname: default-agent\nmodel: {AGENT_MODEL}\n---\n\nHi.\n")
+    (workspace / "pinned.md").write_text(f"---\nname: pinned-agent\nmodel: {PINNED_AGENT_MODEL}\n---\n\nHi.\n")
+    runtime = RuntimeDefaults(workspace_dir=workspace, agent_file=str(workspace / "default.md"), model=None)
+    adapter = _StubAdapter(runtime, SessionStore(tmp_path / "store.json"))
+
+    monkeypatch.setattr(adapter, "_build_message_context", lambda message, *a, **kw: message)
+    monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
+    monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)
+    return adapter
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source,session_override,pin_agent,expected",
+    [
+        pytest.param("http", None, True, PINNED_AGENT_MODEL, id="session-pinned-to-agent-file"),
+        pytest.param("http", SESSION_MODEL, True, SESSION_MODEL, id="model-command-beats-agent-file"),
+        pytest.param("http", None, False, AGENT_MODEL, id="no-pin-bills-default-agent"),
+        pytest.param("scheduler", None, True, PINNED_AGENT_MODEL, id="schedule-pinned-to-agent-file"),
+    ],
+)
+async def test_turn_pinned_to_an_agent_file_runs_on_that_file_model(
+    pinned_adapter, monkeypatch, source, session_override, pin_agent, expected
+):
+    runs = []
+    monkeypatch.setattr(
+        "tsugite_daemon.adapters.base.run_agent",
+        lambda *a, **kw: runs.append(kw) or SimpleNamespace(token_count=1234, cost=4.25, provider_state={}),
+    )
+
+    opened = {}
+    monkeypatch.setattr(
+        "tsugite.agent_runner.history_integration.open_or_create_session",
+        lambda **kw: opened.update(kw) or None,
+    )
+
+    metadata = {}
+    if pin_agent:
+        metadata["agent_file_override"] = str(pinned_adapter.runtime.workspace_dir / "pinned.md")
+    if source == "scheduler":
+        metadata["schedule_id"] = "nightly"
+
+    row = await _run_turn(
+        pinned_adapter, monkeypatch, session_override=session_override, source=source, metadata=metadata
+    )
+
+    assert row["model"] == expected
+    assert row["source"] == source
+    assert opened["model"] == expected
+    assert runs[0]["exec_options"].model_override == expected
+
+
+@pytest.mark.asyncio
+async def test_turn_with_no_model_configured_reports_no_model_specified(pinned_adapter, monkeypatch):
+    """The runner raises its own error when no model is configured anywhere.
+
+    "unknown" is only resolve_model's display sentinel. The agent opts out of inheritance so
+    it picks up no model from the workspace default.
+    """
+    bare_agent = pinned_adapter.runtime.workspace_dir / "bare.md"
+    bare_agent.write_text("---\nname: bare-agent\nextends: none\n---\n\nHi.\n")
+    pinned_adapter.runtime.agent_file = str(bare_agent)
+
+    with pytest.raises(RuntimeError, match="No model specified"):
+        await _run_turn(pinned_adapter, monkeypatch)

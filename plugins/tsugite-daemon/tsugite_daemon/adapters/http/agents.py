@@ -956,7 +956,7 @@ class AgentsMixin:
                             "context_limit": adapter.session_store.get_session_context_limit(target_session_id),
                             "threshold": adapter.session_store.get_session_compaction_threshold(target_session_id),
                             "message_count": refreshed.message_count,
-                            "model": adapter.resolve_model(),
+                            "model": adapter.resolve_session_model(target_session_id),
                             "attachments": [a.name for a in adapter._get_all_attachments()],
                         },
                     )

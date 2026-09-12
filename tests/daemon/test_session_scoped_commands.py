@@ -18,6 +18,7 @@ def _adapter(tmp_path):
     adapter.resolve_model.return_value = "claude_code:haiku"
     # Exercise the real per-session resolver (override wins, else agent default)
     # rather than the mock's auto-stub.
+    adapter.resolve_turn_model.side_effect = lambda sid: BaseAdapter.resolve_turn_model(adapter, sid)
     adapter.resolve_session_model.side_effect = lambda sid: BaseAdapter.resolve_session_model(adapter, sid)
     return adapter, store
 

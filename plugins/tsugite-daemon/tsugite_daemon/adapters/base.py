@@ -403,7 +403,7 @@ class BaseAdapter(ABC):
             self._workspace,
         )
 
-    def resolve_model(self) -> str:
+    def resolve_model(self, agent_path: Optional[Path] = None) -> str:
         """Resolve the effective model name, returning 'unknown' on failure.
 
         Checks: daemon config model -> agent file model -> global config default.
@@ -412,7 +412,7 @@ class BaseAdapter(ABC):
 
         agent_model = self.runtime.model
         if not agent_model:
-            agent_path = self._resolve_agent_path()
+            agent_path = agent_path or self._resolve_agent_path()
             if agent_path:
                 try:
                     from tsugite.md_agents import parse_agent_file
@@ -424,6 +424,25 @@ class BaseAdapter(ABC):
 
         return resolve_effective_model(agent_model=agent_model) or "unknown"
 
+    def resolve_turn_model(
+        self,
+        session_id: Optional[str],
+        metadata: Optional[Dict[str, Any]] = None,
+        agent_path: Optional[Path] = None,
+    ) -> str:
+        """Resolve the model one turn runs under.
+
+        Checks: per-run model_override -> session /model override -> the turn's own
+        agent file -> the agent/daemon default (:meth:`resolve_model`).
+        """
+        meta = metadata or {}
+        override = meta.get("model_override")
+        if not override and session_id:
+            override = self.session_store.get_model_override(session_id)
+        if override:
+            return override
+        return self.resolve_model(agent_path)
+
     def resolve_session_model(self, session_id: Optional[str]) -> str:
         """Resolve the effective model for a session, honoring a per-session override.
 
@@ -431,11 +450,7 @@ class BaseAdapter(ABC):
         session is given or the session has no model override. This is the canonical
         resolution shared by adapter commands (e.g. /status) and the HTTP layer.
         """
-        if session_id:
-            override = self.session_store.get_model_override(session_id)
-            if override:
-                return override
-        return self.resolve_model()
+        return self.resolve_turn_model(session_id)
 
     def session_effort_levels(self, session_id: Optional[str]) -> Optional[list[str]]:
         """Reasoning-effort levels supported by the session's resolved model, or
@@ -855,8 +870,7 @@ class BaseAdapter(ABC):
 
         client_context = _build_client_context_block(client_items)
         recorded_message = f"{client_context}\n\n{message}" if client_context else message
-        # /model switches a live session, so bill the override, not the agent default.
-        turn_model = (channel_context.metadata or {}).get("model_override") or self.resolve_session_model(conv_id)
+        turn_model = self.resolve_turn_model(conv_id, channel_context.metadata, agent_path)
         opened_history = False
         try:
             from tsugite.agent_runner.history_integration import open_or_create_session, record_user_input
@@ -941,9 +955,8 @@ class BaseAdapter(ABC):
 
             meta = channel_context.metadata or {}
             effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(conv_id)
-            model_override = (
-                meta.get("model_override") or self.session_store.get_model_override(conv_id) or self.runtime.model
-            )
+            # "unknown" is resolve_model's display sentinel, not a model string.
+            model_override = None if turn_model == "unknown" else turn_model
             return run_agent(
                 agent_path=agent_path,
                 prompt=enriched_prompt,
@@ -1284,7 +1297,7 @@ class BaseAdapter(ABC):
             walk_model_ladder,
         )
 
-        resolved_model = self.resolve_model()
+        resolved_model = self.resolve_session_model(session_id)
         ladder = compaction_model_ladder(self.runtime.compaction_model, resolved_model)
         model = ladder[0]
 
@@ -1452,7 +1465,7 @@ class BaseAdapter(ABC):
         new_session = self.session_store.compact_session(session_id)
         new_storage = backend.create(
             agent_name=self.agent_label,
-            model=new_session.model_override or resolved_model,
+            model=resolved_model,
             parent_session=old_conv_id,
             session_id=new_session.id,
         )
