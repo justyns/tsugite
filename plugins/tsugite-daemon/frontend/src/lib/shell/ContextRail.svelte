@@ -3,7 +3,7 @@
   // header carries the active workspace view's title + the collapse control; its
   // body swaps between the sessions / terminals / files rails. Collapsing hides the
   // whole rail (the work-shell drops to a single column and shows the expand strip
-  // in the work-main), so the expand affordance lives in App, not here.
+  // in the work-main), so the expand affordance lives in CollapsedRail, not here.
   import Icon from '$lib/components/icon/Icon.svelte';
   import type { WorkspaceView } from '$lib/stores/shellView.svelte';
   import ChatsRail from '../../views/chats/ChatsRail.svelte';
@@ -13,6 +13,7 @@
   let {
     view,
     onCollapse,
+    peeking = false,
     focusedSessionId,
     focusedTerminalId,
     focusedFilePath,
@@ -23,6 +24,8 @@
   }: {
     view: WorkspaceView;
     onCollapse: () => void;
+    /** Rendered inside a hover peek, where the control pins the rail open. */
+    peeking?: boolean;
     focusedSessionId: string | null;
     focusedTerminalId: string | null;
     focusedFilePath: string | null;
@@ -48,7 +51,8 @@
       type="button"
       class="railc"
       data-act="rail-collapse"
-      aria-label="Collapse sidebar"
+      aria-label={peeking ? 'Expand sidebar' : 'Collapse sidebar'}
+      title={peeking ? 'Expand sidebar' : 'Collapse sidebar'}
       onclick={onCollapse}
     >
       <Icon name="chev-r" />

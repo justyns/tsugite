@@ -11,12 +11,12 @@
   // exactly as it was (its layout is never touched while a full view shows).
   import { untrack } from 'svelte';
   import { TESTID } from '$lib/testids';
-  import Icon from '$lib/components/icon/Icon.svelte';
   import { auth } from '$lib/stores/auth.svelte';
   import { conn } from '$lib/stores/conn.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { spaces } from '$lib/stores/spaces.svelte';
   import { shellView } from '$lib/stores/shellView.svelte';
+  import { railPeek } from '$lib/stores/railPeek.svelte';
   import { router, initRouter, navigate } from '$lib/router.svelte';
   import { connectEvents, type SSEEvent } from '$lib/api/sse';
   import { routeShellEvent, type ShellEventSink } from '$lib/api/events';
@@ -67,6 +67,7 @@
   import TopBar from '$lib/shell/TopBar.svelte';
   import NavRail from '$lib/shell/NavRail.svelte';
   import ContextRail from '$lib/shell/ContextRail.svelte';
+  import CollapsedRail from '$lib/shell/CollapsedRail.svelte';
   import TokenPane from '$lib/shell/TokenPane.svelte';
   import SettingsDrawer from '$lib/shell/SettingsDrawer.svelte';
   import Mux from '$lib/shell/mux/Mux.svelte';
@@ -98,6 +99,30 @@
     m.addEventListener('change', sync);
     return () => m.removeEventListener('change', sync);
   });
+
+  // Hover-to-peek is a desktop mouse affordance. A coarse pointer taps, and the
+  // phone shell drills down rather than collapsing.
+  $effect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const m = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const sync = () => {
+      railPeek.hoverable = m.matches && !narrow;
+      if (!railPeek.hoverable) railPeek.close();
+    };
+    sync();
+    m.addEventListener('change', sync);
+    return () => m.removeEventListener('change', sync);
+  });
+
+  function pinRail(): void {
+    railPeek.close();
+    shellView.toggleRail();
+  }
+
+  function pinNav(): void {
+    railPeek.close();
+    shellView.toggleNav();
+  }
 
   // Phone drilldown screen for the active workspace view: 'list' (no content param
   // in the hash) or 'content' (a rail pick / deep link set it); null on desktop,
@@ -437,6 +462,7 @@
       if (paletteOpen) paletteOpen = false;
       else if (settingsOpen) settingsOpen = false;
       else if (helpOpen) helpOpen = false;
+      else if (railPeek.open) railPeek.close();
       return;
     }
     const action = resolveShellShortcut({
@@ -481,9 +507,12 @@
         activeId={shellView.activeViewId}
         badges={navBadges}
         collapsed={shellView.navCollapsed}
+        peeking={railPeek.open === 'nav'}
         {narrow}
         onActivate={openView}
-        onToggleCollapsed={() => shellView.toggleNav()}
+        onToggleCollapsed={pinNav}
+        onHoverStart={() => railPeek.enter('nav')}
+        onHoverEnd={() => railPeek.leave()}
         onOpenSettings={() => (settingsOpen = true)}
         {keystripCost}
         {keystripTokens}
@@ -503,20 +532,24 @@
             class:phone-content={phoneScreen === 'content'}
           >
             {#if railCollapsed && !narrow}
-              <button
-                type="button"
-                class="rail-expand"
-                data-act="rail-collapse"
-                aria-label="Show sidebar"
-                title="Show sidebar"
-                onclick={() => shellView.toggleRail()}
-              >
-                <Icon name="chev-r" />
-              </button>
+              <CollapsedRail
+                view={shellView.workspaceView}
+                peeking={railPeek.open === 'rail'}
+                onHoverStart={() => railPeek.enter('rail')}
+                onHoverEnd={() => railPeek.leave()}
+                onPin={pinRail}
+                {focusedSessionId}
+                {focusedTerminalId}
+                {focusedFilePath}
+                onOpenChat={selectChat}
+                onOpenTerminal={selectTerminal}
+                onOpenFile={selectFile}
+                onPinFile={pinFilePreview}
+              />
             {:else}
               <ContextRail
                 view={shellView.workspaceView}
-                onCollapse={() => shellView.toggleRail()}
+                onCollapse={pinRail}
                 {focusedSessionId}
                 {focusedTerminalId}
                 {focusedFilePath}
@@ -660,32 +693,6 @@
   }
   .work-shell.rail-collapsed .work-main {
     margin-left: 20px;
-  }
-  /* Thin expand strip shown while the rail is collapsed. */
-  .rail-expand {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: 20px;
-    z-index: 25;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg1);
-    border: 0;
-    border-right: 1px solid var(--bd1);
-    color: var(--tx3);
-    cursor: pointer;
-    padding: 0;
-  }
-  .rail-expand:hover {
-    color: var(--acc);
-    background: var(--bg2);
-  }
-  .rail-expand :global(.ic) {
-    width: 13px;
-    height: 13px;
   }
   /* Narrow: the nav rail becomes a bottom bar under the view, and every workspace
      view drills down. The list screen's rail fills the

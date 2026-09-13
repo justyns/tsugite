@@ -11,11 +11,15 @@ export const TESTID = {
   navTab: (view: string) => `nav-${view}`,
   view: (view: string) => `view-${view}`,
   gallery: 'gallery',
-  // Shell chrome
+  // App shell
   topbar: 'topbar',
   themeSwitch: 'theme-switch',
   paletteTrigger: 'palette-trigger',
   keystrip: 'keystrip',
+  /** Thin strip shown in place of a collapsed context rail. */
+  railExpand: 'rail-expand',
+  /** Overlay panel a hovered collapsed rail peeks open. */
+  railPeek: 'rail-peek',
   /** Spaces switcher in the top bar; its chips are selected by accessible name. */
   spaceBar: 'space-bar',
   /** Rail-footer settings entry; the top bar's phone-width one is separate,

@@ -3,7 +3,8 @@
   // View rows driven by the registry, settings + usage + conn pinned at the
   // bottom via KeyStrip. Collapses to an icons-only rail (labels hidden, glyphs
   // keep their accessible name + a tooltip); on narrow viewports it reflows to a
-  // bottom bar instead.
+  // bottom bar instead. Hovering it while collapsed peeks the labelled rail open
+  // over the workspace.
   import type { ViewDef } from '../../views';
   import Icon from '$lib/components/icon/Icon.svelte';
   import NavItem from './NavItem.svelte';
@@ -17,8 +18,11 @@
     badges = {},
     collapsed = false,
     narrow = false,
+    peeking = false,
     onActivate,
     onToggleCollapsed,
+    onHoverStart,
+    onHoverEnd,
     onOpenSettings,
     keystripCost,
     keystripTokens,
@@ -29,49 +33,80 @@
     /** Icons-only mode; labels hide but each glyph keeps its aria-label + tooltip. */
     collapsed?: boolean;
     narrow?: boolean;
+    peeking?: boolean;
     /** Opens the clicked view; forwarded to each NavItem. */
     onActivate?: (id: string) => void;
     onToggleCollapsed?: () => void;
+    onHoverStart?: () => void;
+    onHoverEnd?: () => void;
     onOpenSettings: () => void;
     /** Today's cost/tokens, pre-formatted; forwarded to KeyStrip. */
     keystripCost?: string;
     keystripTokens?: string;
   } = $props();
+
+  const peeked = $derived(collapsed && peeking);
+  const iconsOnly = $derived(collapsed && !peeked);
+
+  let root: HTMLElement | undefined = $state();
+
+  function hoverStart() {
+    if (collapsed) onHoverStart?.();
+  }
+
+  function hoverEnd() {
+    if (collapsed) onHoverEnd?.();
+  }
+
+  function onFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget;
+    if (next instanceof Node && root?.contains(next)) return;
+    hoverEnd();
+  }
 </script>
 
 <nav
   class="rail app-rail"
   class:is-collapsed={collapsed}
+  class:is-peeking={peeked}
   aria-label="Primary"
   data-testid={TESTID.navRail}
+  data-peeking={peeked ? '' : undefined}
+  bind:this={root}
+  onmouseenter={hoverStart}
+  onmouseleave={hoverEnd}
+  onfocusin={hoverStart}
+  onfocusout={onFocusOut}
 >
-  {#if onToggleCollapsed}
-    <button
-      type="button"
-      class="rail-collapse"
-      aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-      aria-pressed={collapsed}
-      title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-      onclick={onToggleCollapsed}
-    >
-      <Icon name="chev-r" />
-    </button>
-  {/if}
-  <ul class="t-navlist">
-    {#each views as view (view.id)}
-      <NavItem
-        id={view.id}
-        label={view.label}
-        icon={view.icon}
-        active={view.id === activeId}
-        badges={badges[view.id]}
-        {collapsed}
-        {narrow}
-        onactivate={onActivate}
-      />
-    {/each}
-  </ul>
-  <KeyStrip {collapsed} {onOpenSettings} cost={keystripCost} tokens={keystripTokens} />
+  <div class="rail-body">
+    {#if onToggleCollapsed}
+      <button
+        type="button"
+        class="rail-collapse"
+        aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        aria-pressed={collapsed}
+        title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+        onclick={onToggleCollapsed}
+      >
+        <Icon name="chev-r" />
+      </button>
+    {/if}
+    <ul class="t-navlist">
+      {#each views as view (view.id)}
+        <NavItem
+          id={view.id}
+          label={view.label}
+          icon={view.icon}
+          active={view.id === activeId}
+          badges={badges[view.id]}
+          collapsed={iconsOnly}
+          {narrow}
+          onactivate={onActivate}
+        />
+      {/each}
+    </ul>
+    <KeyStrip collapsed={iconsOnly} {onOpenSettings} cost={keystripCost} tokens={keystripTokens} />
+  </div>
 </nav>
 
 <style>
@@ -79,12 +114,19 @@
   .rail {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    padding: 10px 8px;
     border-right: 1px solid var(--bd0);
     background: var(--bg0);
     min-width: 0;
     position: relative;
+  }
+  .rail-body {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 8px;
   }
   .app-rail {
     width: 198px;
@@ -94,9 +136,34 @@
   .app-rail.is-collapsed {
     width: 52px;
   }
+  /* Peeking, the nav keeps its 52px slot in the shell row while the body floats
+     over the workspace at full width. */
+  .app-rail.is-peeking .rail-body {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 198px;
+    z-index: 60;
+    background: var(--bg0);
+    border-right: 1px solid var(--bd0);
+    box-shadow: var(--sh-2);
+    animation: nav-peek-in var(--t-2) var(--ease);
+  }
+  @keyframes nav-peek-in {
+    from {
+      translate: -102% 0;
+    }
+    to {
+      translate: 0 0;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .app-rail {
       transition: none;
+    }
+    .app-rail.is-peeking .rail-body {
+      animation: none;
     }
   }
   .rail-collapse {
@@ -125,6 +192,9 @@
   .is-collapsed .rail-collapse {
     align-self: center;
   }
+  .is-peeking .rail-collapse {
+    align-self: flex-end;
+  }
   .rail-collapse :global(.ic) {
     width: 13px;
     height: 13px;
@@ -151,10 +221,12 @@
     .app-rail.is-collapsed {
       width: auto;
       order: 2;
-      flex-direction: row;
-      align-items: center;
       border-right: 0;
       border-top: 1px solid var(--bd0);
+    }
+    .rail-body {
+      flex-direction: row;
+      align-items: center;
       padding: 5px 8px max(5px, env(safe-area-inset-bottom));
     }
     .rail-collapse {
