@@ -33,7 +33,7 @@
     placeholder = 'message tsugite · / for commands, ⇧⏎ for newline',
     streaming = false,
     queued = false,
-    short = false,
+    dense = false,
     rows = 2,
     hint,
     showKbd = false,
@@ -62,8 +62,9 @@
     placeholder?: string;
     /** Streaming turn in flight - flips the primary Send button to a danger Stop. */
     streaming?: boolean;
-    /** Short pane: the attach row shares the send row and the shortcut strip is off. */
-    short?: boolean;
+    /** Compact - the attach row shares the send row, the shortcut strip is off,
+     *  and a hint replaces the placeholder instead of taking its own row. */
+    dense?: boolean;
     /** Turn busy - the message will queue and send when the turn finishes. */
     queued?: boolean;
     rows?: number;
@@ -396,7 +397,7 @@
 <div
   class="composer"
   class:is-queued={queued}
-  data-density={short ? 'short' : undefined}
+  data-density={dense ? 'dense' : undefined}
   bind:this={root}
 >
   <div class="attrow">
@@ -482,7 +483,7 @@
       bind:value
       {rows}
       style="--th:{taH == null ? 'auto' : `${taH}px`}"
-      {placeholder}
+      placeholder={dense && hint ? hint : placeholder}
       aria-label="Message"
       aria-autocomplete="list"
       aria-controls={listId}
@@ -524,7 +525,7 @@
   </div>
 </div>
 
-{#if showKbd && !short}
+{#if showKbd && !dense}
   <div class="kbd-strip" aria-hidden="true">
     <span><span class="t-kbd">/</span> search</span>
     <span><span class="t-kbd">j</span><span class="t-kbd">k</span> sessions</span>
@@ -545,21 +546,26 @@
     gap: 7px;
     position: relative;
   }
-  /* Short pane: the attach row and the send row share one grid row under the
+  /* When dense, the attach row and the send row share one grid row under the
      textarea. Relocating with CSS rather than re-rendering keeps focus on a
      control across a resize. */
-  .composer[data-density='short'] {
+  .composer[data-density='dense'] {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 4px 8px;
     padding: 5px 10px 4px;
   }
-  .composer[data-density='short'] .inwrap {
+  .composer[data-density='dense'] .inwrap {
     grid-column: 1 / -1;
     grid-row: 1;
   }
-  .composer[data-density='short'] .attrow,
-  .composer[data-density='short'] .btmrow {
+  .composer[data-density='dense'] .attrow,
+  .composer[data-density='dense'] .btmrow {
     grid-row: 2;
+  }
+  /* When dense, the hint shows as the placeholder. */
+  .composer[data-density='dense'].is-queued .qnote,
+  .composer[data-density='dense'] .hint {
+    display: none;
   }
   .attrow {
     display: flex;

@@ -1,11 +1,11 @@
 <script lang="ts">
   // Session lifecycle menu. A ghost dots button opens a role=menu popover of the
-  // actions the gap audit enumerated: rename, edit topic, pin/unpin, set primary,
-  // mark complete, cancel, restart. Which items show is gated by the session's
+  // actions: rename, edit topic, pin/unpin, set primary, mark complete, cancel,
+  // restart. Which items show is gated by the session's
   // state (restart only from failed/cancelled; primary hidden when already
   // primary; cancel only while a run is in flight; complete only for live
   // sessions).
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import type { IconName } from '$lib/components/icon/icons';
@@ -20,6 +20,7 @@
   }
 
   let {
+    effort,
     pinned,
     isPrimary,
     canRestart,
@@ -39,6 +40,9 @@
     onCancel,
     onRestart,
   }: {
+    /** Reasoning-effort control, shown as a group above the actions. A phone
+     *  header has no room for it beside the model chip. */
+    effort?: Snippet;
     pinned: boolean;
     isPrimary: boolean;
     canRestart: boolean;
@@ -162,19 +166,29 @@
     {#snippet icon()}<Icon name="dots" />{/snippet}
   </Button>
   {#if open}
-    <div class="menu" role="menu" bind:this={menuEl} data-testid={TESTID.chatSessionMenu}>
-      {#each actions as action (action.id)}
-        <button
-          type="button"
-          role="menuitem"
-          class="menu-item"
-          class:is-danger={action.danger}
-          onclick={() => choose(action)}
-        >
-          <Icon name={action.icon} size={12} />
-          {action.label}
-        </button>
-      {/each}
+    <div class="menu" bind:this={menuEl} data-testid={TESTID.chatSessionMenu}>
+      {#if effort}
+        <!-- role=menu admits only menuitems, and the seg's options are plain
+             buttons. -->
+        <div class="menu-effort" role="group" aria-label="Reasoning effort">
+          <span class="menu-eff-lb">effort</span>
+          {@render effort()}
+        </div>
+      {/if}
+      <div class="menu-items" role="menu">
+        {#each actions as action (action.id)}
+          <button
+            type="button"
+            role="menuitem"
+            class="menu-item"
+            class:is-danger={action.danger}
+            onclick={() => choose(action)}
+          >
+            <Icon name={action.icon} size={12} />
+            {action.label}
+          </button>
+        {/each}
+      </div>
     </div>
   {/if}
 </div>
@@ -190,6 +204,7 @@
     right: 0;
     z-index: 60;
     min-width: 168px;
+    max-width: calc(100vw - 24px);
     display: flex;
     flex-direction: column;
     padding: 4px;
@@ -197,6 +212,33 @@
     border: 1px solid var(--bd1);
     border-radius: var(--r-md);
     box-shadow: var(--sh-2);
+  }
+  .menu-items {
+    display: flex;
+    flex-direction: column;
+  }
+  .menu-effort {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    padding: 4px 9px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--bd0);
+  }
+  .menu-eff-lb {
+    color: var(--tx2);
+    font: 600 var(--fs-2xs) var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+  /* The panel widens to fit the options on one line. They wrap at the viewport's
+     width. */
+  .menu-effort :global(.effort) {
+    width: max-content;
+    max-width: 100%;
+  }
+  .menu-effort :global(.t-seg) {
+    flex-wrap: wrap;
   }
   .menu-item {
     display: flex;

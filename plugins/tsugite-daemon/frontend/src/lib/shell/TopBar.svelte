@@ -58,9 +58,8 @@
     {#if subtitle}<span class="ver">{@render subtitle()}</span>{/if}
   </div>
 
-  <!-- Spaces are global chrome (a space owns the whole workspace layout), so the
-       switcher rides the appbar and reads the store directly, as the conn chip
-       does. -->
+  <!-- A space owns the whole workspace layout. The switcher reads the store
+       directly, as the conn chip does. -->
   <SpaceBar
     spaces={spaces.spaces}
     activeId={spaces.activeSpaceId}
@@ -161,6 +160,12 @@
   /* Base .t-kbd is global (tokens.css); only the trigger's spacing is local. */
   .t-kbd {
     margin-left: 2px;
+  }
+  /* A touch-only device has no key to press. */
+  @media (hover: none) and (pointer: coarse) {
+    .t-kbd {
+      display: none;
+    }
   }
   @media (max-width: 640px) {
     .conn-mobile {

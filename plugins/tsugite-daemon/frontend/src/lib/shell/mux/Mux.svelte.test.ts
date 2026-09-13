@@ -39,7 +39,7 @@ function seeded(ref: SurfaceRef = { kind: 'chat' }): Layout {
 }
 
 // Wire Mux to the real reducers so an interaction exercises the whole loop:
-// event -> Mux callback -> layout op -> rerender. Mirrors the chrome's wiring.
+// event -> Mux callback -> layout op -> rerender. Mirrors App's wiring.
 async function mountMux(initial: Layout, content?: MuxContent) {
   let layout = initial;
   let rerender!: (props: Record<string, unknown>) => Promise<void>;
@@ -509,7 +509,14 @@ test('focusing a pane hands no surface a new params object', async () => {
   expect(new Map(paramRuns)).toEqual(before);
 });
 
-// ── short panes ──
+// ── dense panes ──
+
+test('a lone tab in a narrow (phone) pane hides its tab strip', async () => {
+  const one = seeded({ kind: 'chat' });
+  const { container } = await render(Mux, { layout: one, narrow: true });
+  await expect.element(page.getByTestId('mux-pane')).toBeInTheDocument();
+  await vi.waitFor(() => expect(container.querySelector('[role="tablist"]')).toBeNull());
+});
 
 test('only a lone tab in an unsplit short pane hides its tab strip', async () => {
   const one = seeded({ kind: 'chat' });

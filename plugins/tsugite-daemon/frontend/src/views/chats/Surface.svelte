@@ -25,11 +25,11 @@
   let {
     params,
     setParams,
-    short = false,
+    dense = false,
   }: {
     params?: Record<string, string>;
     setParams?: (params: Record<string, string>) => void;
-    short?: boolean;
+    dense?: boolean;
   } = $props();
 
   const ctrl = new ConversationController();
@@ -270,7 +270,7 @@
 >
   <Conversation
     {ctrl}
-    {short}
+    {dense}
     row={selectedRow}
     fallbackContext={sessionInfo?.contextLimit
       ? { tokens: sessionInfo.cumulativeTokens ?? 0, limit: sessionInfo.contextLimit }
@@ -307,7 +307,7 @@
   {#if canCompose}
     <ChatComposer
       bind:this={composer}
-      {short}
+      {dense}
       sessionId={selectedId}
       streaming={ctrl.streaming}
       busy={selectedRow?.busy ?? false}

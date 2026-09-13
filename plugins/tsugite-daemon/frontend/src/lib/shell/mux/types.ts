@@ -15,11 +15,11 @@ export interface MuxHandlers {
   onCloseOtherTabs?: (paneId: string, tabId: string) => void;
   onCloseAllTabs?: (paneId: string) => void;
   /** New-tab (+) affordance; when omitted the button is hidden. Wired by the
-   *  chrome to open the command palette for the target pane. */
+   *  host to open the command palette for the target pane. */
   onNewTab?: (paneId: string) => void;
   onFocusPane?: (paneId: string) => void;
   // Arg order mirrors the `splitPane` reducer / store `split` method so the
-  // chrome can forward it directly.
+  // host can forward it directly.
   onSplit?: (paneId: string, dir: SplitDir, ref: SurfaceRef, position: 'before' | 'after') => void;
   onDock?: (paneId: string, ref: SurfaceRef) => void;
   // Arg order mirrors the `moveTab` reducer. `from === to` is a reorder.
@@ -34,5 +34,6 @@ export interface MuxHandlers {
 
 /** Renders a docked surface by its {kind, params}; supplied by the view host.
  *  The second argument focuses the pane the surface is docked in, for a surface
- *  whose own content swallows the pointerdown `PaneView` would otherwise see. */
+ *  whose own content swallows the pointerdown `PaneView` would otherwise see. The
+ *  third is the pane's `dense` flag (see views/surfaces.ts). */
 export type MuxContent = Snippet<[PaneTabModel, () => void, boolean]>;

@@ -546,7 +546,7 @@
                   openPalette();
                 }}
               >
-                {#snippet content(tab, focusPane, short)}
+                {#snippet content(tab, focusPane, dense)}
                   {@const Surface = surfaceComponent(tab.kind)}
                   <!-- Key by the tab's identity so two same-kind surfaces (e.g. two
                        chats on different sessions) mount distinct instances. -->
@@ -558,7 +558,7 @@
                         setTitle={(title) => spaces.retitleTab(tab.id, title)}
                         setParams={(params) => spaces.retargetTab(tab.id, params)}
                         {focusPane}
-                        {short}
+                        {dense}
                       />
                     {/if}
                   {/key}

@@ -41,6 +41,7 @@
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
   import SessionMenu from './SessionMenu.svelte';
   import ModelEffort from './ModelEffort.svelte';
+  import EffortSeg from './EffortSeg.svelte';
   import JobTile from './JobTile.svelte';
   import DeliveryCard from './DeliveryCard.svelte';
   import Attachments from './Attachments.svelte';
@@ -53,7 +54,7 @@
   let {
     ctrl,
     row,
-    short = false,
+    dense = false,
     fallbackContext = null,
     railCollapsed,
     onToggleRail,
@@ -75,8 +76,8 @@
   }: {
     ctrl: ConversationController;
     row: SessionRow | null;
-    /** Short pane: a tighter header with the topic inline. */
-    short?: boolean;
+    /** Compact: a tighter header, and on a phone a single header row. */
+    dense?: boolean;
     /** Durable context truth (session record) for freshly loaded conversations -
      *  session_info frames are live-only, so replay alone never sets timeline.context. */
     fallbackContext?: { tokens: number; limit: number } | null;
@@ -99,6 +100,17 @@
     onRetry: (text: string) => void;
     onDismissAttention: (deliveryId?: string) => void;
   } = $props();
+
+  // A phone header holds one row. The effort seg moves into the session menu there.
+  let phone = $state(false);
+  $effect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const m = window.matchMedia('(max-width: 640px)');
+    const sync = () => (phone = m.matches);
+    sync();
+    m.addEventListener('change', sync);
+    return () => m.removeEventListener('change', sync);
+  });
 
   let scrollEl = $state<HTMLElement>();
   const follow = new ScrollFollow();
@@ -420,10 +432,10 @@
 <section
   class="convo"
   data-testid={TESTID.chatConversation}
-  data-density={short ? 'short' : undefined}
+  data-density={dense ? 'dense' : undefined}
   aria-label="Conversation"
 >
-  <header class="convo-hd">
+  <header class="convo-hd" class:is-editing={editing === 'topic' || editing === 'alias'}>
     <PhoneBack {onBack} label="Back to chats" />
     <Button
       variant="ghost"
@@ -485,7 +497,7 @@
 
     <span class="t-type" data-k={sourceType}>{sourceType === 'research' ? 'res' : sourceType}</span>
     <Pill st={pillState} label={pillLabel} />
-    <ModelEffort sessionId={ctrl.sessionId} />
+    <ModelEffort sessionId={ctrl.sessionId} showEffort={!phone} />
     {#if editing === 'topic'}
       <!-- svelte-ignore a11y_autofocus -->
       <input
@@ -534,7 +546,11 @@
       />
     {/if}
     {#if row}
+      {#snippet effortSeg()}
+        <EffortSeg sessionId={ctrl.sessionId} />
+      {/snippet}
       <SessionMenu
+        effort={phone ? effortSeg : undefined}
         pinned={row.pinned}
         isPrimary={row.is_primary}
         {canRestart}
@@ -1324,22 +1340,41 @@
     cursor: pointer;
   }
 
-  /* Short pane: a tighter header with the topic inline. */
-  .convo[data-density='short'] .convo-hd {
+  /* Dense: a tighter header with the topic inline. */
+  .convo[data-density='dense'] .convo-hd {
     padding: 4px 12px;
     gap: 6px;
   }
-  .convo[data-density='short'] :is(.convo-topic, .convo-topic-edit) {
+  .convo[data-density='dense'] :is(.convo-topic, .convo-topic-edit) {
     order: 0;
     flex: 0 1 auto;
     max-width: 28ch;
   }
 
-  /* Narrow: shed ambient chrome, keep state truth. */
   @media (max-width: 640px) {
+    /* The header holds one row and only the title shrinks. An open inline editor
+       may take a row of its own. */
     .convo-hd {
       padding: 7px 10px;
       gap: 7px;
+      flex-wrap: nowrap;
+    }
+    .convo-hd.is-editing {
+      flex-wrap: wrap;
+    }
+    .convo-hd h2 {
+      flex: 1 1 auto;
+    }
+    .title-btn {
+      max-width: 100%;
+    }
+    /* Free space goes to the title, not to a spacer. */
+    .grow {
+      display: none;
+    }
+    /* Edit topic lives in the header menu, which opens this editor prefilled. */
+    .convo-topic {
+      display: none;
     }
     /* Phone drilldown: the conversation is a screen reached from the list, so the
        header's PhoneBack shows and the desktop rail-collapse toggle drops. */

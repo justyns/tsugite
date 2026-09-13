@@ -34,11 +34,11 @@
     pane: LeafNode;
     /** This pane is the focus target (where new surfaces dock). */
     focused?: boolean;
-    /** The layout has more than one pane: draws the focus ring, keeps a lone tab's strip. */
+    /** The layout has more than one pane. Keeps a lone tab's strip, and draws the
+     *  focus ring on every viewport but a phone. */
     multiPane?: boolean;
-    /** Phone width: the split affordance is withheld (phones show one pane + a
-     *  switcher, so splitting - which would hide a pane behind the switcher -
-     *  is not offered). */
+    /** True on a narrow viewport. The pane is dense and the split affordance is
+     *  withheld, because a narrow layout shows one pane plus a switcher. */
     narrow?: boolean;
     content?: MuxContent;
   } & MuxHandlers = $props();
@@ -72,11 +72,11 @@
   const mountedTabs = $derived(pane.tabs.filter((t) => visited.includes(t.id)));
 
   let slotEl = $state<HTMLElement>();
-  // Phones and narrow windows keep their own layout.
+  // A phone is dense by its width, a desktop pane by its height.
   let slotHeight = $state(0);
-  const short = $derived(!narrow && isShortPane(slotHeight));
-  // A strip on a lone tab in an unsplit short pane would only label itself.
-  const stripHidden = $derived(short && !multiPane && pane.tabs.length === 1);
+  const dense = $derived(narrow || isShortPane(slotHeight));
+  // A strip on a lone tab in an unsplit dense pane would only label itself.
+  const stripHidden = $derived(dense && !multiPane && pane.tabs.length === 1);
   let dropZone = $state<DropZone | null>(null);
 
   const DROP_LABEL: Record<DropZone, string> = {
@@ -154,7 +154,7 @@
   bind:this={slotEl}
   bind:clientHeight={slotHeight}
   class="mux-slot"
-  class:is-focused={multiPane && focused}
+  class:is-focused={multiPane && focused && !narrow}
   data-focused={focused}
   data-testid={TESTID.muxPane}
   tabindex="-1"
@@ -171,7 +171,7 @@
   >
     {#snippet tabs()}
       {#if pane.tabs.length > 0 && !stripHidden}
-        <!-- The strip is the pane's only chrome: per-tab close, bulk actions on
+        <!-- The strip is the pane's only control bar: per-tab close, bulk actions on
              right-click, + and split at the end. Surfaces show their own
              titles, so a second header bar would repeat them. -->
         <TabStrip
@@ -200,7 +200,7 @@
       {#if content}
         {#each mountedTabs as tab (tab.id)}
           <div class="mux-surf" hidden={tab.id !== pane.activeTabId}>
-            {@render content(tab, () => handlers.onFocusPane?.(pane.id), short)}
+            {@render content(tab, () => handlers.onFocusPane?.(pane.id), dense)}
           </div>
         {/each}
       {/if}

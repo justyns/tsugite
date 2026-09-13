@@ -33,7 +33,7 @@
 
   let {
     sessionId,
-    short = false,
+    dense = false,
     streaming = false,
     busy = false,
     queuedMessages = [],
@@ -45,7 +45,7 @@
     onCommandResult,
   }: {
     sessionId: string | null;
-    short?: boolean;
+    dense?: boolean;
     streaming?: boolean;
     busy?: boolean;
     /** Messages parked for after the in-flight turn (rendered as removable chips). */
@@ -311,7 +311,7 @@
   <Composer
     bind:this={composerEl}
     bind:value
-    {short}
+    {dense}
     {streaming}
     queued={busy && !streaming}
     attachments={attach.attachments}

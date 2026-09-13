@@ -570,10 +570,10 @@ test('double-clicking Send does not stop the turn it just started', async () => 
   expect(onStop).not.toHaveBeenCalled();
 });
 
-// ── short pane ──
+// ── dense composer ──
 
-test('a short pane puts the attach row beside the send row and drops the shortcut strip', async () => {
-  const { container } = await render(Composer, { short: true, showKbd: true });
+test('a dense composer puts the attach row beside the send row and drops the shortcut strip', async () => {
+  const { container } = await render(Composer, { dense: true, showKbd: true });
   await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
   const attrow = container.querySelector<HTMLElement>('.attrow')!;
   const btmrow = container.querySelector<HTMLElement>('.btmrow')!;
@@ -588,4 +588,17 @@ test('a full-height pane stacks the attach row above the textarea and keeps the 
   await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
   expect(getComputedStyle(container.querySelector('.attrow')!).gridRowStart).toBe('auto');
   expect(container.querySelector('.kbd-strip')).not.toBeNull();
+});
+
+test('a dense composer shows the queued hint as the placeholder', async () => {
+  const { container } = await render(Composer, {
+    dense: true,
+    queued: true,
+    hint: 'queued — sends when this turn finishes',
+  });
+  await expect
+    .element(page.getByRole('textbox', { name: 'Message' }))
+    .toHaveAttribute('placeholder', 'queued — sends when this turn finishes');
+  expect(getComputedStyle(container.querySelector('.qnote')!).display).toBe('none');
+  expect(getComputedStyle(container.querySelector('.hint')!).display).toBe('none');
 });

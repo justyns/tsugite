@@ -24,8 +24,9 @@ export type SurfaceProps = {
   /** Make this surface's pane the focused one. Absent in a full view, which has
    *  no pane to claim. */
   focusPane?: () => void;
-  /** The pane is short (lib/shell/density): render the compact chrome. */
-  short?: boolean;
+  /** Compact the surface's header and controls. Set when the pane is short or
+   *  the viewport is narrow. */
+  dense?: boolean;
 };
 
 const SURFACES: Record<string, Component<SurfaceProps>> = {

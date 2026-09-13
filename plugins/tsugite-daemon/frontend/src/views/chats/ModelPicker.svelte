@@ -491,6 +491,13 @@
   .mp-it.is-sel .mp-meta {
     color: var(--tx2);
   }
+  /* On a phone the chip yields width to the title, which is the one header
+     item that shrinks. */
+  @media (max-width: 640px) {
+    .model-chip {
+      max-width: 12ch;
+    }
+  }
   .mp-empty {
     padding: 16px 12px;
     text-align: center;

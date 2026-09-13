@@ -2,6 +2,19 @@
 import { page, userEvent } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
 import { afterEach, expect, test, vi } from 'vitest';
+
+// Partial mock. Only the two calls the effort control makes are stubbed, and
+// only by the test that sets an implementation. Every other test keeps the real
+// client, whose fetches fail into the components' catch paths.
+vi.mock('$lib/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/client')>();
+  return {
+    ...actual,
+    api: { ...actual.api, get: vi.fn(actual.api.get), patch: vi.fn(actual.api.patch) },
+  };
+});
+
+import { api } from '$lib/api/client';
 import Conversation from './Conversation.svelte';
 import { ConversationController } from './conversation.svelte';
 import type { SessionRow } from '$lib/stores/sessions.svelte';
@@ -36,6 +49,12 @@ afterEach(async () => {
 
 // The thinking pref is a module singleton shared with every other browser test.
 afterEach(() => expandThinking.set(true));
+
+// mockReset restores the real implementation vi.fn() was given.
+afterEach(() => {
+  vi.mocked(api.get).mockReset();
+  vi.mocked(api.patch).mockReset();
+});
 
 function controllerWith(events: Record<string, unknown>[]): ConversationController {
   const ctrl = new ConversationController();
@@ -1527,15 +1546,15 @@ test("a held delivery flushed after the person's own failure keeps their Retry",
   expect(onRetry).toHaveBeenCalledWith('buy milk');
 });
 
-// ── short pane header ──
+// ── dense header ──
 
-test('a short pane marks the conversation and keeps the topic inline, editing included', async () => {
+test('a dense pane marks the conversation and keeps the topic inline, editing included', async () => {
   const ctrl = controllerWith([]);
   const row = sessionRow('sess-1', { metadata: { topic: 'ship the release' } });
-  render(Conversation, { ctrl, row, railCollapsed: false, short: true, ...callbacks });
+  render(Conversation, { ctrl, row, railCollapsed: false, dense: true, ...callbacks });
   await expect
     .element(page.getByTestId(TESTID.chatConversation))
-    .toHaveAttribute('data-density', 'short');
+    .toHaveAttribute('data-density', 'dense');
   const topic = page.getByRole('button', { name: 'ship the release' });
   expect(getComputedStyle(topic.element()).flexBasis).toBe('auto');
   await topic.click();
@@ -1553,4 +1572,70 @@ test('a full-height pane gives the topic a header row of its own', async () => {
     .not.toHaveAttribute('data-density');
   const topic = page.getByRole('button', { name: 'ship the release' });
   expect(getComputedStyle(topic.element()).flexBasis).toBe('100%');
+});
+
+test('at phone width a dense header folds to one row and drops the topic line', async () => {
+  await page.viewport(390, 780);
+  const ctrl = controllerWith([]);
+  const row = sessionRow('sess-1', { metadata: { topic: 'ship the release' } });
+  const { container } = await render(Conversation, {
+    ctrl,
+    row,
+    railCollapsed: false,
+    dense: true,
+    ...callbacks,
+  });
+  const header = container.querySelector<HTMLElement>('.convo-hd')!;
+  expect(getComputedStyle(header).flexWrap).toBe('nowrap');
+  // The title and the overflow menu sit on one row.
+  const title = container.querySelector<HTMLElement>('.title-btn')!.getBoundingClientRect();
+  const menu = container
+    .querySelector<HTMLElement>(`[data-testid="${TESTID.chatSessionMenuTrigger}"]`)!
+    .getBoundingClientRect();
+  expect(Math.abs(title.top + title.height / 2 - (menu.top + menu.height / 2))).toBeLessThan(4);
+  // Topic and effort are reachable from the menu and the model popover instead.
+  const topic = container.querySelector<HTMLElement>('.convo-topic')!;
+  expect(getComputedStyle(topic).display).toBe('none');
+  expect(header.querySelector(`[data-testid="${TESTID.chatEffortSeg}"]`)).toBeNull();
+});
+
+test('at phone width the effort seg moves into the session menu', async () => {
+  await page.viewport(390, 780);
+  vi.mocked(api.get).mockImplementation((path: string) => {
+    if (path.includes('/effort-levels'))
+      return Promise.resolve({
+        model: 'anthropic:claude-sonnet-4-5',
+        supported_effort_levels: ['low', 'medium', 'high'],
+      }) as never;
+    if (path.endsWith('/settings'))
+      return Promise.resolve({ model: null, reasoning_effort: 'high' }) as never;
+    return Promise.reject(new Error(`unexpected GET ${path}`)) as never;
+  });
+  vi.mocked(api.patch).mockResolvedValue({ model: null, reasoning_effort: 'low' } as never);
+
+  const ctrl = controllerWith([]);
+  const row = sessionRow('sess-1');
+  const { container } = await render(Conversation, {
+    ctrl,
+    row,
+    railCollapsed: false,
+    dense: true,
+    ...callbacks,
+  });
+  const header = container.querySelector<HTMLElement>('.convo-hd')!;
+  await expect.element(page.getByTestId(TESTID.chatModelTrigger)).toBeVisible();
+  expect(header.querySelector(`[data-testid="${TESTID.chatEffortSeg}"]`)).toBeNull();
+
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  const menu = page.getByTestId(TESTID.chatSessionMenu);
+  await expect.element(menu.getByTestId(TESTID.chatEffortSeg)).toBeVisible();
+  await expect
+    .element(menu.getByRole('button', { name: 'high' }))
+    .toHaveAttribute('aria-pressed', 'true');
+
+  // The same persisted setting the inline seg writes.
+  await menu.getByRole('button', { name: 'low' }).click();
+  expect(vi.mocked(api.patch)).toHaveBeenCalledWith('/api/sessions/sess-1/settings', {
+    reasoning_effort: 'low',
+  });
 });

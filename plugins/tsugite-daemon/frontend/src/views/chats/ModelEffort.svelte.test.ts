@@ -99,3 +99,11 @@ test('a model without effort levels gets no effort seg', async () => {
   await expect.element(page.getByTestId('chat-model-trigger')).toBeInTheDocument();
   await expect.element(page.getByTestId('chat-effort-seg')).not.toBeInTheDocument();
 });
+
+test('renders only the model chip when the effort seg sits elsewhere', async () => {
+  // A phone header has no room for the seg: the session menu renders it instead.
+  mockBackend({ levels: ['low', 'medium', 'high'], effort: 'high' });
+  render(ModelEffort, { sessionId: 's1', showEffort: false });
+  await expect.element(page.getByTestId('chat-model-trigger')).toBeInTheDocument();
+  await expect.element(page.getByTestId('chat-effort-seg')).not.toBeInTheDocument();
+});

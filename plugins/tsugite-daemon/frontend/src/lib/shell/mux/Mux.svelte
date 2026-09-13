@@ -81,7 +81,7 @@
       </div>
     {/if}
     <div class="mux-panes">
-      <PaneView pane={focusedLeaf} focused multiPane={false} narrow {content} {...handlers} />
+      <PaneView pane={focusedLeaf} focused {multiPane} narrow {content} {...handlers} />
     </div>
   {:else}
     <div class="mux-panes">
