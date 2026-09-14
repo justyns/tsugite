@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
 from tsugite_daemon.job_store import Job, JobState, JobStore, UnknownJobError
-from tsugite_daemon.job_worktrees import _prune_worktree
+from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
 from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
     _parse_verifier_output,
@@ -2097,6 +2097,74 @@ async def test_schedule_notify_passes_kind_job_notify(store, runner, orchestrato
     assert metadata.get("kind") == "job_notify", (
         f"notify metadata must carry kind='job_notify' so the frontend can flag it; got {metadata!r}"
     )
+
+
+def test_retry_with_hint_clears_a_pruned_path_when_provisioning_fails(
+    store, runner, orchestrator, tmp_path, monkeypatch
+):
+    """fresh_workspace prunes before it provisions."""
+    repo = tmp_path / "quarry"
+    _make_git_repo(repo)
+    wt = _provision_worktree(str(repo), "job-seed")
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="p", state="stuck", repo=str(repo), worktree_path=wt)
+    )
+    monkeypatch.setattr(orch_mod, "_provision_worktree", MagicMock(side_effect=OSError("disk full")))
+
+    with pytest.raises(RuntimeError, match="recreate worktree"):
+        asyncio.run(orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True))
+
+    assert not Path(wt).exists()
+    assert store.get(job.id).worktree_path is None
+
+
+def test_retry_with_hint_keeps_the_path_when_the_prune_itself_fails(store, runner, orchestrator, monkeypatch):
+    job = store.add(
+        Job(
+            id="",
+            parent_session_id="parent-1",
+            prompt="p",
+            state="stuck",
+            repo="/repo",
+            worktree_path="/tmp/does-not-matter/.tsugite-jobs/job-x",
+        )
+    )
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path, force=False: False)
+    monkeypatch.setattr(orch_mod, "_provision_worktree", MagicMock(side_effect=OSError("disk full")))
+
+    with pytest.raises(RuntimeError, match="recreate worktree"):
+        asyncio.run(orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True))
+
+    assert store.get(job.id).worktree_path == "/tmp/does-not-matter/.tsugite-jobs/job-x"
+
+
+def test_plain_retry_provisions_a_worktree_when_the_job_has_none(store, runner, orchestrator, tmp_path):
+    repo = tmp_path / "quarry"
+    _make_git_repo(repo)
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="p", state="stuck", repo=str(repo)))
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="try again"))
+
+    rebuilt = store.get(job.id).worktree_path
+    assert rebuilt and Path(rebuilt).exists()
+    assert [s.workspace_override for s in runner.started] == [rebuilt]
+
+
+def test_plain_retry_keeps_an_existing_worktree(store, runner, orchestrator, tmp_path):
+    repo = tmp_path / "quarry"
+    _make_git_repo(repo)
+    wt = _provision_worktree(str(repo), "job-seed")
+    sentinel = Path(wt) / "sentinel.txt"
+    sentinel.write_text("worker noodled here")
+    job = store.add(
+        Job(id="", parent_session_id="parent-1", prompt="p", state="stuck", repo=str(repo), worktree_path=wt)
+    )
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="try again"))
+
+    assert store.get(job.id).worktree_path == wt
+    assert sentinel.exists()
 
 
 def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, runner, orchestrator, tmp_path):

@@ -712,11 +712,15 @@ class JobsOrchestrator:
             if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
                 raise ValueError(f"retry_with_hint only valid on stuck/errored jobs (job '{job_id}' is {job.state})")
 
-            worktree_path = job.worktree_path
-            if fresh_workspace and job.repo:
+            # Only a repo job has enough on record to rebuild a worktree from.
+            if job.repo and (fresh_workspace or not job.worktree_path):
                 try:
-                    if worktree_path and Path(worktree_path).exists():
-                        await asyncio.to_thread(_prune_worktree, worktree_path, force=True)
+                    stale = job.worktree_path
+                    # A failed prune leaves the directory behind, and the path is the
+                    # only pointer to it.
+                    if stale and Path(stale).exists():
+                        if await asyncio.to_thread(_prune_worktree, stale, force=True):
+                            job = self._jobs.update(job_id, worktree_path=None)
                     workspace_root = self._resolve_workspace_root(job.parent_session_id)
                     worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
                     job = self._jobs.update(job_id, worktree_path=worktree_path)
