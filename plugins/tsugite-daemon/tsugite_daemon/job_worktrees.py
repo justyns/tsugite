@@ -24,16 +24,20 @@ def _worktree_is_dirty(worktree: Path) -> bool:
 
 
 def _exclude_worktree_subdir(repo_path: Path) -> None:
-    """Keep `.tsugite-jobs/` out of the target repo's git status."""
-    exclude = repo_path / _git(["rev-parse", "--git-path", "info/exclude"], repo_path).stdout.strip()
-    line = f"{_WORKTREE_SUBDIR}/"
-    existing = exclude.read_text() if exclude.exists() else ""
-    if line in existing.splitlines():
-        return
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    if existing and not existing.endswith("\n"):
-        existing += "\n"
-    exclude.write_text(f"{existing}{line}\n")
+    """Keep `.tsugite-jobs/` out of the target repo's git status. Never raises."""
+    try:
+        exclude = repo_path / _git(["rev-parse", "--git-path", "info/exclude"], repo_path).stdout.strip()
+        line = f"{_WORKTREE_SUBDIR}/"
+        existing = exclude.read_text() if exclude.exists() else ""
+        if line in existing.splitlines():
+            return
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        # A rewrite would drop an edit made since the read.
+        prefix = "" if not existing or existing.endswith("\n") else "\n"
+        with exclude.open("a") as fh:
+            fh.write(f"{prefix}{line}\n")
+    except Exception as e:
+        logger.warning("Could not exclude %s/ in %s: %s", _WORKTREE_SUBDIR, repo_path, e)
 
 
 def _keep_head_reachable(worktree: Path, repo_root: Path, job_id: str) -> None:
@@ -69,6 +73,8 @@ def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] =
         raise ValueError(f"repo path is not a git repository: {repo_path}")
     target = repo_path / _WORKTREE_SUBDIR / job_id
     target.parent.mkdir(parents=True, exist_ok=True)
+    # git worktree add must stay the last fallible statement in this function.
+    _exclude_worktree_subdir(repo_path)
     # --detach: don't create a branch; the job can branch later if it wants.
     # HEAD: start from the repo's current commit.
     # LC_ALL=C pins git's error messages to English so log scrapes are deterministic.
@@ -86,7 +92,6 @@ def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] =
         # Surface git's actual fatal message instead of the bare exit-status string.
         stderr_text = (e.stderr or b"").decode("utf-8", "replace").strip()
         raise RuntimeError(f"git worktree add failed (exit {e.returncode}): {stderr_text or 'no stderr'}") from e
-    _exclude_worktree_subdir(repo_path)
     return str(target)
 
 

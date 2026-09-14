@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import subprocess
 from collections import namedtuple
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
 from tsugite_daemon.job_store import Job, JobState, JobStore, UnknownJobError
+from tsugite_daemon.job_worktrees import _prune_worktree
 from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
     _parse_verifier_output,
@@ -1019,6 +1021,54 @@ def test_existing_exclude_entries_are_kept(store, runner, orchestrator, tmp_path
     lines = exclude.read_text().splitlines()
     assert "scratch.txt" in lines, f"pre-existing excludes must survive: {lines}"
     assert ".tsugite-jobs/" in lines
+
+
+def _make_exclude_unwritable(exclude):
+    if os.geteuid() == 0:
+        pytest.skip("root ignores the mode bits this case relies on")
+    exclude.write_text("")
+    exclude.chmod(0o444)
+    return lambda: exclude.chmod(0o644)
+
+
+def _make_exclude_undecodable(exclude):
+    exclude.write_bytes(b"caf\xe9.txt\n")
+    return lambda: None
+
+
+@pytest.mark.parametrize("break_exclude", [_make_exclude_unwritable, _make_exclude_undecodable])
+def test_a_broken_exclude_file_still_records_the_worktree(store, runner, orchestrator, tmp_path, break_exclude):
+    repo = tmp_path / f"cellar-{break_exclude.__name__}"
+    _make_git_repo(repo)
+    exclude = _exclude_file(repo)
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    restore = break_exclude(exclude)
+    try:
+        job = _start_job_with_repo(orchestrator, repo)
+    finally:
+        restore()
+
+    fresh = store.get(job.id)
+    assert fresh.worktree_path is not None
+    wt = Path(fresh.worktree_path)
+    assert wt.exists()
+    assert _prune_worktree(fresh.worktree_path, force=True)
+    assert not wt.exists()
+
+
+def test_repo_path_that_is_a_linked_worktree_is_covered_by_the_shared_exclude(store, runner, orchestrator, tmp_path):
+    """From a linked worktree, `--git-path` returns the main repo's exclude, which covers it."""
+    repo = tmp_path / "silo"
+    _make_git_repo(repo)
+    linked = tmp_path / "silo-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(linked), "HEAD"], cwd=repo, check=True, capture_output=True
+    )
+
+    _start_job_with_repo(orchestrator, linked)
+
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=linked, capture_output=True, text=True)
+    assert status.stdout == ""
 
 
 def test_create_job_without_repo_does_not_provision(store, runner, orchestrator):
