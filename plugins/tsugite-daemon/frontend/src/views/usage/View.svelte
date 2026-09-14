@@ -353,7 +353,7 @@
   }
   .u-prov-err {
     font-size: var(--fs-xs);
-    color: var(--tx3);
+    color: var(--tx2);
   }
   .u-win {
     display: flex;
@@ -376,7 +376,6 @@
     white-space: nowrap;
   }
 
-  /* section labels (.d-sec-h) */
   .d-sec-h {
     margin: 0 0 7px;
     font: 600 var(--fs-2xs) / 1 var(--font-mono);
