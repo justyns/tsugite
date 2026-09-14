@@ -431,6 +431,8 @@ class Builder {
   /** The interactive prompt still awaiting an answer, folded from the durable
    *  ask_user / ask_answered events (not a timeline block). */
   pendingAsk: PendingAsk | null = null;
+  /** One tile per job. A job outlives the turn that spawned it. */
+  private jobBlocks = new Map<string, JobBlock>();
 
   private uid(prefix: string): string {
     this.seq += 1;
@@ -899,7 +901,6 @@ class Builder {
       }
       case 'job_status':
       case 'job_update': {
-        const turn = this.ensureAi(at);
         const raw = (e.data as Event) ?? e;
         // Narrow the wire dict to the shared JobLike shape at this one boundary, so
         // the tile renders typed fields instead of stringly-casting downstream.
@@ -911,14 +912,14 @@ class Builder {
           verify_attempts: num(raw.verify_attempts),
           max_attempts: num(raw.max_attempts),
         };
-        // One tile per job, not per status event: fold repeat events into the
-        // existing tile so a job's lifecycle updates in place.
-        const existing = job.job_id
-          ? (turn.blocks.find((b) => b.kind === 'job' && b.job.job_id === job.job_id) as
-              JobBlock | undefined)
-          : undefined;
-        if (existing) existing.job = job;
-        else turn.blocks.push({ kind: 'job', job });
+        const existing = job.job_id ? this.jobBlocks.get(job.job_id) : undefined;
+        if (existing) {
+          existing.job = job;
+          return;
+        }
+        const block: JobBlock = { kind: 'job', job };
+        this.ensureAi(at).blocks.push(block);
+        if (job.job_id) this.jobBlocks.set(job.job_id, block);
         return;
       }
       case 'delivery': {

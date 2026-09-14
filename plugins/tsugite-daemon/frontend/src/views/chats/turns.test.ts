@@ -693,6 +693,47 @@ describe('buildTimeline (job tiles)', () => {
     ]);
     expect(t.turns[1]!.blocks.filter((b) => b.kind === 'job')).toHaveLength(2);
   });
+
+  it('folds a job_status arriving after the spawning turn ended into the same tile', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'spawn', id: 1 },
+      { type: 'job_status', job_id: 'job-1', state: 'running', prompt: 'do it', id: 2 },
+      { type: 'session_end', status: 'success', id: 3 },
+      { type: 'job_status', job_id: 'job-1', state: 'done', prompt: 'do it', id: 4 },
+    ]);
+    expect(t.turns.map((x) => x.role)).toEqual(['user', 'ai']);
+    const jobs = t.turns[1]!.blocks.filter((b) => b.kind === 'job') as JobBlock[];
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.job.state).toBe('done');
+  });
+
+  it('folds a late job_status on the replay path used after a reload', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'spawn', timestamp: '2026-07-14T15:00:00Z', id: 2 },
+      { type: 'model_request', turn: 0, id: 3 },
+      { type: 'job_status', job_id: 'job-1', state: 'running', prompt: 'do it', id: 4 },
+      { type: 'model_response', turn: 0, raw_content: 'spawned', thought: 'spawned', id: 5 },
+      { type: 'final_result', result: 'spawned', turns: 1, id: 6 },
+      { type: 'session_end', status: 'success', id: 7 },
+      { type: 'job_status', job_id: 'job-1', state: 'verifying', prompt: 'do it', id: 8 },
+      { type: 'job_status', job_id: 'job-1', state: 'done', prompt: 'do it', id: 9 },
+    ]);
+    expect(t.turns.map((x) => x.role)).toEqual(['user', 'ai']);
+    const jobs = t.turns[1]!.blocks.filter((b) => b.kind === 'job') as JobBlock[];
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.job.state).toBe('done');
+  });
+
+  it('opens a tile for a job the chat never spawned', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      { type: 'session_end', status: 'success', id: 2 },
+      { type: 'job_status', job_id: 'job-elsewhere', state: 'running', prompt: 'do it', id: 3 },
+    ]);
+    const jobs = t.turns.flatMap((x) => x.blocks.filter((b) => b.kind === 'job')) as JobBlock[];
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.job.job_id).toBe('job-elsewhere');
+  });
 });
 
 describe('buildTimeline (dict final answer)', () => {
