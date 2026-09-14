@@ -70,8 +70,14 @@ function hasDraft(sessionId: string | null): boolean {
  *  under an open composer. A draft already parked on the target stays. */
 export function moveDraft(from: string | null, to: string | null): void {
   if (!hasDraft(from) || hasDraft(to)) return;
-  writeDraft(to, readDraft(from));
-  writeDraftStaged(to, readDraftStaged(from));
+  try {
+    writeDraft(to, readDraft(from));
+    writeDraftStaged(to, readDraftStaged(from));
+  } catch {
+    // A failure between the two writes leaves half a draft on the target key.
+    clearDraft(to);
+    return;
+  }
   clearDraft(from);
 }
 

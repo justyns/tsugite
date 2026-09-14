@@ -80,3 +80,31 @@ test('moveDraft with nothing to move keeps the target draft', () => {
   moveDraft('old', 'new');
   expect(readDraft('new')).toBe('untouched');
 });
+
+test('a throwing staged write keeps the whole draft under the old key', () => {
+  const staged = {
+    attachments: [{ id: 'a', name: 'notes.txt', size: '1 KB' }],
+    contextItems: [{ key: 'session:x', label: 'chat', value: 'kind: tsugite session' }],
+  };
+  writeDraft('old', 'half a sentence');
+  writeDraftStaged('old', staged);
+  const realSet = store.set.bind(store);
+  vi.stubGlobal('window', {
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (k.startsWith('tsugite_draft_staged_'))
+          throw new DOMException('quota', 'QuotaExceededError');
+        realSet(k, v);
+      },
+      removeItem: (k: string) => store.delete(k),
+    },
+  });
+
+  moveDraft('old', 'new');
+
+  expect(readDraft('old')).toBe('half a sentence');
+  expect(readDraftStaged('old')).toEqual(staged);
+  expect(readDraft('new')).toBe('');
+  expect(readDraftStaged('new')).toEqual({ attachments: [], contextItems: [] });
+});

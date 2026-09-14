@@ -12,6 +12,7 @@ import {
   sessionHasAttention,
   chatsNeedingAnswer,
   attentionSessions,
+  isSupersessionOf,
   liveSessionId,
 } from './sessionModel';
 import { attentionRecord as rec } from './__fixtures__/sessionRow';
@@ -285,10 +286,28 @@ describe('resumable sessions in the rail', () => {
   });
 });
 
-describe('liveSessionId', () => {
-  const chain = (...links: [string, string | null][]) =>
-    links.map(([id, next]) => base({ id, superseded_by: next }));
+const chain = (...links: [string, string | null][]) =>
+  links.map(([id, next]) => base({ id, superseded_by: next }));
 
+describe('isSupersessionOf', () => {
+  it('is true for the successor a compaction produced', () => {
+    expect(isSupersessionOf(chain(['a', 'b'], ['b', null]), 'a', 'b')).toBe(true);
+  });
+  it('follows repeated compactions', () => {
+    expect(isSupersessionOf(chain(['a', 'b'], ['b', 'c'], ['c', null]), 'a', 'c')).toBe(true);
+  });
+  it('is false in the reverse direction, so a draft never moves backwards', () => {
+    expect(isSupersessionOf(chain(['a', 'b'], ['b', null]), 'b', 'a')).toBe(false);
+  });
+  it('is false for an unrelated session', () => {
+    expect(isSupersessionOf(chain(['a', 'b'], ['b', null], ['z', null]), 'a', 'z')).toBe(false);
+  });
+  it('is false for the id itself', () => {
+    expect(isSupersessionOf(chain(['a', 'b'], ['b', null]), 'a', 'a')).toBe(false);
+  });
+});
+
+describe('liveSessionId', () => {
   it('returns the id unchanged when nothing superseded it', () => {
     expect(liveSessionId(chain(['a', null]), 'a')).toBe('a');
   });
