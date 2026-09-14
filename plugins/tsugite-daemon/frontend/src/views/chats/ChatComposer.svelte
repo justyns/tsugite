@@ -17,7 +17,16 @@
   import Button from '$lib/components/buttons/Button.svelte';
   import type { ContextItem } from '$lib/context/contextProviders';
   import { TESTID } from '$lib/testids';
-  import { readDraft, writeDraft, clearDraft, readDraftStaged, writeDraftStaged } from './draft';
+  import {
+    readDraft,
+    writeDraft,
+    clearDraft,
+    moveDraft,
+    readDraftStaged,
+    writeDraftStaged,
+  } from './draft';
+  import { isSupersessionOf } from './sessionModel';
+  import { sessions } from '$lib/stores/sessions.svelte';
   import { composerPrefill } from './composerPrefill.svelte';
   import { contextAttach } from './contextAttach.svelte';
   import { SlashCommands } from './slashCommands.svelte';
@@ -143,11 +152,16 @@
     });
   });
 
-  // Swap drafts when the open session changes: persist nothing here, just load.
+  // Swap drafts when the open session changes. A compaction gives the same
+  // conversation a new id, and the draft follows it to the new key.
   let draftKeyId: string | null = null;
   $effect(() => {
     if (sessionId !== draftKeyId) {
-      draftKeyId = sessionId;
+      const previous = draftKeyId;
+      const next = sessionId;
+      draftKeyId = next;
+      if (previous && next && untrack(() => isSupersessionOf(sessions.ordered, previous, next)))
+        moveDraft(previous, next);
       value = readDraft(sessionId);
       const staged = readDraftStaged(sessionId);
       attach.attachments = staged.attachments;

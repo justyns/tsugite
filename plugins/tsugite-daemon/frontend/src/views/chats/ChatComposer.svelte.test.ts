@@ -943,3 +943,32 @@ test('an @<prefix> query hits the provider search route and a pick captures via 
     .element(page.getByTestId(TESTID.composerContextOption('demo')))
     .not.toBeInTheDocument();
 });
+
+test('a compaction hop keeps the typed draft and its staged attachment', async () => {
+  stubImageConfig();
+  vi.spyOn(api, 'uploadFiles').mockResolvedValue({ files: [{ name: 'notes.txt', size: 5 }] });
+  sessions.rows = [sessionRow({ id: 's1', superseded_by: 's2' }), sessionRow({ id: 's2' })];
+  const { rerender } = await render(ChatComposer, { ...base, sessionId: 's1' });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await userEvent.fill(box, 'half a sentence');
+  const txt = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+  await userEvent.upload(page.getByTestId(TESTID.composerFileInput), txt);
+  const chip = page.getByRole('button', { name: 'Remove attachment notes.txt' });
+  await expect.element(chip).toBeInTheDocument();
+
+  await rerender({ sessionId: 's2' });
+
+  await expect.element(box).toHaveValue('half a sentence');
+  await expect.element(chip).toBeInTheDocument();
+});
+
+test('switching to an unrelated chat still resets the composer', async () => {
+  sessions.rows = [sessionRow({ id: 's1' }), sessionRow({ id: 'other' })];
+  const { rerender } = await render(ChatComposer, { ...base, sessionId: 's1' });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await userEvent.fill(box, 'half a sentence');
+
+  await rerender({ sessionId: 'other' });
+
+  await expect.element(box).toHaveValue('');
+});

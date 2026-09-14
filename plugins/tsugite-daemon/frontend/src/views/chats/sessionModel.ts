@@ -62,18 +62,29 @@ export function chatNeedsAnswer(row: SessionRow): boolean {
   return sessionAttention(row).some((record) => record.source !== 'job');
 }
 
-/** Walks the `superseded_by` chain (repeated compaction makes it multi-hop) to
- *  the newest row `rows` still holds. Returns `id` when nothing superseded it,
- *  when the successor is absent from `rows`, or on a cycle. */
-export function liveSessionId(rows: SessionRow[], id: string): string {
+/** The `superseded_by` chain from `id`, newest last (repeated compaction makes it
+ *  multi-hop). Stops at a successor `rows` does not hold, and at a cycle. */
+function supersessions(rows: SessionRow[], id: string): string[] {
+  const chain: string[] = [];
   const seen = new Set([id]);
   let current = id;
   for (;;) {
     const next = rows.find((row) => row.id === current)?.superseded_by;
-    if (!next || seen.has(next) || !rows.some((row) => row.id === next)) return current;
+    if (!next || seen.has(next) || !rows.some((row) => row.id === next)) return chain;
     seen.add(next);
+    chain.push(next);
     current = next;
   }
+}
+
+/** The newest session id `rows` still holds for `id`, or `id` itself. */
+export function liveSessionId(rows: SessionRow[], id: string): string {
+  return supersessions(rows, id).at(-1) ?? id;
+}
+
+/** True when `candidate` is what `id` became after one or more compactions. */
+export function isSupersessionOf(rows: SessionRow[], id: string, candidate: string): boolean {
+  return supersessions(rows, id).includes(candidate);
 }
 
 function liveRows(rows: SessionRow[]): SessionRow[] {

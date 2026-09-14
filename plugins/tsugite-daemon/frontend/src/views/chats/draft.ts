@@ -59,6 +59,22 @@ export function writeDraftStaged(sessionId: string | null, staged: DraftStaged):
   }
 }
 
+function hasDraft(sessionId: string | null): boolean {
+  const staged = readDraftStaged(sessionId);
+  return (
+    Boolean(readDraft(sessionId)) || staged.attachments.length > 0 || staged.contextItems.length > 0
+  );
+}
+
+/** Moves a draft onto another session's key, for a compaction that rotates the id
+ *  under an open composer. A draft already parked on the target stays. */
+export function moveDraft(from: string | null, to: string | null): void {
+  if (!hasDraft(from) || hasDraft(to)) return;
+  writeDraft(to, readDraft(from));
+  writeDraftStaged(to, readDraftStaged(from));
+  clearDraft(from);
+}
+
 export function clearDraft(sessionId: string | null): void {
   removeLocal(draftKey(sessionId));
   removeLocal(stagedKey(sessionId));

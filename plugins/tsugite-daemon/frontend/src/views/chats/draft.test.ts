@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { readDraft, writeDraft, clearDraft, readDraftStaged, writeDraftStaged } from './draft';
+import {
+  readDraft,
+  writeDraft,
+  clearDraft,
+  moveDraft,
+  readDraftStaged,
+  writeDraftStaged,
+} from './draft';
 
 // draft.ts persists via $lib/storage, which no-ops unless `window` exists; the
 // node unit env has none, so stub a minimal window.localStorage.
@@ -40,4 +47,36 @@ test('clearDraft removes both the text and the staged items', () => {
   clearDraft('s1');
   expect(readDraft('s1')).toBe('');
   expect(readDraftStaged('s1')).toEqual({ attachments: [], contextItems: [] });
+});
+
+test('moveDraft moves the text and staged items onto the successor key', () => {
+  const staged = {
+    attachments: [{ id: 'a', name: 'notes.txt', size: '1 KB' }],
+    contextItems: [{ key: 'session:x', label: 'chat', value: 'kind: tsugite session' }],
+  };
+  writeDraft('old', 'half a sentence');
+  writeDraftStaged('old', staged);
+
+  moveDraft('old', 'new');
+
+  expect(readDraft('new')).toBe('half a sentence');
+  expect(readDraftStaged('new')).toEqual(staged);
+  expect(readDraft('old')).toBe('');
+  expect(readDraftStaged('old')).toEqual({ attachments: [], contextItems: [] });
+});
+
+test('moveDraft keeps a draft the target already has', () => {
+  writeDraft('old', 'from the old session');
+  writeDraft('new', 'already typed here');
+
+  moveDraft('old', 'new');
+
+  expect(readDraft('new')).toBe('already typed here');
+  expect(readDraft('old')).toBe('from the old session');
+});
+
+test('moveDraft with nothing to move keeps the target draft', () => {
+  writeDraft('new', 'untouched');
+  moveDraft('old', 'new');
+  expect(readDraft('new')).toBe('untouched');
 });
