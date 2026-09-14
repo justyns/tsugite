@@ -82,3 +82,13 @@ test('clicking the peeked header pins the rail open too', async () => {
   await userEvent.click(container.querySelector('.rail-peek .railc') as HTMLElement);
   expect(p.onPin).toHaveBeenCalled();
 });
+
+test('unmounting a peeked rail releases the peek', async () => {
+  const onHoverEnd = vi.fn();
+  const { unmount } = await render(CollapsedRail, props({ peeking: true, onHoverEnd }));
+  expect(onHoverEnd).not.toHaveBeenCalled();
+
+  unmount();
+
+  expect(onHoverEnd).toHaveBeenCalled();
+});

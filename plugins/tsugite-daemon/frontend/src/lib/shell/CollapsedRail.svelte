@@ -38,6 +38,9 @@
 
   let root: HTMLElement | undefined = $state();
 
+  // Unmounting with the pointer still on the rail fires no mouseleave.
+  $effect(() => () => onHoverEnd());
+
   function onFocusOut(event: FocusEvent) {
     const next = event.relatedTarget;
     if (next instanceof Node && root?.contains(next)) return;
