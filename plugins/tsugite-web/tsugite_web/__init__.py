@@ -8,7 +8,7 @@ from typing import Dict
 
 from tsugite.tools import tool
 
-_WEB_EXTRA_HINT = "Install it with: pip install tsugite-cli[web]"
+_WEB_EXTRA_HINT = "Install it with: pip install 'tsugite-cli[web]'"
 
 
 @tool

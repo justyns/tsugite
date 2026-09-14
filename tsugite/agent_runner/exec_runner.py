@@ -142,8 +142,9 @@ def run_python_block(
         workspace_dir: Optional workspace path for sandbox bind mounts.
 
     Raises:
-        RuntimeError: On timeout, on hard execution failure when not continuing,
-            or on non-coercible return-value types.
+        TimeoutError: On timeout.
+        RuntimeError: On hard execution failure when not continuing, or on
+            non-coercible return-value types.
     """
     safe_locals = _filter_json_safe(locals_dict)
 
@@ -162,7 +163,7 @@ def run_python_block(
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"tsu:exec block timed out after {timeout}s") from e
+            raise TimeoutError(f"tsu:exec block timed out after {timeout}s") from e
 
         result_data: Dict[str, Any] = {}
         if os.path.exists(result_path):

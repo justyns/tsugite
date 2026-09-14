@@ -109,7 +109,8 @@ def execute_shell_command(
         Command output including stdout, stderr, and exit code
 
     Raises:
-        RuntimeError: If command execution fails or times out
+        TimeoutError: If the command exceeds `timeout`
+        RuntimeError: If command execution fails
     """
     if cwd is None:
         # Deferred import: tsugite.cli.helpers imports from tsugite.utils.
@@ -142,7 +143,7 @@ def execute_shell_command(
         return get_registry().mask(output) or "[No output]"
 
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Command timed out after {timeout} seconds") from exc
+        raise TimeoutError(f"Command timed out after {timeout}s") from exc
     except Exception as e:
         raise RuntimeError(f"Command execution failed: {e}") from e
 

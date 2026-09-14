@@ -182,7 +182,7 @@ return_value("explicit")
 
     def test_timeout_aborts(self):
         code = "import time\ntime.sleep(5)"
-        with pytest.raises(RuntimeError, match="timed out"):
+        with pytest.raises(TimeoutError, match="timed out"):
             run_python_block(code, locals_dict={}, timeout=1)
 
     def test_continue_on_error_swallows_exception(self):

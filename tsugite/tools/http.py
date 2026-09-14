@@ -11,7 +11,7 @@ from tsugite.tools import tool
 from tsugite.user_agent import set_user_agent_header
 from tsugite.utils import convert_html_to_markdown
 
-_WEB_EXTRA_HINT = "Install it with: pip install tsugite-cli[web]"
+_WEB_EXTRA_HINT = "Install it with: pip install 'tsugite-cli[web]'"
 
 # Redirect hop bound for follow_redirects=True. Sandbox network policy applies
 # at the process level (bwrap network namespace), so followed redirects can't

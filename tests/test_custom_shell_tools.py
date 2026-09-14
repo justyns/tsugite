@@ -236,7 +236,7 @@ class TestShellToolCreation:
 
         func = create_shell_tool_function(definition)
 
-        with pytest.raises(RuntimeError, match="timed out after 5 seconds"):
+        with pytest.raises(TimeoutError, match="timed out after 5s"):
             func()
 
     def test_tool_signature_has_parameters(self):
