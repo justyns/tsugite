@@ -270,14 +270,6 @@ class TestRetryJobEndpoint:
         assert orchestrator.calls[-1]["reset_counter"] is False
         assert orchestrator.calls[-1]["fresh_workspace"] is False
 
-    def test_retry_requires_hint(self, client, test_token, orchestrator):
-        resp = client.post(
-            "/api/jobs/job-s1/retry",
-            headers={"Authorization": f"Bearer {test_token}"},
-            json={"reset_counter": True},
-        )
-        assert resp.status_code == 400
-
 
 class TestListJobsDefaultLimit:
     def test_default_limit_bounds_response(self, client, test_token, job_store):
@@ -312,11 +304,6 @@ class TestRetryModelEndpoint:
         assert resp.status_code == 200
         assert orchestrator.calls[-1]["model"] == "anthropic:claude-opus-4-8"
         assert orchestrator.calls[-1]["hint"] == ""
-
-    def test_retry_without_hint_or_model_rejected(self, client, test_token, orchestrator):
-        resp = client.post("/api/jobs/j1/retry", headers={"Authorization": f"Bearer {test_token}"}, json={})
-        assert resp.status_code == 400
-        assert "hint or model" in resp.json()["error"]
 
     def test_retry_forwards_verifier_model(self, client, test_token, orchestrator):
         resp = client.post(
@@ -360,6 +347,11 @@ class TestJobActionStatusCodes:
     def test_retry_wrong_state_is_409(self, client, auth, orchestrator):
         resp = client.post("/api/jobs/job-r1/retry", headers=auth, json={"hint": "try harder"})
         assert resp.status_code == 409
+
+    def test_retry_without_hint_or_model_is_400_not_409(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-s1/retry", headers=auth, json={})
+        assert resp.status_code == 400
+        assert "hint or model" in resp.json()["error"]
 
     def test_retry_worktree_failure_is_500_not_409(self, client, auth, orchestrator, job_store, monkeypatch):
         job_store.update("job-s1", repo="/repo/does-not-matter")

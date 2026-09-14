@@ -5,7 +5,23 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
-from tsugite_daemon.job_store import JobState, UnknownJobError
+from tsugite_daemon.job_store import JobState, JobStateTransitionError, UnknownJobError
+
+_JOB_ERROR_STATUS: dict[type[Exception], int] = {
+    UnknownJobError: 404,
+    JobStateTransitionError: 409,
+    ValueError: 400,
+    RuntimeError: 500,
+}
+
+
+def _job_error_response(exc: Exception) -> JSONResponse | None:
+    """The response for the nearest mapped class on the exception's MRO."""
+    for cls in type(exc).__mro__:
+        status = _JOB_ERROR_STATUS.get(cls)
+        if status is not None:
+            return JSONResponse({"error": str(exc)}, status_code=status)
+    return None
 
 
 class JobsMixin:
@@ -109,10 +125,9 @@ class JobsMixin:
                 executor=(body.get("executor") or "agent").strip() or "agent",
                 effort=body.get("effort") or None,
             )
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        except Exception as e:  # noqa: BLE001 -- surface spawn failures as 500, don't crash the loop
-            return JSONResponse({"error": str(e)}, status_code=500)
+        except Exception as e:
+            # Unmapped failures are spawn errors.
+            return _job_error_response(e) or JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse(job.to_payload(), status_code=201)
 
     async def _api_cancel_job(self, request: Request) -> JSONResponse:
@@ -123,8 +138,10 @@ class JobsMixin:
         reason = body.get("reason") or "cancelled by user"
         try:
             await self.jobs_orchestrator.cancel_job(job_id, reason=reason)
-        except UnknownJobError as e:
-            return JSONResponse({"error": str(e)}, status_code=404)
+        except Exception as e:
+            if (resp := _job_error_response(e)) is None:
+                raise
+            return resp
         return JSONResponse({"status": "cancelled"})
 
     async def _api_mark_job_done(self, request: Request) -> JSONResponse:
@@ -135,10 +152,10 @@ class JobsMixin:
         reason = body.get("reason") or "marked done by user"
         try:
             await self.jobs_orchestrator.mark_done_manual(job_id, reason=reason)
-        except UnknownJobError as e:
-            return JSONResponse({"error": str(e)}, status_code=404)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=409)
+        except Exception as e:
+            if (resp := _job_error_response(e)) is None:
+                raise
+            return resp
         return JSONResponse({"status": "done"})
 
     async def _api_retry_job(self, request: Request) -> JSONResponse:
@@ -149,10 +166,6 @@ class JobsMixin:
         hint = (body.get("hint") or "").strip()
         model = (body.get("model") or "").strip() or None
         verifier_model = (body.get("verifier_model") or "").strip() or None
-        if not hint and not model:
-            # Retrying purely to switch models is legitimate (usage-limit death);
-            # an unchanged retry with neither is a no-op repeat.
-            return JSONResponse({"error": "hint or model is required"}, status_code=400)
         reset_counter = bool(body.get("reset_counter", False))
         fresh_workspace = bool(body.get("fresh_workspace", False))
         try:
@@ -164,10 +177,8 @@ class JobsMixin:
                 model=model,
                 verifier_model=verifier_model,
             )
-        except UnknownJobError as e:
-            return JSONResponse({"error": str(e)}, status_code=404)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=409)
-        except RuntimeError as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+        except Exception as e:
+            if (resp := _job_error_response(e)) is None:
+                raise
+            return resp
         return JSONResponse({"status": "running"})

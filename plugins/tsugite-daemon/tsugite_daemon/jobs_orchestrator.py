@@ -210,7 +210,7 @@ class JobsOrchestrator:
             try:
                 self._jobs.update_state(job.id, JobState.ERRORED.value)
                 self._jobs.update(job.id, error="daemon restarted while job was active; retry to spawn a fresh worker")
-            except (JobStateTransitionError, KeyError) as e:
+            except (JobStateTransitionError, UnknownJobError) as e:
                 logger.warning("Could not recover orphaned job '%s': %s", job.id, e)
                 continue
             self._emit_job_event(self._jobs.get(job.id))
@@ -552,9 +552,7 @@ class JobsOrchestrator:
         for them, distinct from mark-done (which records a false success). Their
         sessions are already terminal, so the loop below skips them.
         """
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise UnknownJobError(f"Unknown job: {job_id}")
+        job = self._jobs.require(job_id)
         if job.state in (JobState.DONE.value, JobState.CANCELLED.value):
             return job
         for sid in (job.worker_session_id, job.verifier_session_id):
@@ -607,13 +605,11 @@ class JobsOrchestrator:
         """
         if not (message or "").strip():
             raise ValueError("message is required")
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise UnknownJobError(f"Unknown job: {job_id}")
+        job = self._jobs.require(job_id)
         if job.executor == "agent":
             raise ValueError("respond_to_job only supports executor jobs; agent workers have no steering channel")
         if job.state not in (JobState.AWAITING_INPUT.value, JobState.RUNNING.value):
-            raise ValueError(f"job '{job_id}' is {job.state}, not running - use retry for parked jobs")
+            raise JobStateTransitionError(f"job '{job_id}' is {job.state}, not running - use retry for parked jobs")
         executor = self._executors.get(job.executor)
         if executor is None:
             raise ValueError(f"executor '{job.executor}' is not loaded")
@@ -630,9 +626,7 @@ class JobsOrchestrator:
         a cleared question. Called when the pause ends: an answer arrives via
         respond_to_job, or a human answered directly in the live TUI (the hook
         route sees a Stop while paused)."""
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise UnknownJobError(f"Unknown job: {job_id}")
+        job = self._jobs.require(job_id)
         self._jobs.update_state(job_id, JobState.RUNNING.value)
         self._jobs.update(job_id, pending_question=None)
         job = self._jobs.get(job_id)
@@ -646,11 +640,11 @@ class JobsOrchestrator:
         # Share retry_with_hint's per-job lock so a concurrent retry can't interleave
         # with this STUCK override.
         async with self._job_lock(job_id):
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise UnknownJobError(f"Unknown job: {job_id}")
+            job = self._jobs.require(job_id)
             if job.state != JobState.STUCK.value:
-                raise ValueError(f"mark_done_manual only valid on stuck jobs (job '{job_id}' is {job.state})")
+                raise JobStateTransitionError(
+                    f"mark_done_manual only valid on stuck jobs (job '{job_id}' is {job.state})"
+                )
             # Defensive: STUCK should have no pending timer (set in _finalize), but cancel
             # to be safe in case a future code path leaves one behind.
             self._cancel_timeout(job_id)
@@ -706,11 +700,11 @@ class JobsOrchestrator:
             # Re-read inside the lock - a concurrent retry / mark-done may have already
             # moved this job out of STUCK while we waited for the lock. A stale read
             # here is exactly what lets the second caller double-spawn.
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise UnknownJobError(f"Unknown job: {job_id}")
+            job = self._jobs.require(job_id)
             if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
-                raise ValueError(f"retry_with_hint only valid on stuck/errored jobs (job '{job_id}' is {job.state})")
+                raise JobStateTransitionError(
+                    f"retry_with_hint only valid on stuck/errored jobs (job '{job_id}' is {job.state})"
+                )
 
             # Only a repo job has enough on record to rebuild a worktree from.
             if job.repo and (fresh_workspace or not job.worktree_path):
@@ -1414,7 +1408,7 @@ class JobsOrchestrator:
             return
         try:
             self._jobs.update(job_id, worktree_path=None)
-        except KeyError:
+        except UnknownJobError:
             # The job aged out of the store while the prune ran; nothing to clear.
             pass
 

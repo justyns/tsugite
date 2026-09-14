@@ -8,6 +8,7 @@ from tsugite_daemon.job_store import (
     JobState,
     JobStateTransitionError,
     JobStore,
+    UnknownJobError,
 )
 
 
@@ -94,6 +95,14 @@ def test_invalid_transition_raises(store, from_state, to_state):
         _force_state(store, job.id, from_state.value)
     with pytest.raises(JobStateTransitionError):
         store.update_state(job.id, to_state.value)
+
+
+def test_a_missing_record_raises_unknown_job_error(store):
+    """The jobs HTTP layer maps UnknownJobError to 404."""
+    with pytest.raises(UnknownJobError):
+        store.update("job-gone", error="x")
+    with pytest.raises(UnknownJobError):
+        store.update_state("job-gone", JobState.RUNNING.value)
 
 
 @pytest.mark.parametrize(

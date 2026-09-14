@@ -265,6 +265,7 @@ class JobStore(RecordStore):
     valid_transitions = _VALID_TRANSITIONS
     terminal_states = _TERMINAL_STATES
     transition_error_cls = JobStateTransitionError
+    missing_error_cls = UnknownJobError
 
     def __init__(self, path: Path, max_terminal_jobs: int = 200):
         # Retention cap for resolved jobs - without it jobs.json grows forever

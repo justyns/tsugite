@@ -201,6 +201,7 @@ class RecordStore:
     valid_transitions: dict[str, frozenset[str]]
     terminal_states: frozenset[str]
     transition_error_cls: type[ValueError] = ValueError
+    missing_error_cls: type[LookupError] = KeyError
 
     def __init__(self, path: Path):
         self._path = path  # legacy JSON location; migration source only
@@ -237,11 +238,18 @@ class RecordStore:
         with self._lock:
             return [r for r in self._records.values() if r.parent_session_id == parent_session_id]
 
+    def require(self, record_id: str):
+        """Raises `missing_error_cls` when no record has that id."""
+        record = self.get(record_id)
+        if record is None:
+            raise self.missing_error_cls(f"Unknown {self.record_label}: {record_id}")
+        return record
+
     def update_state(self, record_id: str, new_state: str):
         with self._lock:
             record = self._records.get(record_id)
             if record is None:
-                raise KeyError(f"Unknown {self.record_label}: {record_id}")
+                raise self.missing_error_cls(f"Unknown {self.record_label}: {record_id}")
             allowed = self.valid_transitions.get(record.state, frozenset())
             if new_state not in allowed:
                 raise self.transition_error_cls(
@@ -270,7 +278,7 @@ class RecordStore:
         with self._lock:
             record = self._records.get(record_id)
             if record is None:
-                raise KeyError(f"Unknown {self.record_label}: {record_id}")
+                raise self.missing_error_cls(f"Unknown {self.record_label}: {record_id}")
             for key, value in fields.items():
                 if not hasattr(record, key):
                     raise ValueError(f"Unknown {self.record_cls.__name__} field: {key}")
