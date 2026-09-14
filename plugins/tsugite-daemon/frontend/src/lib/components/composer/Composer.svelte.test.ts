@@ -590,6 +590,21 @@ test('a full-height pane stacks the attach row above the textarea and keeps the 
   expect(container.querySelector('.kbd-strip')).not.toBeNull();
 });
 
+test('typing into a dense queued composer brings the queued note back', async () => {
+  // A placeholder shows only while the field is empty.
+  const { container } = await render(Composer, {
+    dense: true,
+    queued: true,
+    hint: 'queued — sends when this turn finishes',
+  });
+  const box = page.getByRole('textbox', { name: 'Message' });
+  expect(getComputedStyle(container.querySelector('.qnote')!).display).toBe('none');
+
+  await userEvent.fill(box, 'and also check the scheduler logs');
+
+  expect(getComputedStyle(container.querySelector('.qnote')!).display).not.toBe('none');
+});
+
 test('a dense composer shows the queued hint as the placeholder', async () => {
   const { container } = await render(Composer, {
     dense: true,

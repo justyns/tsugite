@@ -397,6 +397,7 @@
 <div
   class="composer"
   class:is-queued={queued}
+  class:has-text={Boolean(value)}
   data-density={dense ? 'dense' : undefined}
   bind:this={root}
 >
@@ -562,8 +563,9 @@
   .composer[data-density='dense'] .btmrow {
     grid-row: 2;
   }
-  /* When dense, the hint shows as the placeholder. */
-  .composer[data-density='dense'].is-queued .qnote,
+  /* When dense, the hint shows as the placeholder, which paints only while the
+     field is empty. */
+  .composer[data-density='dense'].is-queued:not(.has-text) .qnote,
   .composer[data-density='dense'] .hint {
     display: none;
   }
