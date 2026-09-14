@@ -194,3 +194,5 @@ plugins/tsugite-daemon/tsugite_daemon/web/
 # gitignores with Python-style `lib/`) would otherwise silently exclude.
 !plugins/tsugite-daemon/frontend/src/lib/
 !plugins/tsugite-daemon/frontend/src/lib/**
+# Per-job git worktrees provisioned by the daemon.
+.tsugite-jobs/

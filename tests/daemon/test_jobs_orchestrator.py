@@ -963,6 +963,64 @@ def test_create_job_with_repo_provisions_worktree(store, runner, orchestrator, t
     assert started.workspace_override == fresh.worktree_path
 
 
+def _exclude_file(repo):
+    done = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(repo) / done.stdout.strip()
+
+
+def _start_job_with_repo(orchestrator, repo):
+    job, _ = asyncio.run(
+        orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do",
+            acceptance_criteria=[],
+            repo=str(repo),
+        )
+    )
+    return job
+
+
+def test_job_worktree_does_not_dirty_the_target_repo(store, runner, orchestrator, tmp_path):
+    repo = tmp_path / "greenhouse"
+    _make_git_repo(repo)
+    _start_job_with_repo(orchestrator, repo)
+
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True)
+    assert status.stdout == "", f"the worktree dir must not show in git status; got {status.stdout!r}"
+    assert ".tsugite-jobs/" in _exclude_file(repo).read_text().splitlines()
+
+
+def test_second_job_does_not_duplicate_the_exclude_line(store, runner, orchestrator, tmp_path):
+    repo = tmp_path / "orchard"
+    _make_git_repo(repo)
+    first = _start_job_with_repo(orchestrator, repo)
+    second = _start_job_with_repo(orchestrator, repo)
+    assert store.get(first.id).worktree_path != store.get(second.id).worktree_path
+
+    lines = _exclude_file(repo).read_text().splitlines()
+    assert lines.count(".tsugite-jobs/") == 1, f"exclude line written twice: {lines}"
+
+
+def test_existing_exclude_entries_are_kept(store, runner, orchestrator, tmp_path):
+    repo = tmp_path / "pantry"
+    _make_git_repo(repo)
+    exclude = _exclude_file(repo)
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("# local excludes\nscratch.txt\n")
+
+    _start_job_with_repo(orchestrator, repo)
+
+    lines = exclude.read_text().splitlines()
+    assert "scratch.txt" in lines, f"pre-existing excludes must survive: {lines}"
+    assert ".tsugite-jobs/" in lines
+
+
 def test_create_job_without_repo_does_not_provision(store, runner, orchestrator):
     job, started = asyncio.run(
         orchestrator.create_and_start_job(
