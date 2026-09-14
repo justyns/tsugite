@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
-from tsugite_daemon.job_store import Job, JobState, JobStore
+from tsugite_daemon.job_store import Job, JobState, JobStore, UnknownJobError
 from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
     _parse_verifier_output,
@@ -1466,6 +1466,40 @@ async def test_retry_with_hint_rejects_non_stuck(store, runner, orchestrator):
         await orchestrator.retry_with_hint(job.id, hint="x")
 
 
+@pytest.mark.parametrize(
+    "action",
+    [
+        lambda o, jid: o.cancel_job(jid),
+        lambda o, jid: o.respond_to_job(jid, "hi"),
+        lambda o, jid: o.resume_worker(jid),
+        lambda o, jid: o.mark_done_manual(jid),
+        lambda o, jid: o.retry_with_hint(jid, hint="x"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tile_actions_raise_unknown_job_error_for_a_missing_id(orchestrator, action):
+    with pytest.raises(UnknownJobError, match="job-nope"):
+        await action(orchestrator, "job-nope")
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_raises_runtime_error_when_the_worktree_cannot_be_recreated(
+    store, runner, orchestrator, monkeypatch
+):
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="p", state="stuck", repo="/repo"))
+    monkeypatch.setattr(orch_mod, "_provision_worktree", MagicMock(side_effect=OSError("disk full")))
+    with pytest.raises(RuntimeError, match="recreate worktree"):
+        await orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True)
+
+
+@pytest.mark.asyncio
+async def test_retry_with_hint_raises_runtime_error_when_the_worker_cannot_spawn(store, runner, orchestrator):
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="p", state="stuck"))
+    runner.start_session = MagicMock(side_effect=OSError("no room"))
+    with pytest.raises(RuntimeError, match="spawn retry worker"):
+        await orchestrator.retry_with_hint(job.id, hint="x")
+
+
 # ── notify + context injection + new tools ──
 
 
@@ -2303,7 +2337,7 @@ async def test_retry_with_hint_refuses_missing_workspace_anchor(store, runner, o
     )
     store.update_state(job.id, JobState.STUCK.value)
     shutil.rmtree(gone)
-    with pytest.raises(ValueError, match="no longer exists"):
+    with pytest.raises(RuntimeError, match="no longer exists"):
         await orchestrator.retry_with_hint(job.id, hint="try again")
 
 

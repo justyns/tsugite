@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -10,6 +10,7 @@ from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.auth import TokenStore
 from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.job_store import Job, JobStore
+from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
 from tsugite_daemon.session_store import SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
@@ -325,3 +326,51 @@ class TestRetryModelEndpoint:
         )
         assert resp.status_code == 200
         assert orchestrator.calls[-1]["verifier_model"] == "claude_code:haiku"
+
+
+class TestJobActionStatusCodes:
+    """The tile actions pick 404 / 409 / 500 by exception type."""
+
+    @pytest.fixture
+    def orchestrator(self, server, job_store):
+        real = JobsOrchestrator(job_store, MagicMock())
+        server.jobs_orchestrator = real
+        return real
+
+    @pytest.fixture
+    def auth(self, test_token):
+        return {"Authorization": f"Bearer {test_token}"}
+
+    def test_cancel_unknown_job_is_404(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-nope/cancel", headers=auth, json={})
+        assert resp.status_code == 404
+
+    def test_mark_done_unknown_job_is_404(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-nope/mark-done", headers=auth, json={})
+        assert resp.status_code == 404
+
+    def test_mark_done_wrong_state_is_409(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-r1/mark-done", headers=auth, json={})
+        assert resp.status_code == 409
+
+    def test_retry_unknown_job_is_404(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-nope/retry", headers=auth, json={"hint": "try harder"})
+        assert resp.status_code == 404
+
+    def test_retry_wrong_state_is_409(self, client, auth, orchestrator):
+        resp = client.post("/api/jobs/job-r1/retry", headers=auth, json={"hint": "try harder"})
+        assert resp.status_code == 409
+
+    def test_retry_worktree_failure_is_500_not_409(self, client, auth, orchestrator, job_store, monkeypatch):
+        job_store.update("job-s1", repo="/repo/does-not-matter")
+        monkeypatch.setattr(
+            "tsugite_daemon.jobs_orchestrator._provision_worktree",
+            MagicMock(side_effect=OSError("disk full")),
+        )
+        resp = client.post(
+            "/api/jobs/job-s1/retry",
+            headers=auth,
+            json={"hint": "try harder", "fresh_workspace": True},
+        )
+        assert resp.status_code == 500
+        assert "recreate worktree" in resp.json()["error"]

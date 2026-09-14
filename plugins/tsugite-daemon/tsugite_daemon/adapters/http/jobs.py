@@ -5,7 +5,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
-from tsugite_daemon.job_store import JobState
+from tsugite_daemon.job_store import JobState, UnknownJobError
 
 
 class JobsMixin:
@@ -123,7 +123,7 @@ class JobsMixin:
         reason = body.get("reason") or "cancelled by user"
         try:
             await self.jobs_orchestrator.cancel_job(job_id, reason=reason)
-        except ValueError as e:
+        except UnknownJobError as e:
             return JSONResponse({"error": str(e)}, status_code=404)
         return JSONResponse({"status": "cancelled"})
 
@@ -135,10 +135,10 @@ class JobsMixin:
         reason = body.get("reason") or "marked done by user"
         try:
             await self.jobs_orchestrator.mark_done_manual(job_id, reason=reason)
+        except UnknownJobError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
         except ValueError as e:
-            # 404 if unknown, 409 if not in STUCK state.
-            status = 404 if "Unknown job" in str(e) else 409
-            return JSONResponse({"error": str(e)}, status_code=status)
+            return JSONResponse({"error": str(e)}, status_code=409)
         return JSONResponse({"status": "done"})
 
     async def _api_retry_job(self, request: Request) -> JSONResponse:
@@ -164,7 +164,10 @@ class JobsMixin:
                 model=model,
                 verifier_model=verifier_model,
             )
+        except UnknownJobError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
         except ValueError as e:
-            status = 404 if "Unknown job" in str(e) else 409
-            return JSONResponse({"error": str(e)}, status_code=status)
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"status": "running"})

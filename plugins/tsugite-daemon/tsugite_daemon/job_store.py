@@ -71,6 +71,10 @@ class JobStateTransitionError(ValueError):
     """Raised when a Job state change violates the state machine."""
 
 
+class UnknownJobError(LookupError):
+    """Raised when a job id matches no Job."""
+
+
 def _coerce_ac_list(items) -> list[str]:
     """Coerce an AC list to plain strings, dropping empties.
 

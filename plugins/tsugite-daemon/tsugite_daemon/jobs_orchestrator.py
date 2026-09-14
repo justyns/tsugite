@@ -30,7 +30,14 @@ from tsugite_daemon.job_prompts import (
     _build_verifier_prompt,
     build_worker_prompt,
 )
-from tsugite_daemon.job_store import _TERMINAL_STATES, Job, JobState, JobStateTransitionError, JobStore
+from tsugite_daemon.job_store import (
+    _TERMINAL_STATES,
+    Job,
+    JobState,
+    JobStateTransitionError,
+    JobStore,
+    UnknownJobError,
+)
 from tsugite_daemon.job_verdicts import (
     _extract_failed_acs,
     _is_infra_failure,
@@ -547,7 +554,7 @@ class JobsOrchestrator:
         """
         job = self._jobs.get(job_id)
         if job is None:
-            raise ValueError(f"Unknown job: {job_id}")
+            raise UnknownJobError(f"Unknown job: {job_id}")
         if job.state in (JobState.DONE.value, JobState.CANCELLED.value):
             return job
         for sid in (job.worker_session_id, job.verifier_session_id):
@@ -602,7 +609,7 @@ class JobsOrchestrator:
             raise ValueError("message is required")
         job = self._jobs.get(job_id)
         if job is None:
-            raise ValueError(f"Unknown job: {job_id}")
+            raise UnknownJobError(f"Unknown job: {job_id}")
         if job.executor == "agent":
             raise ValueError("respond_to_job only supports executor jobs; agent workers have no steering channel")
         if job.state not in (JobState.AWAITING_INPUT.value, JobState.RUNNING.value):
@@ -625,7 +632,7 @@ class JobsOrchestrator:
         route sees a Stop while paused)."""
         job = self._jobs.get(job_id)
         if job is None:
-            raise ValueError(f"Unknown job: {job_id}")
+            raise UnknownJobError(f"Unknown job: {job_id}")
         self._jobs.update_state(job_id, JobState.RUNNING.value)
         self._jobs.update(job_id, pending_question=None)
         job = self._jobs.get(job_id)
@@ -641,7 +648,7 @@ class JobsOrchestrator:
         async with self._job_lock(job_id):
             job = self._jobs.get(job_id)
             if job is None:
-                raise ValueError(f"Unknown job: {job_id}")
+                raise UnknownJobError(f"Unknown job: {job_id}")
             if job.state != JobState.STUCK.value:
                 raise ValueError(f"mark_done_manual only valid on stuck jobs (job '{job_id}' is {job.state})")
             # Defensive: STUCK should have no pending timer (set in _finalize), but cancel
@@ -701,7 +708,7 @@ class JobsOrchestrator:
             # here is exactly what lets the second caller double-spawn.
             job = self._jobs.get(job_id)
             if job is None:
-                raise ValueError(f"Unknown job: {job_id}")
+                raise UnknownJobError(f"Unknown job: {job_id}")
             if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
                 raise ValueError(f"retry_with_hint only valid on stuck/errored jobs (job '{job_id}' is {job.state})")
 
@@ -715,13 +722,13 @@ class JobsOrchestrator:
                     job = self._jobs.update(job_id, worktree_path=worktree_path)
                 except Exception as e:
                     logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
-                    raise ValueError(f"failed to recreate worktree: {e}") from e
+                    raise RuntimeError(f"failed to recreate worktree: {e}") from e
             else:
                 anchor = _job_workspace(job)
                 if anchor and not Path(anchor).is_dir():
                     # Worktree/workspace was hand-deleted between STUCK and retry -
                     # refuse rather than spawn a worker into a missing directory.
-                    raise ValueError(
+                    raise RuntimeError(
                         f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
                     )
 
@@ -761,7 +768,7 @@ class JobsOrchestrator:
                     # without this the job sits live with no diagnostic, refusing
                     # further retries until its phase timeout fires.
                     self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
-                raise ValueError(f"failed to spawn retry worker: {e}") from e
+                raise RuntimeError(f"failed to spawn retry worker: {e}") from e
             if not activate_first:
                 self._activate_worker(
                     job_id,

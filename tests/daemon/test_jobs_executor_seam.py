@@ -574,7 +574,7 @@ async def test_retry_whose_spawn_raises_does_not_wedge_the_job_in_running(store,
     # A plugin whose get_job_executors() raises is logged and skipped at load, so
     # after a daemon restart a persisted cc job can find no executor registered.
     orchestrator._executors.pop("fake")
-    with pytest.raises(ValueError, match="failed to spawn retry worker"):
+    with pytest.raises(RuntimeError, match="failed to spawn retry worker"):
         await orchestrator.retry_with_hint(job.id, "install it first")
 
     fresh = store.get(job.id)
