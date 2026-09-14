@@ -482,6 +482,19 @@ def test_real_claude_launches_inside_the_jail(tmp_path):
 
     if shutil.which("claude") is None or shutil.which("bwrap") is None:
         pytest.skip("needs a real claude + bwrap install")
+    # The jail rebinds HOME, and a wrapper script that recomputes its target from
+    # $HOME is unreachable inside it.
+    probe_home = tmp_path / "probe-home"
+    probe_home.mkdir()
+    probe = subprocess.run(
+        ["claude", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "HOME": str(probe_home)},
+    )
+    if probe.returncode != 0:
+        pytest.skip(f"host claude resolves through $HOME: {probe.stderr.strip()}")
     from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
     work = tmp_path / "work"
