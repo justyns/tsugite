@@ -26,6 +26,7 @@
     onOpenSettings,
     keystripCost,
     keystripTokens,
+    keystripModel,
   }: {
     views: ViewDef[];
     activeId: string;
@@ -43,6 +44,8 @@
     /** Today's cost/tokens, pre-formatted; forwarded to KeyStrip. */
     keystripCost?: string;
     keystripTokens?: string;
+    /** Model of the focused chat. Absent when no session is selected. */
+    keystripModel?: string;
   } = $props();
 
   const peeked = $derived(collapsed && peeking);
@@ -105,7 +108,13 @@
         />
       {/each}
     </ul>
-    <KeyStrip collapsed={iconsOnly} {onOpenSettings} cost={keystripCost} tokens={keystripTokens} />
+    <KeyStrip
+      collapsed={iconsOnly}
+      {onOpenSettings}
+      cost={keystripCost}
+      tokens={keystripTokens}
+      model={keystripModel}
+    />
   </div>
 </nav>
 

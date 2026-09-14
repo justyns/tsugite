@@ -1,8 +1,7 @@
 <script lang="ts">
   // Rail footer / keystrip (.rail-ft).
   // Pinned to the bottom of the nav rail: settings entry, today's usage readout,
-  // and the live connection chip. Cost/token/model values are placeholders until
-  // usage + session data is wired; the conn chip is live off the store now.
+  // and the live connection chip.
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Conn from '$lib/components/connstates/Conn.svelte';
@@ -16,7 +15,6 @@
     cost = '$0.00',
     tokens = '0',
     model,
-    effort,
   }: {
     onOpenSettings: () => void;
     /** Icons-only rail: drop the usage readout + settings label, keep the glyphs. */
@@ -25,11 +23,12 @@
     cost?: string;
     /** Today's token count, e.g. "412k". Live value arrives with usage data. */
     tokens?: string;
-    /** Active model id, e.g. "sonnet-4.6". Present once a session is selected. */
+    /** Active model id, qualified as "anthropic:claude-sonnet-4-6". Absent when
+     *  no session is selected. */
     model?: string;
-    /** Active reasoning effort, e.g. "med". Present once a session is selected. */
-    effort?: string;
   } = $props();
+
+  const shortModel = $derived(model ? model.split(':').slice(-1)[0] : undefined);
 </script>
 
 <div class="rail-ft" class:is-collapsed={collapsed} data-testid={TESTID.keystrip}>
@@ -59,11 +58,10 @@
     </span>
 
     <div class="rail-usage">
-      today <b>{cost}</b> &middot; <b>{tokens}</b> tok<br />
-      {#if model}
-        <span class="model">{model} &middot; effort {effort}</span>
-      {:else}
-        <span class="model">model &middot; effort</span>
+      today <b>{cost}</b> &middot; <b>{tokens}</b> tok
+      {#if shortModel}
+        <br />
+        <span class="model">{shortModel}</span>
       {/if}
     </div>
 
@@ -104,6 +102,7 @@
   .rail-usage {
     font: 500 var(--fs-2xs) / 1.6 var(--font-mono);
     color: var(--tx3);
+    overflow-wrap: anywhere;
   }
   .rail-usage b {
     color: var(--tx2);

@@ -24,16 +24,26 @@ test('usage placeholders are overridden by props when data arrives', async () =>
     onOpenSettings: () => {},
     cost: '$1.84',
     tokens: '412k',
-    model: 'sonnet-4.6',
-    effort: 'med',
+    model: 'anthropic:claude-sonnet-4-6',
   });
   await expect.element(page.getByText('$1.84')).toBeInTheDocument();
   await expect.element(page.getByText('412k')).toBeInTheDocument();
-  await expect.element(page.getByText(/sonnet-4\.6/)).toBeInTheDocument();
+  await expect.element(page.getByText('claude-sonnet-4-6')).toBeInTheDocument();
 });
 
 test('the conn chip mirrors the store status', async () => {
   conn.status = 'reconnecting';
   const { container } = await render(KeyStrip, { onOpenSettings: () => {} });
   expect(container.querySelector('.t-conn')?.getAttribute('data-st')).toBe('re');
+});
+
+test('no session means no model line', async () => {
+  // NavRail mounts this without a model whenever no session is selected.
+  const { container } = await render(KeyStrip, {
+    onOpenSettings: () => {},
+    cost: '$0.00',
+    tokens: '0',
+  });
+  await expect.element(page.getByText('$0.00')).toBeInTheDocument();
+  expect(container.querySelector('.model')).toBeNull();
 });

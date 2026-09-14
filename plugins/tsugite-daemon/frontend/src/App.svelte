@@ -472,6 +472,9 @@
   const keystripTokens = $derived(
     usage.today ? formatTokensCompact(usage.today.total_tokens) : undefined,
   );
+  const keystripModel = $derived(
+    sessions.ordered.find((r) => r.id === focusedSessionId)?.model ?? undefined,
+  );
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
@@ -532,6 +535,7 @@
         onOpenSettings={() => (settingsOpen = true)}
         {keystripCost}
         {keystripTokens}
+        {keystripModel}
       />
       <main class="app-main" id="app-main" data-testid={TESTID.viewHost} aria-label="Workspace">
         <!-- Workspace region: always mounted so terminals + docked surfaces survive
