@@ -14,6 +14,7 @@ DEFAULT_CONTEXT_LIMIT = 128_000
 CONTEXT_RESERVE_RATIO = 0.25
 RETENTION_BUDGET_RATIO = 0.15
 MIN_RETAINED_TURNS = 2
+MAX_CONCURRENT_CHUNK_SUMMARIES = 4
 
 PROVIDER_COMPACT_MODELS = {
     "openai": DEFAULT_COMPACT_MODEL,
@@ -332,15 +333,23 @@ async def summarize_session(
 
     logger.info("Summarizing %d chunks (context limit: %d, usable: %d)", len(chunks), context_limit, usable_tokens)
     completed = 0
+    # An asyncio.Semaphore binds to the event loop that first contends on it.
+    limiter = asyncio.Semaphore(MAX_CONCURRENT_CHUNK_SUMMARIES)
 
     async def _summarize_with_progress(chunk: list[dict]) -> str:
         nonlocal completed
-        result = await _summarize_chunk(chunk, model)
+        async with limiter:
+            result = await _summarize_chunk(chunk, model)
         completed += 1
         _emit({"phase": "summarizing", "chunk_index": completed, "chunk_total": len(chunks)})
         return result
 
-    chunk_summaries = await asyncio.gather(*[_summarize_with_progress(chunk) for chunk in chunks])
+    chunk_summaries = await asyncio.gather(
+        *[_summarize_with_progress(chunk) for chunk in chunks], return_exceptions=True
+    )
+    for result in chunk_summaries:
+        if isinstance(result, BaseException):
+            raise result
     _emit({"phase": "combining"})
     return await _combine_summaries(chunk_summaries, model)
 
