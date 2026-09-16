@@ -62,3 +62,23 @@ test('clicking the strip pins the rail open', async () => {
   await page.getByTestId('rail-expand').click();
   expect(p.onPin).toHaveBeenCalled();
 });
+
+test('a peek draws its header arrow the way the strip draws its own', async () => {
+  await page.viewport(1280, 800);
+  const { container } = await render(CollapsedRail, props({ peeking: true }));
+  const rotation = (icon: Element) => {
+    const { rotate } = getComputedStyle(icon);
+    return rotate === 'none' ? '0deg' : rotate;
+  };
+  expect(rotation(container.querySelector('.railc .ic')!)).toBe(
+    rotation(container.querySelector('.rail-expand .ic')!),
+  );
+});
+
+test('clicking the peeked header pins the rail open too', async () => {
+  await page.viewport(1280, 800);
+  const p = props({ peeking: true });
+  const { container } = await render(CollapsedRail, p);
+  await userEvent.click(container.querySelector('.rail-peek .railc') as HTMLElement);
+  expect(p.onPin).toHaveBeenCalled();
+});

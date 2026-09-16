@@ -50,8 +50,10 @@
     <button
       type="button"
       class="railc"
+      class:is-peeking={peeking}
       data-act="rail-collapse"
       aria-label={peeking ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-pressed={peeking}
       title={peeking ? 'Expand sidebar' : 'Collapse sidebar'}
       onclick={onCollapse}
     >
@@ -123,6 +125,9 @@
     width: 13px;
     height: 13px;
     rotate: 180deg;
+  }
+  .railc.is-peeking :global(.ic) {
+    rotate: 0deg;
   }
   .rail-body {
     flex: 1;
