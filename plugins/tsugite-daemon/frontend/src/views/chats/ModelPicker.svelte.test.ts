@@ -63,10 +63,11 @@ beforeEach(() => {
 });
 // Drain any signal a test left pending (a mismatched request stays set) so the
 // module-scoped store can't leak an open-picker request into the next test.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   const p = modelPickerRequest.pending;
   if (p) modelPickerRequest.consume(p.sessionId);
+  await page.viewport(1440, 900);
 });
 
 test('shows the current model as a short label and opens a filterable popover', async () => {
@@ -100,24 +101,6 @@ test('selecting a model PATCHes the session settings', async () => {
   expect(vi.mocked(api.patch)).toHaveBeenCalledWith('/api/sessions/s1/settings', {
     model: 'openai:gpt-5.4',
   });
-});
-
-test('flips the popover left when a clipping ancestor would cut it off', async () => {
-  // In the app the conversation pane body scrolls (overflow:auto), so a
-  // right-anchored popover hanging left past the pane edge is clipped under
-  // the sessions rail - the flip must measure against that ancestor, not the
-  // viewport. A short chip label (e.g. "gpt-5.5") is what pulls the popover
-  // left enough to cross the boundary.
-  render(ModelPicker, { sessionId: 's1' });
-  const trigger = page.getByTestId('chat-model-trigger');
-  const host = (trigger.element() as HTMLElement).closest('div')!.parentElement as HTMLElement;
-  host.style.cssText +=
-    ';display:block;position:relative;overflow:auto;margin-left:400px;width:220px;';
-
-  await trigger.click();
-  await expect
-    .element(page.getByTestId('chat-model-popover'))
-    .toHaveAttribute('data-align', 'left');
 });
 
 test('a settings broadcast refetches and updates the model chip live', async () => {
@@ -230,4 +213,41 @@ test('a second picker reuses the cached model list', async () => {
   await expect.element(page.getByTestId('chat-model-opt-openai:gpt-5.4-mini')).toBeInTheDocument();
 
   expect(listCalls()).toBe(afterFirst);
+});
+
+// The chip sits second-to-last in the chat header. padding-right stands in for
+// the trailing session menu.
+function headerChip(container: HTMLElement, css: string) {
+  container.style.cssText = `position:fixed;top:0;display:flex;${css}`;
+}
+
+function popRect() {
+  return page.getByTestId('chat-model-popover').element().getBoundingClientRect();
+}
+
+test('at phone width the popover opens fully inside the viewport', async () => {
+  await page.viewport(360, 780);
+  const { container } = await render(ModelPicker, { sessionId: 's1' });
+  headerChip(container, 'left:0;right:0;justify-content:flex-end;padding-right:41px;');
+
+  await page.getByTestId('chat-model-trigger').click();
+  await expect.element(page.getByTestId('chat-model-opt-openai:gpt-5.4-mini')).toBeInTheDocument();
+
+  const r = popRect();
+  expect(r.left).toBeGreaterThanOrEqual(0);
+  expect(r.right).toBeLessThanOrEqual(window.innerWidth);
+});
+
+test('a chip near a clipping pane left edge keeps the popover inside that pane', async () => {
+  await page.viewport(1440, 900);
+  const { container } = await render(ModelPicker, { sessionId: 's1' });
+  headerChip(container, 'left:300px;width:600px;overflow:hidden;');
+
+  await page.getByTestId('chat-model-trigger').click();
+  await expect.element(page.getByTestId('chat-model-opt-openai:gpt-5.4-mini')).toBeInTheDocument();
+
+  const pane = container.getBoundingClientRect();
+  const r = popRect();
+  expect(r.left).toBeGreaterThanOrEqual(pane.left);
+  expect(r.right).toBeLessThanOrEqual(pane.right);
 });

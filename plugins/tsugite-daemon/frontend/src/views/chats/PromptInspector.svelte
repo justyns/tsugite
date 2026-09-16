@@ -15,12 +15,11 @@
   // The context meter, made into a prompt inspector: clicking it opens a popover
   // with the latest prompt_snapshot's per-category token breakdown. With no
   // breakdown it renders the plain meter unchanged (nothing to open). Popover
-  // positioning reuses ModelPicker's clip-boundary flip so it never spills under
-  // a scrolling ancestor.
-  import { tick } from 'svelte';
+  // positioning uses the shared clampIntoView action so it never spills past a
+  // scrolling ancestor or the viewport.
   import Meter from '$lib/components/datadisplay/Meter.svelte';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
-  import { clipBoundaryLeft } from '$lib/dom';
+  import { clampIntoView } from '$lib/actions/clampIntoView';
   import { formatAgo } from '$lib/relativeTime';
 
   let {
@@ -49,9 +48,7 @@
   } = $props();
 
   let root = $state<HTMLElement>();
-  let popEl = $state<HTMLElement>();
   let open = $state(false);
-  let alignLeft = $state(false);
 
   // Biggest consumers first; zero-token categories are noise (matches /context).
   const cats = $derived(
@@ -76,12 +73,8 @@
     return parts.length ? `as of ${parts.join(' · ')}` : '';
   });
 
-  async function toggle(): Promise<void> {
+  function toggle(): void {
     open = !open;
-    if (!open) return;
-    alignLeft = false;
-    await tick();
-    if (popEl && popEl.getBoundingClientRect().left < clipBoundaryLeft(popEl) + 8) alignLeft = true;
   }
 
   $effect(() => {
@@ -115,13 +108,7 @@
     </button>
 
     {#if open}
-      <div
-        class="ctx-pop"
-        data-align={alignLeft ? 'left' : 'right'}
-        role="dialog"
-        aria-label="Context breakdown"
-        bind:this={popEl}
-      >
+      <div class="ctx-pop" role="dialog" aria-label="Context breakdown" use:clampIntoView>
         <div class="ctx-hd">
           <div class="ctx-hd-l">
             <span class="ctx-ttl">context breakdown</span>
@@ -192,12 +179,6 @@
     border-radius: var(--r-md);
     box-shadow: var(--sh-2);
     overflow: hidden;
-  }
-  /* Meter near the viewport's left edge: right-anchoring would clip the popover
-     off-screen, so it flips to hang rightward instead. */
-  .ctx-pop[data-align='left'] {
-    right: auto;
-    left: 0;
   }
   .ctx-hd {
     display: flex;

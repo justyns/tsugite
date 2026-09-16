@@ -20,6 +20,7 @@ RAIL = '[data-testid="chat-rail"]'
 TOPBAR = '[data-testid="topbar"]'
 MODEL_TRIGGER = '[data-testid="chat-model-trigger"]'
 MODEL_POPOVER = '[data-testid="chat-model-popover"]'
+MODEL_OPTION = '[data-testid^="chat-model-opt-"]'
 EFFORT = '[data-testid="chat-effort-seg"]'
 MENU_TRIGGER = '[data-testid="chat-session-menu-trigger"]'
 MENU = '[data-testid="chat-session-menu"]'
@@ -99,10 +100,13 @@ def test_a_portrait_phone_folds_the_header_and_composer(chat_page, e2e_session_s
     page.keyboard.press("Escape")
     expect(page.locator(MENU)).to_have_count(0)
 
-    # The model popover holds models, nothing else.
+    # The model popover holds models, nothing else, and opens fully on-screen.
     page.locator(MODEL_TRIGGER).click()
     expect(page.locator(MODEL_POPOVER)).to_be_visible()
     expect(page.locator(f"{MODEL_POPOVER} {EFFORT}")).to_have_count(0)
+    expect(page.locator(MODEL_OPTION).first).to_be_visible(timeout=15_000)
+    pop = page.locator(MODEL_POPOVER).bounding_box()
+    assert pop["x"] >= 0 and pop["x"] + pop["width"] <= 380, pop
     page.locator('[data-testid="chat-model-search"]').press("Escape")
     expect(page.locator(MODEL_POPOVER)).to_have_count(0)
 

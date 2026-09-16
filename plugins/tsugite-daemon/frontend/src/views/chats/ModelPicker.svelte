@@ -39,7 +39,7 @@
   import { sessions } from '$lib/stores/sessions.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { TESTID } from '$lib/testids';
-  import { clipBoundaryLeft } from '$lib/dom';
+  import { clampIntoView } from '$lib/actions/clampIntoView';
   import { modelPickerRequest } from './modelPickerSignal.svelte';
   import { groupModelsByProvider, formatContext, formatPrice } from './modelGrouping';
 
@@ -65,12 +65,6 @@
   let root = $state<HTMLElement>();
   let inputEl = $state<HTMLInputElement>();
   let listEl = $state<HTMLElement>();
-  let popEl = $state<HTMLElement>();
-  // The popover is right-anchored to the chip; when that would cross the
-  // nearest scroll/clip ancestor's left edge (the pane body cuts it under
-  // the sessions rail - short chip labels pull it furthest left), it flips
-  // to left-anchored.
-  let alignLeft = $state(false);
   const listId = `chat-model-ls-${Math.random().toString(36).slice(2, 8)}`;
 
   // Track which session `current` reflects so a stale fetch can't clobber a newer
@@ -138,7 +132,6 @@
     open = true;
     query = '';
     selected = 0;
-    alignLeft = false;
     if (models.length === 0) {
       loading = true;
       try {
@@ -157,7 +150,6 @@
     const at = options.findIndex((m) => m.id === current);
     selected = at >= 0 ? at : 0;
     await tick();
-    if (popEl && popEl.getBoundingClientRect().left < clipBoundaryLeft(popEl) + 8) alignLeft = true;
     inputEl?.focus();
     scrollSelectedIntoView();
   }
@@ -251,12 +243,7 @@
     </button>
 
     {#if open}
-      <div
-        class="model-pop"
-        data-align={alignLeft ? 'left' : 'right'}
-        data-testid={TESTID.chatModelPopover}
-        bind:this={popEl}
-      >
+      <div class="model-pop" data-testid={TESTID.chatModelPopover} use:clampIntoView>
         <div class="mp-in">
           <Icon name="search" size={14} />
           <!-- svelte-ignore a11y_autofocus -->
@@ -375,12 +362,6 @@
     border-radius: var(--r-md);
     box-shadow: var(--sh-2);
     overflow: hidden;
-  }
-  /* Chip near the viewport's left edge: right-anchoring would clip the popover
-     off-screen, so it flips to hang rightward from the chip instead. */
-  .model-pop[data-align='left'] {
-    right: auto;
-    left: 0;
   }
   .mp-in {
     display: flex;

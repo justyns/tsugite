@@ -1,8 +1,12 @@
 /// <reference types="@vitest/browser/context" />
 import { page } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
-import { expect, test, vi } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import PromptInspector from './PromptInspector.svelte';
+
+afterEach(async () => {
+  await page.viewport(1440, 900);
+});
 
 const base = {
   value: 8000,
@@ -90,4 +94,26 @@ test('the popover closes on an outside mousedown', async () => {
   await expect.element(page.getByRole('dialog')).toBeInTheDocument();
   document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('in a narrow clipping pane the popover stays inside that pane', async () => {
+  // A mux pane clips its overflow and can be as narrow as 260px. The meter sits
+  // near the pane's right edge, with less room than the popover on either side.
+  await page.viewport(1280, 800);
+  const { container } = await render(PromptInspector, {
+    ...base,
+    breakdown: { categories: [{ name: 'tools', tokens: 5000, items: [] }], total: 5000 },
+  });
+  container.style.cssText =
+    'box-sizing:border-box;position:fixed;top:0;left:200px;width:340px;overflow:hidden;display:flex;justify-content:flex-end;padding-right:44px;';
+
+  // The trigger is pinned into the fixture's fixed-position pane, out of reach of
+  // the runner's synthetic pointer, so fire the DOM click on the raw element.
+  (page.getByRole('button', { name: /context breakdown/i }).element() as HTMLElement).click();
+  await expect.element(page.getByRole('dialog')).toBeInTheDocument();
+
+  const pane = container.getBoundingClientRect();
+  const r = page.getByRole('dialog').element().getBoundingClientRect();
+  expect(r.left).toBeGreaterThanOrEqual(pane.left);
+  expect(r.right).toBeLessThanOrEqual(pane.right);
 });
