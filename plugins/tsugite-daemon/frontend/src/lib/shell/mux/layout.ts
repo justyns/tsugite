@@ -163,6 +163,14 @@ function findParent(root: LayoutNode, paneId: string): { parent: SplitNode; inde
 
 // ---------- open / dock ----------
 
+function targetLeaf(layout: Layout, paneId?: string): LeafNode {
+  return (
+    (paneId && findLeafIn(layout.root, paneId)) ||
+    (layout.focusedPaneId && findLeafIn(layout.root, layout.focusedPaneId)) ||
+    collectLeaves(layout.root)[0]!
+  );
+}
+
 function activateOrAdd(leaf: LeafNode, ref: SurfaceRef): void {
   const key = surfaceKey(ref);
   const existing = leaf.tabs.find((t) => surfaceKey(t) === key);
@@ -184,8 +192,6 @@ export function dockAsTab(layout: Layout, paneId: string, ref: SurfaceRef): Layo
   return next;
 }
 
-/** Open a surface, resolving the target pane: explicit id, else the focused
- *  pane, else the first leaf. Used by the palette / row-click path. */
 /**
  * Rail-click semantics: point the existing surface of `ref.kind` at `ref`
  * (params/title update in place, tab id stable so the mounted surface follows)
@@ -210,6 +216,64 @@ export function retargetOrOpen(layout: Layout, ref: SurfaceRef): Layout {
     return next;
   }
   return openInPane(layout, ref);
+}
+
+/** Re-point a docked tab at another surface, keeping its tab id. A title or
+ *  state the ref omits is cleared. */
+function pointAt(tab: PaneTabModel, ref: SurfaceRef): void {
+  tab.kind = ref.kind;
+  tab.params = { ...(ref.params ?? {}) };
+  if (ref.title != null) tab.title = ref.title;
+  else delete tab.title;
+  if (ref.state != null) tab.state = ref.state;
+  else delete tab.state;
+}
+
+/** Activate the tab whose surfaceKey matches `ref`, wherever it is docked. A
+ *  title or state the ref omits is kept. Mutates `layout` - the exported
+ *  callers own the clone. */
+function activateDocked(layout: Layout, ref: SurfaceRef): LeafNode | null {
+  const key = surfaceKey(ref);
+  for (const leaf of collectLeaves(layout.root)) {
+    const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
+    if (!tab) continue;
+    if (ref.title != null) tab.title = ref.title;
+    if (ref.state != null) tab.state = ref.state;
+    leaf.activeTabId = tab.id;
+    return leaf;
+  }
+  return null;
+}
+
+/**
+ * Palette semantics: focus the tab already showing `ref`, in whichever pane it is
+ * docked, else open a new one in the focused pane. A tab pointed at a different
+ * surface is not retargeted.
+ */
+export function focusOrOpen(layout: Layout, ref: SurfaceRef): Layout {
+  const next = clone(layout);
+  const leaf = activateDocked(next, ref);
+  if (!leaf) return openInPane(layout, ref);
+  next.focusedPaneId = leaf.id;
+  return next;
+}
+
+/** Point the focused pane's active tab at `ref` (the palette's Shift pick),
+ *  pinning it. Activates the tab already showing `ref` when one is docked. */
+export function retargetFocusedTab(layout: Layout, ref: SurfaceRef): Layout {
+  const next = clone(layout);
+  const docked = activateDocked(next, ref);
+  if (docked) {
+    next.focusedPaneId = docked.id;
+    return next;
+  }
+  const leaf = targetLeaf(next);
+  const tab = leaf.tabs.find((t) => t.id === leaf.activeTabId);
+  if (!tab) return openInPane(layout, ref, leaf.id);
+  pointAt(tab, ref);
+  delete tab.ephemeral;
+  next.focusedPaneId = leaf.id;
+  return next;
 }
 
 /** Rename a docked tab, wherever it lives. Keyed by tab id alone because the
@@ -240,11 +304,7 @@ export function retargetTab(layout: Layout, tabId: string, params: Record<string
 }
 
 export function openInPane(layout: Layout, ref: SurfaceRef, targetPaneId?: string): Layout {
-  const target =
-    (targetPaneId && findLeaf(layout, targetPaneId)?.id) ||
-    (layout.focusedPaneId && findLeaf(layout, layout.focusedPaneId)?.id) ||
-    collectLeaves(layout.root)[0]!.id;
-  return dockAsTab(layout, target, ref);
+  return dockAsTab(layout, targetLeaf(layout, targetPaneId).id, ref);
 }
 
 /**
@@ -260,10 +320,7 @@ export function openInPane(layout: Layout, ref: SurfaceRef, targetPaneId?: strin
  */
 export function openPreview(layout: Layout, ref: SurfaceRef, targetPaneId?: string): Layout {
   const next = clone(layout);
-  const target =
-    (targetPaneId && findLeafIn(next.root, targetPaneId)) ||
-    (next.focusedPaneId && findLeafIn(next.root, next.focusedPaneId)) ||
-    collectLeaves(next.root)[0]!;
+  const target = targetLeaf(next, targetPaneId);
   const key = surfaceKey(ref);
 
   const pinned = target.tabs.find((t) => !t.ephemeral && surfaceKey(t) === key);
@@ -275,13 +332,7 @@ export function openPreview(layout: Layout, ref: SurfaceRef, targetPaneId?: stri
 
   const preview = target.tabs.find((t) => t.ephemeral);
   if (preview) {
-    preview.kind = ref.kind;
-    preview.params = { ...(ref.params ?? {}) };
-    if (ref.title != null) preview.title = ref.title;
-    else delete preview.title;
-    if (ref.state != null) preview.state = ref.state;
-    else delete preview.state;
-    // preview.ephemeral stays true - this is the reused preview slot.
+    pointAt(preview, ref);
     target.activeTabId = preview.id;
     next.focusedPaneId = target.id;
     return next;
@@ -313,23 +364,12 @@ export function pinTab(layout: Layout, paneId: string, tabId: string): Layout {
  * pane splits along `dir`, which keeps the chat visible next to the new pane.
  *
  * Focus stays on the pane that had it, so an agent-driven open does not
- * retarget where the user's next rail click or palette open lands.
+ * retarget where the user's next rail click lands.
  */
 export function openBeside(layout: Layout, ref: SurfaceRef, dir: SplitDir = 'row'): Layout {
-  const key = surfaceKey(ref);
   const next = clone(layout);
-  for (const leaf of collectLeaves(next.root)) {
-    const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
-    if (!tab) continue;
-    if (ref.title != null) tab.title = ref.title;
-    if (ref.state != null) tab.state = ref.state;
-    leaf.activeTabId = tab.id;
-    return next;
-  }
-  const target =
-    (layout.focusedPaneId && findLeaf(layout, layout.focusedPaneId)?.id) ||
-    collectLeaves(layout.root)[0]!.id;
-  const split = splitPane(layout, target, dir, ref, 'after');
+  if (activateDocked(next, ref)) return next;
+  const split = splitPane(layout, targetLeaf(layout).id, dir, ref, 'after');
   split.focusedPaneId = layout.focusedPaneId;
   return split;
 }

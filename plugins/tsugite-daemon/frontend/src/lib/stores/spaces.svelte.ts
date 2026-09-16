@@ -24,12 +24,14 @@ import {
   deserializeLayout,
   dockAsTab,
   findLeaf,
+  focusOrOpen,
   focusPane,
   moveTab,
   openBeside,
   openInPane,
   openPreview,
   pinTab,
+  retargetFocusedTab,
   resizeSplit,
   retargetOrOpen,
   retargetTab,
@@ -245,6 +247,15 @@ export class SpacesStore {
    *  instead of stacking a tab per selection; drag-to-dock makes new tabs. */
   openReusing(ref: SurfaceRef): void {
     this.apply((l) => retargetOrOpen(l, ref));
+  }
+  /** Palette semantics: focus the tab already showing this surface, else open a
+   *  new one. */
+  focusOrOpen(ref: SurfaceRef): void {
+    this.apply((l) => focusOrOpen(l, ref));
+  }
+  /** Point the focused pane's active tab at `ref` - the palette's Shift pick. */
+  retargetFocusedTab(ref: SurfaceRef): void {
+    this.apply((l) => retargetFocusedTab(l, ref));
   }
   /** VSCode-style preview open: route into the pane's single reusable ephemeral
    *  tab (the next preview replaces it) unless the surface is already pinned. */

@@ -12,6 +12,10 @@ seed state through the daemon fixtures / HTTP API.
 
 from __future__ import annotations
 
+from tsugite_daemon.session_store import Session, SessionSource
+
+from tsugite.history import generate_session_id
+
 # Fixed synthetic user id injected into localStorage by the `authenticated_page`
 # fixture, so tests that seed sessions/data for "the current user" via
 # e2e_session_store etc. have a stable id to key off instead of reading
@@ -51,3 +55,15 @@ def open_view(page, view_id: str, timeout: int = 5000) -> None:
 def auth_headers(token: str) -> dict:
     """Bearer-auth header dict for direct `page.request` API calls."""
     return {"Authorization": f"Bearer {token}"}
+
+
+def seed_session(store, title: str) -> None:
+    """Add an interactive session owned by the e2e user."""
+    store.create_session(
+        Session(
+            id=generate_session_id("test-agent"),
+            source=SessionSource.INTERACTIVE.value,
+            user_id=E2E_USER_ID,
+            title=title,
+        )
+    )

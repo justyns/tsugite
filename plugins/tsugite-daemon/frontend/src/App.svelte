@@ -40,6 +40,7 @@
   import { surfaceComponent } from './views/surfaces';
   import { workspacePhoneScreen } from '$lib/shell/phoneNav';
   import { dockedChatSessionId, focusedSurface } from '$lib/shell/shellNav';
+  import type { SurfaceRef } from '$lib/shell/mux/layout';
   import { followSpaceNav } from '$lib/shell/spaceNav.svelte';
   import { resolveShellShortcut } from '$lib/shell/keymap';
   import { chatsNavBadge, jobsNavBadges, needsYouTotal } from '$lib/shell/navBadges';
@@ -165,9 +166,12 @@
   function openSurface(ref: Parameters<typeof spaces.openReusing>[0]): void {
     spaces.openReusing(ref);
   }
-  function openChat(sessionId: string): void {
+  function chatRef(sessionId: string): SurfaceRef {
     const title = sessions.ordered.find((r) => r.id === sessionId)?.title ?? 'Chat';
-    openSurface({ kind: 'chat', params: { sessionId }, title });
+    return { kind: 'chat', params: { sessionId }, title };
+  }
+  function openChat(sessionId: string): void {
+    openSurface(chatRef(sessionId));
   }
   function openTerminal(terminalId: string): void {
     const title = terminals.list.find((t) => t.id === terminalId)?.cmd ?? 'Terminal';
@@ -175,7 +179,8 @@
   }
   // Files open VSCode-style: a single-click previews into one reusable ephemeral
   // tab (the next click replaces it); double-clicking a file pins it (see
-  // pinFilePreview). Chats/terminals keep the retarget-in-place openReusing path.
+  // pinFilePreview). A rail pick on a chat or terminal keeps the retarget-in-place
+  // openReusing path.
   function openFile(path: string): void {
     spaces.openPreview({
       kind: 'file',
@@ -195,6 +200,17 @@
   }
   function selectFile(path: string): void {
     navigate('files', { path });
+  }
+  // Route params carry neither the caller nor Shift, so this path docks the pick
+  // itself and navigates for the history entry.
+  function openChatFromPalette(sessionId: string, replace: boolean): void {
+    const ref = chatRef(sessionId);
+    if (replace) spaces.retargetFocusedTab(ref);
+    // The default space docks a chat tab with no params, which the surface
+    // resolves to the primary session, so surfaceKey matches no pick of it.
+    else if (focusedSessionId === sessionId) spaces.openReusing(ref);
+    else spaces.focusOrOpen(ref);
+    navigate('chats', { sessionId });
   }
   // Double-clicking a file pins its preview (the single-clicks already opened it
   // as the focused pane's ephemeral tab). Not a navigation, so it hits the store
@@ -347,7 +363,7 @@
     setTheme: (t) => theme.set(t),
     setSpace: (id) => spaces.setActive(id),
     openSettings: () => (settingsOpen = true),
-    openSession: (id) => selectChat(id),
+    openSession: (id, replace) => openChatFromPalette(id, replace),
     newChat: () => void newChat(),
     showHelp: () => (helpOpen = true),
     runCommand: (name) => void runCommand(name),
@@ -622,7 +638,7 @@
   items={paletteItems}
   {sessionItems}
   viewItems={paletteViewItems}
-  onSelect={(item) => runPaletteHref(item.href, paletteCtx)}
+  onSelect={(item, replace) => runPaletteHref(item.href, paletteCtx, replace)}
 />
 <HelpOverlay bind:open={helpOpen} />
 <Toasts />

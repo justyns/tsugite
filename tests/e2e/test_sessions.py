@@ -4,29 +4,15 @@ conversation, and rename via the session menu round-trips to the server."""
 import re
 
 from playwright.sync_api import expect
-from tsugite_daemon.session_store import Session, SessionSource
 
-from tsugite.history import generate_session_id
-
-from .helpers import E2E_USER_ID, wait_for_authed
-
-
-def _seed_session(store, title: str) -> Session:
-    session = Session(
-        id=generate_session_id("test-agent"),
-        source=SessionSource.INTERACTIVE.value,
-        user_id=E2E_USER_ID,
-        title=title,
-    )
-    store.create_session(session)
-    return session
+from .helpers import seed_session, wait_for_authed
 
 
 def test_sessions_render_select_and_rename(authenticated_page, e2e_session_store):
     page = authenticated_page
 
-    _seed_session(e2e_session_store, "First session")
-    _seed_session(e2e_session_store, "Second session")
+    seed_session(e2e_session_store, "First session")
+    seed_session(e2e_session_store, "Second session")
 
     page.reload()
     wait_for_authed(page)
@@ -68,8 +54,8 @@ def test_sessions_render_select_and_rename(authenticated_page, e2e_session_store
 def test_browser_back_forward_walks_conversations(authenticated_page, e2e_session_store):
     page = authenticated_page
 
-    _seed_session(e2e_session_store, "Alpha thread")
-    _seed_session(e2e_session_store, "Beta thread")
+    seed_session(e2e_session_store, "Alpha thread")
+    seed_session(e2e_session_store, "Beta thread")
 
     page.reload()
     wait_for_authed(page)

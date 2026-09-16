@@ -52,7 +52,7 @@ export interface PaletteContext {
   setTheme: (theme: Theme) => void;
   setSpace: (id: string) => void;
   openSettings: () => void;
-  openSession: (id: string) => void;
+  openSession: (id: string, replace: boolean) => void;
   newChat: () => void;
   showHelp: () => void;
   runCommand: (name: string) => void;
@@ -223,8 +223,13 @@ export function buildSessionItems(sessions: SessionLike[]): PaletteItem[] {
   return [...live, ...ended];
 }
 
-/** Run a palette row's command href. Returns whether the scheme was recognised. */
-export function runPaletteHref(href: string | undefined, ctx: PaletteContext): boolean {
+/** Run a palette row's command href. `replace` is true when Shift was held; only
+ *  the session rows act on it. Returns whether the scheme was recognised. */
+export function runPaletteHref(
+  href: string | undefined,
+  ctx: PaletteContext,
+  replace = false,
+): boolean {
   if (!href) return false;
   const colon = href.indexOf(':');
   if (colon === -1) return false;
@@ -244,7 +249,7 @@ export function runPaletteHref(href: string | undefined, ctx: PaletteContext): b
       ctx.openSurface(arg);
       return true;
     case 'session':
-      ctx.openSession(arg);
+      ctx.openSession(arg, replace);
       return true;
     case 'command':
       ctx.runCommand(arg);

@@ -302,7 +302,13 @@ describe('runPaletteHref', () => {
   test('dispatches a session jump', () => {
     const ctx = makeCtx();
     expect(runPaletteHref('session:abc123', ctx)).toBe(true);
-    expect(ctx.openSession).toHaveBeenCalledWith('abc123');
+    expect(ctx.openSession).toHaveBeenCalledWith('abc123', false);
+  });
+
+  test('passes the Shift pick through to the session row', () => {
+    const ctx = makeCtx();
+    runPaletteHref('session:abc123', ctx, true);
+    expect(ctx.openSession).toHaveBeenCalledWith('abc123', true);
   });
 
   test('dispatches a slash command by name', () => {

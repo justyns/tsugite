@@ -24,8 +24,9 @@
     sessionItems?: PaletteItem[];
     /** Registered views, query-only: hidden on the default list but still reachable on phones. */
     viewItems?: PaletteItem[];
-    /** Fired when a row is chosen; the app handles navigation / the quick action. */
-    onSelect?: (item: PaletteItem) => void;
+    /** Fired when a row is chosen; the app handles navigation / the quick action.
+     *  `replace` is true when Shift was held. */
+    onSelect?: (item: PaletteItem, replace: boolean) => void;
     placeholder?: string;
     /** Render the panel in-flow (no backdrop, always shown) - for embedding / the gallery. */
     inline?: boolean;
@@ -75,9 +76,9 @@
     ui.selected = Math.min(Math.max(ui.selected + delta, 0), max);
   }
 
-  function choose(item: PaletteItem) {
+  function choose(item: PaletteItem, replace: boolean) {
     if (!inline) open = false;
-    onSelect?.(item);
+    onSelect?.(item, replace);
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -91,7 +92,7 @@
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const row = itemRows[ui.selected];
-      if (row?.kind === 'item') choose(row.item);
+      if (row?.kind === 'item') choose(row.item, e.shiftKey);
     } else if (e.key === 'Escape' && !inline) {
       e.preventDefault();
       open = false;
@@ -147,7 +148,7 @@
               role="option"
               aria-selected={isSel}
               tabindex="-1"
-              onclick={() => choose(row.item)}
+              onclick={(e) => choose(row.item, e.shiftKey)}
               onmousemove={() => (ui.selected = row.index)}
             >
               <Icon name={row.item.icon as IconName} />
@@ -171,6 +172,7 @@
     <div class="t-pal-ft">
       <span><span class="t-kbd">↑↓</span> navigate</span>
       <span><span class="t-kbd">⏎</span> open</span>
+      <span class="ft-shift"><span class="t-kbd">⇧⏎</span> replace tab</span>
       <span><span class="t-kbd">esc</span> close</span>
     </div>
   </div>
@@ -366,6 +368,10 @@
       max-height: none;
       border-radius: 0;
       border: 0;
+    }
+    /* No Shift key on a phone keyboard's Enter. */
+    .t-pal .ft-shift {
+      display: none;
     }
   }
 

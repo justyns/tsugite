@@ -8,6 +8,7 @@ import {
   dockAsTab,
   defaultLayout,
   findLeaf,
+  focusOrOpen,
   focusPane,
   moveTab,
   closeAllTabs,
@@ -16,6 +17,7 @@ import {
   openInPane,
   openPreview,
   pinTab,
+  retargetFocusedTab,
   retargetOrOpen,
   retitleTab,
   resizeSplit,
@@ -195,6 +197,88 @@ describe('retargetOrOpen', () => {
     const l0 = seeded({ kind: 'terminal', params: { id: 't' } });
     const l1 = retargetOrOpen(l0, { kind: 'chat', params: { sessionId: 'a' } });
     expect(asLeaf(l1.root).tabs.map((t) => t.kind)).toEqual(['terminal', 'chat']);
+  });
+});
+
+describe('focusOrOpen', () => {
+  test('opens a new tab and leaves a chat tab on another session alone', () => {
+    const l0 = seeded({ kind: 'chat', params: { sessionId: 'a' }, title: 'A' });
+    const l1 = focusOrOpen(l0, { kind: 'chat', params: { sessionId: 'b' }, title: 'B' });
+    const leaf = asLeaf(l1.root);
+    expect(leaf.tabs).toHaveLength(2);
+    expect(leaf.tabs[0]!.params).toEqual({ sessionId: 'a' });
+    expect(leaf.tabs[1]!.params).toEqual({ sessionId: 'b' });
+    expect(leaf.activeTabId).toBe(leaf.tabs[1]!.id);
+  });
+
+  test('focuses the tab already showing the surface, in whichever pane holds it', () => {
+    let l = seeded({ kind: 'chat', params: { sessionId: 'a' } });
+    l = splitPane(l, l.root.id, 'row', { kind: 'chat', params: { sessionId: 'b' } });
+    const [left, right] = collectLeaves(l.root);
+    // Focus sits on the right (session b) pane; ask for session a on the left.
+    const l1 = focusOrOpen(l, { kind: 'chat', params: { sessionId: 'a' } });
+    expect(collectLeaves(l1.root).flatMap((n) => n.tabs)).toHaveLength(2);
+    expect(l1.focusedPaneId).toBe(left!.id);
+    expect(findLeaf(l1, left!.id)!.activeTabId).toBe(findLeaf(l1, left!.id)!.tabs[0]!.id);
+    expect(findLeaf(l1, right!.id)!.tabs[0]!.params).toEqual({ sessionId: 'b' });
+  });
+
+  test('refreshes the title of the tab it focuses', () => {
+    const l0 = seeded({ kind: 'chat', params: { sessionId: 'a' }, title: 'old' });
+    const l1 = focusOrOpen(l0, { kind: 'chat', params: { sessionId: 'a' }, title: 'new' });
+    expect(asLeaf(l1.root).tabs).toHaveLength(1);
+    expect(asLeaf(l1.root).tabs[0]!.title).toBe('new');
+  });
+
+  test('does not mutate the input layout (pure)', () => {
+    const l0 = seeded({ kind: 'chat', params: { sessionId: 'a' }, title: 'old' });
+    focusOrOpen(l0, { kind: 'chat', params: { sessionId: 'a' }, title: 'new' });
+    expect(asLeaf(l0.root).tabs[0]!.title).toBe('old');
+  });
+});
+
+describe('retargetFocusedTab', () => {
+  test('activates the tab already showing the surface instead of duplicating it', () => {
+    let l = seeded({ kind: 'chat', params: { sessionId: 'a' } });
+    l = dockAsTab(l, l.root.id, { kind: 'chat', params: { sessionId: 'b' } });
+    const l1 = retargetFocusedTab(l, { kind: 'chat', params: { sessionId: 'a' } });
+    const tabs = asLeaf(l1.root).tabs;
+    expect(tabs.map((t) => t.params.sessionId)).toEqual(['a', 'b']);
+    expect(tabs.find((t) => t.id === asLeaf(l1.root).activeTabId)!.params.sessionId).toBe('a');
+  });
+
+  test("points the focused pane's active tab at the surface, id stable", () => {
+    let l = seeded({ kind: 'chat', params: { sessionId: 'a' }, title: 'A' });
+    l = dockAsTab(l, l.root.id, { kind: 'terminal', params: { terminalId: 't' } });
+    const activeId = asLeaf(l.root).activeTabId;
+    const l1 = retargetFocusedTab(l, { kind: 'chat', params: { sessionId: 'b' }, title: 'B' });
+    const leaf = asLeaf(l1.root);
+    expect(leaf.tabs).toHaveLength(2);
+    expect(leaf.tabs[0]!.params).toEqual({ sessionId: 'a' });
+    expect(leaf.tabs[1]!.id).toBe(activeId);
+    expect(leaf.tabs[1]!.kind).toBe('chat');
+    expect(leaf.tabs[1]!.params).toEqual({ sessionId: 'b' });
+    expect(leaf.tabs[1]!.title).toBe('B');
+  });
+
+  test('leaves other panes untouched', () => {
+    let l = seeded({ kind: 'chat', params: { sessionId: 'a' } });
+    l = splitPane(l, l.root.id, 'row', { kind: 'chat', params: { sessionId: 'b' } });
+    const [left, right] = collectLeaves(l.root);
+    const l1 = retargetFocusedTab(l, { kind: 'chat', params: { sessionId: 'c' } });
+    expect(findLeaf(l1, left!.id)!.tabs[0]!.params).toEqual({ sessionId: 'a' });
+    expect(findLeaf(l1, right!.id)!.tabs[0]!.params).toEqual({ sessionId: 'c' });
+  });
+
+  test('pins an ephemeral preview it takes over', () => {
+    const l0 = openPreview(defaultLayout(), { kind: 'file', params: { path: 'a.md' } });
+    const l1 = retargetFocusedTab(l0, { kind: 'chat', params: { sessionId: 'a' } });
+    expect(asLeaf(l1.root).tabs[0]!.ephemeral).toBeUndefined();
+  });
+
+  test('opens a tab when the focused pane is empty', () => {
+    const l1 = retargetFocusedTab(defaultLayout(), { kind: 'chat', params: { sessionId: 'a' } });
+    expect(asLeaf(l1.root).tabs).toHaveLength(1);
   });
 });
 

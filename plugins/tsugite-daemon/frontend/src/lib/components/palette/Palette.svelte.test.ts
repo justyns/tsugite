@@ -54,7 +54,10 @@ test('Enter selects the active item and closes', async () => {
   await page.getByRole('combobox').click();
   await userEvent.keyboard('{ArrowDown}{Enter}');
   expect(onSelect).toHaveBeenCalledTimes(1);
-  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ label: 'ops backup prune' }));
+  expect(onSelect).toHaveBeenCalledWith(
+    expect.objectContaining({ label: 'ops backup prune' }),
+    false,
+  );
   await expect.element(page.getByRole('combobox')).not.toBeInTheDocument();
 });
 
@@ -91,7 +94,10 @@ test('clicking a row selects it', async () => {
   render(Palette, { open: true, items, onSelect });
   await page.getByText('fix flaky sse test').click();
   expect(onSelect).toHaveBeenCalledTimes(1);
-  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ label: 'fix flaky sse test' }));
+  expect(onSelect).toHaveBeenCalledWith(
+    expect.objectContaining({ label: 'fix flaky sse test' }),
+    false,
+  );
 });
 
 test('the footer carries no leaked mobile-sheet dev note', async () => {
@@ -127,7 +133,18 @@ test('picking a session row fires onSelect with its session href', async () => {
   await input.click();
   await userEvent.type(input, 'planning');
   await page.getByText('weekly planning sync').click();
-  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ href: 'session:s1' }));
+  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ href: 'session:s1' }), false);
+});
+
+test('Shift+Enter selects the active item as a replace pick', async () => {
+  const onSelect = vi.fn();
+  render(Palette, { open: true, items, sessionItems, onSelect });
+  const input = page.getByRole('combobox');
+  await input.click();
+  await userEvent.type(input, 'planning');
+  await expect.element(page.getByText('replace tab')).toBeInTheDocument();
+  await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
+  expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ href: 'session:s1' }), true);
 });
 
 test('a query matching no session shows no sessions group', async () => {
