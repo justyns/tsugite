@@ -40,3 +40,19 @@ def test_a_message_queued_in_one_tab_shows_in_another_and_either_can_remove_it(c
     expect(tab_a.locator(CHIP)).to_have_count(0, timeout=10000)
     expect(tab_b.locator(CHIP)).to_have_count(0)
     tab_b.close()
+
+
+def test_a_queued_message_runs_at_turn_end_with_no_client_action(chat_page, mock_chat):
+    """The daemon flushes the queue itself, so the chip clears and the second
+    turn renders live in a tab that did nothing but watch."""
+    mock_chat("Done after a beat", delay=2)
+
+    page = chat_page
+    _compose(page, "read the logs")
+    expect(page.locator('[data-act="stop"]')).to_be_visible(timeout=5000)
+
+    _compose(page, "and also check the disk")
+    expect(page.locator(CHIP)).to_contain_text("and also check the disk", timeout=5000)
+
+    expect(page.locator(CHIP)).to_have_count(0, timeout=20000)
+    expect(page.locator(".t-msg--ai")).to_have_count(2, timeout=20000)

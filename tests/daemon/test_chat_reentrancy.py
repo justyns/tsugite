@@ -230,7 +230,7 @@ def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_
 
 def test_same_session_double_send_is_queued(client, mock_adapter, test_token):
     """Two POSTs with the same session_id must not run two turns at once. The
-    second is queued and runs when the first finishes.
+    second is parked on the session; `test_chat_queue_api.py` covers the flush.
     """
     _make_session(mock_adapter, "sess-X", "alice")
 

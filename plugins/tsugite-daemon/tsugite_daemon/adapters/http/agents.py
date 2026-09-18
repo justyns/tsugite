@@ -884,10 +884,6 @@ class AgentsMixin:
         }
         position = self.adapter.session_store.queue_message(session.id, entry)
         self._broadcast_queue(session.id)
-        if self.session_runner and not self._session_busy(session):
-            # The turn can end between the busy check and the append, leaving the
-            # turn-end hook nothing to drain.
-            self.session_runner.drain_queued_messages(session.id)
         return JSONResponse(
             {"status": "queued", "queue_id": entry["id"], "position": position},
             status_code=202,

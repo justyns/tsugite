@@ -12,7 +12,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
-  import type { SessionRow, QueuedMessage } from '$lib/stores/sessions.svelte';
+  import type { SessionRow } from '$lib/stores/sessions.svelte';
   import Conversation from './Conversation.svelte';
   import ChatComposer from './ChatComposer.svelte';
   import { ConversationController, type SendOpts } from './conversation.svelte';
@@ -183,8 +183,7 @@
     }
   }
 
-  const NO_QUEUE: QueuedMessage[] = [];
-  const queued = $derived(selectedRow?.queued ?? NO_QUEUE);
+  const queued = $derived(selectedRow?.queued ?? []);
 
   async function onSend(text: string, opts: SendOpts) {
     const id = await ctrl.send(text, opts);

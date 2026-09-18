@@ -171,6 +171,7 @@ def session_runner_backend(e2e_server, e2e_session_store, e2e_adapter):
     _url, server = e2e_server
     runner = SessionRunner(e2e_session_store, e2e_adapter, event_bus=server.event_bus)
     server.session_runner = runner
+    runner.set_queued_message_sender(server.run_queued_message)
     yield runner
     server.session_runner = None
 
@@ -214,6 +215,11 @@ def mock_chat(e2e_adapter):
         mock_chat("Hello!", events=[("reaction", {"emoji": "👍"})])
 
     `delay` holds the turn in flight, so a test can observe mid-turn UI state.
+
+    The fake drives `begin_turn`/`end_turn` the way the real
+    `BaseAdapter.handle_message` does, since it replaces that method whole.
+    Everything hanging off the turn-end hook - the deferred-delivery flush and
+    the queued-message drain - runs only because of those two calls.
     """
     _original = getattr(e2e_adapter, "_original_handle_message", None)
     if _original is None:
@@ -221,13 +227,18 @@ def mock_chat(e2e_adapter):
 
     def _configure(response="Test response", events=None, delay=0):
         async def fake_handle(user_id, message, channel_context, custom_logger=None):
-            if custom_logger and events:
-                handler = custom_logger.ui_handler
-                for ev_type, ev_data in events:
-                    handler._emit(ev_type, ev_data)
-            if delay:
-                await asyncio.sleep(delay)
-            return response
+            conv_id = (channel_context.metadata or {}).get("conv_id_override")
+            e2e_adapter.session_store.begin_turn(conv_id)
+            try:
+                if custom_logger and events:
+                    handler = custom_logger.ui_handler
+                    for ev_type, ev_data in events:
+                        handler._emit(ev_type, ev_data)
+                if delay:
+                    await asyncio.sleep(delay)
+                return response
+            finally:
+                e2e_adapter.session_store.end_turn(conv_id)
 
         e2e_adapter.handle_message = AsyncMock(side_effect=fake_handle)
 

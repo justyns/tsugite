@@ -182,21 +182,29 @@ class TestTheTurnEndDrain:
         assert store.get_session(sid).queued_messages == []
 
     @pytest.mark.asyncio
-    async def test_a_cancelled_drain_is_forgotten(self, store, runner):
-        """The drain task is held so the next turn end can start a fresh one."""
+    async def test_a_cancelled_drain_lets_the_next_turn_end_drain_the_rest(self, store, runner):
         sid = _session(store)
+        held = asyncio.Event()
+        delivered = []
 
         async def sender(session_id, entry):
-            await asyncio.Event().wait()
+            if not held.is_set():
+                held.set()
+                await asyncio.Event().wait()
+            delivered.append(entry["id"])
+            return True
 
         runner.set_queued_message_sender(sender)
         store.queue_message(sid, _entry("q-1", "first"))
+        store.queue_message(sid, _entry("q-2", "second"))
         store.end_turn(sid)
-        assert await _wait_until(lambda: sid in runner._queue_drain_tasks)
+        assert await _wait_until(held.is_set)
 
         runner._queue_drain_tasks[sid].cancel()
-
         assert await _wait_until(lambda: sid not in runner._queue_drain_tasks)
+        store.end_turn(sid)
+
+        assert await _wait_until(lambda: delivered == ["q-2"])
 
     @pytest.mark.asyncio
     async def test_an_empty_queue_sends_nothing(self, store, runner):

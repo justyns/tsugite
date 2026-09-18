@@ -181,43 +181,53 @@ class TestTheTurnEnding:
         assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
         assert _sent_messages(adapter) == ["first", "second"]
 
-    async def test_the_flush_runs_a_user_turn_rather_than_a_delivery(self, adapter, server, client):
+    async def test_the_flush_runs_a_user_turn_rather_than_a_delivery(self, adapter, client):
         sid = _busy_session(adapter)
         await _send(client, sid, "and also check the logs")
 
-        with patch.object(server.session_runner, "deliver_to_session") as deliver:
-            with patch.object(adapter.session_store, "hold_delivery") as hold:
-                adapter.session_store.end_turn(sid)
-                assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        adapter.session_store.end_turn(sid)
 
-        assert deliver.call_count == 0
-        assert hold.call_count == 0
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
         context = adapter.handle_message.await_args.kwargs["channel_context"]
         assert context.source == "http"
         assert context.metadata["conv_id_override"] == sid
 
-    async def test_a_turn_that_ends_during_the_append_still_sends(self, adapter, client):
-        """The turn can finish between /api/chat's busy check and the append, so
-        the turn-end hook finds an empty queue and nothing would drain it."""
+    async def test_the_flush_resolves_the_uploads_and_context_it_parked(self, adapter, client):
+        """`_build_send_metadata` runs at flush time, so an Attachment never has
+        to survive the queue's JSON round-trip."""
+        uploads = adapter.runtime.workspace_dir / "uploads"
+        uploads.mkdir()
+        (uploads / "notes.txt").write_text("the disk is full")
         sid = _busy_session(adapter)
-        store = adapter.session_store
-        append = store.queue_message
+        # /api/chat validates reasoning_effort against the daemon default model.
+        adapter.runtime.model = "openai:o3-mini"
 
-        def end_the_turn_then_append(session_id, entry):
-            store.end_turn(session_id)
-            return append(session_id, entry)
-
-        with patch.object(store, "queue_message", end_the_turn_then_append):
-            resp = await _send(client, sid, "late arrival")
-
+        resp = await client.post(
+            "/api/chat",
+            json={
+                "message": "read this",
+                "session_id": sid,
+                "user_id": "u1",
+                "uploaded_files": [{"name": "notes.txt"}],
+                "context_metadata": [{"type": "file", "path": "notes.txt"}],
+                "reasoning_effort": "high",
+            },
+        )
         assert resp.status_code == 202
+
+        adapter.session_store.end_turn(sid)
+
         assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
-        assert _sent_messages(adapter) == ["late arrival"]
+        metadata = adapter.handle_message.await_args.kwargs["channel_context"].metadata
+        assert [a.name for a in metadata["uploaded_attachments"]] == ["notes.txt"]
+        assert all(a.user_upload for a in metadata["uploaded_attachments"])
+        assert metadata["context_metadata"] == [{"type": "file", "path": "notes.txt"}]
+        assert metadata["reasoning_effort_override"] == "high"
 
 
 @pytest.mark.asyncio
 class TestDequeueing:
-    async def test_dropping_an_entry_removes_it_for_every_client(self, adapter, client):
+    async def test_dropping_an_entry_removes_it_for_every_client(self, adapter, client, broadcasts):
         sid = _busy_session(adapter)
         queue_id = (await _send(client, sid, "drop me")).json()["queue_id"]
         await _send(client, sid, "keep me")
@@ -229,6 +239,8 @@ class TestDequeueing:
         rows = (await client.get("/api/chat/sessions")).json()["sessions"]
         row = next(r for r in rows if r["id"] == sid)
         assert [q["text"] for q in row["queued"]] == ["keep me"]
+        updates = [p for n, p in broadcasts if n == "session_update" and p.get("action") == "queued"]
+        assert [q["text"] for q in updates[-1]["queued"]] == ["keep me"]
 
     async def test_dropping_an_unknown_entry_is_a_404(self, adapter, client):
         sid = _busy_session(adapter)
@@ -297,6 +309,21 @@ class TestAQueuedTurnRunsLikeADirectSend:
 
         assert await _wait_until(lambda: _session_events(broadcasts, "final_result"))
         assert _session_events(broadcasts, "final_result")[-1]["result"] == "ok"
+
+    async def test_it_records_the_turn_in_the_session_log(self, adapter, client):
+        """The tab that queued the message may be gone by the flush, so a client
+        that loads the session afterwards has only the log to read the turn from."""
+        sid = _busy_session(adapter)
+        await _send(client, sid, "go")
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        assert await _wait_until(
+            lambda: [e for e in adapter.session_store.read_events(sid) if e["type"] == "final_result"]
+        )
+        recorded = [e for e in adapter.session_store.read_events(sid) if e["type"] == "final_result"]
+        assert recorded[-1]["result"] == "ok"
 
     async def test_it_refreshes_the_context_meter(self, adapter, client, broadcasts):
         sid = _busy_session(adapter)

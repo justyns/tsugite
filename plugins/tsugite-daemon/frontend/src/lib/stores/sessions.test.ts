@@ -355,10 +355,10 @@ describe('SessionsStore message queue', () => {
     expect(apiGet).not.toHaveBeenCalled();
   });
 
-  test('a flush empties the row queue', () => {
+  test('a queued update with no queue empties the row', () => {
     const store = new SessionsStore();
     store.rows = [row('s1', { queued: [{ id: 'q-1', text: 'later' }] })];
-    store.applySessionUpdate({ action: 'queued', id: 's1', queued: [] });
+    store.applySessionUpdate({ action: 'queued', id: 's1' });
     expect(store.rows[0]!.queued).toEqual([]);
   });
 

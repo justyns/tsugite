@@ -1,8 +1,9 @@
-"""The server, not the UI, is the source of truth for whether a session is
-busy: the sessions payload and /status must expose the authoritative
-turn-in-flight flag so clients render busy state instead of inferring it from
-cached progress labels (which go stale on reconnect/PWA resume, leaving a
-silently-running turn that 409s new sends with no visible explanation)."""
+"""The server, not the UI, is the source of truth for whether a session is busy.
+
+The sessions payload and /status expose the authoritative turn-in-flight flag, so
+clients render busy state instead of inferring it from cached progress labels,
+which go stale on reconnect or PWA resume.
+"""
 
 from unittest.mock import patch
 
@@ -86,9 +87,8 @@ def test_status_busy_reflects_turn_in_flight_without_http_chat(adapter, client_a
 
 
 def test_sessions_payload_busy_from_live_http_task(adapter, client_and_token):
-    """The pre-begin_turn window: an HTTP chat task exists but the durable
-    marker isn't set yet. The unified predicate must still report busy so the
-    sessions payload can never say idle while /chat would 409."""
+    """An HTTP chat task exists but the durable marker isn't set yet. The sessions
+    payload must never say idle while /chat would park the send."""
     from types import SimpleNamespace
 
     client, token = client_and_token
