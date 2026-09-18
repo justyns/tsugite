@@ -291,6 +291,8 @@ class Session:
     pending_deliveries: list[dict] = field(default_factory=list)
     # Held until the turn ends; persisted so a daemon death mid-turn does not swallow the card.
     deferred_deliveries: list[dict] = field(default_factory=list)
+    # User messages sent while this session was busy; run in order once the turn ends.
+    queued_messages: list[dict] = field(default_factory=list)
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
 
@@ -923,6 +925,7 @@ class SessionStore:
                 context_limit=old_session.context_limit,
                 pending_deliveries=list(old_session.pending_deliveries),
                 deferred_deliveries=list(old_session.deferred_deliveries),
+                queued_messages=list(old_session.queued_messages),
                 notify_sessions=list(old_session.notify_sessions),
             )
             # Preserve original conversation start so <session_started> in the
@@ -970,6 +973,7 @@ class SessionStore:
                 )
             old_session.notify_sessions = []
             old_session.deferred_deliveries = []
+            old_session.queued_messages = []
             # The successor owns any in-flight turn now; a stale marker on the
             # superseded session would trigger a spurious boot-time repair.
             old_session.turn_in_flight = False
@@ -1236,6 +1240,39 @@ class SessionStore:
             session.deferred_deliveries = []
             self._persist(session)
             return held
+
+    def queue_message(self, session_id: str, entry: dict) -> int:
+        """Append a user message to the session's queue, returning its 1-based position."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                raise ValueError(f"Session '{session_id}' not found")
+            session.queued_messages.append(entry)
+            self._persist(session)
+            return len(session.queued_messages)
+
+    def take_queued_message(self, session_id: str) -> Optional[dict]:
+        """Pop the oldest queued message, or None when the queue is empty."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or not session.queued_messages:
+                return None
+            entry = session.queued_messages.pop(0)
+            self._persist(session)
+            return entry
+
+    def drop_queued_message(self, session_id: str, queue_id: str) -> bool:
+        """Remove a queued message by id, reporting whether it was there."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            remaining = [e for e in session.queued_messages if e["id"] != queue_id]
+            if len(remaining) == len(session.queued_messages):
+                return False
+            session.queued_messages = remaining
+            self._persist(session)
+            return True
 
     def sessions_holding_deliveries(self) -> list[str]:
         with self._lock:
