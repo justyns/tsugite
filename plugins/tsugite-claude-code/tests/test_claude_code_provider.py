@@ -92,9 +92,9 @@ class TestClaudeCodeProcess:
         """
         mock_proc = AsyncMock()
         mock_proc.stdin = AsyncMock()
+        mock_proc.stdin.write = MagicMock()
         mock_proc.stderr = AsyncMock()
         mock_proc.stderr.readline = AsyncMock(return_value=b"")
-        mock_proc.stdin.write = MagicMock()
         mock_proc.returncode = None
         mock_proc.stdout = AsyncMock()
 
@@ -392,7 +392,7 @@ class TestClaudeCodeProcess:
     @pytest.mark.asyncio
     async def test_send_message_forwards_block_list_content(self, process):
         """A multimodal turn hands send_message a content-block list (text + image);
-        it must reach the CLI's stdin verbatim, not stringified."""
+        it must arrive at the CLI's stdin as a list, not stringified."""
         events = [json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})]
         mock_proc = self._mock_proc(events)
 
@@ -427,8 +427,6 @@ class TestClaudeCodeProcess:
 
     @pytest.mark.asyncio
     async def test_send_message_escapes_a_resolving_at_mention(self, process, tmp_path):
-        """The CLI reads `@path` in a user turn as a file mention and injects the file
-        below the tool layer, so any tool output carrying one leaks what it names."""
         mock_proc = self._workspace_process(process, tmp_path)
 
         async for _ in process.send_message("Log line: see @secrets/token.txt for details."):

@@ -40,10 +40,9 @@ _STREAM_READ_LIMIT = 16 * 1024 * 1024
 _STALL_WARN_SECONDS = 300.0
 _STALL_WARN_ENV = "TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS"
 
-# The CLI reads `@path` in a user turn as its own file-mention syntax and injects the
-# file before the turn reaches the API, below tsugite's tool layer and outside
-# `allowed_secrets`. A backslash blocks the expansion. Only tokens that resolve to a
-# real path are escaped, so decorators, e-mail addresses and npm scopes survive.
+# The CLI reads `@path` in a user turn as its own file-mention syntax and injects that
+# file itself, below tsugite's tool layer and outside `allowed_secrets`. A backslash
+# blocks it. Escaping every `@` would mangle decorators, e-mail addresses and npm scopes.
 _AT_TOKEN = re.compile(r"@(\S+)")
 _MENTION_TRAILERS = ",.;:!?)]}>\"'"
 
@@ -55,14 +54,19 @@ def _resolves_to_path(candidate: str, cwd: Path) -> bool:
         return False  # exists() raises ENAMETOOLONG rather than returning False.
 
 
-def _escape_at_mentions(text: str, cwd: Path) -> str:
+def _escape_at_mentions(content: str | list, cwd: Path) -> str | list:
     def escape(match: re.Match) -> str:
         candidate = match.group(1).rstrip(_MENTION_TRAILERS)
         if candidate and _resolves_to_path(candidate, cwd):
             return "\\" + match.group(0)
         return match.group(0)
 
-    return _AT_TOKEN.sub(escape, text)
+    if isinstance(content, str):
+        return _AT_TOKEN.sub(escape, content)
+    return [
+        {**b, "text": _AT_TOKEN.sub(escape, b["text"])} if isinstance(b, dict) and b.get("type") == "text" else b
+        for b in content
+    ]
 
 
 class ClaudeCodeProcess:
@@ -236,7 +240,7 @@ class ClaudeCodeProcess:
         Args:
             content: User message text, or an Anthropic content-block list
                 (text + image blocks) for a multimodal turn. The CLI relays
-                blocks to the API; text goes through at-mention escaping first.
+                blocks to the API.
 
         Yields:
             Dicts with type "text_delta" (streaming chunk) or "result" (final)
@@ -244,17 +248,7 @@ class ClaudeCodeProcess:
         Raises:
             RuntimeError: If subprocess has crashed
         """
-        cwd = self._cwd or Path.cwd()
-        if isinstance(content, str):
-            content = _escape_at_mentions(content, cwd)
-        else:
-            content = [
-                {**b, "text": _escape_at_mentions(b["text"], cwd)}
-                if isinstance(b, dict) and b.get("type") == "text"
-                else b
-                for b in content
-            ]
-
+        content = _escape_at_mentions(content, self._cwd or Path.cwd())
         msg = {
             "type": "user",
             "message": {"role": "user", "content": content},
