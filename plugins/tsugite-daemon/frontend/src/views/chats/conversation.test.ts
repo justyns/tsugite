@@ -1,4 +1,4 @@
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi, type Mock } from 'vitest';
 import type { ChatStreamHandlers } from '$lib/api/chat';
 
 // Capture the handlers the controller hands to sendChat so a test can drive the
@@ -6,6 +6,8 @@ import type { ChatStreamHandlers } from '$lib/api/chat';
 const chat = vi.hoisted(() => ({
   handlers: null as ChatStreamHandlers | null,
   body: null as Record<string, unknown> | null,
+  // One entry per send, each with its own stream handle.
+  sends: [] as { handlers: ChatStreamHandlers; handle: { close: Mock<() => void> } }[],
   close: vi.fn(),
   // Controllable respond mock so a test can drive ok / expired / rejected.
   respond: vi.fn(async (..._args: unknown[]) => ({ status: 'ok' }) as unknown),
@@ -14,7 +16,13 @@ vi.mock('$lib/api/chat', () => ({
   sendChat: vi.fn((body: Record<string, unknown>, handlers: ChatStreamHandlers) => {
     chat.handlers = handlers;
     chat.body = body;
-    return { close: chat.close };
+    const handle = {
+      close: vi.fn((): void => {
+        chat.close();
+      }),
+    };
+    chat.sends.push({ handlers, handle });
+    return handle;
   }),
   cancelChat: vi.fn(async () => {}),
   respondToAsk: (...args: unknown[]) => chat.respond(...args),
@@ -32,6 +40,12 @@ import { ConversationController } from './conversation.svelte';
 
 type Ev = Record<string, unknown>;
 
+/** Open a send's stream, as a 200 response does. Defaults to the latest send. */
+function openStream(i = chat.sends.length - 1): void {
+  const send = chat.sends[i]!;
+  send.handlers.onStreamOpen?.(send.handle);
+}
+
 function controller(events: Ev[]): ConversationController {
   const ctrl = new ConversationController();
   ctrl.sessionId = 'sess-1';
@@ -42,6 +56,7 @@ function controller(events: Ev[]): ConversationController {
 beforeEach(() => {
   chat.handlers = null;
   chat.body = null;
+  chat.sends = [];
   chat.close.mockClear();
   chat.respond.mockReset();
   chat.respond.mockResolvedValue({ status: 'ok' });
@@ -797,12 +812,7 @@ test('a send the server parks drops the optimistic bubble and leaves nothing str
   await ctrl.send('and also check the logs');
   expect(ctrl.events.filter((e) => e.type === 'user_input')).toHaveLength(1);
 
-  chat.handlers!.onQueued?.({
-    queue_id: 'q-1',
-    position: 1,
-    queued: [{ id: 'q-1', text: 'and also check the logs' }],
-  });
-  chat.handlers!.onDone?.();
+  chat.handlers!.onQueued?.();
 
   // The chip fed by the session row is what shows it now; a bubble here would
   // claim a turn that has not run.
@@ -813,15 +823,11 @@ test('a send the server parks drops the optimistic bubble and leaves nothing str
 test('parking a send made mid-turn leaves the streaming turn its stream', async () => {
   const ctrl = controller([]);
   await ctrl.send('first');
+  openStream();
   chat.close.mockClear();
 
   await ctrl.send('and also check the logs');
-  chat.handlers!.onQueued?.({
-    queue_id: 'q-1',
-    position: 1,
-    queued: [{ id: 'q-1', text: 'and also check the logs' }],
-  });
-  chat.handlers!.onDone?.();
+  chat.handlers!.onQueued?.();
 
   expect(ctrl.events.filter((e) => e.type === 'user_input').map((e) => e.text)).toEqual(['first']);
   expect(ctrl.streaming).toBe(true);
@@ -834,18 +840,41 @@ test('parking a send made mid-turn leaves the streaming turn its stream', async 
 test('parking a send made against an open ask_user leaves the prompt standing', async () => {
   const ctrl = controller([]);
   await ctrl.send('first');
+  openStream();
   ctrl.ask = pendingAsk('ask-42');
 
   await ctrl.send('and also check the logs');
-  chat.handlers!.onQueued?.({
-    queue_id: 'q-1',
-    position: 1,
-    queued: [{ id: 'q-1', text: 'and also check the logs' }],
-  });
-  chat.handlers!.onDone?.();
+  chat.handlers!.onQueued?.();
 
   // The turn is still blocked on the answer, so clearing the prompt would leave
   // the person no way to unblock it.
   expect(ctrl.ask).not.toBeNull();
   expect(ctrl.ask?.askId).toBe('ask-42');
+});
+
+test('a mid-turn send leaves the running turn abortable until its own stream opens', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('first');
+  openStream();
+  await ctrl.send('and also check the logs');
+
+  // Nothing has come back for the second send yet, so the live turn's stream is
+  // still the one closeStream() has to abort.
+  ctrl.closeStream();
+  expect(chat.sends[0]!.handle.close).toHaveBeenCalledTimes(1);
+  expect(chat.sends[1]!.handle.close).not.toHaveBeenCalled();
+});
+
+test('a send the server runs anyway still shows the bubble when serverBusy is stale', async () => {
+  const ctrl = controller([]);
+  // serverBusy lags true after a turn ends (see `working`), and the composer
+  // invites typing in exactly that window.
+  ctrl.serverBusy = true;
+
+  await ctrl.send('and also check the logs');
+  chat.handlers!.onStreamOpen?.({ close: chat.close });
+
+  expect(ctrl.events.filter((e) => e.type === 'user_input').map((e) => e.text)).toEqual([
+    'and also check the logs',
+  ]);
 });

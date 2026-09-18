@@ -29,15 +29,10 @@ export interface ChatSendBody {
   contextMetadata?: { key: string; label: string; value: string }[];
 }
 
-/** The daemon's 202 reply to a send aimed at a busy session: the message is
- *  parked on the session and runs when the turn in flight ends. */
-export interface QueuedReply {
-  queue_id: string;
-  position: number;
-  queued: { id: string; text: string }[];
-}
-
 export interface ChatStreamHandlers {
+  /** A 200 opened the stream, before any frame is read. The handle is the one
+   *  sendChat returned. */
+  onStreamOpen?: (handle: ChatStreamHandle) => void;
   /** Every frame, in order - the primary hook the chat timeline builds from. */
   onEvent?: (frame: ChatFrame) => void;
   /** Streaming token delta (stream_chunk.chunk), when token streaming is on. */
@@ -45,15 +40,17 @@ export interface ChatStreamHandlers {
   /** final_result payload (result / result_data / turns / tokens / cost). */
   onFinal?: (frame: ChatFrame) => void;
   /** An error frame, or a transport failure BEFORE the request was delivered
-   *  (fetch rejected, or a non-ok response like 409 busy) - the turn never ran. */
+   *  (fetch rejected, or a non-ok response - a finished session, a restarting
+   *  daemon) - the turn never ran. */
   onError?: (err: ChatFrame | Error) => void;
   /** The response stream died AFTER a 200 opened it - the daemon accepted the
    *  turn and is running it, only the response feed was lost (mobile background
    *  killing the connection). Recoverable by replay, never a send failure. */
   onStreamLost?: (err: Error) => void;
   /** The session was busy, so the daemon parked the message (202) instead of
-   *  running it. No stream opened - the turn runs when the current one ends. */
-  onQueued?: (reply: QueuedReply) => void;
+   *  running it. No stream opens and onDone never fires. The turn runs when the
+   *  current one ends. */
+  onQueued?: () => void;
   /** The stream closed (done or cancelled, or a transport end). */
   onDone?: () => void;
 }
@@ -71,6 +68,13 @@ const TERMINAL_FRAMES = new Set(['done', 'cancelled']);
 export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}): ChatStreamHandle {
   const controller = new AbortController();
   let closed = false;
+  let parked = false;
+  const handle: ChatStreamHandle = {
+    close() {
+      closed = true;
+      controller.abort();
+    },
+  };
   // A 200 response means the daemon accepted the turn and opened the stream, so
   // any later read failure is a lost RESPONSE, not a failed send. Before that, a
   // failure means the request never got there.
@@ -101,10 +105,12 @@ export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}):
         return;
       }
       if (resp.status === 202) {
-        handlers.onQueued?.(await resp.json());
+        parked = true;
+        handlers.onQueued?.();
         return;
       }
       responded = true;
+      handlers.onStreamOpen?.(handle);
       for await (const event of parseSSE(resp)) {
         const frame = event as unknown as ChatFrame;
         if (TERMINAL_FRAMES.has(frame.type)) return;
@@ -126,17 +132,12 @@ export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}):
         else handlers.onError?.(e);
       }
     } finally {
-      handlers.onDone?.();
+      if (!parked) handlers.onDone?.();
     }
   };
 
   void run();
-  return {
-    close() {
-      closed = true;
-      controller.abort();
-    },
-  };
+  return handle;
 }
 
 /** Stop the agent server-side (the Stop button). Separate from a stream close:

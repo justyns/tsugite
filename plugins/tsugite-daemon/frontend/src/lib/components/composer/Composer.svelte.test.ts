@@ -291,41 +291,43 @@ test('while streaming the send button becomes Stop and triggers onStop', async (
   expect(onSend).not.toHaveBeenCalled();
 });
 
-test('mid-turn Enter with a draft queues it instead of stopping', async () => {
+test('mid-turn Enter with a draft sends it instead of stopping', async () => {
   const onStop = vi.fn();
-  const onQueue = vi.fn();
-  render(Composer, { streaming: true, onStop, onQueue });
+  const onSend = vi.fn();
+  render(Composer, { streaming: true, onStop, onSend });
   const box = page.getByRole('textbox', { name: 'Message' });
   await userEvent.fill(box, 'follow-up question');
   await userEvent.keyboard('{Enter}');
-  expect(onQueue).toHaveBeenCalledWith('follow-up question');
+  expect(onSend).toHaveBeenCalledWith('follow-up question');
   expect(onStop).not.toHaveBeenCalled();
   await expect.element(box).toHaveValue('');
 });
 
 test('mid-turn Enter with an empty draft still stops', async () => {
   const onStop = vi.fn();
-  const onQueue = vi.fn();
-  render(Composer, { streaming: true, onStop, onQueue });
+  const onSend = vi.fn();
+  render(Composer, { streaming: true, onStop, onSend });
   (page.getByRole('textbox', { name: 'Message' }).element() as HTMLElement).focus();
   await userEvent.keyboard('{Enter}');
   expect(onStop).toHaveBeenCalledTimes(1);
-  expect(onQueue).not.toHaveBeenCalled();
+  expect(onSend).not.toHaveBeenCalled();
 });
 
-test('the Queue button shows only mid-turn, disables on empty, and fires onQueue', async () => {
-  const onQueue = vi.fn();
-  const idle = await render(Composer, { streaming: false, onQueue });
+test('the Queue button shows only mid-turn, disables on empty, and sends', async () => {
+  // Mid-turn the primary button is Stop, so this is a mouse user's only way to
+  // add to the queue.
+  const onSend = vi.fn();
+  const idle = await render(Composer, { streaming: false, onSend });
   expect(idle.container.querySelector('[data-act="queue"]')).toBeNull();
   idle.unmount();
 
-  render(Composer, { streaming: true, onQueue });
+  render(Composer, { streaming: true, onSend });
   const queueBtn = page.getByRole('button', { name: 'Queue message for after this turn' });
   await expect.element(queueBtn).toBeDisabled();
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'next task');
   await expect.element(queueBtn).toBeEnabled();
   await queueBtn.click();
-  expect(onQueue).toHaveBeenCalledWith('next task');
+  expect(onSend).toHaveBeenCalledWith('next task');
 });
 
 test('the input grows with multi-line content and shrinks back', async () => {
@@ -530,15 +532,15 @@ test('Enter stops the turn once the guard window has passed', async () => {
 });
 
 test('a fast second Enter after queueing does not stop the turn either', async () => {
-  const onQueue = vi.fn();
+  const onSend = vi.fn();
   const onStop = vi.fn();
-  render(Composer, { streaming: true, onQueue, onStop });
+  render(Composer, { streaming: true, onSend, onStop });
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'follow-up question');
   await userEvent.keyboard('{Enter}');
-  expect(onQueue).toHaveBeenCalledWith('follow-up question');
+  expect(onSend).toHaveBeenCalledWith('follow-up question');
 
-  // Queueing clears the draft the same way sending does, so the next Enter would
-  // otherwise fall through to the stop branch.
+  // The mid-turn send clears the draft, so the next Enter would otherwise fall
+  // through to the stop branch.
   await userEvent.keyboard('{Enter}');
   expect(onStop).not.toHaveBeenCalled();
 });

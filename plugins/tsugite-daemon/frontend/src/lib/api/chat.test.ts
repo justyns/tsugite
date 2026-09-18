@@ -51,6 +51,35 @@ test('a response-stream loss after a 200 routes to onStreamLost, not onError (de
   expect(onError).not.toHaveBeenCalled();
 });
 
+test('a 200 hands the returned handle to onStreamOpen before the first frame', async () => {
+  globalThis.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () =>
+        frameReader(['data: {"type":"turn_start"}\n\n', 'data: {"type":"done"}\n\n']),
+    },
+  })) as unknown as typeof fetch;
+
+  const seen: string[] = [];
+  let opened: unknown = null;
+  const handle = sendChat(
+    { message: 'hi' },
+    {
+      onStreamOpen: (h) => {
+        opened = h;
+        seen.push('open');
+      },
+      onEvent: (frame) => seen.push(String(frame.type)),
+      onDone: () => seen.push('done'),
+    },
+  );
+
+  await vi.waitFor(() => expect(seen).toContain('done'));
+  expect(seen).toEqual(['open', 'turn_start', 'done']);
+  expect(opened).toBe(handle);
+});
+
 test('a fetch rejection before any response routes to onError (never delivered)', async () => {
   globalThis.fetch = vi.fn(async () => {
     throw new Error('Failed to fetch');
@@ -150,31 +179,29 @@ test('a non-ok response (e.g. a 409 on a finished session) routes to onError, ne
   expect(onStreamLost).not.toHaveBeenCalled();
 });
 
-test('a 202 parks the send: onQueued takes the reply and no stream is read', async () => {
-  const reply = {
-    status: 'queued',
-    queue_id: 'q-f210f2cc',
-    position: 1,
-    queued: [{ id: 'q-f210f2cc', text: 'and also check the logs' }],
-  };
+test('a 202 parks the send: onQueued fires, no stream is read, and onDone never runs', async () => {
   globalThis.fetch = vi.fn(async () => ({
     ok: true,
     status: 202,
-    json: async () => reply,
+    json: async () => ({ status: 'queued', queue_id: 'q-f210f2cc', position: 1 }),
   })) as unknown as typeof fetch;
 
   const onQueued = vi.fn();
+  const onStreamOpen = vi.fn();
   const onEvent = vi.fn();
   const onError = vi.fn();
   const onStreamLost = vi.fn();
   const onDone = vi.fn();
   sendChat(
     { message: 'and also check the logs' },
-    { onQueued, onEvent, onError, onStreamLost, onDone },
+    { onQueued, onStreamOpen, onEvent, onError, onStreamLost, onDone },
   );
 
-  await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
-  expect(onQueued).toHaveBeenCalledWith(reply);
+  await vi.waitFor(() => expect(onQueued).toHaveBeenCalledTimes(1));
+  // A parked send is its own ending. onDone would tear down the state of a turn
+  // still streaming in this surface.
+  expect(onDone).not.toHaveBeenCalled();
+  expect(onStreamOpen).not.toHaveBeenCalled();
   expect(onEvent).not.toHaveBeenCalled();
   expect(onError).not.toHaveBeenCalled();
   expect(onStreamLost).not.toHaveBeenCalled();

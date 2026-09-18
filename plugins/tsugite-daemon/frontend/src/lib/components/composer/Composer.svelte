@@ -44,7 +44,6 @@
     refSources = [],
     onSend,
     onStop,
-    onQueue,
     onAttach,
     onCamera,
     onPickContext,
@@ -84,9 +83,6 @@
     refSources?: RefSource[];
     onSend?: (text: string) => void;
     onStop?: () => void;
-    /** Offered while `streaming`: park the draft to send after this turn. Enter
-     *  with a non-empty draft queues instead of stopping. */
-    onQueue?: (text: string) => void;
     onAttach?: () => void;
     /** Phone-only camera-capture affordance; shown beside attach at ≤640px. */
     onCamera?: () => void;
@@ -327,12 +323,10 @@
     }
     if (e.key === 'Enter' && !e.shiftKey && !isTouch) {
       e.preventDefault();
-      // Mid-turn Enter with a draft queues it; with nothing typed it stops,
-      // unless the send that emptied the draft just happened.
-      if (streaming) {
-        if (canSend && onQueue) submit(onQueue);
-        else stopIfArmed();
-      } else submit(onSend);
+      // Mid-turn Enter sends when there is a draft; with nothing typed it
+      // stops, unless the send that emptied the draft just happened.
+      if (streaming && !canSend) stopIfArmed();
+      else submit(onSend);
       return;
     }
     if (e.key === 'Escape' && streaming && !showPopover) {
@@ -500,14 +494,14 @@
     {@render leading?.()}
     {#if hint}<span class="hint">{hint}</span>{/if}
     <div class="grow"></div>
-    {#if streaming && onQueue}
+    {#if streaming}
       <Button
         size="sm"
         variant="ghost"
         data-act="queue"
         aria-label="Queue message for after this turn"
         disabled={!canSend}
-        onclick={() => submit(onQueue)}
+        onclick={() => submit(onSend)}
       >
         {#snippet icon()}<Icon name="clock" />{/snippet}Queue
       </Button>

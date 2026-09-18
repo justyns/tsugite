@@ -255,6 +255,9 @@ export class ConversationController {
     const injected = opts.contextMetadata?.length
       ? [{ tag: 'client_context', items: opts.contextMetadata }]
       : undefined;
+    // Appended for every send and removed again if the daemon parks it. Deciding
+    // from `serverBusy` instead would drop the bubble whenever that flag lags
+    // true, and no later frame reinstates it.
     this.events = [
       ...this.events,
       // With injected blocks present the reducer reads `display_text` (not `text`)
@@ -268,18 +271,11 @@ export class ConversationController {
         ...(injected ? { injected, display_text: text } : {}),
       },
     ];
-    // A parked send opens no stream. A turn already running here keeps its
-    // handle, its streaming flag and any prompt still blocking it.
-    let parked = false;
-    const priorHandle = this.handle;
-    const priorStreaming = this.streaming;
-    const priorAsk = this.ask;
-    this.ask = null;
-    this.streaming = true;
     this.sendFailed = null;
+    let opened = false;
     let gotFrame = false;
     let gotFinalResult = false;
-    this.handle = sendChat(
+    sendChat(
       {
         message: text,
         userId: auth.userId,
@@ -289,6 +285,18 @@ export class ConversationController {
         ...(opts.contextMetadata?.length ? { contextMetadata: opts.contextMetadata } : {}),
       },
       {
+        // Commit the turn's state only once a stream actually opens: before that
+        // the send may still be parked, or the pane may have moved on.
+        onStreamOpen: (h) => {
+          if (this.sessionId !== sessionId) {
+            h.close();
+            return;
+          }
+          opened = true;
+          this.handle = h;
+          this.streaming = true;
+          this.ask = null;
+        },
         onEvent: (frame) => {
           gotFrame = true;
           if (frame.type === 'final_result') gotFinalResult = true;
@@ -317,19 +325,12 @@ export class ConversationController {
           if (this.ask?.answered) this.ask = null;
           void this.reconcileAfterSend(clientKey, text);
         },
-        // The daemon parked the message instead of running it. The queued chip
-        // fed by the session row shows it now, so the optimistic bubble goes.
+        // The daemon parked the message instead of running it.
         onQueued: () => {
-          parked = true;
           this.events = this.events.filter((e) => e.clientKey !== clientKey);
         },
         onDone: () => {
-          if (parked) {
-            this.handle = priorHandle;
-            this.streaming = priorStreaming;
-            this.ask = priorAsk;
-            return;
-          }
+          if (!opened) return;
           this.streaming = false;
           if (this.ask?.answered) this.ask = null;
           this.handle = null;

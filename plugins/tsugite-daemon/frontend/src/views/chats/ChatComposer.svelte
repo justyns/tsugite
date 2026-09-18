@@ -16,6 +16,7 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import type { ContextItem } from '$lib/context/contextProviders';
+  import type { QueuedMessage } from '$lib/stores/sessions.svelte';
   import { TESTID } from '$lib/testids';
   import {
     readDraft,
@@ -58,13 +59,13 @@
     busy?: boolean;
     /** Messages the daemon parked for after the in-flight turn (rendered as
      *  removable chips). */
-    queuedMessages?: string[];
+    queuedMessages?: QueuedMessage[];
     /** A send that failed before it took (daemon down, a finished session):
      *  restore this text into an empty composer so the message isn't lost. */
     restoreFailed?: { text: string; seq: number } | null;
     onSend: (text: string, opts: SendExtras) => void;
     onStop: () => void;
-    onUnqueue?: (index: number) => void;
+    onUnqueue?: (id: string) => void;
     /** A slash-command finished: surface its result as an inline conversation echo
      *  (the controller's ephemeral localEcho channel) instead of a toast. */
     onCommandResult?: (
@@ -110,7 +111,7 @@
     get sessionId() {
       return sessionId;
     },
-    handleSend: (t) => handleSend(t),
+    handleSend: (t) => void handleSend(t),
     // A getter (not a captured value or fixed-arity wrapper) keeps the current
     // prop and lets dispatchCommand preserve its call arity: error/unknown echoes
     // pass three args, a success echo four.
@@ -206,18 +207,16 @@
   // to inline (never discard the text); re-subscribes as the prompt opens/closes.
   $effect(() => attach.installPasteDismiss());
 
-  type Deliver = (text: string, opts: SendExtras) => void;
-
   // A /command is side-band (it does not join the conversation and carries no
   // context), so it dispatches immediately; a plain message gathers any context
   // and is sent. Context rides as structured metadata; the message text is
   // never touched.
-  async function submit(text: string, deliver: Deliver) {
+  async function handleSend(text: string) {
     if (/^\s*\//.test(text)) {
       void slash.dispatchCommand(text);
     } else {
       const contextMetadata = await context.resolveContextMetadata();
-      deliver(text, {
+      onSend(text, {
         uploadedFiles: attach.attachments.map((a) => ({ name: a.name })),
         ...(contextMetadata.length ? { contextMetadata } : {}),
       });
@@ -226,10 +225,6 @@
     attach.attachments = [];
     context.contextItems = [];
     clearDraft(sessionId);
-  }
-
-  function handleSend(text: string) {
-    void submit(text, onSend);
   }
 
   // Imperative entry for OS files dropped on the chat surface (Surface.svelte),
@@ -249,16 +244,16 @@
 <div class="composer-host" data-testid={TESTID.chatComposer}>
   {#if queuedMessages.length > 0}
     <div class="queuedrow" aria-label="Queued messages">
-      {#each queuedMessages as msg, i (i)}
-        <span class="t-chip" title={msg}>
+      {#each queuedMessages as msg, i (msg.id)}
+        <span class="t-chip" title={msg.text}>
           <Icon name="clock" />
-          <span class="qtext">{msg}</span>
+          <span class="qtext">{msg.text}</span>
           {#if onUnqueue}
             <button
               type="button"
               class="x"
               aria-label={`Remove queued message ${i + 1}`}
-              onclick={() => onUnqueue?.(i)}
+              onclick={() => onUnqueue?.(msg.id)}
             >
               <Icon name="x" />
             </button>
@@ -328,7 +323,7 @@
     contextMenu={context.contextMenu}
     refItems={context.refItems}
     refSources={context.refSources}
-    onSend={handleSend}
+    onSend={(text) => void handleSend(text)}
     {onStop}
     onInput={slash.onInput}
     onAttach={attach.openFilePicker}
@@ -341,7 +336,6 @@
     hint={busy && !streaming ? 'queued — sends when this turn finishes' : undefined}
     onKeydown={slash.onComposerKeydown}
     onPaste={attach.onPaste}
-    onQueue={handleSend}
   />
 
   <!-- Generic attach: accept-less so it never filters out non-image files. -->

@@ -287,3 +287,23 @@ test('the queued chips come from the session row, and removing one dequeues it s
   remove!.click();
   expect(del).toHaveBeenCalledWith('/api/chat/sessions/session-queued/queue/q-0b9a1d34');
 });
+
+test('removing a chip targets the queued message by id, not by its position at render', async () => {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  const queued = [
+    { id: 'q-f210f2cc', text: 'and also check the logs' },
+    { id: 'q-0b9a1d34', text: 'then summarize' },
+  ];
+  sessions.rows = [row('session-queued', { busy: true, queued })];
+  const del = vi.spyOn(api, 'del').mockResolvedValue({ queued: [] } as never);
+  render(Surface, { params: { sessionId: 'session-queued' } });
+  await expect.element(page.getByText('then summarize')).toBeInTheDocument();
+
+  const remove = document.querySelector<HTMLButtonElement>('.queuedrow .t-chip:nth-of-type(2) .x');
+  // The turn ends and the first entry flushes between the paint and the click.
+  sessions.rows = [row('session-queued', { busy: true, queued: queued.slice(1) })];
+  remove!.click();
+
+  expect(del).toHaveBeenCalledWith('/api/chat/sessions/session-queued/queue/q-0b9a1d34');
+});

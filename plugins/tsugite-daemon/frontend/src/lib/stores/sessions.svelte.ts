@@ -35,8 +35,6 @@ export interface AttentionRecord {
   created_at: string;
 }
 
-/** One message parked on a busy session, as the row and the queue broadcast
- *  carry it. */
 export interface QueuedMessage {
   id: string;
   text: string;
@@ -465,7 +463,6 @@ export class SessionsStore {
     } as Partial<SessionRow>);
   }
 
-  /** Drop one parked message; the response reports what is still queued. */
   async dequeueMessage(id: string, queueId: string): Promise<void> {
     const { queued } = await api.del<{ queued: QueuedMessage[] }>(
       `/api/chat/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}`,

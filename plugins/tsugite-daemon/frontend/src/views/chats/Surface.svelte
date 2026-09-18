@@ -12,7 +12,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
-  import type { SessionRow } from '$lib/stores/sessions.svelte';
+  import type { SessionRow, QueuedMessage } from '$lib/stores/sessions.svelte';
   import Conversation from './Conversation.svelte';
   import ChatComposer from './ChatComposer.svelte';
   import { ConversationController, type SendOpts } from './conversation.svelte';
@@ -183,14 +183,8 @@
     }
   }
 
-  // The queue lives on the session, so every tab shows the same chips and a
-  // removal from any of them lands for all.
-  const queued = $derived(selectedRow?.queued ?? []);
-
-  function unqueue(index: number) {
-    const entry = queued[index];
-    if (entry && selectedId) void sessions.dequeueMessage(selectedId, entry.id);
-  }
+  const NO_QUEUE: QueuedMessage[] = [];
+  const queued = $derived(selectedRow?.queued ?? NO_QUEUE);
 
   async function onSend(text: string, opts: SendOpts) {
     const id = await ctrl.send(text, opts);
@@ -320,11 +314,11 @@
       sessionId={selectedId}
       streaming={ctrl.streaming}
       busy={selectedRow?.busy ?? false}
-      queuedMessages={queued.map((q) => q.text)}
+      queuedMessages={queued}
       restoreFailed={ctrl.sendFailed}
       {onSend}
       onStop={() => void ctrl.stop()}
-      onUnqueue={unqueue}
+      onUnqueue={(id) => selectedId && void sessions.dequeueMessage(selectedId, id)}
       onCommandResult={(command, output, ok, action) => ctrl.pushEcho(command, output, ok, action)}
     />
   {:else if jobArtifact}
