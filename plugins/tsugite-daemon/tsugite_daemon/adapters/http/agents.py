@@ -1070,7 +1070,7 @@ class AgentsMixin:
         if err_resp:
             return err_resp
 
-        if self._session_busy(target_session):
+        if self._session_busy(target_session) or target_session.queued_messages:
             return self._queue_chat(
                 target_session, message, raw_user_id, reasoning_effort, uploaded_files, context_metadata
             )

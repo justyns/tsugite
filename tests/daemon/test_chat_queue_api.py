@@ -108,6 +108,21 @@ def _session_events(broadcasts, event_type):
     return [p for n, p in broadcasts if n == "session_event" and p.get("event_type") == event_type]
 
 
+def _seed_queue(adapter, sid, queue_id, text):
+    adapter.session_store.queue_message(
+        sid,
+        {
+            "id": queue_id,
+            "text": text,
+            "user_id": "u1",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "reasoning_effort": None,
+            "uploaded_files": [],
+            "context_metadata": None,
+        },
+    )
+
+
 def _hold(adapter, text: str) -> asyncio.Event:
     """Hold handle_message inside the turn for `text`. The returned event fires
     once that turn has entered the handler."""
@@ -273,6 +288,26 @@ class TestCompaction:
         rows = {r["id"]: r for r in (await client.get("/api/chat/sessions?include_superseded=1")).json()["sessions"]}
         assert [q["text"] for q in rows[successor.id]["queued"]] == ["still pending"]
         assert rows[sid]["queued"] == []
+
+
+@pytest.mark.asyncio
+class TestSendingWithEntriesAlreadyParked:
+    async def test_an_idle_session_with_parked_entries_still_queues(self, adapter, client):
+        """Reachable after a daemon restart, or in the window between end_turn and
+        the drain task's first take_queued_message."""
+        sid = _session(adapter, "s-idle-parked")
+        _seed_queue(adapter, sid, "q-1", "first")
+
+        resp = await _send(client, sid, "second")
+
+        assert resp.status_code == 202
+        assert resp.json()["position"] == 2
+        assert adapter.handle_message.await_count == 0
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
+        assert _sent_messages(adapter) == ["first", "second"]
 
 
 @pytest.mark.asyncio
