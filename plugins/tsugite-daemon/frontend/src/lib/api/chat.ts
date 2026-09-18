@@ -1,9 +1,10 @@
 /**
- * Per-surface chat stream helper. A send POSTs /api/chat and the
- * response is an SSE stream OWNED by this surface - it carries the turn-end and
- * streaming frames (final_result/error/cancelled/stream_chunk) that the
- * cross-session broadcast deliberately withholds, so whichever surface ran the
- * send is the only one that sees them live.
+ * Per-surface chat stream helper. A send POSTs /api/chat; a busy session parks
+ * the message (202), otherwise the response is an SSE stream OWNED by this
+ * surface - it carries the turn-end and streaming frames
+ * (final_result/error/cancelled/stream_chunk) that the cross-session broadcast
+ * deliberately withholds, so whichever surface ran the send is the only one
+ * that sees them live.
  *
  * Bearer auth needs a header, so this uses raw fetch + the sse.ts parser rather
  * than the api client (same pattern as connectEvents). The stream terminates on
@@ -28,6 +29,14 @@ export interface ChatSendBody {
   contextMetadata?: { key: string; label: string; value: string }[];
 }
 
+/** The daemon's 202 reply to a send aimed at a busy session: the message is
+ *  parked on the session and runs when the turn in flight ends. */
+export interface QueuedReply {
+  queue_id: string;
+  position: number;
+  queued: { id: string; text: string }[];
+}
+
 export interface ChatStreamHandlers {
   /** Every frame, in order - the primary hook the chat timeline builds from. */
   onEvent?: (frame: ChatFrame) => void;
@@ -42,6 +51,9 @@ export interface ChatStreamHandlers {
    *  turn and is running it, only the response feed was lost (mobile background
    *  killing the connection). Recoverable by replay, never a send failure. */
   onStreamLost?: (err: Error) => void;
+  /** The session was busy, so the daemon parked the message (202) instead of
+   *  running it. No stream opened - the turn runs when the current one ends. */
+  onQueued?: (reply: QueuedReply) => void;
   /** The stream closed (done or cancelled, or a transport end). */
   onDone?: () => void;
 }
@@ -86,6 +98,10 @@ export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}):
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({ error: resp.statusText }));
         handlers.onError?.(new Error(detail.error || resp.statusText));
+        return;
+      }
+      if (resp.status === 202) {
+        handlers.onQueued?.(await resp.json());
         return;
       }
       responded = true;

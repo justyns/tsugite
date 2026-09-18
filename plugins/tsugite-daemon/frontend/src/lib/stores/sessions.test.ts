@@ -336,3 +336,45 @@ describe('SessionsStore list cache', () => {
     expect(readSwr<SessionRow[]>(CACHE_KEY)?.map((r) => r.id)).toEqual(['s1', 's2']);
   });
 });
+
+describe('SessionsStore message queue', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  test('a queued update patches the row in place, so every tab shows the same chips', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1')];
+    apiGet.mockClear();
+    store.applySessionUpdate({
+      action: 'queued',
+      id: 's1',
+      queued: [{ id: 'q-1', text: 'and also check the logs' }],
+    });
+    expect(store.rows[0]!.queued).toEqual([{ id: 'q-1', text: 'and also check the logs' }]);
+    vi.runAllTimers();
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+
+  test('a flush empties the row queue', () => {
+    const store = new SessionsStore();
+    store.rows = [row('s1', { queued: [{ id: 'q-1', text: 'later' }] })];
+    store.applySessionUpdate({ action: 'queued', id: 's1', queued: [] });
+    expect(store.rows[0]!.queued).toEqual([]);
+  });
+
+  test('dequeueMessage deletes one entry and takes the remainder from the response', async () => {
+    const store = new SessionsStore();
+    store.rows = [
+      row('s1', {
+        queued: [
+          { id: 'q-1', text: 'first' },
+          { id: 'q-2', text: 'second' },
+        ],
+      }),
+    ];
+    vi.mocked(api.del).mockResolvedValueOnce({ queued: [{ id: 'q-2', text: 'second' }] });
+    await store.dequeueMessage('s1', 'q-1');
+    expect(api.del).toHaveBeenCalledWith('/api/chat/sessions/s1/queue/q-1');
+    expect(store.rows[0]!.queued).toEqual([{ id: 'q-2', text: 'second' }]);
+  });
+});

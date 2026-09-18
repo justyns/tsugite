@@ -35,6 +35,13 @@ export interface AttentionRecord {
   created_at: string;
 }
 
+/** One message parked on a busy session, as the row and the queue broadcast
+ *  carry it. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+}
+
 export interface SessionRow extends SessionRowLike {
   id: string;
   user_id: string;
@@ -65,6 +72,7 @@ export interface SessionRow extends SessionRowLike {
   needs_attention?: boolean;
   attention?: AttentionRecord[];
   pending_deliveries?: string[];
+  queued?: QueuedMessage[];
   waiting_on?: string[];
   progress?: Progress;
 }
@@ -258,6 +266,12 @@ export class SessionsStore {
             unread: true,
           } as Partial<SessionRow>);
         return;
+      case 'queued':
+        if (id)
+          this.rows = patchRow(this.rows, id, {
+            queued: (data.queued as QueuedMessage[]) ?? [],
+          } as Partial<SessionRow>);
+        return;
       case 'attention_cleared':
         if (id)
           this.rows = patchRow(this.rows, id, {
@@ -449,6 +463,14 @@ export class SessionsStore {
       attention,
       pending_deliveries,
     } as Partial<SessionRow>);
+  }
+
+  /** Drop one parked message; the response reports what is still queued. */
+  async dequeueMessage(id: string, queueId: string): Promise<void> {
+    const { queued } = await api.del<{ queued: QueuedMessage[] }>(
+      `/api/chat/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}`,
+    );
+    this.rows = patchRow(this.rows, id, { queued } as Partial<SessionRow>);
   }
 
   async markViewed(id: string, ts?: string): Promise<void> {

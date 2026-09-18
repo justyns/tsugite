@@ -49,7 +49,6 @@
     restoreFailed = null,
     onSend,
     onStop,
-    onQueue,
     onUnqueue,
     onCommandResult,
   }: {
@@ -57,14 +56,14 @@
     dense?: boolean;
     streaming?: boolean;
     busy?: boolean;
-    /** Messages parked for after the in-flight turn (rendered as removable chips). */
+    /** Messages the daemon parked for after the in-flight turn (rendered as
+     *  removable chips). */
     queuedMessages?: string[];
-    /** A send that failed before it took (409 busy, daemon down): restore this
-     *  text into an empty composer so the message isn't lost. */
+    /** A send that failed before it took (daemon down, a finished session):
+     *  restore this text into an empty composer so the message isn't lost. */
     restoreFailed?: { text: string; seq: number } | null;
     onSend: (text: string, opts: SendExtras) => void;
     onStop: () => void;
-    onQueue?: (text: string, opts: SendExtras) => void;
     onUnqueue?: (index: number) => void;
     /** A slash-command finished: surface its result as an inline conversation echo
      *  (the controller's ephemeral localEcho channel) instead of a toast. */
@@ -211,8 +210,8 @@
 
   // A /command is side-band (it does not join the conversation and carries no
   // context), so it dispatches immediately; a plain message gathers any context
-  // and is delivered - sent now, or queued for after the turn. Context rides as
-  // structured metadata; the message text is never touched.
+  // and is sent. Context rides as structured metadata; the message text is
+  // never touched.
   async function submit(text: string, deliver: Deliver) {
     if (/^\s*\//.test(text)) {
       void slash.dispatchCommand(text);
@@ -231,10 +230,6 @@
 
   function handleSend(text: string) {
     void submit(text, onSend);
-  }
-
-  function handleQueue(text: string) {
-    void submit(text, (t, opts) => onQueue?.(t, opts));
   }
 
   // Imperative entry for OS files dropped on the chat surface (Surface.svelte),
@@ -346,7 +341,7 @@
     hint={busy && !streaming ? 'queued — sends when this turn finishes' : undefined}
     onKeydown={slash.onComposerKeydown}
     onPaste={attach.onPaste}
-    onQueue={onQueue ? handleQueue : undefined}
+    onQueue={handleSend}
   />
 
   <!-- Generic attach: accept-less so it never filters out non-image files. -->

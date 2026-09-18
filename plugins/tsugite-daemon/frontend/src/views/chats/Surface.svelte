@@ -183,6 +183,15 @@
     }
   }
 
+  // The queue lives on the session, so every tab shows the same chips and a
+  // removal from any of them lands for all.
+  const queued = $derived(selectedRow?.queued ?? []);
+
+  function unqueue(index: number) {
+    const entry = queued[index];
+    if (entry && selectedId) void sessions.dequeueMessage(selectedId, entry.id);
+  }
+
   async function onSend(text: string, opts: SendOpts) {
     const id = await ctrl.send(text, opts);
     if (id && id !== selectedId) {
@@ -311,12 +320,11 @@
       sessionId={selectedId}
       streaming={ctrl.streaming}
       busy={selectedRow?.busy ?? false}
-      queuedMessages={ctrl.queued.map((q) => q.text)}
+      queuedMessages={queued.map((q) => q.text)}
       restoreFailed={ctrl.sendFailed}
       {onSend}
       onStop={() => void ctrl.stop()}
-      onQueue={(text, opts) => ctrl.queue(text, opts)}
-      onUnqueue={(i) => ctrl.unqueue(i)}
+      onUnqueue={unqueue}
       onCommandResult={(command, output, ok, action) => ctrl.pushEcho(command, output, ok, action)}
     />
   {:else if jobArtifact}

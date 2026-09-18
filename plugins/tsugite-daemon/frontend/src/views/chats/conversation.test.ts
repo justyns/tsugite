@@ -791,3 +791,61 @@ test('a normal send on a long session renders the message once through the settl
   );
   expect(userTurns).toHaveLength(1);
 });
+
+test('a send the server parks drops the optimistic bubble and leaves nothing streaming', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('and also check the logs');
+  expect(ctrl.events.filter((e) => e.type === 'user_input')).toHaveLength(1);
+
+  chat.handlers!.onQueued?.({
+    queue_id: 'q-1',
+    position: 1,
+    queued: [{ id: 'q-1', text: 'and also check the logs' }],
+  });
+  chat.handlers!.onDone?.();
+
+  // The chip fed by the session row is what shows it now; a bubble here would
+  // claim a turn that has not run.
+  expect(ctrl.events.filter((e) => e.type === 'user_input')).toHaveLength(0);
+  expect(ctrl.streaming).toBe(false);
+});
+
+test('parking a send made mid-turn leaves the streaming turn its stream', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('first');
+  chat.close.mockClear();
+
+  await ctrl.send('and also check the logs');
+  chat.handlers!.onQueued?.({
+    queue_id: 'q-1',
+    position: 1,
+    queued: [{ id: 'q-1', text: 'and also check the logs' }],
+  });
+  chat.handlers!.onDone?.();
+
+  expect(ctrl.events.filter((e) => e.type === 'user_input').map((e) => e.text)).toEqual(['first']);
+  expect(ctrl.streaming).toBe(true);
+  // The live handle is still held: closeStream() has something to abort, and
+  // ingestBroadcast still defers to the local stream.
+  ctrl.closeStream();
+  expect(chat.close).toHaveBeenCalledTimes(1);
+});
+
+test('parking a send made against an open ask_user leaves the prompt standing', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('first');
+  ctrl.ask = pendingAsk('ask-42');
+
+  await ctrl.send('and also check the logs');
+  chat.handlers!.onQueued?.({
+    queue_id: 'q-1',
+    position: 1,
+    queued: [{ id: 'q-1', text: 'and also check the logs' }],
+  });
+  chat.handlers!.onDone?.();
+
+  // The turn is still blocked on the answer, so clearing the prompt would leave
+  // the person no way to unblock it.
+  expect(ctrl.ask).not.toBeNull();
+  expect(ctrl.ask?.askId).toBe('ask-42');
+});

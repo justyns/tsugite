@@ -149,11 +149,9 @@ export class ConversationController {
   /** Largest storage id the controller holds: the cursor for the incremental
    *  resync delta (fetch only events newer than this). */
   private lastEventId: number | null = null;
-  /** Messages queued while a turn streams; flushed one per turn end. */
-  queued = $state<{ text: string; opts: SendOpts }[]>([]);
-  /** Set when a send fails before any frame arrives (409 busy, daemon down):
-   *  the composer restores this text so the message isn't lost. `seq` makes
-   *  each failure a distinct value for the consuming effect. */
+  /** Set when a send fails before any frame arrives (daemon down, a finished
+   *  session): the composer restores this text so the message isn't lost. `seq`
+   *  makes each failure a distinct value for the consuming effect. */
   sendFailed = $state<{ text: string; seq: number } | null>(null);
   private failSeq = 0;
   /** Ephemeral slash-command echoes (see LocalEcho). Its own channel, never the
@@ -193,7 +191,6 @@ export class ConversationController {
     this.error = null;
     this.streaming = false;
     this.serverBusy = false;
-    this.queued = [];
     this.sendFailed = null;
     this.localEcho = [];
     this.hasEarlier = false;
@@ -271,6 +268,12 @@ export class ConversationController {
         ...(injected ? { injected, display_text: text } : {}),
       },
     ];
+    // A parked send opens no stream. A turn already running here keeps its
+    // handle, its streaming flag and any prompt still blocking it.
+    let parked = false;
+    const priorHandle = this.handle;
+    const priorStreaming = this.streaming;
+    const priorAsk = this.ask;
     this.ask = null;
     this.streaming = true;
     this.sendFailed = null;
@@ -293,8 +296,8 @@ export class ConversationController {
         },
         // A failed send never blanks the timeline. Once frames arrived the turn ran
         // and its error is already an inline block, so the toast and the optimistic
-        // bubble removal only fire for a PRE-frame failure (409 busy, daemon down).
-        // The draft comes back either way unless a final result arrived.
+        // bubble removal only fire for a PRE-frame failure (daemon down, a finished
+        // session). The draft comes back either way unless a final result arrived.
         onError: (err) => {
           if (!gotFinalResult) this.sendFailed = { text, seq: ++this.failSeq };
           if (gotFrame) return;
@@ -314,11 +317,22 @@ export class ConversationController {
           if (this.ask?.answered) this.ask = null;
           void this.reconcileAfterSend(clientKey, text);
         },
+        // The daemon parked the message instead of running it. The queued chip
+        // fed by the session row shows it now, so the optimistic bubble goes.
+        onQueued: () => {
+          parked = true;
+          this.events = this.events.filter((e) => e.clientKey !== clientKey);
+        },
         onDone: () => {
+          if (parked) {
+            this.handle = priorHandle;
+            this.streaming = priorStreaming;
+            this.ask = priorAsk;
+            return;
+          }
           this.streaming = false;
           if (this.ask?.answered) this.ask = null;
           this.handle = null;
-          this.flushQueue();
         },
       },
     );
@@ -344,25 +358,6 @@ export class ConversationController {
 
   dismissEcho(id: string): void {
     this.localEcho = this.localEcho.filter((e) => e.id !== id);
-  }
-
-  /** Park a message typed mid-turn; it sends when the current turn finishes. */
-  queue(text: string, opts: SendOpts = {}): void {
-    this.queued = [...this.queued, { text, opts }];
-  }
-
-  unqueue(index: number): void {
-    this.queued = this.queued.filter((_, i) => i !== index);
-  }
-
-  /** Send the next queued message once the turn ends. One per turn end - its
-   *  own onDone flushes the next. Held while an ask_user prompt is open (the
-   *  turn is parked on the user, not finished). */
-  private flushQueue(): void {
-    const next = this.queued[0];
-    if (!next || (this.ask && !this.ask.answered)) return;
-    this.queued = this.queued.slice(1);
-    void this.send(next.text, next.opts);
   }
 
   private applyFrame(frame: ChatFrame): void {

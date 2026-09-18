@@ -127,20 +127,55 @@ test('respondToAsk threads ask_id into the POST body and returns the parsed repl
   expect(res).toEqual({ status: 'ok' });
 });
 
-test('a non-ok response (e.g. 409 busy) routes to onError (delivered but rejected, unchanged)', async () => {
+test('a non-ok response (e.g. a 409 on a finished session) routes to onError, never onQueued', async () => {
   globalThis.fetch = vi.fn(async () => ({
     ok: false,
     status: 409,
     statusText: 'Conflict',
-    json: async () => ({ error: 'a turn is already running for this session' }),
+    json: async () => ({
+      error: 'Session is completed. Start a new session to continue.',
+      code: 'session_finished',
+    }),
   })) as unknown as typeof fetch;
 
   const onError = vi.fn();
+  const onQueued = vi.fn();
   const onStreamLost = vi.fn();
   const onDone = vi.fn();
-  sendChat({ message: 'hi' }, { onError, onStreamLost, onDone });
+  sendChat({ message: 'hi' }, { onError, onQueued, onStreamLost, onDone });
 
   await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
   expect(onError).toHaveBeenCalledTimes(1);
+  expect(onQueued).not.toHaveBeenCalled();
+  expect(onStreamLost).not.toHaveBeenCalled();
+});
+
+test('a 202 parks the send: onQueued takes the reply and no stream is read', async () => {
+  const reply = {
+    status: 'queued',
+    queue_id: 'q-f210f2cc',
+    position: 1,
+    queued: [{ id: 'q-f210f2cc', text: 'and also check the logs' }],
+  };
+  globalThis.fetch = vi.fn(async () => ({
+    ok: true,
+    status: 202,
+    json: async () => reply,
+  })) as unknown as typeof fetch;
+
+  const onQueued = vi.fn();
+  const onEvent = vi.fn();
+  const onError = vi.fn();
+  const onStreamLost = vi.fn();
+  const onDone = vi.fn();
+  sendChat(
+    { message: 'and also check the logs' },
+    { onQueued, onEvent, onError, onStreamLost, onDone },
+  );
+
+  await vi.waitFor(() => expect(onDone).toHaveBeenCalled());
+  expect(onQueued).toHaveBeenCalledWith(reply);
+  expect(onEvent).not.toHaveBeenCalled();
+  expect(onError).not.toHaveBeenCalled();
   expect(onStreamLost).not.toHaveBeenCalled();
 });
