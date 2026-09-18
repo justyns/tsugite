@@ -271,6 +271,25 @@ class TestRetryJobEndpoint:
         assert orchestrator.calls[-1]["fresh_workspace"] is False
 
 
+class TestUnknownStateFilter:
+    """An empty list is a plausible answer, so a typo'd filter must not return one."""
+
+    def test_an_unknown_state_is_400(self, client, test_token):
+        resp = client.get("/api/jobs?state=stcuk", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 400, resp.text
+        assert "stcuk" in resp.json()["error"]
+
+    def test_a_real_state_still_filters(self, client, test_token):
+        resp = client.get("/api/jobs?state=running", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 200
+        assert [j["job_id"] for j in resp.json()["jobs"]] == ["job-r1"]
+
+    def test_an_alias_still_filters(self, client, test_token):
+        resp = client.get("/api/jobs?state=resolved", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.status_code == 200
+        assert {j["job_id"] for j in resp.json()["jobs"]} == {"job-d1", "job-c1"}
+
+
 class TestListJobsDefaultLimit:
     def test_default_limit_bounds_response(self, client, test_token, job_store):
         """Without ?limit the endpoint must NOT ship the entire history - the
@@ -352,6 +371,15 @@ class TestJobActionStatusCodes:
         resp = client.post("/api/jobs/job-s1/retry", headers=auth, json={})
         assert resp.status_code == 400
         assert "hint or model" in resp.json()["error"]
+
+    def test_retry_with_a_missing_executor_is_500_not_400(self, client, auth, orchestrator, job_store):
+        """The caller cannot fix a daemon that no longer loads the job's executor."""
+        job_store.update("job-s1", executor="cc-driver")
+
+        resp = client.post("/api/jobs/job-s1/retry", headers=auth, json={"hint": "try harder"})
+
+        assert resp.status_code == 500, resp.text
+        assert "cc-driver" in resp.json()["error"]
 
     def test_retry_worktree_failure_is_500_not_409(self, client, auth, orchestrator, job_store, monkeypatch):
         job_store.update("job-s1", repo="/repo/does-not-matter")

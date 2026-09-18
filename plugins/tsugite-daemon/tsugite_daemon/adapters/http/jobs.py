@@ -70,6 +70,15 @@ class JobsMixin:
                 "resolved": frozenset({"done", "cancelled"}),
             }
             alias["open"] = frozenset(state.value for state in JobState) - alias["resolved"]
+            states = frozenset(state.value for state in JobState)
+            if state_filter not in alias and state_filter not in states:
+                # Filtering for it would answer 200 with an empty list, which reads
+                # as "no jobs in that state" rather than "no such state".
+                known = ", ".join(sorted(states | set(alias)))
+                return JSONResponse(
+                    {"error": f"unknown state {state_filter!r} (expected one of: {known})"},
+                    status_code=400,
+                )
             allowed = alias.get(state_filter, frozenset({state_filter}))
             jobs = [j for j in jobs if j.state in allowed]
         try:
