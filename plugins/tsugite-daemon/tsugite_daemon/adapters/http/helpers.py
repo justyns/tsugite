@@ -19,6 +19,7 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
 
 if TYPE_CHECKING:
+    from tsugite_daemon.session_runner import LoggingProgressHandler
     from tsugite_daemon.session_store import SessionStore
 
 # adapters/http/helpers.py -> up three parents reaches the daemon package root.
@@ -264,7 +265,8 @@ class ActiveChat:
     """
 
     backend: HTTPInteractionBackend
-    progress: SSEProgressHandler
+    # A queued message runs under LoggingProgressHandler: no SSE stream, broadcast only.
+    progress: "SSEProgressHandler | LoggingProgressHandler"
     task: Optional[asyncio.Task] = None
     # Cooperative cancel signal: cancelling the task tears down the SSE stream but
     # cannot stop the agent loop running in a to_thread worker. The worker checks

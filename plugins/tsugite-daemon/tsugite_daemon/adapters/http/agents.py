@@ -1,9 +1,11 @@
 """AgentsMixin: agents HTTP handlers for HTTPServer."""
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
+from uuid import uuid4
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -61,6 +63,60 @@ def _load_session_events(session_id: str) -> list:
     return list(backend.load(session_id).iter_events())
 
 
+def _build_send_metadata(
+    adapter: HTTPAgentAdapter,
+    session_id: Optional[str],
+    message: str,
+    uploaded_files: list,
+    reasoning_effort: Optional[str],
+    context_metadata,
+) -> tuple[str, dict]:
+    """Resolve uploaded filenames against the uploads dir and build the turn
+    metadata, returning the message with its upload suffix.
+
+    A queued send runs this at flush time: Attachment objects do not survive the
+    queue's JSON round-trip.
+    """
+    from tsugite.models import model_supports_vision
+
+    uploads_dir = adapter.runtime.workspace_dir / "uploads"
+    # A non-vision model can't read an inlined image; route its images to the
+    # workspace-only path (saved + path hint) instead of dropping them.
+    supports_vision = model_supports_vision(adapter.resolve_session_model(session_id))
+
+    uploaded_attachments = []
+    workspace_only_files = []
+    for file_info in uploaded_files:
+        if not isinstance(file_info, dict):
+            continue
+        filename = _sanitize_filename(file_info.get("name", ""))
+        file_path = (uploads_dir / filename).resolve()
+        if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
+            continue
+
+        if can_inline_file(file_path, file_path.stat().st_size, supports_vision=supports_vision):
+            try:
+                attachment = _file_handler.fetch(str(file_path))
+                attachment.user_upload = True
+                uploaded_attachments.append(attachment)
+            except Exception as e:
+                logger.warning("Failed to create attachment for %s: %s", file_path, e)
+                workspace_only_files.append(filename)
+        else:
+            workspace_only_files.append(filename)
+
+    message += _format_upload_message_suffix(workspace_only_files, [a.name for a in uploaded_attachments])
+
+    metadata = {}
+    if uploaded_attachments:
+        metadata["uploaded_attachments"] = uploaded_attachments
+    if reasoning_effort:
+        metadata["reasoning_effort_override"] = reasoning_effort
+    if isinstance(context_metadata, list) and context_metadata:
+        metadata["context_metadata"] = context_metadata
+    return message, metadata
+
+
 def _session_user_label(user_id: str, source: str) -> str:
     if user_id.isdigit():
         return f"Discord: {user_id}"
@@ -75,6 +131,11 @@ class AgentsMixin:
             Route("/api/chat/sessions", self._list_sessions, methods=["GET"]),
             Route("/api/chat/sessions/new", self._new_interactive_session, methods=["POST"]),
             Route("/api/chat/sessions/{session_id}/branch", self._branch, methods=["POST"]),
+            Route(
+                "/api/chat/sessions/{session_id}/queue/{queue_id}",
+                self._dequeue_message,
+                methods=["DELETE"],
+            ),
             Route("/api/chat", self._chat, methods=["POST"]),
             Route("/api/chat/cancel", self._cancel_chat, methods=["POST"]),
             Route("/api/chat/upload", self._upload, methods=["POST"]),
@@ -102,6 +163,26 @@ class AgentsMixin:
         from tsugite.config import get_xdg_write_path
 
         return get_xdg_write_path("permissions.yaml")
+
+    def _bind_run_context(self, chat_state: ActiveChat) -> None:
+        """Bind the interaction backend, the approval permissions store and the
+        cooperative cancel event into the run context.
+
+        The agent loop and the context detector both run via asyncio.to_thread,
+        which copies this context; binding anywhere else never reaches them.
+        """
+        from tsugite.cancellation import set_cancel_event
+        from tsugite.interaction import set_interaction_backend
+        from tsugite.permissions import Permissions, set_permissions
+
+        set_interaction_backend(chat_state.backend)
+        set_permissions(
+            Permissions(
+                runtime_path=self._permissions_runtime_path(),
+                workspace_dir=self.adapter.runtime.workspace_dir,
+            )
+        )
+        set_cancel_event(chat_state.cancel_event)
 
     async def _run_command(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -139,7 +220,7 @@ class AgentsMixin:
 
     def _session_busy(self, session) -> bool:
         """The one definition of busy, shared by the sessions payload, /status,
-        and the /chat 409 guard - the server must never 409 a send while
+        and the /chat busy check - the server must never queue a send while
         reporting the session idle. True when the store reports durable live
         work (an in-flight turn, or a background/scheduled run) OR a live HTTP
         chat task exists (covers the brief window between task creation and
@@ -218,6 +299,7 @@ class AgentsMixin:
                 "resumable": s.resumable,
                 "unread": unread,
                 "pending_deliveries": s.pending_delivery_ids,
+                "queued": s.queued_message_rows,
                 **attention_fields(attention_by_owner.get(s.id, [])),
                 "waiting_on": waiting_on.get(s.id, []),
                 "is_primary": s.is_primary,
@@ -313,6 +395,7 @@ class AgentsMixin:
                 "metadata": session_metadata,
                 "busy": bool(session and self._session_busy(session)),
                 "pending_message": backend.pending_message if backend else None,
+                "queued": session.queued_message_rows if session else [],
                 "attachments": attachments,
             }
         )
@@ -452,7 +535,7 @@ class AgentsMixin:
         backend_key = (user_id, session_id)
         chat = self._active_chats.get(backend_key)
         live_progress = chat.progress if chat else None
-        if live_progress and live_progress.latest_prompt_messages:
+        if live_progress and getattr(live_progress, "latest_prompt_messages", None):
             return JSONResponse(
                 {
                     "prompt_snapshot": {
@@ -772,6 +855,110 @@ class AgentsMixin:
         await form.close()
         return JSONResponse({"files": results})
 
+    def _broadcast_queue(self, session_id: str) -> list[dict]:
+        """Broadcast the session's queue, returning the rows it sent."""
+        queued = self.adapter.session_store.get_session(session_id).queued_message_rows
+        self.event_bus.emit("session_update", {"action": "queued", "id": session_id, "queued": queued})
+        return queued
+
+    async def _dequeue_message(self, request: Request) -> JSONResponse:
+        adapter, err = self._get_adapter(request)
+        if err:
+            return err
+        session_id = request.path_params["session_id"]
+        if not adapter.session_store.drop_queued_message(session_id, request.path_params["queue_id"]):
+            return JSONResponse({"error": "queued message not found"}, status_code=404)
+        return JSONResponse({"queued": self._broadcast_queue(session_id)})
+
+    def _queue_chat(
+        self,
+        session,
+        message: str,
+        user_id: str,
+        reasoning_effort: Optional[str],
+        uploaded_files: list,
+        context_metadata,
+    ) -> JSONResponse:
+        """Park a send aimed at a busy session, holding the raw request fields
+        that `run_queued_message` re-resolves at flush time."""
+        entry = {
+            "id": f"q-{uuid4().hex[:8]}",
+            "text": message,
+            "user_id": user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reasoning_effort": reasoning_effort,
+            "uploaded_files": uploaded_files,
+            "context_metadata": context_metadata,
+        }
+        position = self.adapter.session_store.queue_message(session.id, entry)
+        queued = self._broadcast_queue(session.id)
+        if self.session_runner and not self._session_busy(session):
+            # The turn ended between the busy check and the append, so its
+            # turn-end hook read an empty queue.
+            self.session_runner.drain_queued_messages(session.id)
+        return JSONResponse(
+            {"status": "queued", "queue_id": entry["id"], "position": position, "queued": queued},
+            status_code=202,
+        )
+
+    async def run_queued_message(self, session_id: str, entry: dict) -> None:
+        """Run a queued message as a normal user turn, logged and broadcast so
+        every watching client renders it live."""
+        from tsugite_daemon.session_runner import LoggingProgressHandler
+
+        adapter = self.adapter
+        raw_user_id = entry["user_id"]
+        user_id = adapter.resolve_http_user(raw_user_id)
+        message, metadata = _build_send_metadata(
+            adapter,
+            session_id,
+            entry["text"],
+            entry["uploaded_files"],
+            entry["reasoning_effort"],
+            entry["context_metadata"],
+        )
+        metadata["conv_id_override"] = session_id
+
+        progress = LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus)
+        interaction_backend = HTTPInteractionBackend(
+            progress, session_runner=self.session_runner, session_id=session_id
+        )
+        interaction_backend.pending_message = message
+        chat_state = ActiveChat(backend=interaction_backend, progress=progress, task=asyncio.current_task())
+        # Registering the chat keeps `_session_busy` true across the window before
+        # handle_message reaches begin_turn, and lets /api/chat/cancel reach this turn.
+        backend_key = (user_id, session_id)
+        self._active_chats[backend_key] = chat_state
+        self._broadcast_queue(session_id)
+
+        self._bind_run_context(chat_state)
+        try:
+            await adapter.handle_message(
+                user_id=user_id,
+                message=message,
+                channel_context=ChannelContext(
+                    source="http",
+                    channel_id=None,
+                    user_id=raw_user_id,
+                    reply_to=f"http:{raw_user_id}",
+                    metadata=metadata,
+                ),
+                custom_logger=SimpleNamespace(ui_handler=progress),
+            )
+        except Exception as e:
+            logger.exception("Queued chat error")
+            progress._emit("error", {"error": str(e)})
+            self.session_runner.open_attention(
+                session_id,
+                source=SOURCE_ERROR,
+                ref_id=f"{session_id}:turn",
+                kind="turn_failed",
+            )
+        finally:
+            self._active_chats.pop(backend_key, None)
+            self.event_bus.emit("agent_status", {})
+            self.event_bus.emit("history_update", {"session_id": session_id})
+
     async def _chat(self, request: Request) -> Response:
         body, err = await self._authed_json_body(request)
         if err:
@@ -801,47 +988,12 @@ class AgentsMixin:
         user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("<- %s (http): %s", user_id, message[:100])
 
-        # Process uploaded files -- only accept filenames, resolve against uploads dir
-        uploaded_attachments = []
-        workspace_only_files = []
-        uploads_dir = adapter.runtime.workspace_dir / "uploads"
-        # A non-vision model can't read an inlined image; route its images to the
-        # workspace-only path (saved + path hint) instead of dropping them.
-        from tsugite.models import model_supports_vision
-
-        supports_vision = model_supports_vision(adapter.resolve_session_model(session_id))
-
-        for file_info in uploaded_files:
-            if not isinstance(file_info, dict):
-                continue
-            filename = _sanitize_filename(file_info.get("name", ""))
-            file_path = (uploads_dir / filename).resolve()
-            if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
-                continue
-
-            if can_inline_file(file_path, file_path.stat().st_size, supports_vision=supports_vision):
-                try:
-                    attachment = _file_handler.fetch(str(file_path))
-                    attachment.user_upload = True
-                    uploaded_attachments.append(attachment)
-                except Exception as e:
-                    logger.warning("Failed to create attachment for %s: %s", file_path, e)
-                    workspace_only_files.append(filename)
-            else:
-                workspace_only_files.append(filename)
-
-        message += _format_upload_message_suffix(workspace_only_files, [a.name for a in uploaded_attachments])
-
-        metadata = {"client_ip": request.client.host if request.client else "unknown"}
-        if uploaded_attachments:
-            metadata["uploaded_attachments"] = uploaded_attachments
         context_metadata = body.get("context_metadata")
-        if isinstance(context_metadata, list) and context_metadata:
-            metadata["context_metadata"] = context_metadata
 
         from tsugite_daemon.session_store import FINISHED_STATUSES, SessionSource
 
         target_session = None
+        conv_id_override = None
         if session_id:
             try:
                 target_session = adapter.session_store.get_session(session_id)
@@ -860,7 +1012,7 @@ class AgentsMixin:
                         status_code=409,
                     )
             if target_session is not None:
-                metadata["conv_id_override"] = target_session.id
+                conv_id_override = target_session.id
 
         if target_session is None:
             target_session = adapter.session_store.get_or_create_interactive(user_id, source=SessionSource.WEB.value)
@@ -871,18 +1023,20 @@ class AgentsMixin:
         )
         if err_resp:
             return err_resp
-        if reasoning_effort:
-            metadata["reasoning_effort_override"] = reasoning_effort
 
-        backend_key = (user_id, target_session_id)
-        # Same predicate the sessions payload and /status report - the server
-        # must not 409 a send while telling the sidebar the session is idle.
         if self._session_busy(target_session):
-            return JSONResponse(
-                {"error": "a turn is already running for this session", "code": "turn_in_flight"},
-                status_code=409,
+            return self._queue_chat(
+                target_session, message, raw_user_id, reasoning_effort, uploaded_files, context_metadata
             )
 
+        message, metadata = _build_send_metadata(
+            adapter, target_session_id, message, uploaded_files, reasoning_effort, context_metadata
+        )
+        metadata["client_ip"] = request.client.host if request.client else "unknown"
+        if conv_id_override:
+            metadata["conv_id_override"] = conv_id_override
+
+        backend_key = (user_id, target_session_id)
         channel_context = ChannelContext(
             source="http",
             channel_id=None,
@@ -906,28 +1060,7 @@ class AgentsMixin:
         self._active_chats[backend_key] = chat_state
 
         async def run_agent():
-            from tsugite.cancellation import set_cancel_event
-            from tsugite.interaction import set_interaction_backend
-            from tsugite.permissions import Permissions, set_permissions
-
-            set_interaction_backend(interaction_backend)
-            # Expose the adapter's REGISTERED name (its key in the daemon adapter
-            # registry) so spawn/start-session tools resolve to an agent that has
-            # a live adapter, not the agent-file config name. Rides the same
-            # context copy asyncio.to_thread makes for the executor worker.
-            # Bind the approval permissions store into the run context alongside the
-            # interaction backend, so the context detector (which runs via
-            # asyncio.to_thread and inherits this context) can gate a web fetch on
-            # the allowlist and prompt through the same cross-surface machinery.
-            set_permissions(
-                Permissions(
-                    runtime_path=self._permissions_runtime_path(),
-                    workspace_dir=adapter.runtime.workspace_dir,
-                )
-            )
-            # Bind the cooperative cancel Event into the run context so the agent
-            # loop (copy_context + to_thread) observes a user Stop and exits cleanly.
-            set_cancel_event(chat_state.cancel_event)
+            self._bind_run_context(chat_state)
             try:
                 response = await adapter.handle_message(
                     user_id=user_id,

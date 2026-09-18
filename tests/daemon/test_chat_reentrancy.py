@@ -129,7 +129,7 @@ class _HeldTurn:
 
     def wait_until_running(self, count: int = 1, timeout: float = 5.0):
         """Block until `count` turns have entered the handler. A turn inside the
-        handler is already registered in `_active_chats`, which the 409 guard and
+        handler is already registered in `_active_chats`, which the busy check and
         /status read."""
         for _ in range(count):
             assert self._running.acquire(timeout=timeout), f"fewer than {count} turns reached handle_message"
@@ -168,9 +168,9 @@ def _make_session(mock_adapter, sid: str, user_id: str):
     return session
 
 
-def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_adapter, test_token):
+def test_second_chat_for_same_user_is_queued_while_first_runs(client, mock_adapter, test_token):
     """Second POST /chat for the same (agent, user_id) while the first is
-    still running returns 409 and does not spawn a second agent run.
+    still running is queued (202) and does not spawn a second agent run.
     """
     with _held_turn(client, mock_adapter, test_token) as turn:
         turn.start(user_id="alice", message="hello")
@@ -181,7 +181,7 @@ def test_second_chat_for_same_user_is_rejected_while_first_runs(client, mock_ada
             json={"message": "second", "user_id": "alice"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        assert resp2.status_code == 409, f"expected 409 Conflict, got {resp2.status_code}: {resp2.text}"
+        assert resp2.status_code == 202, f"expected 202 Accepted, got {resp2.status_code}: {resp2.text}"
 
     assert len(turn.started) == 1, f"handle_message fired {len(turn.started)} times; should be 1"
 
@@ -212,7 +212,7 @@ def test_sequential_chats_for_same_user_both_run(client, mock_adapter, test_toke
 
 def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_token):
     """Two POSTs with same (agent, user_id) but distinct session_id values must
-    BOTH start streaming. The 409 guard should be per-session, not per-user.
+    BOTH start streaming. The busy check should be per-session, not per-user.
     """
     _make_session(mock_adapter, "sess-A", "alice")
     _make_session(mock_adapter, "sess-B", "alice")
@@ -228,10 +228,10 @@ def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_
     assert sorted(turn.started) == ["sess-A", "sess-B"]
 
 
-def test_same_session_double_send_still_409s(client, mock_adapter, test_token):
-    """Preserve original safety: two POSTs with the SAME session_id while the
-    first is in flight must still return 409. Per-session keying must not
-    weaken the same-session guard.
+def test_same_session_double_send_is_queued(client, mock_adapter, test_token):
+    """Preserve original safety: the second of two POSTs with the SAME session_id
+    is queued rather than run. Per-session keying must not weaken the
+    same-session guard.
     """
     _make_session(mock_adapter, "sess-X", "alice")
 
@@ -244,7 +244,7 @@ def test_same_session_double_send_still_409s(client, mock_adapter, test_token):
             json={"message": "second", "user_id": "alice", "session_id": "sess-X"},
             headers={"Authorization": f"Bearer {test_token}"},
         )
-        assert resp2.status_code == 409, f"expected 409, got {resp2.status_code}: {resp2.text}"
+        assert resp2.status_code == 202, f"expected 202, got {resp2.status_code}: {resp2.text}"
 
     assert len(turn.started) == 1
 

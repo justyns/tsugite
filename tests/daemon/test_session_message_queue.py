@@ -88,6 +88,17 @@ class TestTheQueue:
 
         assert [e["text"] for e in reloaded.get_session(sid).queued_messages] == ["survive the restart"]
 
+    def test_session_detail_ships_the_wire_rows(self, store):
+        """One key and one shape across the endpoints; the raw entry also carries
+        the sender, the upload names and the client context."""
+        sid = _session(store)
+        store.queue_message(sid, _entry("q-1", "hello"))
+
+        detail = store.session_detail(sid)
+
+        assert detail.get("queued") == [{"id": "q-1", "text": "hello"}]
+        assert "queued_messages" not in detail
+
     def test_compaction_moves_the_queue_to_the_successor(self, store):
         sid = _session(store)
         store.queue_message(sid, _entry("q-1", "still pending"))

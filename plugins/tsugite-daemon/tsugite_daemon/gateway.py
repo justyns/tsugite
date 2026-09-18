@@ -359,6 +359,7 @@ class Gateway:
             )
             if self._http_server:
                 self._http_server.session_runner = self._session_runner
+                self._session_runner.set_queued_message_sender(self._http_server.run_queued_message)
             set_session_runner(self._session_runner, asyncio.get_running_loop())
 
             # Terminal viewer: PTY runtime + persistent session store. Owned by

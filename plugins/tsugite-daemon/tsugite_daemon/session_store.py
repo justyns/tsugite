@@ -345,6 +345,12 @@ class Session:
         return [d["id"] for d in self.pending_deliveries]
 
     @property
+    def queued_message_rows(self) -> list[dict]:
+        """The queue as clients read it: the rest of an entry is what re-running
+        the send needs, not what the composer shows."""
+        return [{"id": e["id"], "text": e["text"]} for e in self.queued_messages]
+
+    @property
     def has_live_work(self) -> bool:
         """Whether this session currently has work running.
 
@@ -1547,6 +1553,8 @@ class SessionStore:
         result.update(attention_fields(self.attention.open_records(session_id)))
         # Same key, same shape as the session-list row: ids, not whole cards.
         result["pending_deliveries"] = session.pending_delivery_ids
+        result["queued"] = session.queued_message_rows
+        del result["queued_messages"]
         # `context_limit` (the raw dataclass field) is None until the first turn
         # reports a provider window, so a fresh session would get no meter. Expose
         # the RESOLVED limit alongside it (falls back to the agent default) so the

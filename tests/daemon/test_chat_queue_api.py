@@ -1,0 +1,263 @@
+"""The HTTP half of the mid-turn message queue.
+
+A send to a busy session is accepted (202) and parked on the session instead of
+refused with a 409. Every client reads the same queue off the sessions payload
+and /status, any client can drop an entry, and the turn-end hook runs the parked
+message as an ordinary user turn once the turn it waited on finishes.
+"""
+
+import asyncio
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+import pytest_asyncio
+from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.auth import TokenStore
+from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
+from tsugite_daemon.session_runner import SessionRunner
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
+
+from .conftest import _wait_until
+
+
+@pytest.fixture
+def adapter(tmp_path):
+    from tsugite.workspace import WorkspaceNotFoundError
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "session_store.json")
+    config = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
+    with patch("tsugite.workspace.Workspace") as mock_ws:
+        mock_ws.load.side_effect = WorkspaceNotFoundError("nope")
+        a = HTTPAgentAdapter(runtime=config, session_store=store)
+    a.handle_message = AsyncMock(return_value="ok")
+    return a
+
+
+@pytest.fixture
+def token_store(tmp_path):
+    return TokenStore(tmp_path / "tokens.json")
+
+
+@pytest.fixture
+def token(token_store):
+    _t, raw = token_store.create_admin_token(name="t")
+    return raw
+
+
+@pytest.fixture
+def server(adapter, token_store):
+    server = HTTPServer(
+        config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
+        adapter=adapter,
+        webhook_store=None,
+        token_store=token_store,
+    )
+    runner = SessionRunner(store=adapter.session_store, adapter=adapter, event_bus=server.event_bus)
+    server.session_runner = runner
+    runner.set_queued_message_sender(server.run_queued_message)
+    return server
+
+
+@pytest_asyncio.fixture
+async def client(server, token):
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app),
+        base_url="http://daemon",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as c:
+        yield c
+
+
+@pytest.fixture
+def broadcasts(server):
+    seen: list[tuple[str, dict]] = []
+    original = server.event_bus.emit
+
+    def record(name, payload):
+        seen.append((name, payload))
+        original(name, payload)
+
+    server.event_bus.emit = record
+    return seen
+
+
+def _session(adapter, sid="s-queue"):
+    adapter.session_store.create_session(Session(id=sid, source=SessionSource.WEB.value, user_id="u1"))
+    return sid
+
+
+def _busy_session(adapter, sid="s-queue"):
+    _session(adapter, sid)
+    adapter.session_store.begin_turn(sid)
+    return sid
+
+
+async def _send(client, sid, message):
+    return await client.post("/api/chat", json={"message": message, "session_id": sid, "user_id": "u1"})
+
+
+def _sent_messages(adapter):
+    return [c.kwargs["message"] for c in adapter.handle_message.await_args_list]
+
+
+@pytest.mark.asyncio
+class TestSendingToABusySession:
+    async def test_the_send_is_accepted_and_queued(self, adapter, client):
+        sid = _busy_session(adapter)
+
+        resp = await _send(client, sid, "and also check the logs")
+
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "queued"
+        assert body["position"] == 1
+        assert body["queued"] == [{"id": body["queue_id"], "text": "and also check the logs"}]
+
+    async def test_another_client_sees_the_queue_on_the_sessions_payload(self, adapter, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+
+        rows = (await client.get("/api/chat/sessions")).json()["sessions"]
+
+        row = next(r for r in rows if r["id"] == sid)
+        assert [q["text"] for q in row["queued"]] == ["and also check the logs"]
+
+    async def test_another_client_sees_the_queue_on_status(self, adapter, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+
+        status = (await client.get(f"/api/chat/status?user_id=u1&session_id={sid}")).json()
+
+        assert [q["text"] for q in status["queued"]] == ["and also check the logs"]
+
+    async def test_the_queue_change_is_broadcast(self, adapter, client, broadcasts):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+
+        updates = [p for n, p in broadcasts if n == "session_update" and p.get("action") == "queued"]
+        assert updates and updates[-1]["id"] == sid
+        assert [q["text"] for q in updates[-1]["queued"]] == ["and also check the logs"]
+
+
+@pytest.mark.asyncio
+class TestTheTurnEnding:
+    async def test_the_queued_message_runs_without_the_queuing_client(self, adapter, client):
+        """The turn was begun elsewhere: no HTTP chat task exists, and the POST
+        that queued the message has already returned."""
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+        assert adapter.handle_message.await_count == 0
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        assert _sent_messages(adapter) == ["and also check the logs"]
+        assert adapter.session_store.get_session(sid).queued_messages == []
+
+    async def test_two_queued_messages_keep_arrival_order(self, adapter, client):
+        sid = _busy_session(adapter)
+
+        first = await _send(client, sid, "first")
+        second = await _send(client, sid, "second")
+
+        assert [first.json()["position"], second.json()["position"]] == [1, 2]
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
+        assert _sent_messages(adapter) == ["first", "second"]
+
+    async def test_the_flush_runs_a_user_turn_rather_than_a_delivery(self, adapter, server, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+
+        with patch.object(server.session_runner, "deliver_to_session") as deliver:
+            with patch.object(adapter.session_store, "hold_delivery") as hold:
+                adapter.session_store.end_turn(sid)
+                assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+
+        assert deliver.call_count == 0
+        assert hold.call_count == 0
+        context = adapter.handle_message.await_args.kwargs["channel_context"]
+        assert context.source == "http"
+        assert context.metadata["conv_id_override"] == sid
+
+    async def test_a_turn_that_ends_during_the_append_still_sends(self, adapter, client):
+        """The turn can finish between /api/chat's busy check and the append, so
+        the turn-end hook finds an empty queue and nothing would drain it."""
+        sid = _busy_session(adapter)
+        store = adapter.session_store
+        append = store.queue_message
+
+        def end_the_turn_then_append(session_id, entry):
+            store.end_turn(session_id)
+            return append(session_id, entry)
+
+        with patch.object(store, "queue_message", end_the_turn_then_append):
+            resp = await _send(client, sid, "late arrival")
+
+        assert resp.status_code == 202
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        assert _sent_messages(adapter) == ["late arrival"]
+
+
+@pytest.mark.asyncio
+class TestDequeueing:
+    async def test_dropping_an_entry_removes_it_for_every_client(self, adapter, client):
+        sid = _busy_session(adapter)
+        queue_id = (await _send(client, sid, "drop me")).json()["queue_id"]
+        await _send(client, sid, "keep me")
+
+        resp = await client.delete(f"/api/chat/sessions/{sid}/queue/{queue_id}")
+
+        assert resp.status_code == 200
+        assert [q["text"] for q in resp.json()["queued"]] == ["keep me"]
+        rows = (await client.get("/api/chat/sessions")).json()["sessions"]
+        row = next(r for r in rows if r["id"] == sid)
+        assert [q["text"] for q in row["queued"]] == ["keep me"]
+
+    async def test_dropping_an_unknown_entry_is_a_404(self, adapter, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "keep me")
+
+        resp = await client.delete(f"/api/chat/sessions/{sid}/queue/q-ghost")
+
+        assert resp.status_code == 404
+        assert [e["text"] for e in adapter.session_store.get_session(sid).queued_messages] == ["keep me"]
+
+    async def test_a_dropped_entry_never_runs(self, adapter, client):
+        sid = _busy_session(adapter)
+        queue_id = (await _send(client, sid, "drop me")).json()["queue_id"]
+        await client.delete(f"/api/chat/sessions/{sid}/queue/{queue_id}")
+
+        adapter.session_store.end_turn(sid)
+        await asyncio.sleep(0.05)
+
+        assert adapter.handle_message.await_count == 0
+
+
+@pytest.mark.asyncio
+class TestCompaction:
+    async def test_the_queue_moves_to_the_successor(self, adapter, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "still pending")
+
+        successor = adapter.session_store.compact_session(sid)
+
+        rows = {r["id"]: r for r in (await client.get("/api/chat/sessions?include_superseded=1")).json()["sessions"]}
+        assert [q["text"] for q in rows[successor.id]["queued"]] == ["still pending"]
+        assert rows[sid]["queued"] == []
+
+
+@pytest.mark.asyncio
+class TestSendingToAnIdleSession:
+    async def test_the_send_runs_instead_of_queueing(self, adapter, client):
+        sid = _session(adapter, "s-idle")
+
+        resp = await asyncio.wait_for(_send(client, sid, "go"), timeout=5)
+
+        assert resp.status_code == 200
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        assert adapter.session_store.get_session(sid).queued_messages == []
