@@ -376,6 +376,21 @@ def expand_tool_specs(tool_specs: List[str], strict: bool = False) -> List[str]:
     return result
 
 
+def format_tool_spec(spec: str) -> str:
+    """Render one frontmatter tool spec for console output, with `@category` as `name (toolset)`.
+
+    A coding agent that shells out to tsugite reads the console output as tool output, and its
+    own CLI expands `@name` as a file mention when the name matches a directory it can see.
+    """
+    prefix, name = ("-", spec[1:]) if spec.startswith("-") else ("", spec)
+    return f"{prefix}{name[1:]} (toolset)" if name.startswith("@") else spec
+
+
+def format_tool_specs(tool_specs: List[str]) -> str:
+    """Render a frontmatter tool list as one comma-separated line."""
+    return ", ".join(format_tool_spec(spec) for spec in tool_specs)
+
+
 def load_custom_shell_tools() -> None:
     """Register the shell tools defined in custom_tools.yaml.
 

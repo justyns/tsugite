@@ -462,3 +462,17 @@ def test_expand_tool_specs_exclude_preserves_order(file_tools):
     assert "create_directory" in expanded
     assert "file_exists" in expanded
     assert "list_files" in expanded
+
+
+def test_format_tool_specs_drops_the_category_sigil():
+    """An `@category` in a console banner is read as a file mention by any coding agent
+    reading that output, and expands when the name matches a workspace directory."""
+    from tsugite.tools import format_tool_specs
+
+    assert format_tool_specs(["read_file", "@fs", "-delete_file"]) == "read_file, fs (toolset), -delete_file"
+
+
+def test_format_tool_spec_drops_the_sigil_from_an_exclusion():
+    from tsugite.tools import format_tool_spec
+
+    assert format_tool_spec("-@fs") == "-fs (toolset)"

@@ -44,3 +44,20 @@ def test_step_plan_preview_leaves_the_caller_console_writing_where_it_was(tmp_pa
 
     assert console.file is before
     assert any("one" in event.message for event in events)
+
+
+def test_step_plan_preview_shows_toolsets_without_the_at_sigil(tmp_path):
+    from tsugite.agent_runner.runner import preview_multistep_agent
+
+    agent = tmp_path / "plan.md"
+    agent.write_text(
+        "---\nname: plan\nmodel: openai:gpt-4o-mini\ntools: ['@fs']\n---\n<!-- tsu:step name=\"one\" -->\nfirst\n"
+    )
+    console = Console()
+    logger, events = _logger(console)
+
+    preview_multistep_agent(agent, "task", custom_logger=logger)
+
+    messages = [event.message for event in events]
+    assert not any("@fs" in message for message in messages)
+    assert any("fs (toolset)" in message for message in messages)

@@ -502,6 +502,30 @@ class TestPipeRegression:
         self._assert_clean(result.stdout)
 
 
+class TestRunBannerToolList:
+    def test_banner_shows_toolsets_without_the_at_sigil(self, cli_runner, temp_dir, mock_agent_execution):
+        agent = temp_dir / "toolset_agent.md"
+        agent.write_text("---\nname: toolset_agent\ntools: ['@fs']\n---\n\nDo the thing.\n")
+
+        result = cli_runner.invoke(app, ["run", str(agent), "test prompt"])
+
+        assert result.exit_code == 0
+        assert "@fs" not in result.output
+        assert "fs (toolset)" in result.output
+
+
+class TestAgentsShowToolList:
+    def test_show_lists_toolsets_without_the_at_sigil(self, cli_runner, temp_dir):
+        agent = temp_dir / "toolset_agent.md"
+        agent.write_text("---\nname: toolset_agent\ntools: ['@fs']\n---\n\nDo the thing.\n")
+
+        result = cli_runner.invoke(app, ["agents", "show", str(agent)])
+
+        assert result.exit_code == 0
+        assert "@fs" not in result.output
+        assert "fs (toolset)" in result.output
+
+
 class TestHeadlessMode:
     """Test headless mode for CI/scripts."""
 

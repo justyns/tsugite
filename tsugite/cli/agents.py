@@ -75,6 +75,7 @@ def agents_show(
     """
     from tsugite.agent_inheritance import find_agent_file
     from tsugite.md_agents import parse_agent_file
+    from tsugite.tools import format_tool_spec
 
     try:
         agent_file = Path(agent_path)
@@ -113,7 +114,7 @@ def agents_show(
         if config.tools:
             console.print(f"\n[bold]Tools ({len(config.tools)}):[/bold]")
             for tool in config.tools:
-                console.print(f"  • {tool}")
+                console.print(f"  • {format_tool_spec(tool)}")
 
         if config.extends:
             console.print(f"\n[bold]Extends:[/bold] {config.extends}")

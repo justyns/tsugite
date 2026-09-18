@@ -288,6 +288,7 @@ def run(
     from tsugite.console import get_stderr_console
     from tsugite.md_agents import validate_agent_execution
     from tsugite.secrets import init_cli as init_secrets
+    from tsugite.tools import format_tool_specs
     from tsugite.utils import should_use_plain_output
 
     from . import console
@@ -562,7 +563,7 @@ def run(
                 "Directory": str(Path.cwd()),
                 "Model": resolve_effective_model(exec_opts.model_override, agent_info.get("model_raw")) or "unknown",
                 "Instructions": instruction_label,
-                "Tools": ", ".join(agent_info.get("tools", [])),
+                "Tools": format_tool_specs(agent_info.get("tools", [])),
             }
 
             agent_attachments = agent_info.get("attachments")

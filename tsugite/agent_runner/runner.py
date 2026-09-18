@@ -1281,6 +1281,7 @@ def preview_multistep_agent(
 
     # Extract steps
     from tsugite.md_agents import extract_step_directives, has_step_directives
+    from tsugite.tools import format_tool_specs
 
     if not has_step_directives(agent.content):
         output("[yellow]This is a single-step agent (no step directives).[/yellow]", is_warning=True)
@@ -1302,7 +1303,7 @@ def preview_multistep_agent(
     output(f"Prompt: {prompt}")
     output(f"Steps: {len(steps)}")
     output(f"Model: {resolve_effective_model(agent_model=agent.config.model) or 'unknown'}")
-    output(f"Tools: {', '.join(agent.config.tools) if agent.config.tools else 'None'}")
+    output(f"Tools: {format_tool_specs(agent.config.tools) if agent.config.tools else 'None'}")
     output("")
 
     # Show steps in table format
