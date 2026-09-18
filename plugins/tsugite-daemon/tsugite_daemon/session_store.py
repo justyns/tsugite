@@ -218,6 +218,10 @@ class AliasConflictError(ValueError):
     """Another routable session already holds the alias."""
 
 
+class QueueFullError(ValueError):
+    """A session's queued-message list is already at its cap."""
+
+
 def validate_alias(alias: object) -> None:
     if not isinstance(alias, str) or not ALIAS_PATTERN.fullmatch(alias):
         raise ValueError(
@@ -1245,12 +1249,16 @@ class SessionStore:
             self._persist(session)
             return held
 
+    MAX_QUEUED_MESSAGES = 20
+
     def queue_message(self, session_id: str, entry: dict) -> int:
         """Returns the message's 1-based position in the queue."""
         with self._lock:
             session = self._sessions.get(session_id)
             if not session:
                 raise ValueError(f"Session '{session_id}' not found")
+            if len(session.queued_messages) >= self.MAX_QUEUED_MESSAGES:
+                raise QueueFullError(f"Session '{session_id}' already has {self.MAX_QUEUED_MESSAGES} queued messages")
             session.queued_messages.append(entry)
             self._persist(session)
             return len(session.queued_messages)

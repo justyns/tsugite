@@ -880,7 +880,12 @@ class AgentsMixin:
             "uploaded_files": uploaded_files,
             "context_metadata": context_metadata,
         }
-        position = self.adapter.session_store.queue_message(session.id, entry)
+        from tsugite_daemon.session_store import QueueFullError
+
+        try:
+            position = self.adapter.session_store.queue_message(session.id, entry)
+        except QueueFullError as e:
+            return JSONResponse({"error": str(e), "code": "queue_full"}, status_code=429)
         self._broadcast_queue(session.id)
         return JSONResponse(
             {"status": "queued", "queue_id": entry["id"], "position": position},

@@ -309,6 +309,17 @@ class TestSendingWithEntriesAlreadyParked:
         assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
         assert _sent_messages(adapter) == ["first", "second"]
 
+    async def test_the_cap_rejects_a_send_with_a_clear_error(self, adapter, client):
+        sid = _busy_session(adapter)
+        for i in range(adapter.session_store.MAX_QUEUED_MESSAGES):
+            assert (await _send(client, sid, f"msg {i}")).status_code == 202
+
+        resp = await _send(client, sid, "one too many")
+
+        assert resp.status_code == 429
+        assert resp.json()["code"] == "queue_full"
+        assert len(adapter.session_store.get_session(sid).queued_messages) == adapter.session_store.MAX_QUEUED_MESSAGES
+
 
 @pytest.mark.asyncio
 class TestSendingToAnIdleSession:

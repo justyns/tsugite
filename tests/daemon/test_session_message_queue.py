@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from tsugite_daemon.session_runner import SessionRunner
-from tsugite_daemon.session_store import Session, SessionSource, SessionStore
+from tsugite_daemon.session_store import QueueFullError, Session, SessionSource, SessionStore
 
 from .conftest import _wait_until
 
@@ -79,6 +79,16 @@ class TestTheQueue:
     def test_queueing_against_an_unknown_session_raises(self, store):
         with pytest.raises(ValueError, match="ghost"):
             store.queue_message("ghost", _entry("q-1", "hello"))
+
+    def test_queueing_past_the_cap_is_rejected(self, store):
+        sid = _session(store)
+        for i in range(SessionStore.MAX_QUEUED_MESSAGES):
+            store.queue_message(sid, _entry(f"q-{i}", f"msg {i}"))
+
+        with pytest.raises(QueueFullError):
+            store.queue_message(sid, _entry("q-over", "one too many"))
+
+        assert len(store.get_session(sid).queued_messages) == SessionStore.MAX_QUEUED_MESSAGES
 
     def test_the_queue_is_persisted(self, store, tmp_path):
         sid = _session(store)
