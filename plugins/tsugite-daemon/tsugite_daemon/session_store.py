@@ -291,7 +291,7 @@ class Session:
     pending_deliveries: list[dict] = field(default_factory=list)
     # Held until the turn ends; persisted so a daemon death mid-turn does not swallow the card.
     deferred_deliveries: list[dict] = field(default_factory=list)
-    # User messages sent while this session is busy; they run in arrival order once the turn ends.
+    # Sends parked while the session is busy, drained in arrival order at turn end.
     queued_messages: list[dict] = field(default_factory=list)
     last_viewed_at: str = ""
     superseded_by: Optional[str] = None
@@ -346,8 +346,6 @@ class Session:
 
     @property
     def queued_message_rows(self) -> list[dict]:
-        """The queue as clients read it: the rest of an entry is what re-running
-        the send needs, not what the composer shows."""
         return [{"id": e["id"], "text": e["text"]} for e in self.queued_messages]
 
     @property
@@ -1248,7 +1246,7 @@ class SessionStore:
             return held
 
     def queue_message(self, session_id: str, entry: dict) -> int:
-        """Append a user message to the session's queue, returning its 1-based position."""
+        """Returns the message's 1-based position in the queue."""
         with self._lock:
             session = self._sessions.get(session_id)
             if not session:

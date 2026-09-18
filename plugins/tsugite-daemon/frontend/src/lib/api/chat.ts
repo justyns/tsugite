@@ -1,7 +1,7 @@
 /**
- * Per-surface chat stream helper. A send POSTs /api/chat; a busy session parks
- * the message (202), otherwise the response is an SSE stream OWNED by this
- * surface - it carries the turn-end and streaming frames
+ * Per-surface chat stream helper. A send POSTs /api/chat. The daemon parks the
+ * message (202) when the session is busy, and otherwise answers with an SSE
+ * stream OWNED by this surface - it carries the turn-end and streaming frames
  * (final_result/error/cancelled/stream_chunk) that the cross-session broadcast
  * deliberately withholds, so whichever surface ran the send is the only one
  * that sees them live.
@@ -30,8 +30,7 @@ export interface ChatSendBody {
 }
 
 export interface ChatStreamHandlers {
-  /** A 200 opened the stream, before any frame is read. The handle is the one
-   *  sendChat returned. */
+  /** The stream opened (200), before any frame is read. */
   onStreamOpen?: (handle: ChatStreamHandle) => void;
   /** Every frame, in order - the primary hook the chat timeline builds from. */
   onEvent?: (frame: ChatFrame) => void;
@@ -40,16 +39,15 @@ export interface ChatStreamHandlers {
   /** final_result payload (result / result_data / turns / tokens / cost). */
   onFinal?: (frame: ChatFrame) => void;
   /** An error frame, or a transport failure BEFORE the request was delivered
-   *  (fetch rejected, or a non-ok response - a finished session, a restarting
-   *  daemon) - the turn never ran. */
+   *  (fetch rejected, or a non-ok response from a finished session or a
+   *  restarting daemon) - the turn never ran. */
   onError?: (err: ChatFrame | Error) => void;
   /** The response stream died AFTER a 200 opened it - the daemon accepted the
    *  turn and is running it, only the response feed was lost (mobile background
    *  killing the connection). Recoverable by replay, never a send failure. */
   onStreamLost?: (err: Error) => void;
-  /** The session was busy, so the daemon parked the message (202) instead of
-   *  running it. No stream opens and onDone never fires. The turn runs when the
-   *  current one ends. */
+  /** The daemon parked the message (202) because the session was busy. No stream
+   *  opens, onDone never fires, and the turn runs when the current one ends. */
   onQueued?: () => void;
   /** The stream closed (done or cancelled, or a transport end). */
   onDone?: () => void;

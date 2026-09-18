@@ -814,8 +814,7 @@ test('a send the server parks drops the optimistic bubble and leaves nothing str
 
   chat.handlers!.onQueued?.();
 
-  // The chip fed by the session row is what shows it now; a bubble here would
-  // claim a turn that has not run.
+  // A bubble here would claim a turn that has not run.
   expect(ctrl.events.filter((e) => e.type === 'user_input')).toHaveLength(0);
   expect(ctrl.streaming).toBe(false);
 });
@@ -831,8 +830,7 @@ test('parking a send made mid-turn leaves the streaming turn its stream', async 
 
   expect(ctrl.events.filter((e) => e.type === 'user_input').map((e) => e.text)).toEqual(['first']);
   expect(ctrl.streaming).toBe(true);
-  // The live handle is still held: closeStream() has something to abort, and
-  // ingestBroadcast still defers to the local stream.
+  // The live handle is still held.
   ctrl.closeStream();
   expect(chat.close).toHaveBeenCalledTimes(1);
 });

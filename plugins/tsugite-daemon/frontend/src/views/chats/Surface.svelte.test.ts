@@ -263,8 +263,6 @@ test('the phone back affordance clears the sessionId to the list hash', async ()
 });
 
 test('the queued chips come from the session row, and removing one dequeues it server-side', async () => {
-  // The queue lives on the session, so a tab that did not do the queueing still
-  // shows the chips and can drop one.
   roster('smoke');
   stubInfo('smoke', { job_host: true });
   sessions.rows = [
@@ -281,8 +279,8 @@ test('the queued chips come from the session row, and removing one dequeues it s
 
   await expect.element(page.getByText('and also check the logs')).toBeInTheDocument();
   await expect.element(page.getByText('then summarize')).toBeInTheDocument();
-  // A direct DOM click: the chip's remove control is an icon sized by the global
-  // stylesheet, which a component test does not load, so it has no hit box here.
+  // The chip's remove control is an icon sized by the global stylesheet, which a
+  // component test does not load, so it has no hit box to click.
   const remove = document.querySelector<HTMLButtonElement>('.queuedrow .t-chip:nth-of-type(2) .x');
   remove!.click();
   expect(del).toHaveBeenCalledWith('/api/chat/sessions/session-queued/queue/q-0b9a1d34');

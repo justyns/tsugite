@@ -267,7 +267,7 @@ class ActiveChat:
     backend: HTTPInteractionBackend
     progress: JSONLUIHandler
     task: Optional[asyncio.Task] = None
-    # Cooperative cancel signal: cancelling the task tears down the SSE stream but
-    # cannot stop the agent loop running in a to_thread worker. The worker checks
-    # this Event at safe checkpoints and exits cleanly. See tsugite/cancellation.py.
+    # Cancelling the task ends the turn's event stream but cannot stop the agent
+    # loop running in a to_thread worker. The worker checks this Event at safe
+    # checkpoints and exits cleanly. See tsugite/cancellation.py.
     cancel_event: threading.Event = field(default_factory=threading.Event)

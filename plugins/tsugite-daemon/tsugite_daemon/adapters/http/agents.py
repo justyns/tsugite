@@ -72,8 +72,7 @@ def _build_send_metadata(
     reasoning_effort: Optional[str],
     context_metadata,
 ) -> tuple[str, dict]:
-    """A queued send runs this at flush time: Attachment objects do not survive
-    the queue's JSON round-trip."""
+    """Attachment objects do not JSON-serialize, so a queued send resolves them here at flush time."""
     from tsugite.models import model_supports_vision
 
     uploads_dir = (adapter.runtime.workspace_dir / "uploads").resolve()
@@ -162,8 +161,8 @@ class AgentsMixin:
         return get_xdg_write_path("permissions.yaml")
 
     def _bind_run_context(self, chat_state: ActiveChat) -> None:
-        """The agent loop and the context detector both run via asyncio.to_thread,
-        which copies this context; binding anywhere else never reaches them.
+        """Call this inside the turn task. The agent loop and the context detector run
+        via asyncio.to_thread, which copies the context they are started from.
         """
         from tsugite.cancellation import set_cancel_event
         from tsugite.interaction import set_interaction_backend
@@ -871,8 +870,7 @@ class AgentsMixin:
         uploaded_files: list,
         context_metadata,
     ) -> JSONResponse:
-        """Park a send aimed at a busy session, holding the raw request fields
-        that `run_queued_message` re-resolves at flush time."""
+        """Park a send aimed at a busy session, holding the raw request body fields."""
         entry = {
             "id": f"q-{uuid4().hex[:8]}",
             "text": message,
@@ -901,9 +899,9 @@ class AgentsMixin:
     ) -> ActiveChat:
         """Run one user turn for `session_id` as its own task.
 
-        Registering the chat before the task starts keeps `_session_busy` true
-        across the window before handle_message reaches begin_turn, and lets
-        /api/chat/cancel reach this turn.
+        The chat registers in `_active_chats` before the task starts. `_session_busy`
+        stays true during the window before begin_turn, and /api/chat/cancel can
+        cancel this turn.
         """
         adapter = self.adapter
         interaction_backend = HTTPInteractionBackend(
@@ -976,11 +974,10 @@ class AgentsMixin:
         return chat_state
 
     async def run_queued_message(self, session_id: str, entry: dict) -> bool:
-        """Run a queued message as a normal user turn, logged and broadcast so
-        every watching client renders it live.
+        """Run a queued message as a normal user turn, logged to the session and
+        broadcast to every watching client.
 
-        False leaves the entry queued: a restarting daemon drains `_active_chats`
-        to a deadline, so it must admit no further turns.
+        Returns False and leaves the entry queued while the daemon is restarting.
         """
         from tsugite_daemon.session_runner import LoggingProgressHandler
 
@@ -1007,7 +1004,7 @@ class AgentsMixin:
             metadata=metadata,
             progress=LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus),
         )
-        # Stop cancels this one turn; the drain still runs the rest of the queue.
+        # asyncio.wait does not re-raise the task's CancelledError.
         await asyncio.wait([chat_state.task])
         return True
 

@@ -65,8 +65,7 @@ def chain_depth_scope(depth: int):
         _current_chain_depth.set(previous)
 
 
-# Transient events that reach live subscribers but not the JSONL event log. Their
-# only value is real-time UI feedback, so a replay has no use for them.
+# Transient events that reach live subscribers but not the JSONL event log.
 _TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress", "session_info"})
 
 
@@ -144,7 +143,7 @@ def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_
 
 
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
-# Returns whether the turn started; False leaves the entry queued and stops the drain.
+# True when the turn started. False leaves the entry queued and stops the drain.
 QueuedMessageSender = Callable[[str, dict], Coroutine[Any, Any, bool]]
 
 
@@ -182,8 +181,6 @@ class SessionRunner:
             self._flush_deferred_deliveries(session_id)
 
     def set_queued_message_sender(self, sender: QueuedMessageSender) -> None:
-        """Owned by the HTTP layer, which re-resolves the entry's uploads and
-        context metadata at flush time."""
         self._queued_message_sender = sender
 
     def drain_queued_messages(self, session_id: str) -> None:
@@ -195,8 +192,7 @@ class SessionRunner:
         self._queue_drain_tasks[session_id] = task
 
         def _forget(done: asyncio.Task) -> None:
-            # A cancel can land before the coroutine runs, so the drain cannot
-            # clear its own entry; a later drain may already hold the slot.
+            # A later drain may already hold the slot.
             if self._queue_drain_tasks.get(session_id) is done:
                 del self._queue_drain_tasks[session_id]
 

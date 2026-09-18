@@ -323,8 +323,8 @@
     }
     if (e.key === 'Enter' && !e.shiftKey && !isTouch) {
       e.preventDefault();
-      // Mid-turn Enter sends when there is a draft; with nothing typed it
-      // stops, unless the send that emptied the draft just happened.
+      // Mid-turn Enter sends when there is a draft. With nothing typed it stops,
+      // unless the send that emptied the draft just happened.
       if (streaming && !canSend) stopIfArmed();
       else submit(onSend);
       return;

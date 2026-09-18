@@ -285,8 +285,8 @@ export class ConversationController {
         ...(opts.contextMetadata?.length ? { contextMetadata: opts.contextMetadata } : {}),
       },
       {
-        // Commit the turn's state only once a stream actually opens: before that
-        // the send may still be parked, or the pane may have moved on.
+        // Before a stream opens the send may still be parked, or the pane may
+        // have moved on.
         onStreamOpen: (h) => {
           if (this.sessionId !== sessionId) {
             h.close();
@@ -325,7 +325,6 @@ export class ConversationController {
           if (this.ask?.answered) this.ask = null;
           void this.reconcileAfterSend(clientKey, text);
         },
-        // The daemon parked the message instead of running it.
         onQueued: () => {
           this.events = this.events.filter((e) => e.clientKey !== clientKey);
         },

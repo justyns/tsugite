@@ -1,7 +1,7 @@
 """The mid-turn message queue lives on the session, so two tabs share it.
 
-`mock_chat` swaps in a fake `handle_message`; `delay=` holds the turn in flight
-so a send made during it is queued by the daemon rather than run.
+`mock_chat` swaps in a fake `handle_message`. `delay=` holds the turn in flight, so
+a send made during it is queued by the daemon.
 """
 
 from playwright.sync_api import expect
@@ -36,7 +36,7 @@ def test_a_message_queued_in_one_tab_shows_in_another_and_either_can_remove_it(c
 
     tab_b.get_by_role("button", name="Remove queued message 1").click()
 
-    # Tab A never reloads: the removal reaches it over the session broadcast.
+    # Tab A never reloads. The session broadcast repaints it.
     expect(tab_a.locator(CHIP)).to_have_count(0, timeout=10000)
     expect(tab_b.locator(CHIP)).to_have_count(0)
     tab_b.close()

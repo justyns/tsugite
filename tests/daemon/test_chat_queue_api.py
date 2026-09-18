@@ -1,9 +1,9 @@
 """The HTTP half of the mid-turn message queue.
 
-A send to a busy session is accepted (202) and parked on the session instead of
-refused with a 409. Every client reads the same queue off the sessions payload
-and /status, any client can drop an entry, and the turn-end hook runs the parked
-message as an ordinary user turn once the turn it waited on finishes.
+A send to a busy session is accepted (202) and parked on the session. Every client
+reads the same queue off the sessions payload and /status, any client can drop an
+entry, and the turn-end hook runs the parked message as an ordinary user turn once
+the turn it waited on finishes.
 """
 
 import asyncio
@@ -157,8 +157,8 @@ class TestSendingToABusySession:
 @pytest.mark.asyncio
 class TestTheTurnEnding:
     async def test_the_queued_message_runs_without_the_queuing_client(self, adapter, client):
-        """The turn was begun elsewhere: no HTTP chat task exists, and the POST
-        that queued the message has already returned."""
+        """No HTTP chat task exists for a turn begun elsewhere, and the POST that
+        queued the message has already returned."""
         sid = _busy_session(adapter)
         await _send(client, sid, "and also check the logs")
         assert adapter.handle_message.await_count == 0
@@ -298,9 +298,6 @@ class TestSendingToAnIdleSession:
 
 @pytest.mark.asyncio
 class TestAQueuedTurnRunsLikeADirectSend:
-    """One turn body serves both entry points, so a queued turn closes its own
-    timeline, refreshes the meter, answers Stop, and stands aside for a restart."""
-
     async def test_it_emits_a_final_result_when_the_run_reports_no_final_answer(self, adapter, client, broadcasts):
         sid = _busy_session(adapter)
         await _send(client, sid, "go")

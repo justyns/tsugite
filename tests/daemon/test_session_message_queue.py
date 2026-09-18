@@ -89,8 +89,6 @@ class TestTheQueue:
         assert [e["text"] for e in reloaded.get_session(sid).queued_messages] == ["survive the restart"]
 
     def test_session_detail_ships_the_wire_rows(self, store):
-        """One key and one shape across the endpoints; the raw entry also carries
-        the sender, the upload names and the client context."""
         sid = _session(store)
         store.queue_message(sid, _entry("q-1", "hello"))
 
@@ -116,7 +114,7 @@ class TestTheTurnEndDrain:
 
     @pytest.mark.asyncio
     async def test_the_turn_end_hook_sends_a_queued_message(self, store, runner):
-        """No HTTP chat task is involved: a turn begun anywhere flushes at its end."""
+        """A turn begun anywhere flushes the queue at its end."""
         sid = _session(store)
         sender = AsyncMock()
         runner.set_queued_message_sender(sender)

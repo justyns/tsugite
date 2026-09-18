@@ -198,8 +198,7 @@ test('a 202 parks the send: onQueued fires, no stream is read, and onDone never 
   );
 
   await vi.waitFor(() => expect(onQueued).toHaveBeenCalledTimes(1));
-  // A parked send is its own ending. onDone would tear down the state of a turn
-  // still streaming in this surface.
+  // onDone would tear down the state of a turn still streaming in this surface.
   expect(onDone).not.toHaveBeenCalled();
   expect(onStreamOpen).not.toHaveBeenCalled();
   expect(onEvent).not.toHaveBeenCalled();
