@@ -887,6 +887,11 @@ class AgentsMixin:
         except QueueFullError as e:
             return JSONResponse({"error": str(e), "code": "queue_full"}, status_code=429)
         self._broadcast_queue(session.id)
+        # The queue drains at turn end. After a restart no turn is running to end,
+        # and `_chat` parks every later send behind the queue, so without this the
+        # session never runs anything again. Parking while idle drains now.
+        if self.session_runner and not self._session_busy(session):
+            self.session_runner.drain_queued_messages(session.id)
         return JSONResponse(
             {"status": "queued", "queue_id": entry["id"], "position": position},
             status_code=202,

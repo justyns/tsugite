@@ -292,9 +292,9 @@ class TestCompaction:
 
 @pytest.mark.asyncio
 class TestSendingWithEntriesAlreadyParked:
-    async def test_an_idle_session_with_parked_entries_still_queues(self, adapter, client):
-        """Reachable after a daemon restart, or in the window between end_turn and
-        the drain task's first take_queued_message."""
+    async def test_an_idle_session_with_parked_entries_queues_then_drains(self, adapter, client):
+        """A restart clears turn_in_flight without ending a turn, so nothing is left
+        to drain a queue parked across it. Parking while idle drains it instead."""
         sid = _session(adapter, "s-idle-parked")
         _seed_queue(adapter, sid, "q-1", "first")
 
@@ -302,12 +302,9 @@ class TestSendingWithEntriesAlreadyParked:
 
         assert resp.status_code == 202
         assert resp.json()["position"] == 2
-        assert adapter.handle_message.await_count == 0
-
-        adapter.session_store.end_turn(sid)
-
         assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
         assert _sent_messages(adapter) == ["first", "second"]
+        assert adapter.session_store.get_session(sid).queued_messages == []
 
     async def test_the_cap_rejects_a_send_with_a_clear_error(self, adapter, client):
         sid = _busy_session(adapter)
