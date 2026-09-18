@@ -203,8 +203,11 @@ class SessionRunner:
             try:
                 started = await sender(session_id, entry)
             except Exception:
-                logger.exception("Queued message '%s' for session '%s' was dropped", entry["id"], session_id)
-                continue
+                logger.exception(
+                    "Queued message '%s' for session '%s' failed to send; requeued", entry["id"], session_id
+                )
+                self._store.requeue_message(session_id, entry)
+                return
             if not started:
                 self._store.requeue_message(session_id, entry)
                 return

@@ -167,8 +167,10 @@ class TestTheTurnEndDrain:
         assert await _wait_until(lambda: started == ["q-1", "q-2"])
 
     @pytest.mark.asyncio
-    async def test_a_send_that_raises_does_not_strand_the_rest(self, store, runner):
-        sender = AsyncMock(side_effect=[RuntimeError("boom"), True])
+    async def test_a_send_that_raises_is_requeued_and_halts_the_drain(self, store, runner):
+        """The client already cleared its draft when the 202 came back. A failing
+        send must not lose the message."""
+        sender = AsyncMock(side_effect=[RuntimeError("boom"), True, True])
         sid = _session(store)
         runner.set_queued_message_sender(sender)
         store.queue_message(sid, _entry("q-1", "first"))
@@ -176,7 +178,15 @@ class TestTheTurnEndDrain:
 
         store.end_turn(sid)
 
-        assert await _wait_until(lambda: sender.await_count == 2)
+        assert await _wait_until(lambda: sender.await_count == 1)
+        queued = store.get_session(sid).queued_messages
+        assert [e["id"] for e in queued] == ["q-1", "q-2"]
+        assert queued[0]["text"] == "first"
+
+        store.end_turn(sid)
+
+        assert await _wait_until(lambda: sender.await_count == 3)
+        assert [c.args[1]["text"] for c in sender.await_args_list] == ["first", "first", "second"]
         assert store.get_session(sid).queued_messages == []
 
     @pytest.mark.asyncio
