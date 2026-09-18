@@ -145,6 +145,7 @@ def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_
 
 
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
+QueuedMessageSender = Callable[[str, dict], Coroutine[Any, Any, None]]
 
 
 class SessionRunner:
@@ -166,6 +167,8 @@ class SessionRunner:
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._completion_listeners: list[NotifyCallback] = []
+        self._queued_message_sender: Optional[QueuedMessageSender] = None
+        self._queue_drain_tasks: dict[str, asyncio.Task] = {}
         if notify_callback:
             self._completion_listeners.append(notify_callback)
 
@@ -177,6 +180,29 @@ class SessionRunner:
         """
         for session_id in self._store.sessions_holding_deliveries():
             self._flush_deferred_deliveries(session_id)
+
+    def set_queued_message_sender(self, sender: QueuedMessageSender) -> None:
+        """Owned by the HTTP layer, which re-resolves the entry's uploads and
+        context metadata at flush time."""
+        self._queued_message_sender = sender
+
+    def drain_queued_messages(self, session_id: str) -> None:
+        """Start draining the session's queue, unless a drain is already running."""
+        sender = self._queued_message_sender
+        drain = self._queue_drain_tasks.get(session_id)
+        if not sender or (drain is not None and not drain.done()):
+            return
+        self._queue_drain_tasks[session_id] = asyncio.get_running_loop().create_task(
+            self._drain_queue(session_id, sender)
+        )
+
+    async def _drain_queue(self, session_id: str, sender: QueuedMessageSender) -> None:
+        while (entry := self._store.take_queued_message(session_id)) is not None:
+            try:
+                await sender(session_id, entry)
+            except Exception:
+                logger.exception("Queued message '%s' for session '%s' was dropped", entry["id"], session_id)
+        self._queue_drain_tasks.pop(session_id, None)
 
     def add_completion_listener(self, callback: NotifyCallback) -> None:
         """Register a session-completion listener. Idempotent."""
@@ -470,6 +496,7 @@ class SessionRunner:
     def _on_turn_end(self, session_id: str) -> None:
         self._flush_deferred_deliveries(session_id)
         self._close_job_batch(session_id)
+        self.drain_queued_messages(session_id)
 
     @staticmethod
     def _close_job_batch(session_id: str) -> None:
