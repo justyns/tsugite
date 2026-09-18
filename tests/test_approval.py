@@ -42,6 +42,16 @@ class TestDecisionMapping:
         request_approval("Fetch x?", allow_always=True)
         assert backend.calls[0][2] == ["Approve", "Deny", "Always allow"]
 
+    def test_never(self):
+        set_interaction_backend(FakeBackend("Always deny"))
+        assert request_approval("Fetch x?", allow_never=True) == "never"
+
+    def test_options_include_never_when_allowed(self):
+        backend = FakeBackend("Deny")
+        set_interaction_backend(backend)
+        request_approval("Fetch x?", allow_always=True, allow_never=True)
+        assert backend.calls[0][2] == ["Approve", "Deny", "Always allow", "Always deny"]
+
     def test_detail_folded_into_question(self):
         backend = FakeBackend("Approve")
         set_interaction_backend(backend)
@@ -80,6 +90,11 @@ class TestNonInteractiveApprovalBackend:
         backend = NonInteractiveBackend()
         result = backend.ask_user("Fetch x?", "approval", ["Approve", "Deny"])
         assert result != "Approve"
+
+    def test_always_deny_is_not_mistaken_for_deny(self):
+        backend = NonInteractiveBackend()
+        options = ["Approve", "Deny", "Always allow", "Always deny"]
+        assert backend.ask_user("Fetch x?", "approval", options) == "Deny"
 
     def test_no_options_returns_deny_literal(self):
         backend = NonInteractiveBackend()

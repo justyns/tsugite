@@ -9,12 +9,14 @@ from tsugite.context import get_context_provider, reset_context_providers
 
 
 class _FakePerms:
-    """Stand-in for tsugite.permissions.Permissions: an in-memory allowlist that
-    records every host persisted via ``web_fetch_allow``."""
+    """Stand-in for tsugite.permissions.Permissions: in-memory allow/deny lists
+    that record every host persisted via ``web_fetch_allow`` / ``web_fetch_deny``."""
 
-    def __init__(self, allowed: set[str] | None = None):
+    def __init__(self, allowed: set[str] | None = None, denied: set[str] | None = None):
         self.allowed = set(allowed or ())
+        self.denied = set(denied or ())
         self.allow_calls: list[str] = []
+        self.deny_calls: list[str] = []
 
     def web_fetch_allowed(self, host: str) -> bool:
         return host in self.allowed
@@ -22,6 +24,13 @@ class _FakePerms:
     def web_fetch_allow(self, host: str) -> None:
         self.allow_calls.append(host)
         self.allowed.add(host)
+
+    def web_fetch_denied(self, host: str) -> bool:
+        return host in self.denied
+
+    def web_fetch_deny(self, host: str) -> None:
+        self.deny_calls.append(host)
+        self.denied.add(host)
 
 
 @pytest.fixture(autouse=True)
@@ -215,7 +224,9 @@ def test_unknown_host_prompts_and_fetches_on_approve():
     prompt, kwargs = ask.call_args
     assert "a.example" in prompt[0]
     assert kwargs.get("allow_always") is True
+    assert kwargs.get("allow_never") is True
     assert perms.allow_calls == []
+    assert perms.deny_calls == []
 
 
 def test_always_persists_host_then_fetches():
@@ -229,6 +240,50 @@ def test_always_persists_host_then_fetches():
 
     assert len(items) == 1
     assert perms.allow_calls == ["a.example"]
+
+
+def test_never_persists_host_then_skips_fetch():
+    perms = _FakePerms()
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=perms),
+        patch.object(web_ctx, "request_approval", return_value="never"),
+        patch.object(web_ctx, "fetch_text") as fetch,
+    ):
+        items = web_ctx.detect_urls("https://a.example/x", {})
+
+    assert items == []
+    fetch.assert_not_called()
+    assert perms.deny_calls == ["a.example"]
+
+
+def test_denylisted_host_is_skipped_without_prompting():
+    perms = _FakePerms(denied={"a.example"})
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=perms),
+        patch.object(web_ctx, "request_approval") as ask,
+        patch.object(web_ctx, "fetch_text") as fetch,
+    ):
+        items = web_ctx.detect_urls("https://a.example/x", {})
+
+    assert items == []
+    ask.assert_not_called()
+    fetch.assert_not_called()
+
+
+def test_denylist_beats_allowlist():
+    """A host on both lists is denied: the persistent deny is checked first, so a
+    stale "Always allow" can never resurrect a host the user later refused."""
+    perms = _FakePerms(allowed={"a.example"}, denied={"a.example"})
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=perms),
+        patch.object(web_ctx, "request_approval") as ask,
+        patch.object(web_ctx, "fetch_text") as fetch,
+    ):
+        items = web_ctx.detect_urls("https://a.example/x", {})
+
+    assert items == []
+    ask.assert_not_called()
+    fetch.assert_not_called()
 
 
 def test_deny_attaches_nothing_and_skips_fetch():
@@ -280,6 +335,19 @@ def test_always_without_perms_fetches_without_crashing():
         items = web_ctx.detect_urls("https://a.example/x", {})
 
     assert len(items) == 1
+
+
+def test_never_without_perms_skips_fetch_without_crashing():
+    """ "Always deny" with no store can't persist, but must still skip the fetch."""
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=None),
+        patch.object(web_ctx, "request_approval", return_value="never"),
+        patch.object(web_ctx, "fetch_text") as fetch,
+    ):
+        items = web_ctx.detect_urls("https://a.example/x", {})
+
+    assert items == []
+    fetch.assert_not_called()
 
 
 def test_hostless_url_is_skipped_without_prompting():

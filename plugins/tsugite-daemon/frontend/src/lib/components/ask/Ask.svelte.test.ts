@@ -84,6 +84,25 @@ test('approval mode: each option button answers with its own exact label', async
   expect(onAnswer).toHaveBeenCalledTimes(3);
 });
 
+test('approval mode: both persistent decisions are de-emphasized, not just the last one', async () => {
+  render(Ask, {
+    question: 'Fetch content from example.com?',
+    questionType: 'approval',
+    options: ['Approve', 'Deny', 'Always allow', 'Always deny'],
+    onAnswer: vi.fn(),
+  });
+
+  await expect
+    .element(page.getByRole('button', { name: 'Always allow' }))
+    .toHaveClass(/t-btn--ghost/);
+  await expect
+    .element(page.getByRole('button', { name: 'Always deny' }))
+    .toHaveClass(/t-btn--ghost/);
+  await expect
+    .element(page.getByRole('button', { name: 'Deny', exact: true }))
+    .not.toHaveClass(/t-btn--ghost/);
+});
+
 test('approval mode: options are keyboard-operable (Enter activates the focused button)', async () => {
   const onAnswer = vi.fn();
   render(Ask, {

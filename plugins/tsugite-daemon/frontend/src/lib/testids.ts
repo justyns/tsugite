@@ -153,7 +153,7 @@ export const TESTID = {
   chatAttachmentImage: 'chat-attachment-image',
   chatAttachmentChip: 'chat-attachment-chip',
   chatAttachmentLightbox: 'chat-attachment-lightbox',
-  /** The inline approval-prompt button row (Approve / Deny / Always allow) awaiting a decision. */
+  /** The inline approval-prompt button row (Approve / Deny / Always allow / Always deny) awaiting a decision. */
   askApproval: 'ask-approval',
   // Files / workspace wiki view
   filesTree: 'files-tree',

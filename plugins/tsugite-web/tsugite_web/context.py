@@ -5,9 +5,9 @@ outgoing message contains http(s) URLs, this detector fetches each page's
 readable article text server-side and attaches it as a ``<client_context>``
 item, so the agent sees the page contents without a manual fetch tool call.
 
-Each fetch is gated on a human approval unless the URL's host is on the
-permissions allowlist; "Always allow" adds the host so it fetches silently
-thereafter (see ``_may_fetch``).
+Each fetch is gated on a human approval unless the URL's host is already on the
+permissions allowlist or denylist; "Always allow" and "Always deny" add the host
+to one of them so it is never asked about again (see ``_may_fetch``).
 """
 
 from __future__ import annotations
@@ -60,10 +60,11 @@ def _host_of(url: str) -> str | None:
 def _may_fetch(url: str) -> bool:
     """Whether the page at ``url`` may be fetched.
 
-    A host on the active permissions store's allowlist fetches silently; any
-    other host - including when there is no store at all - is gated on a human
-    approval, and answering "Always allow" persists the host to the allowlist.
-    A URL with no hostname is never fetched.
+    The denylist is read first, so a host on both lists is never fetched. A host
+    on the allowlist fetches silently; any other host - including when there is no
+    store at all - is gated on a human approval, and "Always allow" / "Always
+    deny" persist the host to the matching list. A URL with no hostname is never
+    fetched.
 
     The detector runs on a worker thread, so the blocking approval prompt here
     pauses the send until the user answers.
@@ -72,13 +73,20 @@ def _may_fetch(url: str) -> bool:
     if not host:
         return False
     perms = get_permissions()
-    if perms and perms.web_fetch_allowed(host):
-        return True
-    decision = request_approval(f"Fetch content from {host}?", allow_always=True)
+    if perms:
+        if perms.web_fetch_denied(host):
+            return False
+        if perms.web_fetch_allowed(host):
+            return True
+    decision = request_approval(f"Fetch content from {host}?", allow_always=True, allow_never=True)
     if decision == "always":
         if perms:
             perms.web_fetch_allow(host)
         return True
+    if decision == "never":
+        if perms:
+            perms.web_fetch_deny(host)
+        return False
     return decision == "approve"
 
 

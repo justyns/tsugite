@@ -72,13 +72,13 @@
   const canSubmitChoice = $derived(choice !== '');
   const canSubmitText = $derived(draft.trim() !== '');
 
-  // Approval options arrive in a fixed order (Approve, Deny, optional "Always allow").
-  // Approve leads as the primary action; a trailing "always" is de-emphasized as a
-  // ghost so it is not fat-fingered; anything between stays a neutral secondary.
+  // Approval options arrive in a fixed order: Approve, Deny, then the optional
+  // persistent decisions ("Always allow", "Always deny"). Approve leads as the
+  // primary action; every persistent decision is de-emphasized as a ghost so it is
+  // not fat-fingered.
   function approvalVariant(i: number): 'pri' | 'ghost' | 'default' {
     if (i === 0) return 'pri';
-    if (options.length > 2 && i === options.length - 1) return 'ghost';
-    return 'default';
+    return i > 1 ? 'ghost' : 'default';
   }
 
   function submitText() {
