@@ -801,10 +801,6 @@ class AgentsMixin:
         user_id = adapter.resolve_http_user(raw_user_id)
         logger.info("<- %s (http): %s", user_id, message[:100])
 
-        reasoning_effort, err_resp = self._resolve_effort_or_400(adapter, body.get("reasoning_effort"))
-        if err_resp:
-            return err_resp
-
         # Process uploaded files -- only accept filenames, resolve against uploads dir
         uploaded_attachments = []
         workspace_only_files = []
@@ -839,8 +835,6 @@ class AgentsMixin:
         metadata = {"client_ip": request.client.host if request.client else "unknown"}
         if uploaded_attachments:
             metadata["uploaded_attachments"] = uploaded_attachments
-        if reasoning_effort:
-            metadata["reasoning_effort_override"] = reasoning_effort
         context_metadata = body.get("context_metadata")
         if isinstance(context_metadata, list) and context_metadata:
             metadata["context_metadata"] = context_metadata
@@ -871,6 +865,14 @@ class AgentsMixin:
         if target_session is None:
             target_session = adapter.session_store.get_or_create_interactive(user_id, source=SessionSource.WEB.value)
         target_session_id = target_session.id
+
+        reasoning_effort, err_resp = self._resolve_effort_or_400(
+            adapter, body.get("reasoning_effort"), target_session_id
+        )
+        if err_resp:
+            return err_resp
+        if reasoning_effort:
+            metadata["reasoning_effort_override"] = reasoning_effort
 
         backend_key = (user_id, target_session_id)
         # Same predicate the sessions payload and /status report - the server

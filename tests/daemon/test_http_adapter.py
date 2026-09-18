@@ -536,6 +536,19 @@ class TestSessionSettingsEndpoint:
         assert settings[-1]["reasoning_effort"] == "high"
 
 
+def _capture_chat_channel_context(client, test_token, body):
+    handle = AsyncMock(return_value="ok")
+    with patch.object(HTTPAgentAdapter, "handle_message", new=handle):
+        resp = client.post(
+            "/api/chat",
+            json=body,
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        list(resp.iter_lines())
+    assert resp.status_code == 200
+    return handle.call_args.kwargs["channel_context"]
+
+
 class TestChatReasoningEffortOverride:
     """POST /api/chat accepts and validates reasoning_effort."""
 
@@ -549,29 +562,46 @@ class TestChatReasoningEffortOverride:
         assert resp.status_code == 400
         assert "supported" in resp.json()
 
+    def test_effort_without_session_id_validates_against_daemon_default(self, client, mock_adapter, test_token):
+        mock_adapter.runtime.model = "claude_code:opus"
+        cc = _capture_chat_channel_context(client, test_token, {"message": "hi", "reasoning_effort": "xhigh"})
+        assert cc.metadata["reasoning_effort_override"] == "xhigh"
+
+    def test_effort_validates_against_session_model_override(self, client, mock_adapter, test_token):
+        # openai:o3 has no xhigh level, claude_code:opus does.
+        mock_adapter.runtime.model = "openai:o3"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-chat")
+        mock_adapter.session_store.set_model_override(session.id, "claude_code:opus")
+
+        cc = _capture_chat_channel_context(
+            client, test_token, {"message": "hi", "session_id": session.id, "reasoning_effort": "xhigh"}
+        )
+        assert cc.metadata["reasoning_effort_override"] == "xhigh"
+
+    def test_effort_unsupported_by_session_model_returns_400(self, client, mock_adapter, test_token):
+        mock_adapter.runtime.model = "claude_code:opus"
+        session = mock_adapter.session_store.get_or_create_interactive("user-eff-chat-rev")
+        mock_adapter.session_store.set_model_override(session.id, "openai:o3")
+
+        resp = client.post(
+            "/api/chat",
+            json={"message": "hi", "session_id": session.id, "reasoning_effort": "xhigh"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 400
+        assert "xhigh" not in resp.json()["supported"]
+
 
 class TestChatContextMetadata:
     """POST /api/chat threads context_metadata onto the ChannelContext."""
 
-    def _capture_channel_context(self, client, server, test_token, body):
-        handle = AsyncMock(return_value="ok")
-        with patch.object(type(server.adapter), "handle_message", new=handle):
-            resp = client.post(
-                "/api/chat",
-                json=body,
-                headers={"Authorization": f"Bearer {test_token}"},
-            )
-            list(resp.iter_lines())
-        assert resp.status_code == 200
-        return handle.call_args.kwargs["channel_context"]
-
-    def test_context_metadata_rides_channel_context_metadata(self, client, server, test_token):
+    def test_context_metadata_rides_channel_context_metadata(self, client, test_token):
         items = [{"key": "url", "label": "URL", "value": "https://x"}]
-        cc = self._capture_channel_context(client, server, test_token, {"message": "hi", "context_metadata": items})
+        cc = _capture_chat_channel_context(client, test_token, {"message": "hi", "context_metadata": items})
         assert cc.metadata["context_metadata"] == items
 
-    def test_absent_context_metadata_leaves_key_unset(self, client, server, test_token):
-        cc = self._capture_channel_context(client, server, test_token, {"message": "hi"})
+    def test_absent_context_metadata_leaves_key_unset(self, client, test_token):
+        cc = _capture_chat_channel_context(client, test_token, {"message": "hi"})
         assert "context_metadata" not in cc.metadata
 
 
