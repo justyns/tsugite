@@ -10,11 +10,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from tsugite.cli.helpers import get_workspace_dir
 
@@ -37,6 +39,30 @@ _STREAM_READ_LIMIT = 16 * 1024 * 1024
 # pass between two of them.
 _STALL_WARN_SECONDS = 300.0
 _STALL_WARN_ENV = "TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS"
+
+# The CLI reads `@path` in a user turn as its own file-mention syntax and injects the
+# file before the turn reaches the API, below tsugite's tool layer and outside
+# `allowed_secrets`. A backslash blocks the expansion. Only tokens that resolve to a
+# real path are escaped, so decorators, e-mail addresses and npm scopes survive.
+_AT_TOKEN = re.compile(r"@(\S+)")
+_MENTION_TRAILERS = ",.;:!?)]}>\"'"
+
+
+def _resolves_to_path(candidate: str, cwd: Path) -> bool:
+    try:
+        return (cwd / candidate).exists()
+    except OSError:
+        return False  # exists() raises ENAMETOOLONG rather than returning False.
+
+
+def _escape_at_mentions(text: str, cwd: Path) -> str:
+    def escape(match: re.Match) -> str:
+        candidate = match.group(1).rstrip(_MENTION_TRAILERS)
+        if candidate and _resolves_to_path(candidate, cwd):
+            return "\\" + match.group(0)
+        return match.group(0)
+
+    return _AT_TOKEN.sub(escape, text)
 
 
 class ClaudeCodeProcess:
@@ -61,6 +87,7 @@ class ClaudeCodeProcess:
             else float(os.environ.get(_STALL_WARN_ENV, _STALL_WARN_SECONDS))
         )
         self._last_output_at: float = 0.0
+        self._cwd: Path | None = None
 
     @property
     def session_id(self) -> str | None:
@@ -181,6 +208,7 @@ class ClaudeCodeProcess:
         env["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] = "1"
 
         workspace = get_workspace_dir()
+        self._cwd = workspace
         self._process = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
@@ -207,8 +235,8 @@ class ClaudeCodeProcess:
 
         Args:
             content: User message text, or an Anthropic content-block list
-                (text + image blocks) for a multimodal turn. Forwarded to the
-                CLI's stdin verbatim -- the CLI relays blocks to the API.
+                (text + image blocks) for a multimodal turn. The CLI relays
+                blocks to the API; text goes through at-mention escaping first.
 
         Yields:
             Dicts with type "text_delta" (streaming chunk) or "result" (final)
@@ -216,6 +244,17 @@ class ClaudeCodeProcess:
         Raises:
             RuntimeError: If subprocess has crashed
         """
+        cwd = self._cwd or Path.cwd()
+        if isinstance(content, str):
+            content = _escape_at_mentions(content, cwd)
+        else:
+            content = [
+                {**b, "text": _escape_at_mentions(b["text"], cwd)}
+                if isinstance(b, dict) and b.get("type") == "text"
+                else b
+                for b in content
+            ]
+
         msg = {
             "type": "user",
             "message": {"role": "user", "content": content},

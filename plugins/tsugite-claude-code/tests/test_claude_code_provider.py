@@ -94,6 +94,7 @@ class TestClaudeCodeProcess:
         mock_proc.stdin = AsyncMock()
         mock_proc.stderr = AsyncMock()
         mock_proc.stderr.readline = AsyncMock(return_value=b"")
+        mock_proc.stdin.write = MagicMock()
         mock_proc.returncode = None
         mock_proc.stdout = AsyncMock()
 
@@ -374,9 +375,6 @@ class TestClaudeCodeProcess:
             )
         ]
         mock_proc = self._mock_proc(events)
-        mock_proc.stdin = MagicMock()
-        mock_proc.stdin.write = MagicMock()
-        mock_proc.stdin.drain = AsyncMock()
 
         process._process = mock_proc
         process._session_id = "s1"
@@ -397,9 +395,6 @@ class TestClaudeCodeProcess:
         it must reach the CLI's stdin verbatim, not stringified."""
         events = [json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"})]
         mock_proc = self._mock_proc(events)
-        mock_proc.stdin = MagicMock()
-        mock_proc.stdin.write = MagicMock()
-        mock_proc.stdin.drain = AsyncMock()
 
         process._process = mock_proc
         process._session_id = "s1"
@@ -414,6 +409,71 @@ class TestClaudeCodeProcess:
         written = mock_proc.stdin.write.call_args[0][0]
         msg = json.loads(written.decode().strip())
         assert msg["message"]["content"] == blocks
+
+    def _workspace_process(self, process, tmp_path):
+        (tmp_path / "secrets").mkdir()
+        (tmp_path / "secrets" / "token.txt").write_text("TOKEN-VALUE\n")
+        (tmp_path / "sessions").mkdir()
+
+        mock_proc = self._mock_proc([json.dumps({"type": "result", "subtype": "success", "result": "ok"})])
+        process._process = mock_proc
+        process._session_id = "s1"
+        process._cwd = tmp_path
+        return mock_proc
+
+    @staticmethod
+    def _sent_content(mock_proc):
+        return json.loads(mock_proc.stdin.write.call_args[0][0].decode().strip())["message"]["content"]
+
+    @pytest.mark.asyncio
+    async def test_send_message_escapes_a_resolving_at_mention(self, process, tmp_path):
+        """The CLI reads `@path` in a user turn as a file mention and injects the file
+        below the tool layer, so any tool output carrying one leaks what it names."""
+        mock_proc = self._workspace_process(process, tmp_path)
+
+        async for _ in process.send_message("Log line: see @secrets/token.txt for details."):
+            pass
+
+        assert self._sent_content(mock_proc) == "Log line: see \\@secrets/token.txt for details."
+
+    @pytest.mark.asyncio
+    async def test_send_message_escapes_only_toolsets_matching_a_real_directory(self, process, tmp_path):
+        mock_proc = self._workspace_process(process, tmp_path)
+
+        async for _ in process.send_message("Tools: run, @secrets, @schedule, @sessions, @jobs"):
+            pass
+
+        assert self._sent_content(mock_proc) == "Tools: run, \\@secrets, @schedule, \\@sessions, @jobs"
+
+    @pytest.mark.asyncio
+    async def test_send_message_escapes_an_absolute_at_mention(self, process, tmp_path):
+        mock_proc = self._workspace_process(process, tmp_path)
+        target = tmp_path / "secrets" / "token.txt"
+
+        async for _ in process.send_message(f"see @{target}"):
+            pass
+
+        assert self._sent_content(mock_proc) == f"see \\@{target}"
+
+    @pytest.mark.asyncio
+    async def test_send_message_leaves_at_tokens_that_are_not_paths(self, process, tmp_path):
+        mock_proc = self._workspace_process(process, tmp_path)
+        text = "@property on ops@example.com with @scope/pkg and @" + "x" * 5000
+
+        async for _ in process.send_message(text):
+            pass
+
+        assert self._sent_content(mock_proc) == text
+
+    @pytest.mark.asyncio
+    async def test_send_message_escapes_text_blocks_of_a_multimodal_turn(self, process, tmp_path):
+        mock_proc = self._workspace_process(process, tmp_path)
+        image = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "QUJD"}}
+
+        async for _ in process.send_message([{"type": "text", "text": "see @secrets/token.txt"}, image]):
+            pass
+
+        assert self._sent_content(mock_proc) == [{"type": "text", "text": "see \\@secrets/token.txt"}, image]
 
     @pytest.mark.asyncio
     async def test_stop_terminates_process(self, process):
