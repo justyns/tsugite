@@ -240,6 +240,43 @@ def test_fetch_text_extract_article_non_html_passthrough(mock_httpx_client):
     assert result == plain
 
 
+def test_fetch_text_extract_article_falls_back_to_page(mock_httpx_client):
+    """A sliver of a much larger page means readability found no article, so the page is used."""
+    page = "<html><body><div id='app'>" + "<div>Body text the extractor discarded. </div>" * 40 + "</div></body></html>"
+    mock_httpx_client.request.return_value = _mock_response(200, text=page, headers={"content-type": "text/html"})
+
+    with patch("readability.Document") as doc:
+        doc.return_value.summary.return_value = '<body id="readabilityBody"><p>Generated with AI assistance.</p></body>'
+        result = fetch_text("https://example.com", extract_article=True)
+
+    assert "Body text the extractor discarded" in result
+
+
+def test_fetch_text_extract_article_keeps_substantial_extraction(mock_httpx_client):
+    """A substantial extraction is kept even when the page is much bigger."""
+    article = "<p>" + "Real article sentence that readability kept. " * 20 + "</p>"
+    page = f"<html><body><nav>{'Menu link ' * 200}</nav><article>{article}</article></body></html>"
+    mock_httpx_client.request.return_value = _mock_response(200, text=page, headers={"content-type": "text/html"})
+
+    with patch("readability.Document") as doc:
+        doc.return_value.summary.return_value = f'<body id="readabilityBody">{article}</body>'
+        result = fetch_text("https://example.com", extract_article=True)
+
+    assert "Real article sentence" in result
+    assert "Menu link" not in result
+
+
+def test_fetch_text_extract_article_raises_on_empty_page(mock_httpx_client):
+    """A client-rendered shell has no text to fall back to."""
+    shell = (
+        "<html><head><title>App</title></head><body><div id='root'></div><script src='/a.js'></script></body></html>"
+    )
+    mock_httpx_client.request.return_value = _mock_response(200, text=shell, headers={"content-type": "text/html"})
+
+    with pytest.raises(RuntimeError, match="no readable text"):
+        fetch_text("https://example.com", extract_article=True)
+
+
 def test_fetch_text_extract_article_takes_precedence(mock_httpx_client):
     """When both flags set, extract_article takes precedence."""
     mock_httpx_client.request.return_value = _mock_response(

@@ -18,6 +18,11 @@ _WEB_EXTRA_HINT = "Install it with: pip install 'tsugite-cli[web]'"
 # reach anything the original request couldn't.
 _MAX_REDIRECTS = 5
 
+# readability emits a near-empty node when it finds no article. An extraction that is
+# both short and a sliver of the whole page means extraction failed, not a short article.
+_MIN_ARTICLE_CHARS = 200
+_ARTICLE_PAGE_RATIO = 10
+
 
 def _extract_article(html: str) -> str:
     """Extract the main article body from HTML using readability (optional dep)."""
@@ -150,9 +155,21 @@ def fetch_text(
     if "text/html" not in content_type or (not strip_html and not extract_article):
         return text
 
-    if extract_article:
-        text = _extract_article(text)
-    return convert_html_to_markdown(text)
+    if not extract_article:
+        return convert_html_to_markdown(text)
+
+    article = convert_html_to_markdown(_extract_article(text))
+    article_len = len(article.strip())
+    if article_len >= _MIN_ARTICLE_CHARS:
+        return article
+
+    page = convert_html_to_markdown(text)
+    page_len = len(page.strip())
+    if not page_len:
+        raise RuntimeError(f"{url} has no readable text; the page is likely rendered client-side")
+    if article_len * _ARTICLE_PAGE_RATIO < page_len:
+        return page
+    return article
 
 
 # No sensitive_args: the built-in key rules already redact Authorization,
