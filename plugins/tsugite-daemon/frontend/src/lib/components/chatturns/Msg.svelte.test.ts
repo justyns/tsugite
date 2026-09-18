@@ -42,7 +42,7 @@ test('an ai turn exposes a retry action instead of edit-and-fork', async () => {
   expect(onRetry).toHaveBeenCalledTimes(1);
 });
 
-test('a failed ai turn shows a prominent Retry button (not hover-gated) that re-sends', async () => {
+test('a failed ai turn offers a prominent Continue button (not hover-gated)', async () => {
   const onRetry = vi.fn();
   // retryFailed marks the turn as errored; pinnedActs is NOT set, so the button
   // must be visible on its own - a failed turn cannot rely on hovering the exact
@@ -58,7 +58,8 @@ test('a failed ai turn shows a prominent Retry button (not hover-gated) that re-
 
   const retry = page.getByTestId('chat-retry');
   await expect.element(retry).toBeVisible();
-  await expect.element(retry).toHaveTextContent('Retry');
+  await expect.element(retry).toHaveTextContent('Continue');
+  await expect.element(retry).not.toHaveTextContent('Retry');
   await retry.click();
   expect(onRetry).toHaveBeenCalledTimes(1);
 });

@@ -312,3 +312,75 @@ class TestTimestampPrefixing:
         first = events_to_messages(events)
         second = events_to_messages(events)
         assert first == second
+
+
+class TestFailedTurn:
+    """A turn that raised records an `error` event. The next prompt has to say so,
+    otherwise the model reads its own half-finished work as a fresh start."""
+
+    def test_failed_turn_reaches_the_prompt(self):
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="refactor the parser"),
+            _ev("model_response", raw_content="Starting on it."),
+            _ev("error", ts=FIXED_TS, error="RuntimeError: provider timed out"),
+        ]
+        msgs = events_to_messages(events)
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+        content = msgs[2]["content"]
+        assert content.startswith("<tsugite_turn_failed")
+        assert "RuntimeError: provider timed out" in content
+        assert f'ts="{FIXED_TS_PREFIX[1:-1]}"' in content
+        assert content.endswith("</tsugite_turn_failed>")
+
+    def test_failure_notice_tells_the_model_to_continue(self):
+        events = [_ev("error", ts=FIXED_TS, error="boom")]
+        content = events_to_messages(events)[0]["content"]
+        assert "previous attempt failed" in content
+        assert "continue" in content.lower()
+        assert "starting over" in content.lower()
+
+    def test_partial_work_still_reaches_the_prompt(self):
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="read the file"),
+            _ev("model_response", raw_content="```python-exec\nprint(read_file('a.md'))\n```"),
+            _ev("code_execution", ts=FIXED_TS, code="read_file('a.md')", output="half of it"),
+            _ev("error", ts=FIXED_TS, error="RuntimeError: provider timed out"),
+        ]
+        msgs = events_to_messages(events)
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user", "user"]
+        assert "print(read_file('a.md'))" in msgs[1]["content"]
+        assert "half of it" in msgs[2]["content"]
+        assert "<tsugite_turn_failed" in msgs[3]["content"]
+
+    def test_the_notice_is_derived_never_recorded(self):
+        """The fix must not append a user_input the person never typed."""
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="refactor the parser"),
+            _ev("error", ts=FIXED_TS, error="boom"),
+        ]
+        before = [(e.type, dict(e.data)) for e in events]
+        msgs = events_to_messages(events)
+        assert any("previous attempt failed" in m["content"] for m in msgs)
+        assert [(e.type, dict(e.data)) for e in events] == before
+
+    def test_a_failed_send_stays_out_of_the_prompt(self):
+        """`report_send_failure` records an error for a notification or delivery
+        that never left the daemon. The model's turn did not fail; telling it so
+        would make it resume work that already finished."""
+        events = [
+            _ev("user_input", ts=FIXED_TS, text="t"),
+            _ev("model_response", raw_content="done"),
+            _ev("error", ts=FIXED_TS, error="Delivery notification failed: no channel", kind="send_failed"),
+        ]
+        msgs = events_to_messages(events)
+        assert [m["role"] for m in msgs] == ["user", "assistant"]
+
+    def test_error_text_is_escaped(self):
+        events = [_ev("error", ts=FIXED_TS, error="ValueError: <a> & <b> mismatch")]
+        content = events_to_messages(events)[0]["content"]
+        assert "<error>ValueError: &lt;a&gt; &amp; &lt;b&gt; mismatch</error>" in content
+
+    def test_an_error_without_text_still_reports_the_failure(self):
+        events = [_ev("error", ts=FIXED_TS)]
+        content = events_to_messages(events)[0]["content"]
+        assert "previous attempt failed" in content

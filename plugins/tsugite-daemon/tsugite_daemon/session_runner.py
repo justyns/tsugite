@@ -114,14 +114,24 @@ def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_
     """Record a send that failed: an error block in the chat, and an attention
     record the session list can badge.
 
+    The `send_failed` kind keeps it out of the next prompt.
+
     A module function because BaseAdapter reports without holding a SessionRunner.
     """
     store.append_event(
         session_id,
-        {"type": "error", "timestamp": datetime.now(timezone.utc).isoformat(), "error": error},
+        {
+            "type": "error",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": error,
+            "kind": "send_failed",
+        },
     )
     if event_bus:
-        event_bus.emit("session_event", {"session_id": session_id, "event_type": "error", "error": error})
+        event_bus.emit(
+            "session_event",
+            {"session_id": session_id, "event_type": "error", "error": error, "kind": "send_failed"},
+        )
     opened = store.attention.open(
         owner_kind=OWNER_SESSION,
         owner_id=session_id,

@@ -18,6 +18,9 @@ from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore, attention_fields
 
+from tsugite.history.models import Event
+from tsugite.history.reconstruction import events_to_messages
+
 
 class _Bus:
     def __init__(self):
@@ -416,6 +419,18 @@ class TestErrorSource:
         errors = [e for e in store.read_events(sid) if e["type"] == "error"]
         assert len(errors) == 1
         assert "target is gone" in errors[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_the_failed_send_stays_out_of_the_next_prompt(self, store, runner, monkeypatch):
+        """The model's own turn succeeded. Replaying the send failure into its
+        context would make it resume work it already finished."""
+        sid = self._notify_target(store, runner, monkeypatch)
+
+        await runner._notify_finished(store.get_session(sid), SessionStatus.COMPLETED.value, "done")
+
+        events = [Event(type=e["type"], ts=e["timestamp"], data=e) for e in store.read_events(sid)]
+        assert [e.type for e in events].count("error") == 1
+        assert all("target is gone" not in m["content"] for m in events_to_messages(events))
 
     @pytest.mark.asyncio
     async def test_acknowledging_clears_the_error_record(self, store, runner, monkeypatch):

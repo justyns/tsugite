@@ -68,3 +68,17 @@ def test_soft_line_breaks_render_hard_in_the_persons_own_message_only(chat_page,
     ai_bubble = page.locator(".t-msg--ai").last
     expect(ai_bubble).to_contain_text("second half", timeout=15000)
     expect(ai_bubble.locator("br")).to_have_count(0)
+
+
+def test_a_failed_turn_offers_continue(chat_page, mock_chat):
+    """The button reads Continue because the failure replays into the next prompt."""
+    mock_chat("", events=[("error", {"error": "RuntimeError: provider timed out"})])
+
+    page = chat_page
+    textarea = page.get_by_role("textbox", name="Message", exact=True)
+    textarea.fill("refactor the parser")
+    textarea.press("Enter")
+
+    button = page.locator('[data-testid="chat-retry"]')
+    expect(button).to_be_visible(timeout=15000)
+    expect(button).to_have_text("Continue")

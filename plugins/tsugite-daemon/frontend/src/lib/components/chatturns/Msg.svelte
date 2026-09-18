@@ -64,12 +64,12 @@
     {@render children()}
   </div>
   {#if role === 'ai' && onRetry && retryFailed}
-    <!-- The turn failed: Retry is the recovery action, so it reads as a real
-         labelled button under the error - never hover-gated like the regenerate
-         icon a healthy turn carries. Re-sends the last user message (onRetry). -->
+    <!-- A failed turn gets a real labelled button under the error, never the
+         hover-gated regenerate icon a healthy turn has. It says Continue
+         because the failure replays into the next prompt. -->
     <div class="retry-failed">
       <button type="button" class="retry-btn" data-testid={TESTID.chatRetry} onclick={onRetry}>
-        <Icon name="retry" size={12} />Retry
+        <Icon name="retry" size={12} />Continue
       </button>
     </div>
   {/if}

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from xml.sax.saxutils import escape, quoteattr
 
+from tsugite.prompt_xml import El
 from tsugite.renderer import format_prompt_ts, parse_iso_utc
 
 from .models import Event
@@ -176,6 +177,11 @@ def _event_to_message(event: Event, executed: bool = False) -> Optional[Dict[str
         return {"role": "user", "content": _format_error_xml(event.data)}
     if event.type == "delivery":
         return {"role": "user", "content": _delivery_xml(event.data, event.ts)}
+    if event.type == "error":
+        # send_failed is a notification that never left the daemon, not a turn failure.
+        if event.data.get("kind") == "send_failed":
+            return None
+        return {"role": "user", "content": _turn_failed_xml(event.data, event.ts)}
     return None
 
 
@@ -221,6 +227,22 @@ def _delivery_xml(data: Dict[str, Any], ts: Optional[datetime] = None) -> str:
     parts.append(f"<message>{escape(data.get('message') or '')}</message>")
     parts.append("</tsugite_delivery>")
     return "\n".join(parts)
+
+
+_TURN_FAILED_NOTE = (
+    "The previous attempt failed before it finished. Continue from where it stopped rather than starting over."
+)
+
+
+def _turn_failed_xml(data: Dict[str, Any], ts: datetime) -> str:
+    return El(
+        "tsugite_turn_failed",
+        [
+            El("note", [_TURN_FAILED_NOTE], inline=True),
+            El("error", [data.get("error")], inline=True),
+        ],
+        {"ts": _format_event_ts(ts)},
+    ).render()
 
 
 def _format_error_xml(data: Dict[str, Any]) -> str:
