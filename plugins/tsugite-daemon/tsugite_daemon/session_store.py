@@ -1559,7 +1559,7 @@ class SessionStore:
 
     def session_detail(self, session_id: str) -> dict:
         session = self.get_session(session_id)
-        result = asdict(session)
+        result = {k: v for k, v in asdict(session).items() if k != "queued_messages"}
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
         result["alias"] = session.alias
@@ -1567,7 +1567,6 @@ class SessionStore:
         # Same key, same shape as the session-list row: ids, not whole cards.
         result["pending_deliveries"] = session.pending_delivery_ids
         result["queued"] = session.queued_message_rows
-        del result["queued_messages"]
         # `context_limit` (the raw dataclass field) is None until the first turn
         # reports a provider window, so a fresh session would get no meter. Expose
         # the RESOLVED limit alongside it (falls back to the agent default) so the
