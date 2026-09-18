@@ -7,6 +7,7 @@ message as an ordinary user turn once the turn it waited on finishes.
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -103,6 +104,25 @@ def _sent_messages(adapter):
     return [c.kwargs["message"] for c in adapter.handle_message.await_args_list]
 
 
+def _session_events(broadcasts, event_type):
+    return [p for n, p in broadcasts if n == "session_event" and p.get("event_type") == event_type]
+
+
+def _hold(adapter, text: str) -> asyncio.Event:
+    """Hold handle_message inside the turn for `text`. The returned event fires
+    once that turn has entered the handler."""
+    running = asyncio.Event()
+
+    async def handle(**kwargs):
+        if kwargs["message"] == text:
+            running.set()
+            await asyncio.Event().wait()
+        return "ok"
+
+    adapter.handle_message.side_effect = handle
+    return running
+
+
 @pytest.mark.asyncio
 class TestSendingToABusySession:
     async def test_the_send_is_accepted_and_queued(self, adapter, client):
@@ -114,7 +134,7 @@ class TestSendingToABusySession:
         body = resp.json()
         assert body["status"] == "queued"
         assert body["position"] == 1
-        assert body["queued"] == [{"id": body["queue_id"], "text": "and also check the logs"}]
+        assert body["queue_id"].startswith("q-")
 
     async def test_another_client_sees_the_queue_on_the_sessions_payload(self, adapter, client):
         sid = _busy_session(adapter)
@@ -124,14 +144,6 @@ class TestSendingToABusySession:
 
         row = next(r for r in rows if r["id"] == sid)
         assert [q["text"] for q in row["queued"]] == ["and also check the logs"]
-
-    async def test_another_client_sees_the_queue_on_status(self, adapter, client):
-        sid = _busy_session(adapter)
-        await _send(client, sid, "and also check the logs")
-
-        status = (await client.get(f"/api/chat/status?user_id=u1&session_id={sid}")).json()
-
-        assert [q["text"] for q in status["queued"]] == ["and also check the logs"]
 
     async def test_the_queue_change_is_broadcast(self, adapter, client, broadcasts):
         sid = _busy_session(adapter)
@@ -261,3 +273,91 @@ class TestSendingToAnIdleSession:
         assert resp.status_code == 200
         assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
         assert adapter.session_store.get_session(sid).queued_messages == []
+
+    async def test_a_send_without_a_session_id_targets_the_primary_session(self, adapter, client):
+        resp = await asyncio.wait_for(client.post("/api/chat", json={"message": "go", "user_id": "u1"}), timeout=5)
+
+        assert resp.status_code == 200
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        primary = adapter.session_store.find_default_session("u1")
+        metadata = adapter.handle_message.await_args.kwargs["channel_context"].metadata
+        assert metadata.get("conv_id_override") == primary.id
+
+
+@pytest.mark.asyncio
+class TestAQueuedTurnRunsLikeADirectSend:
+    """One turn body serves both entry points, so a queued turn closes its own
+    timeline, refreshes the meter, answers Stop, and stands aside for a restart."""
+
+    async def test_it_emits_a_final_result_when_the_run_reports_no_final_answer(self, adapter, client, broadcasts):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "go")
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: _session_events(broadcasts, "final_result"))
+        assert _session_events(broadcasts, "final_result")[-1]["result"] == "ok"
+
+    async def test_it_refreshes_the_context_meter(self, adapter, client, broadcasts):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "go")
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: _session_events(broadcasts, "session_info"))
+        assert _session_events(broadcasts, "session_info")[-1]["session_id"] == sid
+
+    async def test_stopping_it_emits_a_cancelled_frame(self, adapter, client, broadcasts):
+        sid = _busy_session(adapter)
+        running = _hold(adapter, "first")
+        await _send(client, sid, "first")
+        adapter.session_store.end_turn(sid)
+        await asyncio.wait_for(running.wait(), timeout=2)
+
+        assert (await client.post("/api/chat/cancel", json={"user_id": "u1", "session_id": sid})).status_code == 200
+
+        assert await _wait_until(lambda: _session_events(broadcasts, "cancelled"))
+
+    async def test_stopping_one_queued_turn_still_runs_the_rest(self, adapter, client):
+        sid = _busy_session(adapter)
+        running = _hold(adapter, "first")
+        await _send(client, sid, "first")
+        await _send(client, sid, "second")
+        adapter.session_store.end_turn(sid)
+        await asyncio.wait_for(running.wait(), timeout=2)
+
+        assert (await client.post("/api/chat/cancel", json={"user_id": "u1", "session_id": sid})).status_code == 200
+
+        assert await _wait_until(lambda: _sent_messages(adapter) == ["first", "second"])
+
+    async def test_the_prompt_inspector_reads_its_live_prompt(self, adapter, client):
+        from tsugite.events import PromptSnapshotEvent
+
+        sid = _busy_session(adapter)
+        messages = [{"role": "user", "content": "hi"}]
+        running = asyncio.Event()
+
+        async def handle(**kwargs):
+            kwargs["custom_logger"].ui_handler.handle_event(PromptSnapshotEvent(messages=messages))
+            running.set()
+            await asyncio.Event().wait()
+
+        adapter.handle_message.side_effect = handle
+        await _send(client, sid, "go")
+        adapter.session_store.end_turn(sid)
+        await asyncio.wait_for(running.wait(), timeout=2)
+
+        snapshot = (await client.get(f"/api/chat/prompt-snapshot?user_id=u1&session_id={sid}")).json()
+
+        assert snapshot["prompt_snapshot"] == {"messages": messages, "token_breakdown": {}}
+
+    async def test_it_stays_queued_while_the_daemon_is_restarting(self, adapter, server, client):
+        sid = _busy_session(adapter)
+        await _send(client, sid, "after the restart")
+        server.gateway = SimpleNamespace(restart_requested=True, config_path=None)
+
+        adapter.session_store.end_turn(sid)
+        await asyncio.sleep(0.05)
+
+        assert adapter.handle_message.await_count == 0
+        assert [e["text"] for e in adapter.session_store.get_session(sid).queued_messages] == ["after the restart"]

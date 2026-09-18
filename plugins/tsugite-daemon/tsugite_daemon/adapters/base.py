@@ -208,11 +208,8 @@ class SSEBroadcastHandler(JSONLUIHandler):
         self._broadcaster = broadcaster
         self._session_id = session_id
         self._persist_event = persist_event
-        self.has_final = False
 
     def _emit(self, event_type: str, data: Dict[str, Any]) -> None:
-        if event_type == "final_result":
-            self.has_final = True
         payload = {"type": event_type, **data}
         if self._persist_event and event_type in _PERSIST_EVENT_TYPES:
             try:

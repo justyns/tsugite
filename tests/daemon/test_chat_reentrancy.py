@@ -229,9 +229,8 @@ def test_distinct_sessions_same_user_run_in_parallel(client, mock_adapter, test_
 
 
 def test_same_session_double_send_is_queued(client, mock_adapter, test_token):
-    """Preserve original safety: the second of two POSTs with the SAME session_id
-    is queued rather than run. Per-session keying must not weaken the
-    same-session guard.
+    """Two POSTs with the same session_id must not run two turns at once. The
+    second is queued and runs when the first finishes.
     """
     _make_session(mock_adapter, "sess-X", "alice")
 

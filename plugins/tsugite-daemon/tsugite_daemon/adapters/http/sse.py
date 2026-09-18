@@ -7,7 +7,6 @@ from collections import deque
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from tsugite.events.base import BaseEvent
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import _PERSIST_EVENT_TYPES
 from tsugite_daemon.attention_store import SOURCE_ASK
@@ -144,7 +143,6 @@ class SSEProgressHandler(JSONLUIHandler):
     def __init__(self):
         self.queue: asyncio.Queue = asyncio.Queue()
         self.done = False
-        self.has_final = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._persist_event: Optional[Callable] = None
         self._broadcaster: Optional["SSEBroadcaster"] = None
@@ -163,22 +161,7 @@ class SSEProgressHandler(JSONLUIHandler):
     def set_session_id(self, session_id: str) -> None:
         self._session_id = session_id
 
-    latest_prompt_messages: Optional[list] = None
-
-    def handle_event(self, event: BaseEvent) -> None:
-        """Handle event from agent thread -- schedule onto the event loop."""
-        from tsugite.events import PromptSnapshotEvent
-
-        if isinstance(event, PromptSnapshotEvent):
-            if event.messages:
-                self.latest_prompt_messages = event.messages
-            if not event.token_breakdown:
-                return  # Messages-only update, don't emit SSE or persist
-        super().handle_event(event)
-
     def _emit(self, event_type: str, data: dict[str, Any]) -> None:
-        if event_type == "final_result":
-            self.has_final = True
         payload = {"type": event_type, **data}
         if self._loop and self._loop.is_running():
             try:

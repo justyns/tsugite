@@ -153,6 +153,7 @@ class TestTheTurnEndDrain:
         async def sender(session_id, entry):
             started.append(entry["id"])
             await release.wait()
+            return True
 
         runner.set_queued_message_sender(sender)
         store.queue_message(sid, _entry("q-1", "first"))
@@ -169,7 +170,7 @@ class TestTheTurnEndDrain:
 
     @pytest.mark.asyncio
     async def test_a_send_that_raises_does_not_strand_the_rest(self, store, runner):
-        sender = AsyncMock(side_effect=[RuntimeError("boom"), None])
+        sender = AsyncMock(side_effect=[RuntimeError("boom"), True])
         sid = _session(store)
         runner.set_queued_message_sender(sender)
         store.queue_message(sid, _entry("q-1", "first"))
@@ -179,6 +180,23 @@ class TestTheTurnEndDrain:
 
         assert await _wait_until(lambda: sender.await_count == 2)
         assert store.get_session(sid).queued_messages == []
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_drain_is_forgotten(self, store, runner):
+        """The drain task is held so the next turn end can start a fresh one."""
+        sid = _session(store)
+
+        async def sender(session_id, entry):
+            await asyncio.Event().wait()
+
+        runner.set_queued_message_sender(sender)
+        store.queue_message(sid, _entry("q-1", "first"))
+        store.end_turn(sid)
+        assert await _wait_until(lambda: sid in runner._queue_drain_tasks)
+
+        runner._queue_drain_tasks[sid].cancel()
+
+        assert await _wait_until(lambda: sid not in runner._queue_drain_tasks)
 
     @pytest.mark.asyncio
     async def test_an_empty_queue_sends_nothing(self, store, runner):

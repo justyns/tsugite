@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from tsugite.attachments.delegation import can_inline_file
+from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http.helpers import (
     MAX_UPLOAD_FILES,
@@ -71,18 +72,14 @@ def _build_send_metadata(
     reasoning_effort: Optional[str],
     context_metadata,
 ) -> tuple[str, dict]:
-    """Resolve uploaded filenames against the uploads dir and build the turn
-    metadata, returning the message with its upload suffix.
-
-    A queued send runs this at flush time: Attachment objects do not survive the
-    queue's JSON round-trip.
-    """
+    """A queued send runs this at flush time: Attachment objects do not survive
+    the queue's JSON round-trip."""
     from tsugite.models import model_supports_vision
 
-    uploads_dir = adapter.runtime.workspace_dir / "uploads"
+    uploads_dir = (adapter.runtime.workspace_dir / "uploads").resolve()
     # A non-vision model can't read an inlined image; route its images to the
     # workspace-only path (saved + path hint) instead of dropping them.
-    supports_vision = model_supports_vision(adapter.resolve_session_model(session_id))
+    supports_vision = bool(uploaded_files) and model_supports_vision(adapter.resolve_session_model(session_id))
 
     uploaded_attachments = []
     workspace_only_files = []
@@ -91,7 +88,7 @@ def _build_send_metadata(
             continue
         filename = _sanitize_filename(file_info.get("name", ""))
         file_path = (uploads_dir / filename).resolve()
-        if not file_path.is_relative_to(uploads_dir.resolve()) or not file_path.exists():
+        if not file_path.is_relative_to(uploads_dir) or not file_path.exists():
             continue
 
         if can_inline_file(file_path, file_path.stat().st_size, supports_vision=supports_vision):
@@ -165,10 +162,7 @@ class AgentsMixin:
         return get_xdg_write_path("permissions.yaml")
 
     def _bind_run_context(self, chat_state: ActiveChat) -> None:
-        """Bind the interaction backend, the approval permissions store and the
-        cooperative cancel event into the run context.
-
-        The agent loop and the context detector both run via asyncio.to_thread,
+        """The agent loop and the context detector both run via asyncio.to_thread,
         which copies this context; binding anywhere else never reaches them.
         """
         from tsugite.cancellation import set_cancel_event
@@ -395,7 +389,6 @@ class AgentsMixin:
                 "metadata": session_metadata,
                 "busy": bool(session and self._session_busy(session)),
                 "pending_message": backend.pending_message if backend else None,
-                "queued": session.queued_message_rows if session else [],
                 "attachments": attachments,
             }
         )
@@ -535,7 +528,7 @@ class AgentsMixin:
         backend_key = (user_id, session_id)
         chat = self._active_chats.get(backend_key)
         live_progress = chat.progress if chat else None
-        if live_progress and getattr(live_progress, "latest_prompt_messages", None):
+        if live_progress and live_progress.latest_prompt_messages:
             return JSONResponse(
                 {
                     "prompt_snapshot": {
@@ -856,7 +849,6 @@ class AgentsMixin:
         return JSONResponse({"files": results})
 
     def _broadcast_queue(self, session_id: str) -> list[dict]:
-        """Broadcast the session's queue, returning the rows it sent."""
         queued = self.adapter.session_store.get_session(session_id).queued_message_rows
         self.event_bus.emit("session_update", {"action": "queued", "id": session_id, "queued": queued})
         return queued
@@ -891,24 +883,116 @@ class AgentsMixin:
             "context_metadata": context_metadata,
         }
         position = self.adapter.session_store.queue_message(session.id, entry)
-        queued = self._broadcast_queue(session.id)
+        self._broadcast_queue(session.id)
         if self.session_runner and not self._session_busy(session):
-            # The turn ended between the busy check and the append, so its
-            # turn-end hook read an empty queue.
+            # The turn can end between the busy check and the append, leaving the
+            # turn-end hook nothing to drain.
             self.session_runner.drain_queued_messages(session.id)
         return JSONResponse(
-            {"status": "queued", "queue_id": entry["id"], "position": position, "queued": queued},
+            {"status": "queued", "queue_id": entry["id"], "position": position},
             status_code=202,
         )
 
-    async def run_queued_message(self, session_id: str, entry: dict) -> None:
+    def _start_turn(
+        self,
+        *,
+        user_id: str,
+        raw_user_id: str,
+        session_id: str,
+        message: str,
+        metadata: dict,
+        progress: JSONLUIHandler,
+    ) -> ActiveChat:
+        """Run one user turn for `session_id` as its own task.
+
+        Registering the chat before the task starts keeps `_session_busy` true
+        across the window before handle_message reaches begin_turn, and lets
+        /api/chat/cancel reach this turn.
+        """
+        adapter = self.adapter
+        interaction_backend = HTTPInteractionBackend(
+            progress, session_runner=self.session_runner, session_id=session_id
+        )
+        interaction_backend.pending_message = message
+        chat_state = ActiveChat(backend=interaction_backend, progress=progress)
+        backend_key = (user_id, session_id)
+        self._active_chats[backend_key] = chat_state
+        channel_context = ChannelContext(
+            source="http",
+            channel_id=None,
+            user_id=raw_user_id,
+            reply_to=f"http:{raw_user_id}",
+            metadata=metadata,
+        )
+
+        async def run_turn():
+            self._bind_run_context(chat_state)
+            try:
+                response = await adapter.handle_message(
+                    user_id=user_id,
+                    message=message,
+                    channel_context=channel_context,
+                    custom_logger=SimpleNamespace(ui_handler=progress),
+                )
+                logger.info("-> %s (http): %s", user_id, (response or "")[:100])
+                # FinalAnswerEvent fires during handle_message for a normal
+                # completion, but not for max_turns or an error.
+                if not progress.has_final:
+                    progress._emit("final_result", {"result": response})
+
+                self.event_bus.emit("agent_status", {})
+                self.event_bus.emit("history_update", {"session_id": session_id})
+
+                try:
+                    refreshed = adapter.session_store.get_session(session_id)
+                except ValueError:
+                    refreshed = None
+                if refreshed is not None:
+                    progress._emit(
+                        "session_info",
+                        {
+                            "session_id": session_id,
+                            "tokens": refreshed.cumulative_tokens,
+                            "context_limit": adapter.session_store.get_session_context_limit(session_id),
+                            "threshold": adapter.session_store.get_session_compaction_threshold(session_id),
+                            "message_count": refreshed.message_count,
+                            "model": adapter.resolve_session_model(session_id),
+                            "attachments": [a.name for a in adapter._get_all_attachments()],
+                        },
+                    )
+            except asyncio.CancelledError:
+                logger.info("Chat cancelled by user for %s", user_id)
+                progress._emit("cancelled", {"reason": "User cancelled"})
+            except Exception as e:
+                logger.exception("Chat error")
+                progress._emit("error", {"error": str(e)})
+                if self.session_runner:
+                    self.session_runner.open_attention(
+                        session_id,
+                        source=SOURCE_ERROR,
+                        ref_id=f"{session_id}:turn",
+                        kind="turn_failed",
+                    )
+            finally:
+                self._active_chats.pop(backend_key, None)
+
+        chat_state.task = asyncio.create_task(run_turn())
+        return chat_state
+
+    async def run_queued_message(self, session_id: str, entry: dict) -> bool:
         """Run a queued message as a normal user turn, logged and broadcast so
-        every watching client renders it live."""
+        every watching client renders it live.
+
+        False leaves the entry queued: a restarting daemon drains `_active_chats`
+        to a deadline, so it must admit no further turns.
+        """
         from tsugite_daemon.session_runner import LoggingProgressHandler
 
+        if self.gateway and self.gateway.restart_requested:
+            return False
         adapter = self.adapter
+        self._broadcast_queue(session_id)
         raw_user_id = entry["user_id"]
-        user_id = adapter.resolve_http_user(raw_user_id)
         message, metadata = _build_send_metadata(
             adapter,
             session_id,
@@ -919,45 +1003,17 @@ class AgentsMixin:
         )
         metadata["conv_id_override"] = session_id
 
-        progress = LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus)
-        interaction_backend = HTTPInteractionBackend(
-            progress, session_runner=self.session_runner, session_id=session_id
+        chat_state = self._start_turn(
+            user_id=adapter.resolve_http_user(raw_user_id),
+            raw_user_id=raw_user_id,
+            session_id=session_id,
+            message=message,
+            metadata=metadata,
+            progress=LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus),
         )
-        interaction_backend.pending_message = message
-        chat_state = ActiveChat(backend=interaction_backend, progress=progress, task=asyncio.current_task())
-        # Registering the chat keeps `_session_busy` true across the window before
-        # handle_message reaches begin_turn, and lets /api/chat/cancel reach this turn.
-        backend_key = (user_id, session_id)
-        self._active_chats[backend_key] = chat_state
-        self._broadcast_queue(session_id)
-
-        self._bind_run_context(chat_state)
-        try:
-            await adapter.handle_message(
-                user_id=user_id,
-                message=message,
-                channel_context=ChannelContext(
-                    source="http",
-                    channel_id=None,
-                    user_id=raw_user_id,
-                    reply_to=f"http:{raw_user_id}",
-                    metadata=metadata,
-                ),
-                custom_logger=SimpleNamespace(ui_handler=progress),
-            )
-        except Exception as e:
-            logger.exception("Queued chat error")
-            progress._emit("error", {"error": str(e)})
-            self.session_runner.open_attention(
-                session_id,
-                source=SOURCE_ERROR,
-                ref_id=f"{session_id}:turn",
-                kind="turn_failed",
-            )
-        finally:
-            self._active_chats.pop(backend_key, None)
-            self.event_bus.emit("agent_status", {})
-            self.event_bus.emit("history_update", {"session_id": session_id})
+        # Stop cancels this one turn; the drain still runs the rest of the queue.
+        await asyncio.wait([chat_state.task])
+        return True
 
     async def _chat(self, request: Request) -> Response:
         body, err = await self._authed_json_body(request)
@@ -993,7 +1049,6 @@ class AgentsMixin:
         from tsugite_daemon.session_store import FINISHED_STATUSES, SessionSource
 
         target_session = None
-        conv_id_override = None
         if session_id:
             try:
                 target_session = adapter.session_store.get_session(session_id)
@@ -1011,8 +1066,6 @@ class AgentsMixin:
                         },
                         status_code=409,
                     )
-            if target_session is not None:
-                conv_id_override = target_session.id
 
         if target_session is None:
             target_session = adapter.session_store.get_or_create_interactive(user_id, source=SessionSource.WEB.value)
@@ -1033,87 +1086,23 @@ class AgentsMixin:
             adapter, target_session_id, message, uploaded_files, reasoning_effort, context_metadata
         )
         metadata["client_ip"] = request.client.host if request.client else "unknown"
-        if conv_id_override:
-            metadata["conv_id_override"] = conv_id_override
-
-        backend_key = (user_id, target_session_id)
-        channel_context = ChannelContext(
-            source="http",
-            channel_id=None,
-            user_id=raw_user_id,
-            reply_to=f"http:{raw_user_id}",
-            metadata=metadata,
-        )
+        metadata["conv_id_override"] = target_session_id
 
         progress = SSEProgressHandler()
         progress.set_loop(asyncio.get_running_loop())
         progress.set_session_id(target_session_id)
         progress.set_broadcaster(self.event_bus)
         progress.set_event_persister(build_session_event_persister(adapter.session_store, target_session_id))
-        custom_logger = SimpleNamespace(ui_handler=progress)
 
-        interaction_backend = HTTPInteractionBackend(
-            progress, session_runner=self.session_runner, session_id=target_session_id
+        chat_state = self._start_turn(
+            user_id=user_id,
+            raw_user_id=raw_user_id,
+            session_id=target_session_id,
+            message=message,
+            metadata=metadata,
+            progress=progress,
         )
-        interaction_backend.pending_message = message
-        chat_state = ActiveChat(backend=interaction_backend, progress=progress)
-        self._active_chats[backend_key] = chat_state
-
-        async def run_agent():
-            self._bind_run_context(chat_state)
-            try:
-                response = await adapter.handle_message(
-                    user_id=user_id,
-                    message=message,
-                    channel_context=channel_context,
-                    custom_logger=custom_logger,
-                )
-                # Only emit final_result if the EventBus didn't already
-                # (FinalAnswerEvent fires during handle_message for normal completions,
-                # but not for max_turns/error cases)
-                logger.info("-> %s (http): %s", user_id, (response or "")[:100])
-                if not progress.has_final:
-                    progress._emit("final_result", {"result": response})
-
-                self.event_bus.emit("agent_status", {})
-                self.event_bus.emit("history_update", {"session_id": target_session_id})
-
-                try:
-                    refreshed = adapter.session_store.get_session(target_session_id)
-                except ValueError:
-                    refreshed = None
-                if refreshed is not None:
-                    progress._emit(
-                        "session_info",
-                        {
-                            "session_id": target_session_id,
-                            "tokens": refreshed.cumulative_tokens,
-                            "context_limit": adapter.session_store.get_session_context_limit(target_session_id),
-                            "threshold": adapter.session_store.get_session_compaction_threshold(target_session_id),
-                            "message_count": refreshed.message_count,
-                            "model": adapter.resolve_session_model(target_session_id),
-                            "attachments": [a.name for a in adapter._get_all_attachments()],
-                        },
-                    )
-            except asyncio.CancelledError:
-                logger.info("Chat cancelled by user for %s", user_id)
-                progress._emit("cancelled", {"reason": "User cancelled"})
-            except Exception as e:
-                logger.exception("Chat error")
-                progress._emit("error", {"error": str(e)})
-                if self.session_runner:
-                    self.session_runner.open_attention(
-                        target_session_id,
-                        source=SOURCE_ERROR,
-                        ref_id=f"{target_session_id}:turn",
-                        kind="turn_failed",
-                    )
-            finally:
-                self._active_chats.pop(backend_key, None)
-                progress.signal_done()
-
-        task = asyncio.create_task(run_agent())
-        chat_state.task = task
+        chat_state.task.add_done_callback(lambda _task: progress.signal_done())
 
         return StreamingResponse(
             progress.event_generator(),

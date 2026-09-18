@@ -65,10 +65,9 @@ def chain_depth_scope(depth: int):
         _current_chain_depth.set(previous)
 
 
-# Transient events that should reach live subscribers but not the JSONL event log.
-# Persisting them would bloat history with high-frequency heartbeats whose only
-# value is real-time UI feedback.
-_TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress"})
+# Transient events that reach live subscribers but not the JSONL event log. Their
+# only value is real-time UI feedback, so a replay has no use for them.
+_TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress", "session_info"})
 
 
 class LoggingProgressHandler(JSONLUIHandler):
@@ -145,7 +144,8 @@ def report_send_failure(store: SessionStore, event_bus, session_id: str, *, ref_
 
 
 NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
-QueuedMessageSender = Callable[[str, dict], Coroutine[Any, Any, None]]
+# Returns whether the turn started; False leaves the entry queued and stops the drain.
+QueuedMessageSender = Callable[[str, dict], Coroutine[Any, Any, bool]]
 
 
 class SessionRunner:
@@ -187,22 +187,31 @@ class SessionRunner:
         self._queued_message_sender = sender
 
     def drain_queued_messages(self, session_id: str) -> None:
-        """Start draining the session's queue, unless a drain is already running."""
         sender = self._queued_message_sender
         drain = self._queue_drain_tasks.get(session_id)
         if not sender or (drain is not None and not drain.done()):
             return
-        self._queue_drain_tasks[session_id] = asyncio.get_running_loop().create_task(
-            self._drain_queue(session_id, sender)
-        )
+        task = asyncio.get_running_loop().create_task(self._drain_queue(session_id, sender))
+        self._queue_drain_tasks[session_id] = task
+
+        def _forget(done: asyncio.Task) -> None:
+            # A cancel can land before the coroutine runs, so the drain cannot
+            # clear its own entry; a later drain may already hold the slot.
+            if self._queue_drain_tasks.get(session_id) is done:
+                del self._queue_drain_tasks[session_id]
+
+        task.add_done_callback(_forget)
 
     async def _drain_queue(self, session_id: str, sender: QueuedMessageSender) -> None:
         while (entry := self._store.take_queued_message(session_id)) is not None:
             try:
-                await sender(session_id, entry)
+                started = await sender(session_id, entry)
             except Exception:
                 logger.exception("Queued message '%s' for session '%s' was dropped", entry["id"], session_id)
-        self._queue_drain_tasks.pop(session_id, None)
+                continue
+            if not started:
+                self._store.requeue_message(session_id, entry)
+                return
 
     def add_completion_listener(self, callback: NotifyCallback) -> None:
         """Register a session-completion listener. Idempotent."""

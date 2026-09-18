@@ -1,7 +1,7 @@
 """JSONL UI handler for subprocess-based subagent communication."""
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from tsugite.events import (
     CodeExecutionEvent,
@@ -32,6 +32,7 @@ from tsugite.events import (
     ToolResultEvent,
     WarningEvent,
 )
+from tsugite.events.base import BaseEvent
 from tsugite.ui.dispatch import EventDispatchMixin, handles
 
 # Event types that share the same file-io payload shape
@@ -72,6 +73,17 @@ class JSONLUIHandler(EventDispatchMixin):
     - Successful tool: {"type": "tool_result", "tool": "read_file", "success": true, "output": "..."}
     - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
     """
+
+    has_final = False
+    latest_prompt_messages: Optional[list] = None
+
+    def handle_event(self, event: BaseEvent) -> None:
+        if isinstance(event, PromptSnapshotEvent):
+            if event.messages:
+                self.latest_prompt_messages = event.messages
+            if not event.token_breakdown:
+                return
+        super().handle_event(event)
 
     @handles(TaskStartEvent)
     def _handle_task_start(self, event: TaskStartEvent) -> None:
@@ -132,6 +144,7 @@ class JSONLUIHandler(EventDispatchMixin):
 
     @handles(FinalAnswerEvent)
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
+        self.has_final = True
         self._emit(
             "final_result",
             {
