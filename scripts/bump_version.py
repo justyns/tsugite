@@ -5,6 +5,7 @@ Updates:
   - pyproject.toml: project.version
   - plugins/*/pyproject.toml: project.version AND the tsugite-cli== pin in
     project.dependencies
+  - uv.lock, via `uv lock`
 
 Plain regex on single lines so formatting and comments are preserved.
 
@@ -15,6 +16,7 @@ Usage:
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,6 +64,17 @@ def _write(path: Path, before: str, after: str, dry_run: bool, label: str) -> No
     print(f"  updated: {rel} ({label})")
 
 
+def refresh_lock(dry_run: bool) -> None:
+    """Re-resolve uv.lock so the workspace versions it pins match the bump."""
+    if dry_run:
+        print("  would run: uv lock")
+        return
+    lock = REPO_ROOT / "uv.lock"
+    before = lock.read_text()
+    subprocess.run(["uv", "lock"], cwd=REPO_ROOT, check=True, capture_output=True)
+    print(f"  {'updated' if lock.read_text() != before else 'unchanged'}: uv.lock")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("version", help="New version (PEP 440 format, e.g. 0.14.0)")
@@ -78,13 +91,18 @@ def main() -> int:
         print("  no plugins found under plugins/")
     for plugin in plugins:
         bump_plugin(plugin, args.version, args.dry_run)
+    refresh_lock(args.dry_run)
 
     if not args.dry_run:
+        # origin is Forgejo and runs no release CI; the tag has to reach github.
+        # Pushing master first lets CI vet the commit before the tag publishes to PyPI.
         print("\nNext steps:")
-        print("  git diff                          # review changes")
-        print(f"  git commit -am 'chore: bump version to {args.version}'")
-        print(f"  git tag v{args.version}")
-        print("  git push origin master --tags     # triggers PyPI + GitHub release")
+        print("  git diff                                      # review changes")
+        print("  git add -u")
+        print(f"  git commit -m 'chore: bump version to {args.version}'")
+        print(f"  git tag -a v{args.version} -m v{args.version}")
+        print("  git push origin master && git push github master")
+        print(f"  # once github CI is green: git push origin v{args.version} && git push github v{args.version}")
     return 0
 
 
