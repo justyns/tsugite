@@ -36,8 +36,8 @@ jobs:
           cache: npm
           cache-dependency-path: plugins/tsugite-daemon/frontend/package-lock.json
 
-      # The web UI dist is gitignored build output; the tsugite-daemon wheel
-      # bundles it (hatch `artifacts`), so it must exist before packaging.
+      # The web UI dist is gitignored build output. The tsugite-daemon wheel
+      # bundles it (hatch `artifacts`), and it must exist before packaging.
       - name: Build web UI
         run: npm ci && npm run build
         working-directory: plugins/tsugite-daemon/frontend
@@ -50,9 +50,10 @@ jobs:
         # registered separately on PyPI as a trusted publisher pointing at this workflow.
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # Tolerate partial re-runs: if some packages of a version are already
-          # uploaded (e.g. one package's trusted publisher wasn't registered yet
-          # and was fixed), skip those instead of erroring on the duplicate.
+          # skip-existing tolerates partial re-runs. If some packages of a
+          # version are already uploaded (one package's trusted publisher
+          # wasn't registered yet and was fixed, say), this skips those
+          # instead of erroring on the duplicate.
           skip-existing: true
 
       - name: Generate release notes from conventional commits
@@ -63,13 +64,14 @@ jobs:
           args: --latest --strip header
 
       - name: Create GitHub release
-        # Only on a real tag push; a manual workflow_dispatch on a branch has no
-        # tag for the release to attach to.
+        # Only on a real tag push. A manual workflow_dispatch on a branch has
+        # no tag for the release to attach to.
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.changelog.outputs.content }}
-          files: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/*.publish.attestation
+          # TODO: Do I want to readd this?
+          # files: |
+          #   dist/*.whl
+          #   dist/*.tar.gz
+          #   dist/*.publish.attestation
