@@ -1559,6 +1559,9 @@ class SessionStore:
 
     def session_detail(self, session_id: str) -> dict:
         session = self.get_session(session_id)
+        # `deferred_deliveries` rides through unfiltered, full card content and all:
+        # a delivery card is meant to be visible before it lands, unlike a pending
+        # or queued entry's raw text.
         result = {k: v for k, v in asdict(session).items() if k != "queued_messages"}
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary

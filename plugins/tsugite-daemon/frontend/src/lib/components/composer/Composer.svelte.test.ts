@@ -314,8 +314,8 @@ test('mid-turn Enter with an empty draft still stops', async () => {
 });
 
 test('the Queue button shows only mid-turn, disables on empty, and sends', async () => {
-  // Mid-turn the primary button is Stop, so this is a mouse user's only way to
-  // add to the queue.
+  // Mid-turn the primary button is Stop, leaving the Queue button as a mouse
+  // user's only way to add to the queue.
   const onSend = vi.fn();
   const idle = await render(Composer, { streaming: false, onSend });
   expect(idle.container.querySelector('[data-act="queue"]')).toBeNull();
@@ -539,7 +539,7 @@ test('a fast second Enter after queueing does not stop the turn either', async (
   await userEvent.keyboard('{Enter}');
   expect(onSend).toHaveBeenCalledWith('follow-up question');
 
-  // The mid-turn send clears the draft, so the next Enter would otherwise fall
+  // The mid-turn send clears the draft. Without a guard, the next Enter falls
   // through to the stop branch.
   await userEvent.keyboard('{Enter}');
   expect(onStop).not.toHaveBeenCalled();

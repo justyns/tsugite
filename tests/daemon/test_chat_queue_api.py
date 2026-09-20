@@ -184,6 +184,31 @@ class TestTheTurnEnding:
         assert _sent_messages(adapter) == ["and also check the logs"]
         assert adapter.session_store.get_session(sid).queued_messages == []
 
+    async def test_a_failed_flush_does_not_broadcast_the_entry_as_gone(self, adapter, client, broadcasts):
+        """A failing `_build_send_metadata` must not tell every client the message
+        left the queue before it actually did."""
+        sid = _busy_session(adapter)
+        await _send(client, sid, "and also check the logs")
+
+        with patch(
+            "tsugite_daemon.adapters.http.agents._build_send_metadata",
+            side_effect=RuntimeError("boom"),
+        ):
+            adapter.session_store.end_turn(sid)
+            await asyncio.sleep(0.05)
+
+        assert adapter.handle_message.await_count == 0
+        assert [e["text"] for e in adapter.session_store.get_session(sid).queued_messages] == [
+            "and also check the logs"
+        ]
+        updates = [p for n, p in broadcasts if n == "session_update" and p.get("action") == "queued"]
+        assert [q["text"] for q in updates[-1]["queued"]] == ["and also check the logs"]
+
+        adapter.session_store.end_turn(sid)
+
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+        assert adapter.session_store.get_session(sid).queued_messages == []
+
     async def test_two_queued_messages_keep_arrival_order(self, adapter, client):
         sid = _busy_session(adapter)
 

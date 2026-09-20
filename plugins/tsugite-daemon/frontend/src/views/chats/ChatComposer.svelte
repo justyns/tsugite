@@ -207,9 +207,9 @@
   // to inline (never discard the text); re-subscribes as the prompt opens/closes.
   $effect(() => attach.installPasteDismiss());
 
-  // A /command does not join the conversation and carries no context, so it
-  // dispatches immediately. A plain message gathers any context first and sends
-  // it as structured metadata, leaving the message text untouched.
+  // A /command does not join the conversation and includes no context. It
+  // dispatches immediately. A plain message gathers any context first and
+  // sends it as structured metadata, leaving the message text untouched.
   async function handleSend(text: string) {
     if (/^\s*\//.test(text)) {
       void slash.dispatchCommand(text);

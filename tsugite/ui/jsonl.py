@@ -74,7 +74,7 @@ class JSONLUIHandler(EventDispatchMixin):
     - Failed tool: {"type": "tool_result", "tool": "read_file", "success": false, "error": "..."}
     """
 
-    has_final = False
+    final_seen = False
     latest_prompt_messages: Optional[list] = None
 
     def handle_event(self, event: BaseEvent) -> None:
@@ -144,7 +144,7 @@ class JSONLUIHandler(EventDispatchMixin):
 
     @handles(FinalAnswerEvent)
     def _handle_final_answer(self, event: FinalAnswerEvent) -> None:
-        self.has_final = True
+        self.final_seen = True
         self._emit(
             "final_result",
             {

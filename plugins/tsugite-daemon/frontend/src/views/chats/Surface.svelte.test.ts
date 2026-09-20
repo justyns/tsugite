@@ -9,6 +9,7 @@ import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
 import { api } from '$lib/api/client';
 import { routeHistory } from '$lib/router.svelte';
 import { sessionRow as row } from './__fixtures__/sessionRow';
+import { toasts } from '$lib/components/feedback/toast-store.svelte';
 
 const realGetInfo = sessions.getInfo.bind(sessions);
 
@@ -279,11 +280,33 @@ test('the queued chips come from the session row, and removing one dequeues it s
 
   await expect.element(page.getByText('and also check the logs')).toBeInTheDocument();
   await expect.element(page.getByText('then summarize')).toBeInTheDocument();
-  // The chip's remove control is an icon sized by the global stylesheet, which a
-  // component test does not load, so it has no hit box to click.
+  // The chip's remove control is an icon sized by the global stylesheet. A
+  // component test does not load that stylesheet, leaving the icon with no
+  // hit box to click here.
   const remove = document.querySelector<HTMLButtonElement>('.queuedrow .t-chip:nth-of-type(2) .x');
   remove!.click();
   expect(del).toHaveBeenCalledWith('/api/chat/sessions/session-queued/queue/q-0b9a1d34');
+});
+
+test('a failed dequeue toasts an error instead of throwing unhandled', async () => {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [
+    row('session-queued', {
+      busy: true,
+      queued: [{ id: 'q-f210f2cc', text: 'and also check the logs' }],
+    }),
+  ];
+  vi.spyOn(api, 'del').mockRejectedValue(new Error('404'));
+  toasts.items = [];
+  render(Surface, { params: { sessionId: 'session-queued' } });
+  await expect.element(page.getByText('and also check the logs')).toBeInTheDocument();
+
+  const remove = document.querySelector<HTMLButtonElement>('.queuedrow .t-chip .x');
+  remove!.click();
+  await vi.waitFor(() => expect(toasts.items).not.toHaveLength(0));
+
+  expect(toasts.items[0]).toMatchObject({ variant: 'err' });
 });
 
 test('removing a chip targets the queued message by id, not by its position at render', async () => {

@@ -116,6 +116,29 @@
   let ta = $state<HTMLTextAreaElement>();
   let root: HTMLDivElement | undefined;
 
+  const sendButton = $derived.by(() =>
+    streaming
+      ? ({
+          variant: 'danger',
+          dataAct: 'stop',
+          icon: 'stop',
+          ariaLabel: 'Stop streaming',
+          label: 'Stop',
+        } as const)
+      : ({
+          variant: 'pri',
+          dataAct: 'send',
+          icon: 'send',
+          ariaLabel: 'Send message',
+          label: 'Send',
+        } as const),
+  );
+
+  function handleSendClick() {
+    if (streaming) stopIfArmed();
+    else submit();
+  }
+
   // Auto-grow: the textarea tracks its content height (floor = the `rows`
   // baseline, ceiling = the CSS max-height; past the ceiling it scrolls).
   // Measured with the transient height:auto trick - synchronous, so nothing
@@ -326,7 +349,7 @@
       // Mid-turn Enter sends when there is a draft. With nothing typed it stops,
       // unless the send that emptied the draft just happened.
       if (streaming && !canSend) stopIfArmed();
-      else submit(onSend);
+      else submit();
       return;
     }
     if (e.key === 'Escape' && streaming && !showPopover) {
@@ -335,9 +358,9 @@
     }
   }
 
-  function submit(cb?: (text: string) => void) {
+  function submit() {
     if (!canSend) return;
-    cb?.(value.trim());
+    onSend?.(value.trim());
     value = '';
     lastSubmitAt = Date.now();
     mention.open = false;
@@ -501,21 +524,19 @@
         data-act="queue"
         aria-label="Queue message for after this turn"
         disabled={!canSend}
-        onclick={() => submit(onSend)}
+        onclick={() => submit()}
       >
         {#snippet icon()}<Icon name="clock" />{/snippet}Queue
       </Button>
     {/if}
     <Button
       size="sm"
-      variant={streaming ? 'danger' : 'pri'}
-      data-act={streaming ? 'stop' : 'send'}
-      aria-label={streaming ? 'Stop streaming' : 'Send message'}
-      onclick={() => (streaming ? stopIfArmed() : submit(onSend))}
+      variant={sendButton.variant}
+      data-act={sendButton.dataAct}
+      aria-label={sendButton.ariaLabel}
+      onclick={handleSendClick}
     >
-      {#snippet icon()}<Icon name={streaming ? 'stop' : 'send'} />{/snippet}{streaming
-        ? 'Stop'
-        : 'Send'}
+      {#snippet icon()}<Icon name={sendButton.icon} />{/snippet}{sendButton.label}
     </Button>
   </div>
 </div>

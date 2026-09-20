@@ -65,7 +65,8 @@ def chain_depth_scope(depth: int):
         _current_chain_depth.set(previous)
 
 
-# Transient events that reach live subscribers but not the JSONL event log.
+# Reach live subscribers but skip the JSONL log. llm_wait_progress is a
+# high-frequency heartbeat. session_info is derived state recomputed on load.
 _TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress", "session_info"})
 
 

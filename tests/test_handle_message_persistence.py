@@ -164,7 +164,7 @@ def test_sse_broadcast_handler_persists_final_result():
 
     handler.handle_event(FinalAnswerEvent(answer="all done", turns=1, tokens=10, cost=0.0))
 
-    assert handler.has_final
+    assert handler.final_seen
     assert any(p.get("type") == "final_result" for p in persisted)
 
 

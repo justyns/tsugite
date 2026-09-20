@@ -213,11 +213,12 @@ class AgentsMixin:
 
     def _session_busy(self, session) -> bool:
         """The one definition of busy, shared by the sessions payload, /status,
-        and the /chat busy check - the server must never queue a send while
-        reporting the session idle. True when the store reports durable live
-        work (an in-flight turn, or a background/scheduled run) OR a live HTTP
-        chat task exists (covers the brief window between task creation and
-        begin_turn, which only this layer can see)."""
+        and the /chat busy check - the server must never report a session idle
+        while it has durable live work. True when the store reports durable
+        live work (an in-flight turn, or a background/scheduled run) OR a live
+        HTTP chat task exists (covers the brief window between task creation
+        and begin_turn, which only this layer can see). /chat routes a send to
+        the queue on a broader condition than this alone - see `_queue_chat`."""
         if session.has_live_work:
             return True
         return any(
@@ -870,7 +871,9 @@ class AgentsMixin:
         uploaded_files: list,
         context_metadata,
     ) -> JSONResponse:
-        """Park a send aimed at a busy session, holding the raw request body fields."""
+        """Park a send that must wait for the queue to drain - the target session
+        is busy, or idle with an earlier entry already parked - holding the raw
+        request body fields."""
         entry = {
             "id": f"q-{uuid4().hex[:8]}",
             "text": message,
@@ -941,7 +944,7 @@ class AgentsMixin:
                 logger.info("-> %s (http): %s", user_id, (response or "")[:100])
                 # FinalAnswerEvent fires during handle_message for a normal
                 # completion, but not for max_turns or an error.
-                if not progress.has_final:
+                if not progress.final_seen:
                     progress._emit("final_result", {"result": response})
 
                 self.event_bus.emit("agent_status", {})
@@ -994,7 +997,6 @@ class AgentsMixin:
         if self.gateway and self.gateway.restart_requested:
             return False
         adapter = self.adapter
-        self._broadcast_queue(session_id)
         raw_user_id = entry["user_id"]
         message, metadata = _build_send_metadata(
             adapter,
@@ -1014,6 +1016,7 @@ class AgentsMixin:
             metadata=metadata,
             progress=LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus),
         )
+        self._broadcast_queue(session_id)
         # asyncio.wait does not re-raise the task's CancelledError.
         await asyncio.wait([chat_state.task])
         return True

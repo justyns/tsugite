@@ -856,7 +856,7 @@ test('a mid-turn send leaves the running turn abortable until its own stream ope
   openStream();
   await ctrl.send('and also check the logs');
 
-  // Nothing has come back for the second send yet, so the live turn's stream is
+  // Nothing has come back for the second send yet. The live turn's stream is
   // still the one closeStream() has to abort.
   ctrl.closeStream();
   expect(chat.sends[0]!.handle.close).toHaveBeenCalledTimes(1);

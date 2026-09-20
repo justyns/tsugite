@@ -727,14 +727,14 @@ class DiscordAdapter(BaseAdapter):
                 custom_logger=custom_logger,
             )
             await progress.cleanup(success=True)
-            if not sse_handler.has_final:
+            if not sse_handler.final_seen:
                 sse_handler._emit("final_result", {"result": response})
 
         except Exception as e:
             await progress.cleanup(success=False)
             response = f"Error processing message: {e}"
             logger.error("[%s] %s", bot_name, e, exc_info=True)
-            if not sse_handler.has_final:
+            if not sse_handler.final_seen:
                 sse_handler._emit("error", {"error": str(e)})
         finally:
             # Remove from active handlers after cleanup

@@ -1,7 +1,7 @@
 /**
  * Per-surface chat stream helper. A send POSTs /api/chat. The daemon parks the
  * message (202) when the session is busy, and otherwise answers with an SSE
- * stream OWNED by this surface - it carries the turn-end and streaming frames
+ * stream OWNED by this surface - it includes the turn-end and streaming frames
  * (final_result/error/cancelled/stream_chunk) that the cross-session broadcast
  * deliberately withholds, so whichever surface ran the send is the only one
  * that sees them live.

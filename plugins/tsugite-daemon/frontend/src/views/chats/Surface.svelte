@@ -213,6 +213,14 @@
     }
   }
 
+  async function dequeueMessage(sessionId: string, queueId: string) {
+    try {
+      await sessions.dequeueMessage(sessionId, queueId);
+    } catch {
+      toasts.push('err', 'Could not remove the queued message');
+    }
+  }
+
   // OS file drag/drop onto the whole surface (conversation + composer), funneled
   // into the composer's attach pipeline. Only file drags are handled: internal
   // rail-to-mux drags carry a private MIME (never `Files`), so they pass straight
@@ -317,7 +325,7 @@
       restoreFailed={ctrl.sendFailed}
       {onSend}
       onStop={() => void ctrl.stop()}
-      onUnqueue={(id) => selectedId && void sessions.dequeueMessage(selectedId, id)}
+      onUnqueue={(id) => selectedId && void dequeueMessage(selectedId, id)}
       onCommandResult={(command, output, ok, action) => ctrl.pushEcho(command, output, ok, action)}
     />
   {:else if jobArtifact}
