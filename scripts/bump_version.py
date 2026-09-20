@@ -71,7 +71,7 @@ def refresh_lock(dry_run: bool) -> None:
         return
     lock = REPO_ROOT / "uv.lock"
     before = lock.read_text()
-    subprocess.run(["uv", "lock"], cwd=REPO_ROOT, check=True, capture_output=True)
+    subprocess.run(["uv", "lock"], cwd=REPO_ROOT, check=True)
     print(f"  {'updated' if lock.read_text() != before else 'unchanged'}: uv.lock")
 
 
@@ -94,7 +94,7 @@ def main() -> int:
     refresh_lock(args.dry_run)
 
     if not args.dry_run:
-        # origin is Forgejo and runs no release CI; the tag has to reach github.
+        # origin is Forgejo and runs no release CI. The tag has to reach GitHub.
         # Pushing master first lets CI vet the commit before the tag publishes to PyPI.
         print("\nNext steps:")
         print("  git diff                                      # review changes")
