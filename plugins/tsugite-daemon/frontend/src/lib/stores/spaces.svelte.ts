@@ -183,6 +183,10 @@ function dockedTabs(layout: Layout): PaneTabModel[] {
   return collectLeaves(layout.root).flatMap((leaf) => leaf.tabs);
 }
 
+function artifactIdentity(tab: PaneTabModel): string {
+  return `${tab.params.id}\u0000${tab.params.sessionId ?? ''}`;
+}
+
 /** Trailing debounce for layout writes - coalesces a drag's mutation burst. */
 const PERSIST_DEBOUNCE_MS = 150;
 
@@ -229,10 +233,19 @@ export class SpacesStore {
   private applyClosing(fn: (layout: Layout) => Layout): void {
     const before = dockedTabs(this.active.layout);
     this.apply(fn);
-    const kept = new Set(this.spaces.flatMap((s) => dockedTabs(s.layout)).map((t) => t.id));
+    const after = this.spaces.flatMap((s) => dockedTabs(s.layout));
+    const kept = new Set(after.map((t) => t.id));
+    const keptArtifacts = new Set(
+      after.filter((t) => t.kind === 'artifact' && t.params.id).map(artifactIdentity),
+    );
     for (const tab of before) {
       const id = tab.params.id;
-      if (tab.kind === 'artifact' && id && !kept.has(tab.id))
+      if (
+        tab.kind === 'artifact' &&
+        id &&
+        !kept.has(tab.id) &&
+        !keptArtifacts.has(artifactIdentity(tab))
+      )
         artifacts.close(id, tab.params.sessionId ?? null);
     }
   }
@@ -268,19 +281,29 @@ export class SpacesStore {
   openBeside(ref: SurfaceRef, dir: SplitDir = 'row'): void {
     this.apply((l) => openBeside(l, ref, dir));
   }
-  /** Undock `ref`, wherever it is docked - a surface dismissing itself, which
-   *  knows its own identity but not which pane it landed in. An artifact keeps
-   *  its store record here. The shell also undocks a background session's
-   *  artifact pane, which re-opens when that session is focused again. */
-  closeSurface(ref: SurfaceRef): void {
+  /** Hides a background session's artifact pane, keeping its record, so the pane
+   *  returns on that session's next focus. To close its own tab, a surface calls
+   *  closeSurfaceTab. */
+  closeSurface(ref: SurfaceRef): boolean {
     const key = surfaceKey(ref);
     for (const leaf of collectLeaves(this.active.layout.root)) {
       const tab = leaf.tabs.find((t) => surfaceKey(t) === key);
       if (tab) {
         this.apply((l) => closeTab(l, leaf.id, tab.id));
-        return;
+        return true;
       }
     }
+    return false;
+  }
+  /** Two tabs can share one surface key, so closing goes by tab id. */
+  closeSurfaceTab(tabId: string): boolean {
+    for (const leaf of collectLeaves(this.active.layout.root)) {
+      if (leaf.tabs.some((t) => t.id === tabId)) {
+        this.closeTab(leaf.id, tabId);
+        return true;
+      }
+    }
+    return false;
   }
   /** Rename a docked tab from the surface mounted in it (a plugin surface titling
    *  itself over the bridge). A plugin may push a title per internal navigation,

@@ -608,6 +608,7 @@
                       <Surface
                         params={tab.params}
                         kind={tab.kind}
+                        tabId={tab.id}
                         setTitle={(title) => spaces.retitleTab(tab.id, title)}
                         setParams={(params) => spaces.retargetTab(tab.id, params)}
                         {focusPane}

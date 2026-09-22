@@ -25,8 +25,13 @@
 
   let {
     params,
+    tabId,
     setTitle,
-  }: { params?: Record<string, string>; setTitle?: (title: string) => void } = $props();
+  }: {
+    params?: Record<string, string>;
+    tabId?: string;
+    setTitle?: (title: string) => void;
+  } = $props();
 
   const id = $derived(params?.id ?? '');
   const sessionId = $derived(params?.sessionId ?? null);
@@ -90,10 +95,8 @@
   }
 
   function dismiss() {
-    if (!id) return;
-    // Drop the record first, so a stale pane can never outlive it.
-    artifacts.close(id, sessionId);
-    spaces.closeSurface({ kind: 'artifact', params: params ?? {} });
+    if (!tabId) return;
+    spaces.closeSurfaceTab(tabId);
   }
 </script>
 

@@ -16,6 +16,7 @@ import ArtifactSurface from './artifacts/Surface.svelte';
 export type SurfaceProps = {
   params?: Record<string, string>;
   kind?: string;
+  tabId?: string;
   /** Rename the tab this surface is mounted in; only the host that owns a tab
    *  supplies it, so a surface can never address another tab. */
   setTitle?: (title: string) => void;
