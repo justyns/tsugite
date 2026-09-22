@@ -432,10 +432,85 @@ describe('closing an artifact tab', () => {
       title: artifact.title,
     });
 
-    store.closeSurface({ kind: 'artifact', params: artifactSurfaceParams(artifact) });
+    expect(store.closeSurface({ kind: 'artifact', params: artifactSurfaceParams(artifact) })).toBe(
+      true,
+    );
 
     const kinds = collectLeaves(store.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
     expect(kinds).not.toContain('artifact');
+    expect(artifacts.get('agent', 'sess-a')?.title).toBe('notes.md');
+  });
+
+  test('closeSurface reports false when nothing matches', () => {
+    const store = new SpacesStore();
+    const artifact = record('sess-a');
+    expect(store.closeSurface({ kind: 'artifact', params: artifactSurfaceParams(artifact) })).toBe(
+      false,
+    );
+  });
+
+  test('closeSurfaceTab closes the exact duplicate it names, leaving its sibling and their shared artifact', () => {
+    const store = new SpacesStore();
+    const artifact = record('sess-a');
+    const ref = {
+      kind: 'artifact',
+      params: artifactSurfaceParams(artifact),
+      title: artifact.title,
+    };
+    store.openBeside(ref);
+    const leaves = () => collectLeaves(store.active.layout.root);
+    const artifactPane = leaves().find((l) => l.tabs.some((t) => t.kind === 'artifact'))!;
+    const otherPane = leaves().find((l) => l.id !== artifactPane.id)!;
+    // dockAsTab dedupes within a leaf, so a second pane is how a duplicate happens.
+    store.dock(otherPane.id, ref);
+
+    const duped = leaves()
+      .flatMap((l) => l.tabs)
+      .filter((t) => t.kind === 'artifact');
+    expect(duped).toHaveLength(2);
+    const [first, second] = duped;
+
+    expect(store.closeSurfaceTab(second!.id)).toBe(true);
+
+    const remaining = leaves().flatMap((l) => l.tabs.filter((t) => t.kind === 'artifact'));
+    expect(remaining.map((t) => t.id)).toEqual([first!.id]);
+    expect(artifacts.get('agent', 'sess-a')?.title).toBe('notes.md');
+  });
+
+  test('closeSurfaceTab drops the artifact once its last tab closes', () => {
+    const store = new SpacesStore();
+    const { tab } = dockArtifact(store, 'sess-a');
+
+    expect(store.closeSurfaceTab(tab)).toBe(true);
+
+    expect(artifacts.get('agent', 'sess-a')).toBeUndefined();
+  });
+
+  test('closeSurfaceTab reports false for a tab id that is not docked', () => {
+    const store = new SpacesStore();
+    expect(store.closeSurfaceTab('not-a-real-tab')).toBe(false);
+  });
+
+  test('closeSurfaceTab keeps the artifact alive when a duplicate is docked in another space', () => {
+    const store = new SpacesStore();
+    const { tab } = dockArtifact(store, 'sess-a');
+    const artifact = artifacts.get('agent', 'sess-a')!;
+    const ref = {
+      kind: 'artifact',
+      params: artifactSurfaceParams(artifact),
+      title: artifact.title,
+    };
+    const first = store.activeSpaceId;
+    store.addSpace('Second');
+    store.dock(collectLeaves(store.active.layout.root)[0]!.id, ref);
+    store.setActive(first);
+
+    expect(store.closeSurfaceTab(tab)).toBe(true);
+
+    const remainingInFirst = collectLeaves(store.active.layout.root).flatMap((leaf) =>
+      leaf.tabs.filter((t) => t.id === tab),
+    );
+    expect(remainingInFirst).toHaveLength(0);
     expect(artifacts.get('agent', 'sess-a')?.title).toBe('notes.md');
   });
 });

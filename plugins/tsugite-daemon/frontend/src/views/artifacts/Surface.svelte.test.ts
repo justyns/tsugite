@@ -17,6 +17,10 @@ beforeEach(async () => {
   WORKSPACE.reset();
   const { artifacts } = await import('$lib/stores/artifacts.svelte');
   artifacts.items = {};
+  const { spaces, defaultSpace } = await import('$lib/stores/spaces.svelte');
+  const fresh = defaultSpace();
+  spaces.spaces = [fresh];
+  spaces.activeSpaceId = fresh.id;
 });
 
 /** Feed the daemon's frame through the real store, as the shell sink does. */
@@ -48,9 +52,24 @@ async function frameDoc(): Promise<string> {
   return frameEl().srcdoc;
 }
 
-async function mount(id = 'agent', sessionId: string | null = 'sess-1') {
+async function mount(id = 'agent', sessionId: string | null = 'sess-1', tabId?: string) {
   const { default: Surface } = await import('./Surface.svelte');
-  return render(Surface, { props: { params: sessionId ? { id, sessionId } : { id } } });
+  return render(Surface, {
+    props: { params: sessionId ? { id, sessionId } : { id }, tabId },
+  });
+}
+
+async function dockArtifactTab(id = 'agent', sessionId: string | null = 'sess-1') {
+  const { spaces } = await import('$lib/stores/spaces.svelte');
+  const { collectLeaves } = await import('$lib/shell/mux/layout');
+  const rootPane = collectLeaves(spaces.active.layout.root)[0]!.id;
+  spaces.dock(rootPane, {
+    kind: 'artifact',
+    params: sessionId ? { id, sessionId } : { id },
+  });
+  return collectLeaves(spaces.active.layout.root)
+    .flatMap((l) => l.tabs)
+    .find((t) => t.kind === 'artifact')!.id;
 }
 
 test('a markdown artifact renders, badged as opened by the agent', async () => {
@@ -132,13 +151,56 @@ test('plain text opens as source with no rendered segment offered', async () => 
 
 test('the close control dismisses the artifact', async () => {
   const store = await openArtifact();
-  await mount();
+  const tabId = await dockArtifactTab();
+  await mount('agent', 'sess-1', tabId);
   await expect.element(page.getByTestId(TESTID.artifactPane)).toBeVisible();
 
   await page.getByTestId(TESTID.artifactClose).click();
 
   expect(Object.keys(store.items)).toEqual([]);
   await expect.element(page.getByText(/no longer open/i)).toBeInTheDocument();
+  const { spaces } = await import('$lib/stores/spaces.svelte');
+  const { collectLeaves } = await import('$lib/shell/mux/layout');
+  const kinds = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+  expect(kinds).not.toContain('artifact');
+});
+
+test('closing one of two tabs sharing a surface key leaves the other tab and their shared artifact', async () => {
+  const store = await openArtifact();
+  const { spaces } = await import('$lib/stores/spaces.svelte');
+  const { collectLeaves } = await import('$lib/shell/mux/layout');
+  const keepTabId = await dockArtifactTab();
+  const rootPane = collectLeaves(spaces.active.layout.root)[0]!.id;
+  spaces.split(rootPane, 'row', { kind: 'chat', title: 'Chat' });
+  const chatPane = collectLeaves(spaces.active.layout.root).find((l) => l.id !== rootPane)!.id;
+  spaces.dock(chatPane, { kind: 'artifact', params: { id: 'agent', sessionId: 'sess-1' } });
+  const dupTabId = collectLeaves(spaces.active.layout.root)
+    .find((l) => l.id === chatPane)!
+    .tabs.find((t) => t.kind === 'artifact')!.id;
+
+  await mount('agent', 'sess-1', dupTabId);
+  await page.getByTestId(TESTID.artifactClose).click();
+
+  const remaining = collectLeaves(spaces.active.layout.root).flatMap((l) =>
+    l.tabs.filter((t) => t.kind === 'artifact'),
+  );
+  expect(remaining.map((t) => t.id)).toEqual([keepTabId]);
+  expect(store.get('agent', 'sess-1')?.title).toBe('alpha.md');
+});
+
+test('the close control still undocks a pane whose artifact record already expired', async () => {
+  const store = await openArtifact();
+  const tabId = await dockArtifactTab();
+  store.close('agent', 'sess-1');
+  await mount('agent', 'sess-1', tabId);
+  await expect.element(page.getByText(/no longer open/i)).toBeInTheDocument();
+
+  await page.getByTestId(TESTID.artifactClose).click();
+
+  const { spaces } = await import('$lib/stores/spaces.svelte');
+  const { collectLeaves } = await import('$lib/shell/mux/layout');
+  const kinds = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs.map((t) => t.kind));
+  expect(kinds).not.toContain('artifact');
 });
 
 test('a slot with no record explains itself instead of rendering blank', async () => {
