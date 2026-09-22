@@ -78,6 +78,13 @@
 
   let value = $state('');
 
+  // The library Composer's Stop/Queue affordances key off this session's turn
+  // being in flight at all - `busy` alone, since `streaming` (this tab's own
+  // SSE stream) goes false on a session switch and never returns even though
+  // the turn is still running server-side.
+  const composerBusy = $derived(streaming || busy);
+  const queuedNotStreaming = $derived(busy && !streaming);
+
   // Client-context chips, the "add context" menu, and the @ reference sources.
   const context = new ContextItems({
     get sessionId() {
@@ -315,8 +322,8 @@
     bind:this={composerEl}
     bind:value
     {dense}
-    {streaming}
-    queued={busy && !streaming}
+    busy={composerBusy}
+    queued={queuedNotStreaming}
     attachments={attach.attachments}
     contextItems={context.contextChips}
     contextMenu={context.contextMenu}
@@ -332,7 +339,7 @@
     onPickRef={context.pickRef}
     onRemoveAttachment={attach.removeAttachment}
     onRemoveContext={context.removeContext}
-    hint={busy && !streaming ? 'queued — sends when this turn finishes' : undefined}
+    hint={queuedNotStreaming ? 'queued, sends when this turn finishes' : undefined}
     onKeydown={slash.onComposerKeydown}
     onPaste={attach.onPaste}
   />

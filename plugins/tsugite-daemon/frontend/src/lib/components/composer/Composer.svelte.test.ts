@@ -280,11 +280,11 @@ test('Shift+Enter does not send', async () => {
   expect(onSend).not.toHaveBeenCalled();
 });
 
-test('while streaming the send button becomes Stop and triggers onStop', async () => {
+test('while busy the send button becomes Stop and triggers onStop', async () => {
   const onSend = vi.fn();
   const onStop = vi.fn();
-  render(Composer, { streaming: true, value: 'work in progress', onSend, onStop });
-  const stop = page.getByRole('button', { name: 'Stop streaming' });
+  render(Composer, { busy: true, value: 'work in progress', onSend, onStop });
+  const stop = page.getByRole('button', { name: 'Stop the turn' });
   await expect.element(stop).toBeInTheDocument();
   await userEvent.click(stop);
   expect(onStop).toHaveBeenCalledTimes(1);
@@ -294,7 +294,7 @@ test('while streaming the send button becomes Stop and triggers onStop', async (
 test('mid-turn Enter with a draft sends it instead of stopping', async () => {
   const onStop = vi.fn();
   const onSend = vi.fn();
-  render(Composer, { streaming: true, onStop, onSend });
+  render(Composer, { busy: true, onStop, onSend });
   const box = page.getByRole('textbox', { name: 'Message' });
   await userEvent.fill(box, 'follow-up question');
   await userEvent.keyboard('{Enter}');
@@ -306,7 +306,7 @@ test('mid-turn Enter with a draft sends it instead of stopping', async () => {
 test('mid-turn Enter with an empty draft still stops', async () => {
   const onStop = vi.fn();
   const onSend = vi.fn();
-  render(Composer, { streaming: true, onStop, onSend });
+  render(Composer, { busy: true, onStop, onSend });
   (page.getByRole('textbox', { name: 'Message' }).element() as HTMLElement).focus();
   await userEvent.keyboard('{Enter}');
   expect(onStop).toHaveBeenCalledTimes(1);
@@ -317,11 +317,11 @@ test('the Queue button shows only mid-turn, disables on empty, and sends', async
   // Mid-turn the primary button is Stop, leaving the Queue button as a mouse
   // user's only way to add to the queue.
   const onSend = vi.fn();
-  const idle = await render(Composer, { streaming: false, onSend });
+  const idle = await render(Composer, { busy: false, onSend });
   expect(idle.container.querySelector('[data-act="queue"]')).toBeNull();
   idle.unmount();
 
-  render(Composer, { streaming: true, onSend });
+  render(Composer, { busy: true, onSend });
   const queueBtn = page.getByRole('button', { name: 'Queue message for after this turn' });
   await expect.element(queueBtn).toBeDisabled();
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'next task');
@@ -506,7 +506,7 @@ test('a fast second Enter after sending does not stop the turn it just started',
 
   // The host flips to streaming as the turn starts, so the second Enter of an
   // accidental double-tap lands on the freshly rendered Stop.
-  await screen.rerender({ streaming: true, onSend, onStop });
+  await screen.rerender({ busy: true, onSend, onStop });
   await userEvent.keyboard('{Enter}');
   expect(onStop).not.toHaveBeenCalled();
 });
@@ -517,7 +517,7 @@ test('Enter stops the turn once the guard window has passed', async () => {
   const screen = await render(Composer, { onSend, onStop });
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'run the suite');
   await userEvent.keyboard('{Enter}');
-  await screen.rerender({ streaming: true, onSend, onStop });
+  await screen.rerender({ busy: true, onSend, onStop });
 
   // Fake only Date: the guard reads the clock but schedules nothing, and leaving
   // setTimeout real keeps userEvent's own scheduling intact.
@@ -534,7 +534,7 @@ test('Enter stops the turn once the guard window has passed', async () => {
 test('a fast second Enter after queueing does not stop the turn either', async () => {
   const onSend = vi.fn();
   const onStop = vi.fn();
-  render(Composer, { streaming: true, onSend, onStop });
+  render(Composer, { busy: true, onSend, onStop });
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'follow-up question');
   await userEvent.keyboard('{Enter}');
   expect(onSend).toHaveBeenCalledWith('follow-up question');
@@ -551,7 +551,7 @@ test('Escape stops the turn during the guard window', async () => {
   const screen = await render(Composer, { onSend, onStop });
   await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'run the suite');
   await userEvent.keyboard('{Enter}');
-  await screen.rerender({ streaming: true, onSend, onStop });
+  await screen.rerender({ busy: true, onSend, onStop });
 
   // The guard reads a repeated Enter as an accident; Escape is unambiguous.
   await userEvent.keyboard('{Escape}');
@@ -567,8 +567,8 @@ test('double-clicking Send does not stop the turn it just started', async () => 
 
   // Send and Stop are the same button element, so the second click of a
   // double-click lands on Stop once the host flips to streaming.
-  await screen.rerender({ streaming: true, value: '', onSend, onStop });
-  await userEvent.click(page.getByRole('button', { name: 'Stop streaming' }));
+  await screen.rerender({ busy: true, value: '', onSend, onStop });
+  await userEvent.click(page.getByRole('button', { name: 'Stop the turn' }));
   expect(onStop).not.toHaveBeenCalled();
 });
 

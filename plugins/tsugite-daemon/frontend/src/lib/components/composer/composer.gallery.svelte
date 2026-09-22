@@ -82,9 +82,9 @@
     </figure>
 
     <figure>
-      <figcaption>streaming — Send becomes Stop</figcaption>
+      <figcaption>busy: Send becomes Stop</figcaption>
       <div class="g-frame">
-        <Composer streaming value="add jitter to reconnect backoff" onSend={noop} onStop={noop} />
+        <Composer busy value="add jitter to reconnect backoff" onSend={noop} onStop={noop} />
       </div>
     </figure>
 

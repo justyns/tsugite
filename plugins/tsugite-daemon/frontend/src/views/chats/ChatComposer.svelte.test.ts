@@ -972,3 +972,48 @@ test('switching to an unrelated chat still resets the composer', async () => {
 
   await expect.element(box).toHaveValue('');
 });
+
+// ── busy-but-not-streaming (a session switch away from the tab that sent) ──
+
+test('server-busy but not streaming in this tab offers Stop (not a dead Send) plus Queue', async () => {
+  const onStop = vi.fn();
+  const { container } = await render(ChatComposer, {
+    ...base,
+    streaming: false,
+    busy: true,
+    onStop,
+  });
+
+  const stop = page.getByRole('button', { name: 'Stop the turn' });
+  await expect.element(stop).toBeInTheDocument();
+  expect(page.getByRole('button', { name: 'Send message' }).elements()).toHaveLength(0);
+  await expect
+    .element(page.getByRole('button', { name: 'Queue message for after this turn' }))
+    .toBeInTheDocument();
+  expect(container.querySelector('.composer')?.classList.contains('is-queued')).toBe(true);
+
+  // Stop cancels the turn server-side by session id, not through this tab's stream.
+  await userEvent.click(stop);
+  expect(onStop).toHaveBeenCalledTimes(1);
+});
+
+test('clicking Queue while server-busy (not streaming) sends the draft', async () => {
+  const onSend = vi.fn();
+  await render(ChatComposer, { ...base, streaming: false, busy: true, onSend });
+  await userEvent.fill(page.getByRole('textbox', { name: 'Message' }), 'follow-up while busy');
+  const queueBtn = page.getByRole('button', { name: 'Queue message for after this turn' });
+  await expect.element(queueBtn).toBeEnabled();
+  await queueBtn.click();
+
+  await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+  expect(onSend.mock.calls[0]?.[0]).toBe('follow-up while busy');
+});
+
+test('neither busy nor streaming shows a plain Send with no Queue button', async () => {
+  const { container } = await render(ChatComposer, { ...base, streaming: false, busy: false });
+  await expect.element(page.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
+  expect(
+    page.getByRole('button', { name: 'Queue message for after this turn' }).elements(),
+  ).toHaveLength(0);
+  expect(container.querySelector('.composer')?.classList.contains('is-queued')).toBe(false);
+});

@@ -31,7 +31,7 @@
   let {
     value = $bindable(''),
     placeholder = 'message tsugite · / for commands, ⇧⏎ for newline',
-    streaming = false,
+    busy = false,
     queued = false,
     dense = false,
     rows = 2,
@@ -59,8 +59,10 @@
   }: {
     value?: string;
     placeholder?: string;
-    /** Streaming turn in flight - flips the primary Send button to a danger Stop. */
-    streaming?: boolean;
+    /** A turn is in flight for this session - whether streaming in this tab or
+     *  running elsewhere - flips the primary Send button to a danger Stop and
+     *  shows the Queue button. */
+    busy?: boolean;
     /** Compact - the attach row shares the send row, the shortcut strip is off,
      *  and a hint replaces the placeholder instead of taking its own row. */
     dense?: boolean;
@@ -117,12 +119,12 @@
   let root: HTMLDivElement | undefined;
 
   const sendButton = $derived.by(() =>
-    streaming
+    busy
       ? ({
           variant: 'danger',
           dataAct: 'stop',
           icon: 'stop',
-          ariaLabel: 'Stop streaming',
+          ariaLabel: 'Stop the turn',
           label: 'Stop',
         } as const)
       : ({
@@ -135,7 +137,7 @@
   );
 
   function handleSendClick() {
-    if (streaming) stopIfArmed();
+    if (busy) stopIfArmed();
     else submit();
   }
 
@@ -348,11 +350,11 @@
       e.preventDefault();
       // Mid-turn Enter sends when there is a draft. With nothing typed it stops,
       // unless the send that emptied the draft just happened.
-      if (streaming && !canSend) stopIfArmed();
+      if (busy && !canSend) stopIfArmed();
       else submit();
       return;
     }
-    if (e.key === 'Escape' && streaming && !showPopover) {
+    if (e.key === 'Escape' && busy && !showPopover) {
       e.preventDefault();
       onStop?.();
     }
@@ -479,7 +481,7 @@
       </div>
     {/if}
     <span class="qnote">
-      <Icon name="clock" />queued — sends when this turn finishes
+      <Icon name="clock" />queued, sends when this turn finishes
     </span>
   </div>
 
@@ -517,7 +519,7 @@
     {@render leading?.()}
     {#if hint}<span class="hint">{hint}</span>{/if}
     <div class="grow"></div>
-    {#if streaming}
+    {#if busy}
       <Button
         size="sm"
         variant="ghost"
