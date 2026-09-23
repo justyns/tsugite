@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .base import ModelInfo, Usage
 
 _REGISTRY: dict[str, ModelInfo] = {}
@@ -22,11 +24,13 @@ def get_model_info(provider: str, model: str) -> ModelInfo | None:
     for reg_key, info in _REGISTRY.items():
         if not key.startswith(reg_key) or len(reg_key) <= best_len:
             continue
-        # Only treat the prefix as the same model when the remainder is a date/version
-        # continuation (e.g. "-20250805"), not a distinct variant ("-mini", "-turbo")
-        # — otherwise an unlisted variant silently inherits a sibling's pricing.
+        # Only treat the prefix as the same model when the remainder is a dated
+        # continuation (e.g. "-20250805", "-2024-05-13"), not a distinct variant
+        # ("-mini", "-turbo") or a point release ("-5"). An unlisted variant
+        # would otherwise silently inherit a sibling's pricing. A year is 4+
+        # digits, so require the digit run right after the dash to be that long.
         suffix = key[len(reg_key) :]
-        if suffix and not (suffix.startswith("-") and len(suffix) > 1 and suffix[1].isdigit()):
+        if suffix and not re.match(r"^-\d{4}", suffix):
             continue
         best_match = info
         best_len = len(reg_key)

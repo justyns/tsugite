@@ -91,3 +91,39 @@ def test_prefix_match_rejects_variants_but_allows_dated_versions():
         assert get_model_info("testreg", "o1-preview") is None
     finally:
         _REGISTRY.pop("testreg/o1", None)
+
+
+def test_prefix_match_rejects_point_release_but_allows_dated_version():
+    """A point release (`-5`) reads like a date continuation under a naive
+    `next char is a digit` check but is a distinct model, not the same one
+    pinned to a date. `claude-opus-5-5` must resolve to its own registered
+    entry, an unregistered sibling like `claude-opus-5-9` must fall through
+    to None rather than inherit `claude-opus-5`'s pricing, and a real dated
+    name must still prefix-match its base."""
+    from tsugite.providers.model_registry import _REGISTRY, get_model_info, register_model
+
+    info = _ANTHROPIC_MODELS["anthropic/claude-opus-5-5"]
+    assert info.input_cost_per_million == 4.0
+    assert info.output_cost_per_million == 20.0
+
+    register_model("testreg", "claude-opus-5", ModelInfo(input_cost_per_million=5.0, output_cost_per_million=25.0))
+    register_model("testreg", "claude-opus-5-5", ModelInfo(input_cost_per_million=4.0, output_cost_per_million=20.0))
+    try:
+        assert get_model_info("testreg", "claude-opus-5-5").input_cost_per_million == 4.0
+        assert get_model_info("testreg", "claude-opus-5-9") is None
+        assert get_model_info("testreg", "claude-opus-5-20260101").input_cost_per_million == 5.0
+    finally:
+        _REGISTRY.pop("testreg/claude-opus-5", None)
+        _REGISTRY.pop("testreg/claude-opus-5-5", None)
+
+
+def test_prefix_match_allows_dated_version_on_multi_segment_base():
+    """A base name that already ends in a point release (`claude-opus-4-5`)
+    must still prefix-match a date continuation on top of it."""
+    from tsugite.providers.model_registry import _REGISTRY, get_model_info, register_model
+
+    register_model("testreg", "claude-opus-4-5", ModelInfo(input_cost_per_million=5.0, output_cost_per_million=25.0))
+    try:
+        assert get_model_info("testreg", "claude-opus-4-5-20251101").input_cost_per_million == 5.0
+    finally:
+        _REGISTRY.pop("testreg/claude-opus-4-5", None)
