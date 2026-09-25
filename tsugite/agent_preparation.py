@@ -152,7 +152,8 @@ class AgentPreparer:
 
         A front-matter attachment defines its cache tier and replaces a same-named
         caller attachment. Legacy `-filename` string entries drop a same-named
-        entry. Front-matter paths render with `paths` and resolve against its CWD.
+        entry. Front-matter paths render with `paths` and resolve against the
+        workspace, or the CWD when the run has no workspace.
         """
         all_attachments = list(attachments or [])
 
@@ -160,7 +161,8 @@ class AgentPreparer:
         if removals:
             all_attachments = [a for a in all_attachments if a.name not in removals]
 
-        loaded, bindings = resolve_agent_config_attachments(keep_items, Path(paths["CWD"]), paths)
+        base = paths["WORKSPACE_DIR"] or paths["CWD"]
+        loaded, bindings = resolve_agent_config_attachments(keep_items, Path(base), paths)
         all_attachments = loaded + all_attachments
 
         seen_names: set[str] = set()

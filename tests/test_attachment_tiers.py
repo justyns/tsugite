@@ -167,3 +167,32 @@ def test_no_uploads_means_no_upload_blocks():
     agent = _bare_agent()
     agent.attachments = [_att("USER", 0)]
     assert agent._build_upload_blocks() == []
+
+
+# ── base directory for relative paths ──
+def test_relative_attachments_resolve_against_the_workspace(tmp_path):
+    """A run with `--root` has a CWD outside its workspace, and every agent's
+    relative attachment paths still name workspace files."""
+    from tsugite.agent_preparation import AgentPreparer
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "USER.md").write_text("from the workspace")
+    elsewhere = tmp_path / "root"
+    elsewhere.mkdir()
+    (elsewhere / "USER.md").write_text("from the root")
+
+    paths = {"CWD": str(elsewhere), "INVOKED_FROM": str(elsewhere), "WORKSPACE_DIR": str(workspace)}
+    atts, _ = AgentPreparer._resolve_attachments(object.__new__(AgentPreparer), _cfg(["USER.md"]), None, paths)
+
+    assert [a.content for a in atts] == ["from the workspace"]
+
+
+def test_attachments_fall_back_to_cwd_without_a_workspace(tmp_path):
+    from tsugite.agent_preparation import AgentPreparer
+
+    (tmp_path / "USER.md").write_text("from the cwd")
+    paths = {"CWD": str(tmp_path), "INVOKED_FROM": str(tmp_path), "WORKSPACE_DIR": None}
+    atts, _ = AgentPreparer._resolve_attachments(object.__new__(AgentPreparer), _cfg(["USER.md"]), None, paths)
+
+    assert [a.content for a in atts] == ["from the cwd"]
