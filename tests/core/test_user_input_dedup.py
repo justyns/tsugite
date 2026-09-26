@@ -6,8 +6,9 @@ turn that fails before producing a `model_response`, the daemon's post-hoc
 used to re-record the whole turn -- including a second identical `user_input`,
 which surfaced as a duplicate user bubble in the web UI. The two recorders share
 no in-memory flag, so the guard has to be derived from the session's own events:
-a turn runs from its `user_input` to its `session_end`, so an already-recorded
-`user_input` with no `session_end` after it belongs to the current turn.
+a turn runs from its `user_input` to its `session_end` or `final_result`, so an
+already-recorded `user_input` with no `session_end` or `final_result` after it
+belongs to the current turn.
 """
 
 from pathlib import Path
@@ -50,6 +51,20 @@ def test_record_user_input_records_repeat_in_new_turn(tmp_path: Path):
     record_user_input(storage, "hello")
 
     assert [e.data["text"] for e in _user_inputs(storage)] == ["hello", "hello"]
+
+
+def test_record_user_input_after_a_turn_copied_without_its_session_end(tmp_path: Path):
+    """Compaction copies retained turns into the successor without their
+    session_end. A completed retained turn ends at its final_result instead."""
+    storage = _storage(tmp_path)
+    storage.record("compaction", summary="earlier work")
+    storage.record("user_input", text="retained question")
+    storage.record("model_response", raw_content="answer")
+    storage.record("final_result", result="answer")
+
+    record_user_input(storage, "next question")
+
+    assert [e.data["text"] for e in _user_inputs(storage)] == ["retained question", "next question"]
 
 
 def test_save_run_to_history_no_dup_user_input_on_failed_turn(tmp_path: Path):
