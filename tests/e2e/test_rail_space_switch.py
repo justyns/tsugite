@@ -27,13 +27,6 @@ def _leaf(pane_id: str, tab_id: str, session_id: str) -> dict:
     return {"type": "leaf", "id": pane_id, "tabs": [tab], "activeTabId": tab_id}
 
 
-def _focused_pane(page, space_id: str) -> str:
-    return page.evaluate(
-        "(id) => JSON.parse(localStorage.getItem('tsugite_spaces')).spaces.find((s) => s.id === id).layout.focusedPaneId",
-        space_id,
-    )
-
-
 def _switch(page, name: str) -> None:
     page.locator(SPACE_BAR).get_by_role("button", name=name, exact=True).click()
     expect(page.locator(SPACE_BAR).get_by_role("button", name=name, exact=True)).to_have_attribute(
@@ -77,10 +70,10 @@ def test_space_switch_keeps_focus_on_the_chat_in_use(authenticated_page, e2e_ses
     expect(page.locator(RAIL_ACTIVE)).to_contain_text("Other chat")
     _switch(page, "A")
     expect(page.locator(PANE)).to_have_count(2)
-    # Both chats' session details load after the remount; give the autofocus a chance to land.
+    # Both chats' session details load after the remount. Give the autofocus a chance to land.
     expect(page.locator(PANE).nth(1).get_by_role("button", name="Right chat")).to_be_visible()
     page.wait_for_timeout(500)
 
     expect(page.locator(RAIL_ACTIVE)).to_contain_text("Left chat")
-    page.wait_for_timeout(400)  # layout persistence is debounced
-    assert _focused_pane(page, "space-a") == "pane-left"
+    expect(page.locator(PANE).nth(0)).to_have_attribute("data-focused", "true")
+    expect(page.locator(PANE).nth(1)).to_have_attribute("data-focused", "false")
