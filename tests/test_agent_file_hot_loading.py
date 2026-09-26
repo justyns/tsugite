@@ -164,8 +164,28 @@ class TestRunAgentWithAgentFile:
             agent_file="/nonexistent/agent.md",
         )
 
-        with pytest.raises(FileNotFoundError, match="Agent file not found"):
+        with pytest.raises(ValueError, match="Agent file not found"):
             await scheduler_adapter._run_agent(entry)
+
+        assert adapter.session_store.list_sessions() == []
+
+    def test_creating_a_schedule_with_a_missing_agent_file_is_rejected(self, scheduler_adapter):
+        entry = ScheduleEntry(
+            id="t", prompt="hi", schedule_type="once", run_at="2099-01-01T00:00:00Z", agent_file="+nope"
+        )
+
+        with pytest.raises(ValueError, match="Agent file not found: \\+nope"):
+            scheduler_adapter.scheduler.add(entry)
+
+        assert scheduler_adapter.scheduler.list() == []
+
+    def test_updating_a_schedule_to_a_missing_agent_file_is_rejected(self, scheduler_adapter):
+        scheduler_adapter.scheduler.add(ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *"))
+
+        with pytest.raises(ValueError, match="Agent file not found"):
+            scheduler_adapter.scheduler.update("t", agent_file="+nope")
+
+        assert scheduler_adapter.scheduler.get("t").agent_file is None
 
     @pytest.mark.asyncio
     async def test_no_agent_file_no_override(self, adapter, scheduler_adapter):

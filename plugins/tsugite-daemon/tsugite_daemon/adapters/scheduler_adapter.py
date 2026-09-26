@@ -170,6 +170,7 @@ class SchedulerAdapter:
             script_callback=self._run_script,
             session_message_callback=self._run_session_message,
             on_repeated_failure=self._on_repeated_failure,
+            validate_agent_file=self._require_agent_path,
         )
 
     def set_session_runner(self, session_runner) -> None:
@@ -384,11 +385,18 @@ class SchedulerAdapter:
 
         return RunResult(output=result, session_id=conv_id)
 
+    def _require_agent_path(self, agent_file: str) -> Path:
+        resolved = self._adapter._resolve_agent_path(agent_file)
+        if not resolved:
+            raise ValueError(f"Agent file not found: {agent_file}")
+        return resolved
+
     async def _run_agent(self, entry: ScheduleEntry) -> RunResult:
         adapter = self._adapter
         if not adapter:
             raise ValueError("No adapter available to run schedules")
         logger.info("Schedule '%s' executing: %s", entry.id, entry.prompt[:100])
+        agent_path = self._require_agent_path(entry.agent_file) if entry.agent_file else None
         conv_id, opened_session = self._create_run_session(entry)
         user_id = "scheduler"
         metadata = {
@@ -406,13 +414,9 @@ class SchedulerAdapter:
         if entry.max_turns is not None:
             metadata["max_turns_override"] = entry.max_turns
 
-        if entry.agent_file:
-            resolved = adapter._resolve_agent_path(entry.agent_file)
-            if not resolved:
-                raise FileNotFoundError(f"Agent file not found: {entry.agent_file}")
-            metadata["agent_file_override"] = str(resolved)
+        if agent_path:
+            metadata["agent_file_override"] = str(agent_path)
 
-        # Issue a temporary token for this scheduled task
         temp_token = ""
         if self._token_store:
             temp_token = self._token_store.issue(schedule_id=entry.id)

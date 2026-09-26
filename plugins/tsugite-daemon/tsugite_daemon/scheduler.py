@@ -163,6 +163,7 @@ class Scheduler:
         script_callback: RunCallback | None = None,
         session_message_callback: RunCallback | None = None,
         on_repeated_failure: Callable[["ScheduleEntry"], None] | None = None,
+        validate_agent_file: Callable[[str], object] | None = None,
     ):
         self._path = schedules_path
         self._storage = SqliteCollectionStorage.for_state_file(schedules_path, "schedules")
@@ -172,6 +173,7 @@ class Scheduler:
         # Called once when a schedule crosses its consecutive-failure threshold,
         # so the daemon/adapter can surface it (Discord/notify). None = log only.
         self._on_repeated_failure = on_repeated_failure
+        self._validate_agent_file = validate_agent_file
         self._schedules: dict[str, ScheduleEntry] = {}
         self._wakeup = asyncio.Event()
         self._running = False
@@ -489,6 +491,8 @@ class Scheduler:
             except ValueError as e:
                 raise ValueError(f"Invalid expires_at '{entry.expires_at}': {e}") from e
         validate_delivery(entry.delivery_mode, entry.delivery_kind)
+        if entry.agent_file and self._validate_agent_file:
+            self._validate_agent_file(entry.agent_file)
         next_run = self._compute_next_run_iso(entry)  # raises ValueError on bad timezone
         self._validate_cron_interval(entry)
         return next_run
