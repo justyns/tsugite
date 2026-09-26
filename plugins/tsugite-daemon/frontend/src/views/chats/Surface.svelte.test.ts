@@ -189,6 +189,26 @@ test('switching the selected session refocuses the composer (desktop)', async ()
   await vi.waitFor(() => expect(document.activeElement).toBe(composerTa()));
 });
 
+test('a chat in an unfocused pane leaves focus where it is', async () => {
+  await page.viewport(1440, 900);
+  roster('smoke');
+  let infoLoaded: Promise<unknown> = Promise.resolve();
+  sessions.getInfo = () => {
+    infoLoaded = Promise.resolve({
+      metadata: { job_host: true },
+      contextLimit: null,
+      cumulativeTokens: null,
+    });
+    return infoLoaded as ReturnType<typeof realGetInfo>;
+  };
+  const focusSpy = vi.spyOn(HTMLTextAreaElement.prototype, 'focus');
+  render(Surface, { params: { sessionId: 'session-parent' }, focused: false });
+  await expect.element(page.getByTestId('chat-composer')).toBeInTheDocument();
+  await infoLoaded;
+  await tick();
+  expect(focusSpy).not.toHaveBeenCalled();
+});
+
 test('auto-focus is suppressed at phone width (the keyboard would cover the conversation)', async () => {
   await page.viewport(390, 780);
   roster('smoke');

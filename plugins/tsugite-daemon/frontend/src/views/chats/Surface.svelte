@@ -26,10 +26,12 @@
     params,
     setParams,
     dense = false,
+    focused = true,
   }: {
     params?: Record<string, string>;
     setParams?: (params: Record<string, string>) => void;
     dense?: boolean;
+    focused?: boolean;
   } = $props();
 
   const ctrl = new ConversationController();
@@ -237,14 +239,15 @@
   // on a loaded sessionInfo so canCompose reflects the true metadata (a read-only
   // job artifact briefly looks composable before its info lands - don't grab focus
   // for it). Skipped at phone width, where it would pop the on-screen keyboard over
-  // the just-opened conversation.
+  // the just-opened conversation, and outside the focused pane, where focusing
+  // would move pane focus onto this chat.
   let autofocusedId: string | null = null;
   $effect(() => {
     const id = selectedId;
     if (!id || sessionInfo == null || !canCompose || !composer) return;
     if (autofocusedId === id) return;
     autofocusedId = id;
-    if (isPhoneWidth()) return;
+    if (isPhoneWidth() || !focused) return;
     untrack(() => composer?.focus());
   });
 

@@ -28,6 +28,8 @@ export type SurfaceProps = {
   /** Compact the surface's header and controls. Set when the pane is short or
    *  the viewport is narrow. */
   dense?: boolean;
+  /** Set on the tab showing in the focused pane. */
+  focused?: boolean;
 };
 
 const SURFACES: Record<string, Component<SurfaceProps>> = {

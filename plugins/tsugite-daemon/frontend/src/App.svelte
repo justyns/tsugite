@@ -611,6 +611,7 @@
                         tabId={tab.id}
                         setTitle={(title) => spaces.retitleTab(tab.id, title)}
                         setParams={(params) => spaces.retargetTab(tab.id, params)}
+                        focused={focused?.id === tab.id}
                         {focusPane}
                         {dense}
                       />
