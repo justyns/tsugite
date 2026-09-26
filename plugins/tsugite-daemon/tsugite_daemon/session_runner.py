@@ -65,13 +65,17 @@ def chain_depth_scope(depth: int):
         _current_chain_depth.set(previous)
 
 
-# Reach live subscribers but skip the JSONL log. llm_wait_progress is a
+# Reach live subscribers but skip session history. llm_wait_progress is a
 # high-frequency heartbeat. session_info is derived state recomputed on load.
-_TRANSIENT_EVENT_TYPES = frozenset({"llm_wait_progress", "session_info"})
+# The agent records model_response and prompt_snapshot itself, and its
+# code_execution event holds what code and tool_result carry.
+_TRANSIENT_EVENT_TYPES = frozenset(
+    {"llm_wait_progress", "session_info", "model_response", "prompt_snapshot", "code", "tool_result"}
+)
 
 
 class LoggingProgressHandler(JSONLUIHandler):
-    """Wraps SSE event emission to also append events to the session JSONL log and broadcast via SSE."""
+    """Appends UI events to session history and broadcasts them via SSE."""
 
     def __init__(self, store: SessionStore, session_id: str, broadcaster=None):
         self._store = store
