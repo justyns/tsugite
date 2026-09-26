@@ -3,9 +3,8 @@ subscription or budget the user has consumed ("week 73%, resets Aug 19").
 
 A source is contributed by a plugin through the ``tsugite.usage_providers``
 entry point (a module-only entry point whose import registers the source) and
-fetches from whatever local state that provider keeps. The shape has no severity
-field: the UI derives its own warn threshold, and a second source of truth would
-let the two disagree.
+fetches from that provider's local state or API. The shape has no severity
+field because the UI derives its own warn threshold.
 """
 
 from __future__ import annotations
@@ -31,8 +30,8 @@ class QuotaWindow:
 
 @dataclass(frozen=True)
 class QuotaReport:
-    """One provider's quota. ``error`` is set instead of windows when local
-    state was unreadable."""
+    """One provider's quota. ``error`` is set instead of windows when the
+    source could not be read."""
 
     provider: str
     label: str
@@ -69,10 +68,9 @@ def reset_quota_sources() -> None:
 
 
 def ensure_loaded() -> None:
-    """Import the ``tsugite.usage_providers`` entry-point modules once, so every
-    ``register_quota_source`` call has run before the registry is read. The
-    daemon collects from worker threads, so a reader racing the first load
-    waits for it rather than seeing an empty registry."""
+    """Import the ``tsugite.usage_providers`` entry-point modules once, before
+    the registry is read. A daemon worker thread racing the first load waits
+    for it."""
     global _loaded
     if _loaded:
         return
@@ -102,7 +100,7 @@ def collect_quota_reports() -> list[dict]:
             logger.warning("Quota source '%s' failed: %s", source.provider, e)
             report = QuotaReport(provider=source.provider, label=source.label, error=str(e))
         row = asdict(report)
-        # asdict keeps the dataclass's tuple; the wire shape is an array.
+        # asdict keeps windows as a tuple and the wire shape is an array.
         row["windows"] = list(row["windows"])
         rows.append(row)
     return rows
