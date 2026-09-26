@@ -128,6 +128,7 @@ def execute_shell_command(
             shell=shell,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=timeout,
             check=False,
             cwd=resolved_cwd,

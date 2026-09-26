@@ -80,3 +80,8 @@ def test_execute_shell_command_env_kwarg(workspace):
 def test_execute_shell_command_env_kwarg_shell_false(workspace):
     output = execute_shell_command("printenv FOO", cwd=workspace, shell=False, env={"FOO": "y"})
     assert "y" in output
+
+
+def test_execute_shell_command_replaces_undecodable_bytes(workspace):
+    output = execute_shell_command("printf 'ok\\313end'; printf 'err\\377' >&2", cwd=workspace)
+    assert output == "ok�end\nerr�"
