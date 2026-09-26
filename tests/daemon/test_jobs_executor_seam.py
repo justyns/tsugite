@@ -741,3 +741,14 @@ async def test_liveness_stamp_leaves_updated_at_alone(store, orchestrator):
 def test_record_worker_activity_ignores_an_unknown_job(orchestrator):
     """A stamp can land after the job aged out under the retention cap."""
     orchestrator.record_worker_activity("job-does-not-exist")
+
+
+@pytest.mark.asyncio
+async def test_a_provider_name_as_executor_points_at_the_model_argument(store, runner, orchestrator):
+    with pytest.raises(ValueError, match=r"model='claude_code:\.\.\.'"):
+        await orchestrator.create_and_start_job(
+            parent_session_id="parent-1",
+            prompt="do it",
+            acceptance_criteria=[],
+            executor="claude_code",
+        )

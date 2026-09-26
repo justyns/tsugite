@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from xml.sax.saxutils import quoteattr
 
 from tsugite.core.record_store import now_iso
+from tsugite.providers import list_all_providers
 from tsugite_daemon.attention_store import SOURCE_JOB
 from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_prompts import (
@@ -263,7 +264,10 @@ class JobsOrchestrator:
         # Reject an unknown executor before persisting anything - a Job pinned to a
         # missing executor would spawn nothing and strand in QUEUED.
         if executor != "agent" and executor not in self._executors:
-            raise ValueError(f"Unknown job executor: {executor!r} (registered: {sorted(self._executors)})")
+            message = f"Unknown job executor: {executor!r} (registered: {sorted(self._executors)})"
+            if executor in list_all_providers():
+                message += f"; {executor!r} is a model provider, pass model='{executor}:...' with executor='agent'"
+            raise ValueError(message)
 
         # If the spawner didn't supply an inherited policy (the /job slash command
         # path, vs the spawn_job tool from a sandboxed agent), fall back to the
