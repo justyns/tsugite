@@ -166,6 +166,35 @@ class TestAttention:
         assert successor.has_pending_deliveries is True
         assert store.get_session(sid).has_pending_deliveries is False
 
+    def test_a_failed_turn_follows_compaction_and_can_be_acknowledged(self, store, runner):
+        sid = _session(store)
+        runner.open_attention(sid, source="error", ref_id=f"{sid}:turn", kind="turn_failed")
+
+        successor = store.compact_session(sid)
+
+        assert [r.kind for r in store.attention.open_records(successor.id)] == ["turn_failed"]
+        runner.clear_attention(sid, f"{sid}:turn")
+        assert store.attention.open_records() == []
+
+    def test_a_turn_failing_after_compaction_flags_the_successor(self, store, runner):
+        sid = _session(store)
+        successor = store.compact_session(sid)
+
+        runner.open_attention(sid, source="error", ref_id=f"{sid}:turn", kind="turn_failed")
+
+        assert [r.owner_id for r in store.attention.open_records()] == [successor.id]
+
+    def test_a_restart_moves_attention_stranded_on_a_superseded_session(self, store, tmp_path):
+        sid = _session(store)
+        successor = store.compact_session(sid)
+        store.attention.open(
+            owner_kind="session", owner_id=sid, source="error", ref_id=f"{sid}:turn", kind="turn_failed"
+        )
+
+        reopened = SessionStore(tmp_path / "store.json")
+
+        assert [r.owner_id for r in reopened.attention.open_records()] == [successor.id]
+
     def test_runner_clear_attention_broadcasts(self, store, runner, bus):
         sid = _session(store)
         runner.deliver_to_session(sid, "approve?", source="job", kind="needs_ack")

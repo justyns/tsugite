@@ -95,6 +95,13 @@ class AttentionStore:
             ]
             return [self._remove_locked(r) for r in targets]
 
+    def reown(self, owner_id: str, new_owner_id: str) -> None:
+        with self._lock:
+            for record in self._records.values():
+                if record.owner_id == owner_id:
+                    record.owner_id = new_owner_id
+                    self._storage.upsert(record.id, asdict(record))
+
     def clear_stale_asks(self) -> list[AttentionRecord]:
         """Close ask records left by a previous process.
 

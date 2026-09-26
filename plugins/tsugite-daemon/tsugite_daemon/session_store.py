@@ -970,15 +970,7 @@ class SessionStore:
             old_session.model_override = None
             old_session.compacting = False
             old_session.pending_deliveries = []
-            # The cards moved to the successor, so the obligations they carry move too.
-            for record in self.attention.clear_owner(session_id, source=SOURCE_DELIVERY):
-                self.attention.open(
-                    owner_kind=OWNER_SESSION,
-                    owner_id=new_id,
-                    source=record.source,
-                    ref_id=record.ref_id,
-                    kind=record.kind,
-                )
+            self.attention.reown(session_id, new_id)
             old_session.notify_sessions = []
             old_session.deferred_deliveries = []
             old_session.queued_messages = []
@@ -1341,7 +1333,8 @@ class SessionStore:
                     self.attention.clear_owner(session_id, source=source)
             else:
                 session.pending_deliveries = [d for d in session.pending_deliveries if d.get("id") != delivery_id]
-                self.attention.clear_ref(SOURCE_DELIVERY, delivery_id)
+                for source in ACKNOWLEDGEABLE_SOURCES:
+                    self.attention.clear_ref(source, delivery_id)
             self._persist(session)
             return session
 
@@ -1843,6 +1836,11 @@ class SessionStore:
             if session.compacting:
                 session.compacting = False
                 changed = True
+        for owner_id in {r.owner_id for r in self.attention.open_records()}:
+            session = self._sessions.get(owner_id)
+            live = self._live_end_locked(session) if session else None
+            if live and live.id != owner_id:
+                self.attention.reown(owner_id, live.id)
         return changed
 
     def _finalize_interrupted_turn(self, session_id: str) -> None:

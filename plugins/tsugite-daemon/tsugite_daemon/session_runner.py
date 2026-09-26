@@ -577,6 +577,7 @@ class SessionRunner:
 
     def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> None:
         """Open an attention record; a re-report of something already open announces nothing."""
+        session_id = self.live_id(session_id)
         opened = self._store.attention.open(
             owner_kind=OWNER_SESSION,
             owner_id=session_id,
