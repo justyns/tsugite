@@ -98,6 +98,13 @@ def _jsonable_call_args(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return safe
 
 
+NAME_ERROR_NOTE = (
+    " (each code block starts with a fresh namespace: names from earlier blocks and"
+    " <content> blocks do not carry over, so re-import or recompute them, or keep"
+    " values in state['key'])"
+)
+
+
 def truncate_observation(text: str, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> tuple[str, bool]:
     """Clip text to the observation cap, returning (text, was_truncated).
 
@@ -134,6 +141,8 @@ def build_execution_result(
 
     children = [El("output", [output], inline=True)]
     if error:
+        if error.startswith("NameError:"):
+            error += NAME_ERROR_NOTE
         children.append(El("error", [error], inline=True))
         if traceback:
             children.append(El("traceback", [traceback], inline=True))

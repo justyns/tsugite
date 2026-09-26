@@ -536,6 +536,14 @@ class TestExecutionResultToXml:
         assert "<traceback>" in xml
         assert "</traceback>" in xml
 
+    def test_a_name_error_says_names_do_not_carry_between_blocks(self):
+        result = ExecutionResult(output="", error="NameError: name 'rows' is not defined", stdout="", stderr="")
+        assert "state['key']" in result.to_xml()
+
+    def test_other_errors_carry_no_namespace_note(self):
+        result = ExecutionResult(output="", error="KeyError: 'rows'", stdout="", stderr="")
+        assert "state['key']" not in result.to_xml()
+
     def test_xml_escaping(self):
         result = ExecutionResult(
             output="<script>alert('xss')</script>",
