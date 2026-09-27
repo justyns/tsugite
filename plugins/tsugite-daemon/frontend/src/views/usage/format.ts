@@ -69,6 +69,8 @@ export function formatLastRun(iso: string | null | undefined): string {
   return `${month} ${match[3]} ${match[4]}:${match[5]}`;
 }
 
+export const QUOTA_WARN_PCT = 80;
+
 /** A quota window's used share: 73 -> "73%", 45.55 -> "45.6%". A provider may
  * report a float percent where another reports an int. */
 export function formatPercent(pct: number): string {

@@ -114,6 +114,22 @@ export class UsageStore {
   today = $state<UsageTotal | null>(null);
 
   private loadSeq = 0;
+  private providersAt = -Infinity;
+  private providersReq: Promise<void> = Promise.resolve();
+
+  /** Re-read `providers` for the chat header quota chip, at most once per
+   *  minute however many panes ask. The backend caches its live reads as long. */
+  refreshProviders(): Promise<void> {
+    if (Date.now() - this.providersAt < 60_000) return this.providersReq;
+    this.providersAt = Date.now();
+    this.providersReq = api
+      .get<UsageProviderRow[]>('/api/usage/providers')
+      .then((rows) => {
+        this.providers = rows;
+      })
+      .catch(() => {});
+    return this.providersReq;
+  }
 
   async loadToday(): Promise<void> {
     try {
@@ -151,6 +167,7 @@ export class UsageStore {
         this.schedules = schedules;
         this.total = total;
         this.providers = providers;
+        this.providersAt = Date.now();
       }
     } catch (err) {
       if (seq === this.loadSeq) this.error = err instanceof Error ? err.message : String(err);

@@ -46,6 +46,7 @@
   import DeliveryCard from './DeliveryCard.svelte';
   import Attachments from './Attachments.svelte';
   import PromptInspector, { type TokenBreakdown } from './PromptInspector.svelte';
+  import QuotaChip from './QuotaChip.svelte';
   import RawMessages from './RawMessages.svelte';
   import RawSessionMetadata from './RawSessionMetadata.svelte';
   import { metaLinks } from './metaLinks';
@@ -118,6 +119,7 @@
   let editDraft = $state('');
   let rawOpen = $state(false);
   let rawMetadataOpen = $state(false);
+  let quotaProvider = $state<string | null>(null);
 
   const timeline = $derived(ctrl.timeline);
   const storedTitle = $derived(row?.title ?? '');
@@ -497,7 +499,7 @@
 
     <span class="t-type" data-k={sourceType}>{sourceType === 'research' ? 'res' : sourceType}</span>
     <Pill st={pillState} label={pillLabel} />
-    <ModelEffort sessionId={ctrl.sessionId} showEffort={!phone} />
+    <ModelEffort sessionId={ctrl.sessionId} showEffort={!phone} bind:provider={quotaProvider} />
     {#if editing === 'topic'}
       <!-- svelte-ignore a11y_autofocus -->
       <input
@@ -532,6 +534,7 @@
         <Icon name="jobs" size={11} />{jobCount} job{jobCount === 1 ? '' : 's'}
       </a>
     {/if}
+    <QuotaChip provider={quotaProvider} working={ctrl.working} />
     {#if ctxView}
       <PromptInspector
         value={ctxView.tokens}
@@ -1382,6 +1385,7 @@
       display: none;
     }
     .convo-hd .hd-chip,
+    .convo-hd :global(.quota-anchor),
     .convo-hd :global(.ctx-anchor) {
       display: none;
     }

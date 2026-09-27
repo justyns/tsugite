@@ -143,3 +143,55 @@ describe('UsageStore.load request ordering', () => {
     expect(store.loading).toBe(false);
   });
 });
+
+describe('UsageStore.refreshProviders', () => {
+  const ROWS = [
+    {
+      provider: 'claude_code',
+      label: 'Claude Code',
+      error: null,
+      windows: [{ key: 'five_hour', label: '5h', used_pct: 11, resets_at: null }],
+    },
+  ];
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test('stores the providers report', async () => {
+    const store = new UsageStore();
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+
+    await store.refreshProviders();
+
+    expect(spy).toHaveBeenCalledWith('/api/usage/providers');
+    expect(store.providers).toEqual(ROWS);
+  });
+
+  test('callers within a minute share one request, and a later call refetches', async () => {
+    vi.useFakeTimers();
+    const store = new UsageStore();
+    const spy = vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+
+    await Promise.all([store.refreshProviders(), store.refreshProviders()]);
+    vi.advanceTimersByTime(59_000);
+    await store.refreshProviders();
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(2_000);
+    await store.refreshProviders();
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  test('a failed read keeps the previous report and still throttles', async () => {
+    const store = new UsageStore();
+    store.providers = ROWS;
+    const spy = vi.spyOn(api, 'get').mockRejectedValue(new Error('network down'));
+
+    await store.refreshProviders();
+    await store.refreshProviders();
+
+    expect(store.providers).toEqual(ROWS);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});

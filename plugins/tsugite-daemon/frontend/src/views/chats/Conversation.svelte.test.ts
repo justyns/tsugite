@@ -17,7 +17,7 @@ vi.mock('$lib/api/client', async (importOriginal) => {
 import { api } from '$lib/api/client';
 import Conversation from './Conversation.svelte';
 import { ConversationController } from './conversation.svelte';
-import type { SessionRow } from '$lib/stores/sessions.svelte';
+import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
 import { TESTID } from '$lib/testids';
 import { sessionRow } from './__fixtures__/sessionRow';
 import { expandThinking } from '$lib/stores/expandThinking.svelte';
@@ -1638,4 +1638,48 @@ test('at phone width the effort seg moves into the session menu', async () => {
   expect(vi.mocked(api.patch)).toHaveBeenCalledWith('/api/sessions/sess-1/settings', {
     reasoning_effort: 'low',
   });
+});
+
+test('the header quota chip follows the chat provider, and hides on a phone', async () => {
+  let provider = 'claude_code';
+  vi.mocked(api.get).mockImplementation((path: string) => {
+    if (path.includes('/effort-levels'))
+      return Promise.resolve({ model: 'm', provider, supported_effort_levels: null }) as never;
+    if (path === '/api/usage/providers')
+      return Promise.resolve([
+        {
+          provider: 'claude_code',
+          label: 'Claude Code',
+          error: null,
+          windows: [{ key: 'five_hour', label: '5h', used_pct: 11, resets_at: null }],
+        },
+        {
+          provider: 'codex_cli',
+          label: 'Codex',
+          error: null,
+          windows: [{ key: 'primary', label: 'week', used_pct: 52, resets_at: null }],
+        },
+      ]) as never;
+    return Promise.reject(new Error(`unexpected GET ${path}`)) as never;
+  });
+
+  // Its own id: fetchEffortLevels shares an in-flight request per session, and an
+  // earlier test's unmocked sess-1 request may never settle.
+  const ctrl = controllerWith([]);
+  ctrl.sessionId = 'sess-quota';
+  render(Conversation, {
+    ctrl,
+    row: sessionRow('sess-quota'),
+    railCollapsed: false,
+    ...callbacks,
+  });
+  const chip = page.getByTestId(TESTID.chatQuota);
+  await expect.element(chip).toHaveTextContent('5h 11%');
+
+  provider = 'codex_cli';
+  sessions.settingsRev = { ...sessions.settingsRev, 'sess-quota': 1 };
+  await expect.element(chip).toHaveTextContent('week 52%');
+
+  await page.viewport(390, 780);
+  await expect.element(chip).not.toBeVisible();
 });

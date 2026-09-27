@@ -20,11 +20,10 @@
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
+  import ProviderQuota from './ProviderQuota.svelte';
   import {
     formatDayLabel,
     formatLastRun,
-    formatPercent,
-    formatResetAt,
     formatRuns,
     formatTokensCompact,
     formatUsd,
@@ -88,27 +87,7 @@
       <h4 class="d-sec-h">provider limits</h4>
       <div class="u-quota">
         {#each usage.providers as row (row.provider)}
-          <div class="u-prov">
-            <span class="u-prov-name">{row.label}</span>
-            {#if row.error}
-              <span class="u-prov-err">{row.error}</span>
-            {:else}
-              {#each row.windows as win}
-                {@const reset = formatResetAt(win.resets_at)}
-                <div class="u-win">
-                  <span class="u-win-name">{win.label}</span>
-                  <Meter
-                    value={win.used_pct}
-                    max={100}
-                    label="{row.label} {win.label}"
-                    displayText={formatPercent(win.used_pct)}
-                    warn={win.used_pct >= 80}
-                  />
-                  {#if reset}<span class="u-win-reset mono">{reset}</span>{/if}
-                </div>
-              {/each}
-            {/if}
-          </div>
+          <div class="u-prov"><ProviderQuota {row} /></div>
         {/each}
       </div>
     </div>
@@ -343,37 +322,7 @@
     border: 1px solid var(--bd0);
     border-radius: var(--r-md);
     padding: 9px 10px;
-    display: grid;
-    gap: 7px;
     min-width: 0;
-  }
-  .u-prov-name {
-    font: 600 var(--fs-sm) var(--font-ui);
-    color: var(--tx0);
-  }
-  .u-prov-err {
-    font-size: var(--fs-xs);
-    color: var(--tx2);
-  }
-  .u-win {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    min-width: 0;
-  }
-  .u-win-name {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--fs-xs);
-    color: var(--tx2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .u-win-reset {
-    font-size: var(--fs-2xs);
-    color: var(--tx3);
-    white-space: nowrap;
   }
 
   .d-sec-h {

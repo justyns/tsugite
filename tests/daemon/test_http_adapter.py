@@ -427,6 +427,27 @@ class TestEffortLevelsEndpoint:
         assert data["model"] == "claude_code:opus"
         assert data["supported_effort_levels"] == ["low", "medium", "high", "xhigh", "max"]
 
+    def test_reports_the_model_provider(self, client, mock_adapter, test_token):
+        mock_adapter.runtime.model = "claude_code:opus"
+        resp = client.get("/api/chat/effort-levels", headers={"Authorization": f"Bearer {test_token}"})
+        assert resp.json().get("provider") == "claude_code"
+
+    def test_reports_the_provider_behind_a_model_alias(self, client, mock_adapter, test_token):
+        mock_adapter.runtime.model = "fast"
+        with patch("tsugite.config.get_model_alias", return_value="openai:gpt-4o-mini"):
+            resp = client.get("/api/chat/effort-levels", headers={"Authorization": f"Bearer {test_token}"})
+        data = resp.json()
+        assert data["model"] == "fast"
+        assert data.get("provider") == "openai"
+
+    def test_provider_is_null_for_an_unresolvable_model(self, client, mock_adapter, test_token):
+        mock_adapter.runtime.model = "fast"
+        with patch("tsugite.config.get_model_alias", return_value=None):
+            resp = client.get("/api/chat/effort-levels", headers={"Authorization": f"Bearer {test_token}"})
+        data = resp.json()
+        assert "provider" in data
+        assert data["provider"] is None
+
 
 class TestSessionSettingsEndpoint:
     """GET/PATCH /api/sessions/{session_id}/settings round-trips reasoning_effort."""

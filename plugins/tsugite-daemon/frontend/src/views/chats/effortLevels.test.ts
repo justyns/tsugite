@@ -10,6 +10,7 @@ import { fetchEffortLevels, type EffortLevels } from './effortLevels';
 
 const LEVELS: EffortLevels = {
   model: 'anthropic:claude-sonnet-4-5',
+  provider: 'anthropic',
   supported_effort_levels: ['low', 'medium', 'high'],
 };
 

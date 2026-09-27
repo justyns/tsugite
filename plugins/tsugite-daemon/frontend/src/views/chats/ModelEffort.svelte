@@ -12,10 +12,13 @@
   let {
     sessionId,
     showEffort = true,
+    provider = $bindable(null),
   }: {
     sessionId: string | null;
     /** Render the effort seg beside the chip. */
     showEffort?: boolean;
+    /** The resolved model's provider, for the header quota chip. */
+    provider?: string | null;
   } = $props();
 
   let resolvedModel = $state<string | null>(null);
@@ -23,6 +26,7 @@
   let modelRev = $state(0);
 
   let modelKey = '';
+  let modelFor: string | null = null;
   $effect(() => {
     const id = sessionId;
     const rev = id ? (sessions.settingsRev[id] ?? 0) : 0;
@@ -30,11 +34,14 @@
     if (key === modelKey) return;
     modelKey = key;
     resolvedModel = null;
+    if (id !== modelFor) provider = null;
+    modelFor = id;
     if (!id) return;
     fetchEffortLevels(id)
       .then((res) => {
         if (modelKey !== key) return;
         resolvedModel = res.model;
+        provider = res.provider;
       })
       .catch(() => {});
   });

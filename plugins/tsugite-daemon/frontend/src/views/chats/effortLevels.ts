@@ -2,6 +2,8 @@ import { api } from '$lib/api/client';
 
 export interface EffortLevels {
   model: string;
+  /** The model's provider prefix, after alias resolution. */
+  provider: string | null;
   supported_effort_levels: string[] | null;
 }
 

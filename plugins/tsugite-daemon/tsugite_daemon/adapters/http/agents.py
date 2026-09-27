@@ -683,15 +683,23 @@ class AgentsMixin:
         return JSONResponse({"status": "ok", "session_id": session.id, "name": skill_name})
 
     async def _effort_levels(self, request: Request) -> JSONResponse:
-        """Return the effort levels supported by the session's resolved model."""
+        """Return the session's resolved model, its provider, and the effort levels it supports."""
         adapter, err = self._get_adapter(request)
         if err:
             return err
 
+        from tsugite.models import parse_model_string, resolve_model_alias
+
         session_id = request.query_params.get("session_id")
+        model = adapter.resolve_session_model(session_id)
+        try:
+            provider = parse_model_string(resolve_model_alias(model))[0]
+        except ValueError:
+            provider = None
         return JSONResponse(
             {
-                "model": adapter.resolve_session_model(session_id),
+                "model": model,
+                "provider": provider,
                 "supported_effort_levels": adapter.session_effort_levels(session_id),
             }
         )

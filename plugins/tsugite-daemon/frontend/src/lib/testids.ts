@@ -143,6 +143,8 @@ export const TESTID = {
   chatModelSearch: 'chat-model-search',
   chatModelOption: (id: string) => `chat-model-opt-${id}`,
   chatEffortSeg: 'chat-effort-seg',
+  chatQuota: 'chat-quota',
+  chatQuotaPopover: 'chat-quota-popover',
   /** Prominent, always-visible Retry on a failed turn (re-sends the last message). */
   chatRetry: 'chat-retry',
   chatTurnOrigin: 'chat-turn-origin',
