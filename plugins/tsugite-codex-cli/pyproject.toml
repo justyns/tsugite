@@ -11,6 +11,9 @@ dependencies = [
 [project.entry-points."tsugite.providers"]
 codex_cli = "tsugite_codex_cli:create_provider"
 
+[project.entry-points."tsugite.usage_providers"]
+codex_cli = "tsugite_codex_cli.usage"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

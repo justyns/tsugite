@@ -64,9 +64,9 @@ class CodexAuthStore:
 
     async def get_access_token(self) -> tuple[str, str]:
         """Return (access_token, account_id), refreshing if near expiry."""
-        return await asyncio.to_thread(self._sync_get_or_refresh)
+        return await asyncio.to_thread(self.sync_get_or_refresh)
 
-    def _sync_get_or_refresh(self) -> tuple[str, str]:
+    def sync_get_or_refresh(self) -> tuple[str, str]:
         if not self._auth_path.exists():
             raise CodexAuthError(f"No Codex auth file at {self._auth_path}. Run `codex login` first.")
 
