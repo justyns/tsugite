@@ -251,6 +251,7 @@ async def _execute_step_with_retries(
         user_input_for_history=f"[Step {i}/{total_steps}: {step.name}]",
         resume_session=None,
         resume_after_compaction=False,
+        resume_cost_baseline=0.0,
     )
     errors = []
     step_start_time = time.time()

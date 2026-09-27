@@ -183,3 +183,22 @@ async def test_empty_observation_not_sent_verbatim():
     await provider.acompletion(messages=[{"role": "user", "content": ""}], model="opus")
 
     assert proc.sent[-1].strip(), "empty user content was sent verbatim to the CLI"
+
+
+@pytest.mark.asyncio
+async def test_fresh_session_costs_start_from_zero_again():
+    """A fresh CLI session counts its own cost from 0, so the resumed session's
+    baseline does not apply to it."""
+    provider = ClaudeCodeProvider()
+    provider.set_context(
+        resume_session="9e6bd114-poisoned",
+        resume_cost_baseline=5.0,
+        previous_messages=[{"role": "user", "content": "earlier question"}],
+    )
+
+    response = await provider.acompletion(
+        messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "new prompt"}],
+        model="opus",
+    )
+
+    assert response.cost == pytest.approx(0.01)

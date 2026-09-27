@@ -288,6 +288,7 @@ class ResumableSessionState:
 
     session_id: str
     compacted: bool = False
+    cumulative_cost: float = 0.0
 
 
 def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessionState]:
@@ -324,6 +325,7 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
             return ResumableSessionState(
                 session_id=session_id,
                 compacted=bool(state.get("compacted", False)),
+                cumulative_cost=state.get("cumulative_cost") or 0.0,
             )
         return None
     except Exception:

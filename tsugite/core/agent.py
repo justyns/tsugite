@@ -347,6 +347,7 @@ class TsugiteAgent:
         previous_messages: List[Dict] = None,
         resume_session: Optional[str] = None,
         resume_after_compaction: bool = False,
+        resume_cost_baseline: float = 0.0,
         hook_vars: Optional[Dict[str, str]] = None,
         storage: Optional[Any] = None,
         pre_llm_call: Optional[Callable] = None,
@@ -410,6 +411,7 @@ class TsugiteAgent:
         self._provider.set_context(
             resume_session=resume_session,
             resume_after_compaction=resume_after_compaction,
+            resume_cost_baseline=resume_cost_baseline,
             attachments=self.attachments,
             skills=self.skills,
             previous_messages=self.previous_messages,

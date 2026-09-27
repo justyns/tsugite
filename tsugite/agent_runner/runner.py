@@ -395,6 +395,7 @@ async def _execute_agent_with_prompt(
     path_context: Optional[Any] = None,
     resume_session: Optional[str] = None,
     resume_after_compaction: bool = False,
+    resume_cost_baseline: float = 0.0,
     hook_vars: Optional[Dict[str, str]] = None,
     continue_conversation_id: Optional[str] = None,
     user_input_for_history: Optional[str] = None,
@@ -610,6 +611,7 @@ async def _execute_agent_with_prompt(
             previous_messages=previous_messages,
             resume_session=resume_session,
             resume_after_compaction=resume_after_compaction,
+            resume_cost_baseline=resume_cost_baseline,
             hook_vars=hook_vars,
             storage=session_storage,
             pre_llm_call=pre_llm_call_cb,
@@ -867,6 +869,7 @@ class _RunSetup:
     previous_messages: List[Dict] = field(default_factory=list)
     resume_session: Optional[str] = None
     resume_after_compaction: bool = False
+    resume_cost_baseline: float = 0.0
     conversation_id: Optional[str] = None
 
 
@@ -958,6 +961,7 @@ async def _run_unit(
             previous_messages=setup.previous_messages,
             resume_session=setup.resume_session,
             resume_after_compaction=setup.resume_after_compaction,
+            resume_cost_baseline=setup.resume_cost_baseline,
             **execute_kwargs,
         )
     except (RuntimeError, AgentExecutionError) as e:
@@ -1151,6 +1155,7 @@ async def run_agent_async(
     previous_messages = []
     resume_session = None
     resume_after_compaction = False
+    resume_cost_baseline = 0.0
     if continue_conversation_id:
         from tsugite.agent_runner.history_integration import (
             get_resumable_session_state,
@@ -1162,6 +1167,7 @@ async def run_agent_async(
         if session_info:
             resume_session = session_info.session_id
             resume_after_compaction = session_info.compacted
+            resume_cost_baseline = session_info.cumulative_cost
             logger.info(
                 "Resuming provider session %s (compacted=%s)",
                 resume_session,
@@ -1210,6 +1216,7 @@ async def run_agent_async(
         previous_messages=previous_messages,
         resume_session=resume_session,
         resume_after_compaction=resume_after_compaction,
+        resume_cost_baseline=resume_cost_baseline,
         conversation_id=continue_conversation_id,
     )
 

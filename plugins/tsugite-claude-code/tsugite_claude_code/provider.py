@@ -129,6 +129,8 @@ class ClaudeCodeProvider:
         self._resume_session = kwargs.get("resume_session")
         self._resume_after_compaction = kwargs.get("resume_after_compaction", False)
         self._previous_messages = kwargs.get("previous_messages", [])
+        # total_cost_usd is cumulative for the whole --resume'd session, not this process.
+        self._cumulative_cost = kwargs.get("resume_cost_baseline") or 0.0
 
     def get_state(self) -> dict | None:
         return {
@@ -137,6 +139,7 @@ class ClaudeCodeProvider:
             "context_window": self._context_window,
             "cache_creation_tokens": self._cache_creation_tokens,
             "cache_read_tokens": self._cache_read_tokens,
+            "cumulative_cost": self._cumulative_cost,
         }
 
     async def acompletion(
@@ -215,6 +218,7 @@ class ClaudeCodeProvider:
         await self._process.stop()
         self._resume_session = None
         self._resume_after_compaction = False
+        self._cumulative_cost = 0.0
         self._process = ClaudeCodeProcess()
         await self._process.start(
             model=self._resolved_model,

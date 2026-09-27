@@ -349,7 +349,7 @@ async def test_steps_never_resume_a_provider_session(tmp_path, monkeypatch):
     monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
     monkeypatch.setattr(
         "tsugite.agent_runner.history_integration.get_resumable_session_state",
-        lambda cid: SimpleNamespace(session_id="provider-session-1", compacted=False),
+        lambda cid: SimpleNamespace(session_id="provider-session-1", compacted=False, cumulative_cost=0.0),
     )
 
     agent_file = _write(tmp_path, TWO_STEP_AGENT)
