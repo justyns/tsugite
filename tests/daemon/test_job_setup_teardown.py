@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from tsugite_daemon.job_store import JobState
 
-from tests.daemon.test_jobs_orchestrator import _make_git_repo
+from .test_jobs_orchestrator import _make_git_repo
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def test_teardown_runs_in_the_worktree_on_matching_terminal_states(
 
 
 @pytest.mark.asyncio
-async def test_teardown_runs_off_the_event_loop_before_the_prune(orchestrator, repo, store, tmp_path):
+async def test_teardown_runs_before_the_prune_with_a_running_loop(orchestrator, repo, store, tmp_path):
     marker = tmp_path / "torn_down"
     job = await _create_async(orchestrator, repo, teardown=f"pwd > {marker}")
     worktree = store.get(job.id).worktree_path

@@ -71,6 +71,7 @@ _JOB_TO_SESSION_STATUS = {
 
 # Allowed notify_when values; anything else is coerced to "never" at intake.
 _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "all_done", "never"})
+
 _VALID_TEARDOWN_WHEN = frozenset({"always", "on_success", "on_failure"})
 
 
@@ -86,16 +87,6 @@ def _with_sandbox(job: Job, metadata: dict) -> dict:
     return metadata
 
 
-def _teardown_applies(job: Job, terminal: JobState) -> bool:
-    if not job.teardown:
-        return False
-    if job.teardown_when == "on_success":
-        return terminal == JobState.DONE
-    if job.teardown_when == "on_failure":
-        return terminal != JobState.DONE
-    return True
-
-
 def _run_job_command(job: Job, cmd: str) -> None:
     run_job_command(cmd, _job_workspace(job), job.timeout_minutes * 60, job.sandbox_override)
 
@@ -104,7 +95,7 @@ def _run_teardown(job: Job) -> None:
     try:
         _run_job_command(job, job.teardown)
     except JobCommandError as e:
-        logger.warning("Teardown for job '%s' failed: %s\n%s", job.id, e, e.output)
+        logger.warning("Teardown for job '%s' failed: %s%s", job.id, e, f"\n{e.output}" if e.output else "")
 
 
 def _job_workspace(job: Job) -> Optional[str]:
@@ -134,7 +125,7 @@ class JobsOrchestrator:
         # Strong refs to in-flight background tasks (e.g. offloaded worktree
         # prunes). Same GC rationale as _notify_tasks; also lets tests drain them.
         self._bg_tasks: set[asyncio.Task] = set()
-        # Latest setup/teardown task per job; the next one waits for it.
+        # Latest setup/teardown task per job. The next one waits for it.
         self._job_commands: dict[str, asyncio.Task] = {}
         # Per-job locks serializing out-of-band STUCK transitions (retry / mark-done)
         # so two concurrent tile clicks can't both pass the stuck guard and double-act.
@@ -417,7 +408,7 @@ class JobsOrchestrator:
         try:
             await self._start_worker(job, worker_prompt)
         except Exception:
-            logger.exception("Job '%s': worker spawn after setup failed", job.id)
+            logger.exception("Failed to spawn worker after setup for job '%s'", job.id)
 
     async def _spawn_worker(
         self,
@@ -727,7 +718,10 @@ class JobsOrchestrator:
             self._jobs.update(job_id, result=result, error=None, resolved_at=now_iso())
             self.close_batch_barrier(job.parent_session_id)
             fresh = self._jobs.get(job_id)
-            await self._teardown_sequence(fresh, job.worktree_path, self._claim_teardown(fresh, JobState.DONE))
+            self._schedule_executor_teardown(
+                fresh, prune_worktree=True, run_teardown=self._claim_teardown(fresh, JobState.DONE)
+            )
+            await self._await_job_commands(job_id)
             self._emit_job_event(self._jobs.get(job_id))
             return self._jobs.get(job_id)
 
@@ -1356,16 +1350,14 @@ class JobsOrchestrator:
         except Exception:
             logger.exception("Executor cancel failed for job '%s'", job.id)
 
-    def _schedule_executor_teardown(self, job: Job, *, prune_worktree: bool = True, run_teardown: bool = False) -> None:
-        """Cancel a non-agent executor's child, run the job's teardown command, then
-        (on a clean exit) prune the worktree, in that order and off the event loop -
-        the child and the teardown both use the cwd. Parked finalizes (STUCK/ERRORED)
-        pass prune_worktree=False: the child is still reaped but the worktree
-        survives for inspection."""
+    def _schedule_executor_teardown(self, job: Job, *, prune_worktree: bool, run_teardown: bool) -> None:
+        """Cancel a non-agent executor's child, run the teardown command, then prune the
+        worktree, off the event loop and after the job's earlier setup/teardown. All
+        three use the cwd. prune_worktree=False keeps the tree for inspection."""
         worktree_path = job.worktree_path if prune_worktree else None
         if not self._after_job_commands(job.id, lambda: self._teardown_sequence(job, worktree_path, run_teardown)):
-            # No loop (sync CLI/test path): the async executor cancel can't run,
-            # but the teardown and the worktree prune still can.
+            # With no running loop (sync CLI/test path) the async executor cancel
+            # is skipped, and the teardown and prune run inline.
             if run_teardown:
                 _run_teardown(job)
             if worktree_path:
@@ -1380,13 +1372,18 @@ class JobsOrchestrator:
 
     def _claim_teardown(self, job: Job, terminal: JobState) -> bool:
         """True (and marks the job torn down) when its teardown should run for `terminal`."""
-        if job.torn_down or not _teardown_applies(job, terminal):
+        if job.torn_down or not job.teardown:
+            return False
+        if job.teardown_when == "on_success" and terminal != JobState.DONE:
+            return False
+        if job.teardown_when == "on_failure" and terminal == JobState.DONE:
             return False
         self._jobs.update(job.id, torn_down=True)
         return True
 
     def _after_job_commands(self, job_id: str, make_coro) -> bool:
-        """`_spawn_bg`, started only after the job's previous setup/teardown finishes."""
+        """Like `_spawn_bg`, but waits for the job's previous setup/teardown task first.
+        False when there is no running loop."""
         previous = self._job_commands.get(job_id)
 
         async def run() -> None:
@@ -1528,12 +1525,6 @@ class JobsOrchestrator:
         every other session, SSE stream, and timer until it returns.
         """
         await asyncio.to_thread(self._prune_and_clear_sync, job_id, worktree_path)
-
-    def _prune_worktree_bg(self, job_id: str, worktree_path: str) -> None:
-        """Prune a worktree off the loop, falling back to an inline prune when no
-        loop is running (sync CLI/test context) - there's nothing to block there."""
-        if not self._spawn_bg(lambda: self._prune_and_clear(job_id, worktree_path)):
-            self._prune_and_clear_sync(job_id, worktree_path)
 
     def _schedule_timeout(self, job_id: str, timeout_minutes: int) -> None:
         self._cancel_timeout(job_id)

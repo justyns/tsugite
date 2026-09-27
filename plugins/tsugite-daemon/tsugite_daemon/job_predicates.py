@@ -28,8 +28,8 @@ class JobCommandError(Exception):
 
 
 def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optional[list[str]]:
-    """`sh -c cmd`, wrapped in bwrap (confined to `cwd`, no network) when the job is
-    sandboxed. None when it is sandboxed but no sandbox backend is installed."""
+    """`sh -c cmd`, wrapped in bwrap (no network, `cwd` plus the override's binds) when
+    the job is sandboxed. None when it is sandboxed but no sandbox backend is installed."""
     if not sandbox_override:
         return ["sh", "-c", cmd]
 
@@ -51,11 +51,11 @@ def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optio
     return bwrap.build_command(["sh", "-c", cmd])
 
 
-def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_override: Optional[dict] = None) -> None:
+def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_override: Optional[dict]) -> None:
     """Run a job's setup/teardown command in `cwd`, raising JobCommandError on failure.
 
-    Output goes to a temp file, not a pipe: a pipe stays open while any backgrounded
-    child (`npm run dev &`) lives, and the call would block until the timeout.
+    Output goes to a temp file because a backgrounded child (`npm run dev &`) would
+    hold a pipe open and block the call until the timeout.
     """
     if cwd is None:
         raise JobCommandError("job has no working directory")

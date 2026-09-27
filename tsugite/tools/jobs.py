@@ -97,19 +97,23 @@ def spawn_job(
             (paths relative to your workspace). A vision model sees images as
             pixels, e.g. delegate an image question via files=["uploads/photo.jpg"],
             model="claude_code:haiku".
-        setup: Shell command run in the background in the Job's working directory
-            before the worker starts, e.g. "docker compose up -d". A non-zero exit
-            errors the Job before any model call. Budget: timeout_minutes. Redirect
-            a backgrounded server's output yourself ("npm run dev > dev.log 2>&1 &").
+        setup: Shell command run in the Job's working directory before the worker
+            starts, e.g. "docker compose up -d". spawn_job returns before it
+            finishes. A non-zero exit or a timeout (timeout_minutes) errors the Job
+            before any model call. Redirect a backgrounded server's output yourself
+            ("npm run dev > dev.log 2>&1 &"). In a sandboxed Job, setup and teardown
+            run with no network and background processes die when setup exits.
         teardown: Shell command run in the Job's working directory after the Job
-            reaches a terminal state, e.g. "docker compose down".
+            reaches a terminal state, e.g. "docker compose down". A failed teardown
+            is logged and leaves the Job's state unchanged.
         teardown_when: always (default) | on_success (done) | on_failure (stuck,
             errored, cancelled). A retry of a parked Job re-runs setup when
             teardown ran on it.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
-        `worker_session_id` is null for a non-agent executor. `get_job` describes
+        `worker_session_id` is null for a non-agent executor and for a Job with
+        `setup` (its worker starts after setup finishes). `get_job` describes
         how to check on that worker.
     """
     from tsugite_daemon.session_runner import get_current_session_id
