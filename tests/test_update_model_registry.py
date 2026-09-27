@@ -176,3 +176,41 @@ class TestShouldSkip:
 
     def test_skips_standalone_codex_utility_models(self):
         assert umr.should_skip("codex-mini-latest", _entry()) is True
+
+
+class TestClaudeCliModelInfo:
+    def _eval(self, entry: dict, provider: str) -> ModelInfo:
+        effort = ["low", "medium", "high", "xhigh", "max"]
+        namespace = {"ModelInfo": ModelInfo, umr.CLAUDE_CLI_EFFORT_CONSTANTS[provider]: effort}
+        return eval(umr.claude_cli_model_info(entry, provider), namespace)  # noqa: S307
+
+    def test_context_and_vision_from_anthropic_entry(self):
+        entry = _entry(modalities={"input": ["text", "image"], "output": ["text"]}, limit={"context": 1_000_000})
+        info = self._eval(entry, "claude_code")
+        assert info.max_input_tokens == 1_000_000
+        assert info.supports_vision is True
+        assert info.supported_effort_levels == ["low", "medium", "high", "xhigh", "max"]
+
+    def test_no_api_pricing(self):
+        info = self._eval(_entry(), "acp")
+        assert info.input_cost_per_million is None
+        assert info.output_cost_per_million is None
+
+
+class TestCodexModelInfo:
+    def test_uses_subscription_context_window_and_levels(self):
+        entry = {
+            "slug": "gpt-6-sol",
+            "context_window": 272_000,
+            "max_context_window": 872_000,
+            "supported_reasoning_levels": [{"effort": "low"}, {"effort": "xhigh"}, {"effort": "ultra"}],
+        }
+        assert umr.codex_model_info(entry) == '_codex_model_info(272_000, ["low", "xhigh", "ultra"])'
+
+
+class TestGeneratedTargets:
+    def test_every_target_file_has_markers(self):
+        for provider, path in umr.PROVIDER_FILES.items():
+            content = path.read_text()
+            assert f"# --- BEGIN GENERATED MODELS ({provider}) --- #" in content, path
+            assert f"# --- END GENERATED MODELS ({provider}) --- #" in content, path

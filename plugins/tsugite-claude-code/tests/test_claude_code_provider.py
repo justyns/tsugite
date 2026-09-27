@@ -50,24 +50,10 @@ class TestClaudeCodeModelParams:
         for short, full in _CLAUDE_CODE_MODEL_MAP.items():
             assert get_model_id(f"claude_code:{short}") == full
 
-    def test_registry_matches_served_models(self):
-        assert set(_CLAUDE_CODE_MODELS) == {
-            "claude_code/claude-fable-5",
-            "claude_code/claude-fable-5-1",
-            "claude_code/claude-haiku-4-5",
-            "claude_code/claude-haiku-4-5-20251001",
-            "claude_code/claude-opus-4-5",
-            "claude_code/claude-opus-4-5-20251101",
-            "claude_code/claude-opus-4-6",
-            "claude_code/claude-opus-4-7",
-            "claude_code/claude-opus-4-8",
-            "claude_code/claude-opus-5",
-            "claude_code/claude-opus-5-5",
-            "claude_code/claude-sonnet-4-5",
-            "claude_code/claude-sonnet-4-5-20250929",
-            "claude_code/claude-sonnet-4-6",
-            "claude_code/claude-sonnet-5",
-        }
+    def test_registry_matches_anthropic_catalog(self):
+        from tsugite.providers.anthropic import _ANTHROPIC_MODELS
+
+        assert {k.split("/", 1)[1] for k in _CLAUDE_CODE_MODELS} == {k.split("/", 1)[1] for k in _ANTHROPIC_MODELS}
 
 
 # ── ClaudeCodeProcess tests ──
