@@ -77,10 +77,11 @@ def test_job_command_in_a_missing_directory_raises_job_command_error(tmp_path):
 
 
 def test_job_command_timeout_keeps_output_and_kills_the_process_group(tmp_path):
-    import os
     import time
 
     from tsugite_daemon.job_predicates import JobCommandError, run_job_command
+
+    from .test_cc_driver_executor import _alive
 
     with pytest.raises(JobCommandError, match="timed out") as err:
         run_job_command("echo started; sleep 30 & echo $! > child.pid; wait", str(tmp_path), 1, None)
@@ -88,5 +89,4 @@ def test_job_command_timeout_keeps_output_and_kills_the_process_group(tmp_path):
     assert "started" in err.value.output
     child = int((tmp_path / "child.pid").read_text())
     time.sleep(0.2)
-    with pytest.raises(ProcessLookupError):
-        os.kill(child, 0)
+    assert not _alive(child)
