@@ -5,6 +5,8 @@ it needs no verifier model. Runs under the job's sandbox when one is configured.
 """
 
 import logging
+import os
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -64,13 +66,22 @@ def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_overri
         raise JobCommandError("the job is sandboxed but no sandbox backend is installed")
     with tempfile.TemporaryFile() as out:
         try:
-            completed = subprocess.run(argv, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
+            proc = subprocess.Popen(argv, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError as e:
+            raise JobCommandError(str(e)) from e
+        try:
+            code = proc.wait(timeout=timeout)
+            error = None if code == 0 else f"exit code {code}"
         except subprocess.TimeoutExpired:
-            raise JobCommandError(f"timed out after {timeout:.0f}s") from None
-        out.seek(0)
+            # The command's own process group, so its backgrounded children die with it.
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+            error = f"timed out after {timeout:.0f}s"
+        if error is None:
+            return
+        out.seek(max(0, out.seek(0, os.SEEK_END) - 4 * _JOB_COMMAND_OUTPUT_TAIL))
         output = out.read().decode("utf-8", "replace")[-_JOB_COMMAND_OUTPUT_TAIL:]
-    if completed.returncode != 0:
-        raise JobCommandError(f"exit code {completed.returncode}", output)
+    raise JobCommandError(error, output)
 
 
 def _parse_ac_predicate(text: str) -> Optional[dict]:

@@ -180,7 +180,7 @@ def spawn_job(
         "worker_session_id": started.id if started else None,
         "parent_session_id": parent_session_id,
         "notify_when": job.notify_when,
-        "state": "running",
+        "state": job.state,
     }
 
 

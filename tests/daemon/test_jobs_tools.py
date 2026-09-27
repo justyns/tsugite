@@ -307,7 +307,7 @@ def test_spawn_job_forwards_executor(monkeypatch):
 
     def fake_call(fn, *args, timeout=30, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(id="job-1", notify_when="never"), SimpleNamespace(id="session-1")
+        return SimpleNamespace(id="job-1", notify_when="never", state="running"), SimpleNamespace(id="session-1")
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
 
@@ -327,7 +327,7 @@ def test_spawn_job_forwards_effort(monkeypatch):
 
     def fake_call(fn, *args, timeout=30, **kwargs):
         seen.update(kwargs)
-        return SimpleNamespace(id="job-1", notify_when="never"), SimpleNamespace(id="session-1")
+        return SimpleNamespace(id="job-1", notify_when="never", state="running"), SimpleNamespace(id="session-1")
 
     monkeypatch.setattr(jobs_tool, "_call", fake_call)
 
@@ -373,3 +373,14 @@ def test_spawn_job_passes_setup_and_teardown(monkeypatch, wire, real_store):
 
     [kw] = calls
     assert (kw["setup"], kw["teardown"], kw["teardown_when"]) == ("make up", "make down", "on_success")
+
+
+def test_spawn_job_reports_the_job_state(monkeypatch, wire, real_store):
+    """A job with setup stays queued, with no worker, until setup finishes."""
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "p1")
+    job = _add(real_store, parent="p1", prompt="do x")
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, **kw: (job, None))
+
+    result = jobs_tool.spawn_job(prompt="do x", setup="make up")
+
+    assert (result["state"], result["worker_session_id"]) == ("queued", None)

@@ -1,6 +1,8 @@
 """Job setup/teardown commands around the worker."""
 
 import asyncio
+import os
+import signal
 import time
 from pathlib import Path
 
@@ -65,10 +67,11 @@ def test_failed_setup_errors_the_job_without_starting_a_worker(orchestrator, run
 def test_setup_that_backgrounds_a_process_returns(orchestrator, repo, store):
     started = time.monotonic()
 
-    job = _create(orchestrator, repo, setup="sleep 30 > /dev/null &", timeout_minutes=1)
+    job = _create(orchestrator, repo, setup="sleep 30 > /dev/null & echo $! > server.pid", timeout_minutes=1)
 
     assert time.monotonic() - started < 10
     assert store.get(job.id).state == JobState.RUNNING.value
+    os.kill(int((Path(store.get(job.id).worktree_path) / "server.pid").read_text()), signal.SIGTERM)
 
 
 @pytest.mark.asyncio
@@ -208,3 +211,65 @@ def test_failed_setup_on_retry_keeps_the_job_parked_with_the_output(orchestrator
     job = store.get(job.id)
     assert job.state == JobState.STUCK.value
     assert "not again" in job.error_detail
+
+
+def test_retry_reruns_a_setup_that_failed(orchestrator, repo, store, tmp_path):
+    flag, counter = tmp_path / "fail", tmp_path / "setup_runs"
+    flag.touch()
+    job = _create(
+        orchestrator,
+        repo,
+        setup=f"echo x >> {counter}; test ! -e {flag}",
+        teardown="true",
+        teardown_when="on_success",
+    )
+    assert store.get(job.id).state == JobState.ERRORED.value
+    flag.unlink()
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="try again"))
+
+    assert len(counter.read_text().splitlines()) == 2
+    assert store.get(job.id).state == JobState.RUNNING.value
+
+
+def test_fresh_workspace_retry_reruns_setup(orchestrator, repo, store, tmp_path):
+    counter = tmp_path / "setup_runs"
+    job = _create(orchestrator, repo, setup=f"echo x >> {counter}", teardown="true", teardown_when="on_success")
+    orchestrator._finalize(store.get(job.id), JobState.STUCK)
+
+    asyncio.run(orchestrator.retry_with_hint(job.id, hint="try again", fresh_workspace=True))
+
+    assert len(counter.read_text().splitlines()) == 2
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_retry_setup_starts_no_worker_and_tears_down_after_setup(
+    orchestrator, runner, repo, store, tmp_path
+):
+    log = tmp_path / "log"
+    job = await _create_async(orchestrator, repo, setup=f"sleep 1; echo up >> {log}", teardown=f"echo down >> {log}")
+    orchestrator._finalize(store.get(job.id), JobState.STUCK)
+    workers_before = len(runner.started)
+
+    retry = asyncio.create_task(orchestrator.retry_with_hint(job.id, hint="try again"))
+    await asyncio.sleep(0.3)
+    await orchestrator.cancel_job(job.id)
+    await retry
+    await _drain(orchestrator)
+
+    assert log.read_text().split() == ["up", "down", "up", "down"]
+    assert len(runner.started) == workers_before
+    assert store.get(job.id).state == JobState.CANCELLED.value
+
+
+def test_cancel_after_a_failed_retry_setup_runs_teardown(orchestrator, repo, store, tmp_path):
+    flag, log = tmp_path / "fail", tmp_path / "log"
+    job = _create(orchestrator, repo, setup=f"echo up >> {log}; test ! -e {flag}", teardown=f"echo down >> {log}")
+    orchestrator._finalize(store.get(job.id), JobState.STUCK)
+    flag.touch()
+    with pytest.raises(RuntimeError, match="setup failed"):
+        asyncio.run(orchestrator.retry_with_hint(job.id, hint="try again"))
+
+    asyncio.run(orchestrator.cancel_job(job.id))
+
+    assert log.read_text().split() == ["up", "down", "up", "down"]

@@ -405,6 +405,7 @@ class JobsOrchestrator:
         # Cancelled while setup ran.
         if job is None or job.state != JobState.QUEUED.value:
             return
+        job = self._jobs.update(job.id, setup_done=True)
         try:
             await self._start_worker(job, worker_prompt)
         except Exception:
@@ -778,7 +779,7 @@ class JobsOrchestrator:
                             job = self._jobs.update(job_id, worktree_path=None)
                     workspace_root = self._resolve_workspace_root(job.parent_session_id)
                     worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
-                    job = self._jobs.update(job_id, worktree_path=worktree_path)
+                    job = self._jobs.update(job_id, worktree_path=worktree_path, setup_done=False)
                 except Exception as e:
                     logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
                     raise RuntimeError(f"failed to recreate worktree: {e}") from e
@@ -791,16 +792,21 @@ class JobsOrchestrator:
                         f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
                     )
 
-            if job.torn_down:
-                await self._await_job_commands(job_id)
-                if job.setup:
-                    try:
-                        await asyncio.to_thread(_run_job_command, job, job.setup)
-                    except JobCommandError as e:
-                        error = f"setup failed: {e}"
-                        self._jobs.update(job_id, error=error, error_detail=e.output or None)
-                        raise RuntimeError(error) from e
-                job = self._jobs.update(job_id, torn_down=False)
+            await self._await_job_commands(job_id)
+            if job.setup and not job.setup_done:
+                self._jobs.update(job_id, torn_down=False)
+                try:
+                    await self._after_job_commands(job_id, lambda: asyncio.to_thread(_run_job_command, job, job.setup))
+                except JobCommandError as e:
+                    error = f"setup failed: {e}"
+                    self._jobs.update(job_id, error=error, error_detail=e.output or None)
+                    raise RuntimeError(error) from e
+                job = self._jobs.get(job_id)
+                # Cancelled while setup ran.
+                if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
+                    return job
+                job = self._jobs.update(job_id, setup_done=True)
+            job = self._jobs.update(job_id, torn_down=False)
 
             if model or verifier_model:
                 fields = {}
@@ -1378,12 +1384,12 @@ class JobsOrchestrator:
             return False
         if job.teardown_when == "on_failure" and terminal == JobState.DONE:
             return False
-        self._jobs.update(job.id, torn_down=True)
+        self._jobs.update(job.id, torn_down=True, setup_done=False)
         return True
 
-    def _after_job_commands(self, job_id: str, make_coro) -> bool:
+    def _after_job_commands(self, job_id: str, make_coro) -> Optional[asyncio.Task]:
         """Like `_spawn_bg`, but waits for the job's previous setup/teardown task first.
-        False when there is no running loop."""
+        None when there is no running loop."""
         previous = self._job_commands.get(job_id)
 
         async def run() -> None:
@@ -1393,12 +1399,12 @@ class JobsOrchestrator:
 
         task = self._spawn_bg(run)
         if task is None:
-            return False
+            return None
         self._job_commands[job_id] = task
         task.add_done_callback(
             lambda t: self._job_commands.pop(job_id) if self._job_commands.get(job_id) is t else None
         )
-        return True
+        return task
 
     async def _await_job_commands(self, job_id: str) -> None:
         task = self._job_commands.get(job_id)

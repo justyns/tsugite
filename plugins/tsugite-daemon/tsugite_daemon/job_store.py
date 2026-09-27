@@ -185,7 +185,9 @@ class Job:
     setup: Optional[str] = None
     teardown: Optional[str] = None
     teardown_when: str = "always"
-    # Set when teardown is scheduled. A retry re-runs setup and clears it.
+    # True once setup succeeds, until teardown or a fresh worktree. A retry runs setup when it is False.
+    setup_done: bool = False
+    # Set when teardown is scheduled, cleared when a retry starts setup again.
     torn_down: bool = False
     # Which executor produces the work. "agent" (default) spawns a tsugite worker
     # session through the SessionRunner; a plugin-registered executor (e.g. a
