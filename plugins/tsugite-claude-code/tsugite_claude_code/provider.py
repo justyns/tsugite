@@ -45,6 +45,9 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
     "claude_code/claude-opus-5": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
+    "claude_code/claude-opus-5-5": ModelInfo(
+        max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
+    ),
     "claude_code/claude-sonnet-4-5": ModelInfo(
         max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS
     ),
@@ -63,13 +66,14 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
 # stay for reproducible configs. Exception: opus stays on 4-8. Opus 5's replies
 # through Claude Code's resume path can leave an empty assistant block that wedges
 # the sidecar transcript (400 "text content blocks must be non-empty"), and the
-# fresh-session fallback only covers the first send, so opus-5 is opt-in via its
-# pinned alias until a mid-conversation poison recovers cleanly.
+# fresh-session fallback only covers the first send, so opus-5 and opus-5-5 are
+# opt-in via their pinned aliases until a mid-conversation poison recovers cleanly.
 _ALIASES = {
     "fable": "claude-fable-5-1",
     "fable-5-1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",
     "opus": "claude-opus-4-8",
+    "opus-5-5": "claude-opus-5-5",
     "opus-5": "claude-opus-5",
     "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",

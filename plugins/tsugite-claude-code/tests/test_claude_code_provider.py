@@ -33,6 +33,7 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:fable") == "claude-fable-5-1"
 
     def test_model_id_version_pinned_aliases(self):
+        assert get_model_id("claude_code:opus-5-5") == "claude-opus-5-5"
         assert get_model_id("claude_code:opus-5") == "claude-opus-5"
         assert get_model_id("claude_code:opus-4-8") == "claude-opus-4-8"
         assert get_model_id("claude_code:opus-4-7") == "claude-opus-4-7"
@@ -61,6 +62,7 @@ class TestClaudeCodeModelParams:
             "claude_code/claude-opus-4-7",
             "claude_code/claude-opus-4-8",
             "claude_code/claude-opus-5",
+            "claude_code/claude-opus-5-5",
             "claude_code/claude-sonnet-4-5",
             "claude_code/claude-sonnet-4-5-20250929",
             "claude_code/claude-sonnet-4-6",
