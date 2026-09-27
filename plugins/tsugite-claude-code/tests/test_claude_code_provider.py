@@ -361,6 +361,29 @@ class TestClaudeCodeProcess:
         assert streamed == "Hello world"
 
     @pytest.mark.asyncio
+    async def test_send_message_records_rate_limit_windows_as_quota(self, process, tmp_path, monkeypatch):
+        from tsugite_claude_code import usage
+
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(usage, "_turn", {})
+        windows = {
+            "five_hour": {"utilization": 0.06, "resetsAt": 1767225600},
+            "seven_day": {"utilization": 0.12, "resetsAt": 1767830400},
+        }
+        events = [
+            json.dumps(
+                {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "unifiedWindows": windows}}
+            ),
+            json.dumps({"type": "result", "subtype": "success", "result": "ok", "session_id": "s1"}),
+        ]
+        process._process = self._mock_proc(events)
+
+        async for _ in process.send_message("hello"):
+            pass
+
+        assert {w.key: w.used_pct for w in usage.fetch().windows} == {"session": 6.0, "weekly_all": 12.0}
+
+    @pytest.mark.asyncio
     async def test_send_message_writes_correct_json(self, process):
         events = [
             json.dumps(

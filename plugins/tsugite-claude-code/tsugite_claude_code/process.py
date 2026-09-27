@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from tsugite.cli.helpers import get_workspace_dir
+from tsugite_claude_code.usage import record_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +369,8 @@ class ClaudeCodeProcess:
                 }
                 return
 
-            # Skip: rate_limit_event, system, etc.
+            elif event_type == "rate_limit_event":
+                record_rate_limit(event.get("rate_limit_info") or {})
 
     async def stop(self) -> None:
         """Terminate subprocess and clean up temp files."""

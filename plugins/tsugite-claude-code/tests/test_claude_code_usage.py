@@ -64,9 +64,27 @@ def _write_config(tmp_path, monkeypatch, limits=None, cache=..., age_ms=0):
     return path
 
 
+RATE_LIMIT_INFO = {
+    "status": "allowed",
+    "rateLimitType": "five_hour",
+    "unifiedWindows": {
+        "five_hour": {"utilization": 0.06, "resetsAt": 1767225600},
+        "seven_day": {"utilization": 0.12, "resetsAt": 1767830400},
+    },
+}
+
+
 @pytest.fixture(autouse=True)
 def _no_live_result(monkeypatch):
-    monkeypatch.setattr(usage, "_last_live", None)
+    for name, value in [("_last_live", None), ("_failures", 0), ("_retry_at", 0.0), ("_turn", {})]:
+        monkeypatch.setattr(usage, name, value)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    now = [time.time()]
+    monkeypatch.setattr(time, "time", lambda: now[0])
+    return now
 
 
 @pytest.fixture
@@ -232,3 +250,115 @@ def test_fresh_cache_is_used_when_the_live_fetch_fails(tmp_path, monkeypatch, fa
 
     assert report.error is None
     assert _pcts(report)["weekly_all"] == 42.0
+
+
+def test_turn_windows_are_reported_with_the_endpoint_keys_and_labels(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+
+    usage.record_rate_limit(RATE_LIMIT_INFO)
+    report = usage.fetch()
+
+    assert report.error is None
+    windows = {w.key: w for w in report.windows}
+    assert windows["session"].label == "session"
+    assert windows["session"].used_pct == 6.0
+    assert windows["session"].resets_at == "2026-01-01T00:00:00+00:00"
+    assert windows["weekly_all"].label == "week"
+    assert windows["weekly_all"].used_pct == 12.0
+    assert windows["weekly_all"].resets_at == "2026-01-08T00:00:00+00:00"
+
+
+def test_rate_limit_event_without_windows_records_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+
+    usage.record_rate_limit({"status": "allowed", "rateLimitType": "five_hour", "resetsAt": 1767225600})
+
+    assert usage.fetch().error
+
+
+def test_newer_turn_reading_overrides_endpoint_windows_and_keeps_scoped_ones(tmp_path, monkeypatch, clock):
+    _write_config(tmp_path, monkeypatch, cache=None)
+    _write_credentials(tmp_path)
+    _serve_limits(monkeypatch)
+    usage.fetch()
+
+    clock[0] += 60
+    usage.record_rate_limit(RATE_LIMIT_INFO)
+
+    pcts = _pcts(usage.fetch())
+    assert pcts["session"] == 6.0
+    assert pcts["weekly_all"] == 12.0
+    assert pcts["weekly_scoped"] == 7.0
+
+
+def test_endpoint_reading_newer_than_the_turn_is_kept(tmp_path, monkeypatch, clock):
+    _write_config(tmp_path, monkeypatch, cache=None)
+    _write_credentials(tmp_path)
+    _serve_limits(monkeypatch)
+    usage.record_rate_limit(RATE_LIMIT_INFO)
+
+    clock[0] += 60
+    assert _pcts(usage.fetch())["weekly_all"] == 42.0
+
+
+def test_endpoint_is_called_again_only_after_an_hour(tmp_path, monkeypatch, clock):
+    _write_config(tmp_path, monkeypatch, cache=None)
+    _write_credentials(tmp_path)
+    calls = _serve_limits(monkeypatch)
+
+    usage.fetch()
+    clock[0] += 59 * 60
+    usage.fetch()
+    assert len(calls) == 1
+
+    clock[0] += 2 * 60
+    usage.fetch()
+    assert len(calls) == 2
+
+
+def test_failed_refresh_serves_the_last_good_reading_and_backs_off(tmp_path, monkeypatch, clock):
+    _write_config(tmp_path, monkeypatch, cache=None)
+    _write_credentials(tmp_path)
+    _serve_limits(monkeypatch)
+    usage.fetch()
+
+    calls = []
+
+    def rate_limited(url, headers, timeout):
+        calls.append(url)
+        return httpx.Response(429, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", rate_limited)
+    clock[0] += 61 * 60
+    report = usage.fetch()
+    assert report.error is None
+    assert _pcts(report)["weekly_all"] == 42.0
+
+    for backoff_min in (5, 10, 20):
+        attempts = len(calls)
+        clock[0] += (backoff_min - 1) * 60
+        usage.fetch()
+        assert len(calls) == attempts
+        clock[0] += 60
+        usage.fetch()
+        assert len(calls) == attempts + 1
+
+
+def test_backoff_caps_at_an_hour(tmp_path, monkeypatch, clock):
+    _write_config(tmp_path, monkeypatch, cache=None)
+    _write_credentials(tmp_path)
+    calls = []
+
+    def not_json(url, headers, timeout):
+        calls.append(url)
+        return httpx.Response(200, text="<html>", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", not_json)
+    for _ in range(6):
+        usage.fetch()
+        clock[0] += 60 * 60
+    assert len(calls) == 6
+
+    clock[0] -= 1
+    usage.fetch()
+    assert len(calls) == 6
