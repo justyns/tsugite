@@ -359,3 +359,17 @@ def test_spawn_job_timeout_is_generous_and_warns_about_duplicates(monkeypatch):
     with pytest.raises(TimeoutError, match="list_jobs"):
         jobs_tool.spawn_job(prompt="x", repo="/some/repo")
     assert seen["timeout"] >= 120, "spawn must allow slow worktree provisioning"
+
+
+def test_spawn_job_passes_setup_and_teardown(monkeypatch, wire, real_store):
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "p1")
+    job = _add(real_store, parent="p1", prompt="do x")
+    calls = []
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, **kw: calls.append(kw) or (job, Session(id="worker-1")))
+
+    jobs_tool.spawn_job(
+        prompt="do x", setup="make up", teardown="make down", teardown_when="on_success", timeout_minutes=5
+    )
+
+    [kw] = calls
+    assert (kw["setup"], kw["teardown"], kw["teardown_when"]) == ("make up", "make down", "on_success")

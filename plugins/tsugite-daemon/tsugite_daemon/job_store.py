@@ -180,6 +180,14 @@ class Job:
     # attachments once the model is known - images reach a vision model as pixels,
     # non-inlinable files degrade to a path hint. Mirrors spawn_agent's files=.
     delegation_files: list[str] = field(default_factory=list)
+    # Shell commands run in the job's working directory: `setup` before the worker
+    # starts, `teardown` once the job reaches a terminal state matching
+    # `teardown_when` ("always", "on_success" = done, "on_failure" = any other).
+    setup: Optional[str] = None
+    teardown: Optional[str] = None
+    teardown_when: str = "always"
+    # Set when teardown is scheduled; a retry re-runs setup and clears it.
+    torn_down: bool = False
     # Which executor produces the work. "agent" (default) spawns a tsugite worker
     # session through the SessionRunner; a plugin-registered executor (e.g. a
     # PTY-driven CLI) runs the job itself and reports back via the orchestrator's

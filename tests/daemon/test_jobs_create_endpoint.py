@@ -157,10 +157,14 @@ class TestCreateJobHappyPath:
                     "notify_when": "done",
                     "model_ladder": "gpt|opus",
                     "timeout_minutes": 90,
+                    "setup": "make up",
+                    "teardown": "make down",
+                    "teardown_when": "on_failure",
                 },
             )
         assert resp.status_code == 201, resp.text
         call = server.jobs_orchestrator.calls[-1]
+        assert (call["setup"], call["teardown"], call["teardown_when"]) == ("make up", "make down", "on_failure")
         assert call["repo"] == "myrepo"
         assert call["agent"] == "custom_worker"
         assert call["effort"] == "high"

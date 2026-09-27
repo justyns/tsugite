@@ -41,6 +41,9 @@ def spawn_job(
     executor: str = "agent",
     effort: Optional[str] = None,
     files: Optional[list[str]] = None,
+    setup: Optional[str] = None,
+    teardown: Optional[str] = None,
+    teardown_when: str = "always",
 ) -> dict:
     """Spawn a background Job with an optional verification loop.
 
@@ -94,6 +97,15 @@ def spawn_job(
             (paths relative to your workspace). A vision model sees images as
             pixels, e.g. delegate an image question via files=["uploads/photo.jpg"],
             model="claude_code:haiku".
+        setup: Shell command run in the background in the Job's working directory
+            before the worker starts, e.g. "docker compose up -d". A non-zero exit
+            errors the Job before any model call. Budget: timeout_minutes. Redirect
+            a backgrounded server's output yourself ("npm run dev > dev.log 2>&1 &").
+        teardown: Shell command run in the Job's working directory after the Job
+            reaches a terminal state, e.g. "docker compose down".
+        teardown_when: always (default) | on_success (done) | on_failure (stuck,
+            errored, cancelled). A retry of a parked Job re-runs setup when
+            teardown ran on it.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -148,6 +160,9 @@ def spawn_job(
             executor=executor,
             effort=effort,
             delegation_files=delegation_files,
+            setup=setup,
+            teardown=teardown,
+            teardown_when=teardown_when,
             timeout=180,
         )
     except TimeoutError:

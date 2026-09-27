@@ -54,3 +54,16 @@ def test_sandboxed_job_predicate_runs_in_bwrap(tmp_path):
         sandbox_override=override,
     )
     assert escaped["pass"] is False
+
+
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
+def test_sandboxed_job_setup_command_runs_in_bwrap(tmp_path):
+    from tsugite_daemon.job_predicates import JobCommandError, run_job_command
+
+    override = {"enabled": True, "no_network": True, "extra_ro_binds": [], "extra_rw_binds": []}
+
+    run_job_command("touch made_inside", str(tmp_path), 30, override)
+    assert (tmp_path / "made_inside").exists()
+
+    with pytest.raises(JobCommandError):
+        run_job_command("cat /etc/shadow", str(tmp_path), 30, override)

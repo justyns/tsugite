@@ -6,6 +6,7 @@ it needs no verifier model. Runs under the job's sandbox when one is configured.
 
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +17,60 @@ logger = logging.getLogger(__name__)
 _PREDICATE_TIMEOUT_SECONDS = 30
 
 _PREDICATE_STDERR_TRUNCATE = 100
+
+_JOB_COMMAND_OUTPUT_TAIL = 2000
+
+
+class JobCommandError(Exception):
+    def __init__(self, message: str, output: str = ""):
+        super().__init__(message)
+        self.output = output
+
+
+def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optional[list[str]]:
+    """`sh -c cmd`, wrapped in bwrap (confined to `cwd`, no network) when the job is
+    sandboxed. None when it is sandboxed but no sandbox backend is installed."""
+    if not sandbox_override:
+        return ["sh", "-c", cmd]
+
+    from tsugite.core.sandbox import SandboxConfig, get_sandbox_class
+
+    sandbox_cls = get_sandbox_class()
+    if sandbox_cls is None:
+        return None
+    bwrap = sandbox_cls(
+        config=SandboxConfig(
+            no_network=True,
+            extra_ro_binds=[Path(p) for p in sandbox_override.get("extra_ro_binds", [])],
+            extra_rw_binds=[Path(p) for p in sandbox_override.get("extra_rw_binds", [])],
+            pass_env=list(sandbox_override.get("pass_env", [])),
+        ),
+        workspace_dir=Path(cwd),
+        state_dir=None,
+    )
+    return bwrap.build_command(["sh", "-c", cmd])
+
+
+def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_override: Optional[dict] = None) -> None:
+    """Run a job's setup/teardown command in `cwd`, raising JobCommandError on failure.
+
+    Output goes to a temp file, not a pipe: a pipe stays open while any backgrounded
+    child (`npm run dev &`) lives, and the call would block until the timeout.
+    """
+    if cwd is None:
+        raise JobCommandError("job has no working directory")
+    argv = _command_argv(cmd, cwd, sandbox_override)
+    if argv is None:
+        raise JobCommandError("the job is sandboxed but no sandbox backend is installed")
+    with tempfile.TemporaryFile() as out:
+        try:
+            completed = subprocess.run(argv, cwd=cwd, stdout=out, stderr=subprocess.STDOUT, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise JobCommandError(f"timed out after {timeout:.0f}s") from None
+        out.seek(0)
+        output = out.read().decode("utf-8", "replace")[-_JOB_COMMAND_OUTPUT_TAIL:]
+    if completed.returncode != 0:
+        raise JobCommandError(f"exit code {completed.returncode}", output)
 
 
 def _parse_ac_predicate(text: str) -> Optional[dict]:
@@ -142,33 +197,10 @@ def _evaluate_predicate(
                 return verdict(
                     False, "no working directory for command predicate (job has no worktree, repo, or workspace anchor)"
                 )
-            if sandbox_override:
-                from tsugite.core.sandbox import SandboxConfig, get_sandbox_class
-
-                sandbox_cls = get_sandbox_class()
-                if sandbox_cls is None:
-                    return verdict(False, "command predicate requires a sandbox but no backend is installed")
-
-                bwrap = sandbox_cls(
-                    config=SandboxConfig(
-                        no_network=True,
-                        extra_ro_binds=[Path(p) for p in sandbox_override.get("extra_ro_binds", [])],
-                        extra_rw_binds=[Path(p) for p in sandbox_override.get("extra_rw_binds", [])],
-                        pass_env=list(sandbox_override.get("pass_env", [])),
-                    ),
-                    workspace_dir=Path(cwd),
-                    state_dir=None,
-                )
-                run_cmd = bwrap.build_command(["sh", "-c", cmd])
-                completed = subprocess.run(run_cmd, capture_output=True, timeout=_PREDICATE_TIMEOUT_SECONDS, cwd=cwd)
-            else:
-                completed = subprocess.run(
-                    cmd,
-                    shell=True,
-                    capture_output=True,
-                    timeout=_PREDICATE_TIMEOUT_SECONDS,
-                    cwd=cwd,
-                )
+            argv = _command_argv(cmd, cwd, sandbox_override)
+            if argv is None:
+                return verdict(False, "command predicate requires a sandbox but no backend is installed")
+            completed = subprocess.run(argv, capture_output=True, timeout=_PREDICATE_TIMEOUT_SECONDS, cwd=cwd)
             if completed.returncode == expected:
                 return verdict(True, f"exit code {completed.returncode}")
             stderr = (completed.stderr or b"").decode("utf-8", "replace").strip()

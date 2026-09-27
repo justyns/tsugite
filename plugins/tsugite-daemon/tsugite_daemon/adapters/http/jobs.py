@@ -133,6 +133,9 @@ class JobsMixin:
                 spawned_by="user-slash",
                 executor=(body.get("executor") or "agent").strip() or "agent",
                 effort=body.get("effort") or None,
+                setup=body.get("setup") or None,
+                teardown=body.get("teardown") or None,
+                teardown_when=body.get("teardown_when") or "always",
             )
         except Exception as e:
             # Unmapped failures are spawn errors.

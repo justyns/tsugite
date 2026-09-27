@@ -22,7 +22,13 @@ from xml.sax.saxutils import quoteattr
 from tsugite.core.record_store import now_iso
 from tsugite.providers import list_all_providers
 from tsugite_daemon.attention_store import SOURCE_JOB
-from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
+from tsugite_daemon.job_predicates import (
+    JobCommandError,
+    _evaluate_predicate,
+    _resolve_predicate_cwd,
+    partition_acs,
+    run_job_command,
+)
 from tsugite_daemon.job_prompts import (
     _build_barrier_message,
     _build_followup_prompt,
@@ -65,6 +71,7 @@ _JOB_TO_SESSION_STATUS = {
 
 # Allowed notify_when values; anything else is coerced to "never" at intake.
 _VALID_NOTIFY_WHEN = frozenset({"done", "stuck", "errored", "terminal", "all_done", "never"})
+_VALID_TEARDOWN_WHEN = frozenset({"always", "on_success", "on_failure"})
 
 
 # A job in one of these is parked on the user: it cannot progress until someone acts.
@@ -77,6 +84,27 @@ def _with_sandbox(job: Job, metadata: dict) -> dict:
     if job.sandbox_override:
         return {**metadata, "sandbox_override": job.sandbox_override}
     return metadata
+
+
+def _teardown_applies(job: Job, terminal: JobState) -> bool:
+    if not job.teardown:
+        return False
+    if job.teardown_when == "on_success":
+        return terminal == JobState.DONE
+    if job.teardown_when == "on_failure":
+        return terminal != JobState.DONE
+    return True
+
+
+def _run_job_command(job: Job, cmd: str) -> None:
+    run_job_command(cmd, _job_workspace(job), job.timeout_minutes * 60, job.sandbox_override)
+
+
+def _run_teardown(job: Job) -> None:
+    try:
+        _run_job_command(job, job.teardown)
+    except JobCommandError as e:
+        logger.warning("Teardown for job '%s' failed: %s\n%s", job.id, e, e.output)
 
 
 def _job_workspace(job: Job) -> Optional[str]:
@@ -106,6 +134,8 @@ class JobsOrchestrator:
         # Strong refs to in-flight background tasks (e.g. offloaded worktree
         # prunes). Same GC rationale as _notify_tasks; also lets tests drain them.
         self._bg_tasks: set[asyncio.Task] = set()
+        # Latest setup/teardown task per job; the next one waits for it.
+        self._job_commands: dict[str, asyncio.Task] = {}
         # Per-job locks serializing out-of-band STUCK transitions (retry / mark-done)
         # so two concurrent tile clicks can't both pass the stuck guard and double-act.
         self._job_action_locks: dict[str, asyncio.Lock] = {}
@@ -214,7 +244,10 @@ class JobsOrchestrator:
             except (JobStateTransitionError, UnknownJobError) as e:
                 logger.warning("Could not recover orphaned job '%s': %s", job.id, e)
                 continue
-            self._emit_job_event(self._jobs.get(job.id))
+            fresh = self._jobs.get(job.id)
+            if self._claim_teardown(fresh, JobState.ERRORED):
+                self._schedule_executor_teardown(fresh, prune_worktree=False, run_teardown=True)
+            self._emit_job_event(fresh)
             recovered += 1
         if recovered:
             logger.info("Recovered %d orphaned job(s) from previous daemon run", recovered)
@@ -239,6 +272,9 @@ class JobsOrchestrator:
         executor: str = "agent",
         effort: Optional[str] = None,
         delegation_files: Optional[list] = None,
+        setup: Optional[str] = None,
+        teardown: Optional[str] = None,
+        teardown_when: str = "always",
     ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -276,6 +312,11 @@ class JobsOrchestrator:
         # off job.sandbox_override.
         if sandbox_override is None:
             sandbox_override = self._resolve_parent_sandbox_override(parent_session_id)
+
+        if teardown_when not in _VALID_TEARDOWN_WHEN:
+            raise ValueError(
+                f"Unknown teardown_when: {teardown_when!r} (expected one of {sorted(_VALID_TEARDOWN_WHEN)})"
+            )
 
         job_kwargs: dict = {}
         if model_ladder:
@@ -316,6 +357,9 @@ class JobsOrchestrator:
                 workspace_path=str(workspace_root) if workspace_root is not None and not repo else None,
                 executor=executor,
                 delegation_files=delegation_files or [],
+                setup=setup,
+                teardown=teardown,
+                teardown_when=teardown_when,
                 **job_kwargs,
             )
         )
@@ -344,6 +388,12 @@ class JobsOrchestrator:
                 raise
 
         worker_prompt = build_worker_prompt(prompt, acceptance_criteria or [], repo)
+        if setup:
+            self._after_job_commands(job.id, lambda: self._setup_then_start(job, worker_prompt))
+            return job, None
+        return job, await self._start_worker(job, worker_prompt)
+
+    async def _start_worker(self, job: Job, worker_prompt: str) -> Optional[Session]:
         try:
             started = await self._spawn_worker(job, prompt=worker_prompt, workspace=_job_workspace(job))
         except Exception as e:
@@ -351,8 +401,23 @@ class JobsOrchestrator:
             # doesn't accumulate as a zombie in jobs.json.
             self._finalize(job, JobState.ERRORED, error=f"worker spawn failed: {e}")
             raise
-        self.register_worker(job.id, started.id if started else None, timeout_minutes=timeout_minutes)
-        return job, started
+        self.register_worker(job.id, started.id if started else None, timeout_minutes=job.timeout_minutes)
+        return started
+
+    async def _setup_then_start(self, job: Job, worker_prompt: str) -> None:
+        try:
+            await asyncio.to_thread(_run_job_command, job, job.setup)
+        except JobCommandError as e:
+            self._finalize(job, JobState.ERRORED, error=f"setup failed: {e}", error_detail=e.output or None)
+            return
+        job = self._jobs.get(job.id)
+        # Cancelled while setup ran.
+        if job is None or job.state != JobState.QUEUED.value:
+            return
+        try:
+            await self._start_worker(job, worker_prompt)
+        except Exception:
+            logger.exception("Job '%s': worker spawn after setup failed", job.id)
 
     async def _spawn_worker(
         self,
@@ -661,10 +726,8 @@ class JobsOrchestrator:
             self._jobs.update_state(job_id, JobState.DONE.value)
             self._jobs.update(job_id, result=result, error=None, resolved_at=now_iso())
             self.close_batch_barrier(job.parent_session_id)
-            # Clean exit: stop a non-agent executor's child BEFORE pruning its cwd.
-            await self._cancel_executor(self._jobs.get(job_id))
-            if job.worktree_path:
-                await self._prune_and_clear(job_id, job.worktree_path)
+            fresh = self._jobs.get(job_id)
+            await self._teardown_sequence(fresh, job.worktree_path, self._claim_teardown(fresh, JobState.DONE))
             self._emit_job_event(self._jobs.get(job_id))
             return self._jobs.get(job_id)
 
@@ -733,6 +796,17 @@ class JobsOrchestrator:
                     raise RuntimeError(
                         f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
                     )
+
+            if job.torn_down:
+                await self._await_job_commands(job_id)
+                if job.setup:
+                    try:
+                        await asyncio.to_thread(_run_job_command, job, job.setup)
+                    except JobCommandError as e:
+                        error = f"setup failed: {e}"
+                        self._jobs.update(job_id, error=error, error_detail=e.output or None)
+                        raise RuntimeError(error) from e
+                job = self._jobs.update(job_id, torn_down=False)
 
             if model or verifier_model:
                 fields = {}
@@ -1260,7 +1334,9 @@ class JobsOrchestrator:
             # worktree_path is cleared by the teardown once the tree is actually
             # gone. Clearing it here would drop the only pointer to a directory a
             # failed prune left behind.
-            self._schedule_executor_teardown(fresh, prune_worktree=prune)
+            self._schedule_executor_teardown(
+                fresh, prune_worktree=prune, run_teardown=self._claim_teardown(fresh, terminal)
+            )
         self._emit_job_event(fresh)
         self._reconcile_host_session(job, terminal)
         if fresh and _should_notify(fresh, terminal):
@@ -1280,29 +1356,57 @@ class JobsOrchestrator:
         except Exception:
             logger.exception("Executor cancel failed for job '%s'", job.id)
 
-    def _schedule_executor_teardown(self, job: Job, *, prune_worktree: bool = True) -> None:
-        """Cancel a non-agent executor's child THEN (on a clean exit) prune the
-        worktree, in that order and off the event loop - the child holds the cwd
-        open. Parked finalizes (STUCK/ERRORED) pass prune_worktree=False: the child
-        is still reaped but the worktree survives for inspection. For an agent job
-        (or a job whose executor is gone) this collapses to the plain worktree
-        prune, matching the historical behaviour exactly."""
+    def _schedule_executor_teardown(self, job: Job, *, prune_worktree: bool = True, run_teardown: bool = False) -> None:
+        """Cancel a non-agent executor's child, run the job's teardown command, then
+        (on a clean exit) prune the worktree, in that order and off the event loop -
+        the child and the teardown both use the cwd. Parked finalizes (STUCK/ERRORED)
+        pass prune_worktree=False: the child is still reaped but the worktree
+        survives for inspection."""
         worktree_path = job.worktree_path if prune_worktree else None
-        if job.executor == "agent":
-            if worktree_path:
-                self._prune_worktree_bg(job.id, worktree_path)
-            return
-
-        async def _teardown() -> None:
-            await self._cancel_executor(job)
-            if worktree_path:
-                await self._prune_and_clear(job.id, worktree_path)
-
-        if not self._spawn_bg(_teardown):
+        if not self._after_job_commands(job.id, lambda: self._teardown_sequence(job, worktree_path, run_teardown)):
             # No loop (sync CLI/test path): the async executor cancel can't run,
-            # but the worktree still needs pruning.
+            # but the teardown and the worktree prune still can.
+            if run_teardown:
+                _run_teardown(job)
             if worktree_path:
                 self._prune_and_clear_sync(job.id, worktree_path)
+
+    async def _teardown_sequence(self, job: Job, worktree_path: Optional[str], run_teardown: bool) -> None:
+        await self._cancel_executor(job)
+        if run_teardown:
+            await asyncio.to_thread(_run_teardown, job)
+        if worktree_path:
+            await self._prune_and_clear(job.id, worktree_path)
+
+    def _claim_teardown(self, job: Job, terminal: JobState) -> bool:
+        """True (and marks the job torn down) when its teardown should run for `terminal`."""
+        if job.torn_down or not _teardown_applies(job, terminal):
+            return False
+        self._jobs.update(job.id, torn_down=True)
+        return True
+
+    def _after_job_commands(self, job_id: str, make_coro) -> bool:
+        """`_spawn_bg`, started only after the job's previous setup/teardown finishes."""
+        previous = self._job_commands.get(job_id)
+
+        async def run() -> None:
+            if previous is not None:
+                await asyncio.wait([previous])
+            await make_coro()
+
+        task = self._spawn_bg(run)
+        if task is None:
+            return False
+        self._job_commands[job_id] = task
+        task.add_done_callback(
+            lambda t: self._job_commands.pop(job_id) if self._job_commands.get(job_id) is t else None
+        )
+        return True
+
+    async def _await_job_commands(self, job_id: str) -> None:
+        task = self._job_commands.get(job_id)
+        if task is not None:
+            await asyncio.wait([task])
 
     def _schedule_notify(self, job: Job) -> None:
         """Post a one-line wake-up message into the parent session so its agent
@@ -1392,18 +1496,18 @@ class JobsOrchestrator:
         self._notify_tasks.add(task)
         task.add_done_callback(self._notify_tasks.discard)
 
-    def _spawn_bg(self, make_coro) -> bool:
+    def _spawn_bg(self, make_coro) -> Optional[asyncio.Task]:
         """Run `make_coro()` as a tracked background task, so it can't be garbage
-        collected mid-flight. Returns False when there is no running loop (sync
+        collected mid-flight. Returns None when there is no running loop (sync
         CLI/test context) and the caller must do the work inline instead."""
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            return False
+            return None
         task = loop.create_task(make_coro())
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
-        return True
+        return task
 
     def _prune_and_clear_sync(self, job_id: str, worktree_path: str) -> None:
         """Prune, then drop the path only once the tree is confirmed gone. A failed
