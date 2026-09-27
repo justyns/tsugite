@@ -92,8 +92,8 @@ def _current_turn_already_has_user_input(storage: Session) -> bool:
     session_end after it; the post-hoc save_run_to_history on the error path
     would otherwise record a second, identical one (a duplicate user bubble).
     A genuinely repeated message opens a new turn *after* the prior session_end,
-    so this stays False for it. A final_result also ends a turn: compaction copies
-    retained turns into the successor without their session_end.
+    so this stays False for it. A final_result also ends a turn copied without
+    its session_end (branches, older compacted sessions).
     """
     events = list(storage.iter_events(types=("user_input", "session_end", "final_result")))
     return bool(events) and events[-1].type == "user_input"

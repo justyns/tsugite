@@ -43,8 +43,7 @@ def test_boot_repair_finalizes_in_flight_interactive_turn(tmp_path, history_dir)
     reopened = SessionStore(tmp_path / "session_store.json")
 
     types = _event_types(history_dir, "s1")
-    assert types[-1] == "session_error", f"repair must append a terminal event; got tail {types[-3:]}"
-    assert "info" in types, "repair must leave a visible explanation for the user"
+    assert types[-3:] == ["info", "session_error", "session_end"]
     session = reopened.get_session("s1")
     assert session.turn_in_flight is False, "the in-flight marker must be cleared"
     assert session.status == SessionStatus.ACTIVE.value, "an interactive session stays usable; only the turn died"
@@ -68,7 +67,7 @@ def test_boot_repair_appends_terminal_event_for_running_session(tmp_path, histor
     reopened = SessionStore(tmp_path / "session_store.json")
 
     assert reopened.get_session("s2").status == SessionStatus.FAILED.value
-    assert _event_types(history_dir, "s2")[-1] == "session_error"
+    assert _event_types(history_dir, "s2")[-3:] == ["info", "session_error", "session_end"]
 
 
 def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):

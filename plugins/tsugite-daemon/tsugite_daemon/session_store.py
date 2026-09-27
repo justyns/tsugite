@@ -1581,11 +1581,10 @@ class SessionStore:
 
         `status_text` is the last status-bearing event, which is the session's
         *current* status only while the log ends on a terminator. A log can end
-        mid-turn with nothing running - compaction retains a slice of turns and
-        deliberately drops their `session_end` markers, and a crash or truncated
-        write leaves the same shape. Callers rendering the label must therefore
-        gate it on `has_live_work` (or the HTTP layer's broader `_session_busy`),
-        or an idle session displays a stale "Waiting on LLM..." forever. This
+        mid-turn with nothing running after a crash or a truncated write. Callers
+        rendering the label must therefore gate it on `has_live_work` (or the HTTP
+        layer's broader `_session_busy`), or an idle session displays a stale
+        "Waiting on LLM..." forever. This
         stays a pure derivation from events; liveness is not an event.
 
         Callers MUST treat the returned dict as read-only - it's the cached
@@ -1859,6 +1858,7 @@ class SessionStore:
                 session_id,
                 {"type": "session_error", "error": "daemon restarted mid-turn", "timestamp": now},
             )
+            self.append_event(session_id, {"type": "session_end", "status": "interrupted", "timestamp": now})
         except Exception as e:
             logger.warning("Could not finalize interrupted turn for session '%s': %s", session_id, e)
 

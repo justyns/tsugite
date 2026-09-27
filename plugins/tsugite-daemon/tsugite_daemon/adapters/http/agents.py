@@ -311,9 +311,8 @@ class AgentsMixin:
                 if not row["busy"]:
                     # The fold reports the last status-bearing event, which is the
                     # current status only while the log ends on a terminator. An
-                    # idle session whose log ends mid-turn (compaction drops the
-                    # retained turns' session_end markers; a crash truncates the
-                    # same way) would otherwise show "Waiting on LLM..." forever.
+                    # idle session whose log ends mid-turn (a crash or truncated
+                    # write) would otherwise show "Waiting on LLM..." forever.
                     progress = {**progress, "status_text": ""}
                 row["progress"] = progress
             sessions.append(row)

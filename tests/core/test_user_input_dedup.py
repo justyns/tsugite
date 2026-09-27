@@ -54,8 +54,8 @@ def test_record_user_input_records_repeat_in_new_turn(tmp_path: Path):
 
 
 def test_record_user_input_after_a_turn_copied_without_its_session_end(tmp_path: Path):
-    """Compaction copies retained turns into the successor without their
-    session_end. A completed retained turn ends at its final_result instead."""
+    """Branch copies and older compacted sessions carry turns without their
+    session_end. A completed copied turn ends at its final_result instead."""
     storage = _storage(tmp_path)
     storage.record("compaction", summary="earlier work")
     storage.record("user_input", text="retained question")

@@ -135,8 +135,7 @@ def _mid_turn_tail(store, sid):
 
 
 def test_progress_summary_stays_a_pure_fold_when_idle(store, history_dir):
-    """A retained slice can end mid-turn (compaction drops per-turn session_end
-    markers). The fold still reports the last status-bearing event - suppressing
+    """A log can end mid-turn (a crash or truncated write). The fold still reports the last status-bearing event - suppressing
     it is the caller's job, because liveness is not an event."""
     from tsugite_daemon.session_store import Session
 

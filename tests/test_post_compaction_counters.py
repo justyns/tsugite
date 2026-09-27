@@ -47,12 +47,13 @@ def _seed_session_events(session_id, count=6):
         storage.record("model_response", raw_content=f"reply {i}")
 
 
-def _patches(history_dir, summarize=None):
+def _patches(history_dir, summarize=None, recent_events=None):
     """The shared patch list for driving `_compact_session` in isolation."""
     old_events = [Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"old {i}"}) for i in range(4)]
-    recent_events = [
-        Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
-    ]
+    if recent_events is None:
+        recent_events = [
+            Event(type="user_input", ts=datetime.now(timezone.utc), data={"text": f"recent {i}"}) for i in range(2)
+        ]
 
     async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
         return "Summary"

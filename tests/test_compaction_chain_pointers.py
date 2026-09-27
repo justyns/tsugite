@@ -196,11 +196,9 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
 
 
 @pytest.mark.asyncio
-async def test_retained_events_preserve_timestamps_and_drop_session_end(workspace_dir, history_dir, tmp_path):
-    """Carried-forward retained events must keep their ORIGINAL `ts` (not the
-    compaction-spawn time), and per-turn `session_end` markers must not be
-    copied mid-file. Otherwise a retained turn's whole timeline collapses into
-    the spawn instant and the new session structurally "ends" before it ends.
+async def test_retained_events_preserve_timestamps_and_session_end(workspace_dir, history_dir, tmp_path):
+    """Carried-forward retained events keep their ORIGINAL `ts` (not the
+    compaction-spawn time), and each retained turn keeps its `session_end`.
     """
     from datetime import datetime, timezone
     from unittest.mock import AsyncMock, patch
@@ -240,9 +238,8 @@ async def test_retained_events_preserve_timestamps_and_drop_session_end(workspac
 
     assert new_session is not None
     new_events = load_history_session(new_session.id).load_events()
-    assert all(e.type != "session_end" for e in new_events), "retained session_end must not be copied mid-file"
-    carried = [e for e in new_events if e.type in ("user_input", "model_response")]
-    assert carried, "expected carried turns in the new session"
+    carried = [e for e in new_events if e.type in ("user_input", "model_response", "session_end")]
+    assert [e.type for e in carried] == ["user_input", "model_response", "session_end"]
     assert all(e.ts == old_ts for e in carried), f"carried events lost their original ts: {[e.ts for e in carried]}"
 
 

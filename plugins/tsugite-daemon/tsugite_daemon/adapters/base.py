@@ -1457,10 +1457,6 @@ class BaseAdapter(ABC):
             source_session_id=old_conv_id,
         )
         for event in recent_events:
-            if event.type == "session_end":
-                # A retained session_end would mark the new session ended mid-file.
-                # The new session records its own at its real end.
-                continue
             data = event.data
             if event.type == "model_response" and "state_delta" in data:
                 # state_delta holds provider runtime ids (e.g. the claude_code session_id
