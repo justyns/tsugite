@@ -27,6 +27,7 @@ _ACP_MODELS: dict[str, ModelInfo] = {
     "acp/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-sonnet-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
+    "acp/claude-sonnet-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
 }
 # fmt: on
 # --- END GENERATED MODELS (acp) --- #
@@ -40,6 +41,7 @@ _ALIASES: dict[str, str] = {
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
     "sonnet": "claude-sonnet-4-6",
+    "sonnet-5-5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "haiku": "claude-haiku-4-5-20251001",
 }

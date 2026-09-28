@@ -33,6 +33,7 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
     "claude_code/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-sonnet-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
+    "claude_code/claude-sonnet-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
 }
 # fmt: on
 # --- END GENERATED MODELS (claude_code) --- #
@@ -56,6 +57,7 @@ _ALIASES = {
     "opus-4-5": "claude-opus-4-5",
     "opus-4-5-20251101": "claude-opus-4-5-20251101",
     "sonnet": "claude-sonnet-5",
+    "sonnet-5-5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "sonnet-4-6": "claude-sonnet-4-6",
     "sonnet-4-5": "claude-sonnet-4-5",
