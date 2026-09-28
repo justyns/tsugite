@@ -155,3 +155,22 @@ async def test_a_complete_envelope_without_a_name_attribute_is_still_caught(stor
     await agent.run("run something")
 
     assert mock.await_count == 2
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "<python-exec>\nrun(command=\"git commit -am 'log notes'\")\n</python-exec>",
+        "<function_calls>\n<python-exec>\nrun(command=\"git commit -am 'log notes'\")\n</python-exec>",
+    ],
+    ids=["bare-element", "inside-function-calls"],
+)
+@pytest.mark.asyncio
+async def test_a_python_exec_element_is_caught(storage, reply):
+    """The fence written as an XML element ran nothing either."""
+    agent = _agent(storage)
+    mock = _patch(agent, side_effect=[_resp(reply), _resp("Nothing to commit.")])
+
+    await agent.run("commit anything outstanding")
+
+    assert mock.await_count == 2

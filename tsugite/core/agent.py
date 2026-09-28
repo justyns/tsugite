@@ -153,12 +153,13 @@ def _has_bare_python_fence(cleaned: str) -> bool:
 
 
 # Tool-call envelopes a model may emit as text instead of a ```python-exec
-# block. Nothing here executes them, so such a reply did no work. An envelope
-# carries structure (`<invoke name="...">`, or an opening tag closed by its own
+# block, including that block written as a `<python-exec>` element. Nothing
+# here executes them, so such a reply did no work. An envelope carries
+# structure (`<invoke name="...">`, or an opening tag closed by its own
 # counterpart); prose naming the tags is not one.
 _TOOL_CALL_MARKUP = re.compile(
     r"<(?:[a-z]+:)?invoke\s+name\s*="
-    r"|<(?:[a-z]+:)?(function_calls|tool_call|tool_use)\b[^>]*>.*?</(?:[a-z]+:)?\1\s*>",
+    r"|<(?:[a-z]+:)?(function_calls|tool_call|tool_use|python-exec)\b[^>]*>.*?</(?:[a-z]+:)?\1\s*>",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -167,7 +168,7 @@ _CODE_MARKUP = re.compile(r"^```.*?^```|`[^`\n]+`", re.MULTILINE | re.DOTALL)
 
 
 def _has_tool_call_markup(content: str) -> bool:
-    """True if the text contains a native tool-call envelope outside of code."""
+    """True if the text contains a tool-call envelope outside of code."""
     return bool(content) and _TOOL_CALL_MARKUP.search(_CODE_MARKUP.sub("", content)) is not None
 
 
@@ -218,13 +219,13 @@ def _build_spoofed_runtime_tag_warning() -> str:
 
 
 def _build_unexecuted_tool_call_notice_xml() -> str:
-    """Model-visible correction when a no-code response was built out of native
+    """Model-visible correction when a no-code response was built out of
     tool-call markup. Nothing in it ran, so its completion summary describes work
     that never happened; this hands the turn back pointing at the fence that
     actually executes."""
     return (
         "\n<tsugite_unexecuted_tool_call_notice>"
-        "Your response contained native tool-call markup. This runtime does not execute it - "
+        "Your response contained tool-call markup. This runtime does not execute it - "
         "nothing ran, and any result or count your response reported is not real. "
         "Call the tools from Python instead: re-emit the work as exactly one ```python-exec block."
         "</tsugite_unexecuted_tool_call_notice>"

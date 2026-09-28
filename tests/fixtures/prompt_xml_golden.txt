@@ -226,7 +226,7 @@ This skill will auto-unload in 2 turn(s) unless referenced. Call load_skill("fad
 
 ======== agent/unexecuted-tool-call
 
-<tsugite_unexecuted_tool_call_notice>Your response contained native tool-call markup. This runtime does not execute it - nothing ran, and any result or count your response reported is not real. Call the tools from Python instead: re-emit the work as exactly one ```python-exec block.</tsugite_unexecuted_tool_call_notice>
+<tsugite_unexecuted_tool_call_notice>Your response contained tool-call markup. This runtime does not execute it - nothing ran, and any result or count your response reported is not real. Call the tools from Python instead: re-emit the work as exactly one ```python-exec block.</tsugite_unexecuted_tool_call_notice>
 
 ======== agent/bare-python
 
