@@ -470,9 +470,15 @@ export class SessionsStore {
     this.rows = patchRow(this.rows, id, { queued } as Partial<SessionRow>);
   }
 
-  async markViewed(id: string, ts?: string): Promise<void> {
-    await api.post(`/api/sessions/${encodeURIComponent(id)}/mark-viewed`, ts ? { ts } : undefined);
+  async markViewed(id: string): Promise<void> {
+    if (!this.rows.find((r) => r.id === id)?.unread) return;
     this.rows = patchRow(this.rows, id, { unread: false } as Partial<SessionRow>);
+    try {
+      await api.post(`/api/sessions/${encodeURIComponent(id)}/mark-viewed`);
+    } catch (err) {
+      this.rows = patchRow(this.rows, id, { unread: true } as Partial<SessionRow>);
+      throw err;
+    }
   }
 }
 

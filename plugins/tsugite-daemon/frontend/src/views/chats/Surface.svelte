@@ -146,6 +146,8 @@
         // The first turn resolves the provider window and moves the token count;
         // refresh the meter's fallback so it isn't stale until a session switch.
         if (selectedId) loadSessionInfo(selectedId);
+        if (focused && selectedId && document.visibilityState === 'visible')
+          void sessions.markViewed(selectedId);
       });
   });
 
@@ -163,8 +165,7 @@
 
   function selectSession(id: string) {
     selectedId = id;
-    const row = rows.find((r) => r.id === id);
-    if (row?.unread) void sessions.markViewed(id);
+    void sessions.markViewed(id);
   }
 
   async function afterMutation() {

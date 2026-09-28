@@ -40,6 +40,13 @@
     onOpenChat(id);
   }
 
+  // The surface marks read only on a selection change, which re-picking the chat
+  // already on screen never makes.
+  function select(id: string) {
+    void sessions.markViewed(id);
+    onOpenChat(id);
+  }
+
   function serverSearch(q: string) {
     void sessions.search(q);
   }
@@ -51,7 +58,7 @@
   {attn}
   {jobCounts}
   loading={sessions.loading}
-  onSelect={(id) => onOpenChat(id)}
+  onSelect={select}
   onNew={newSession}
   onServerSearch={serverSearch}
 />

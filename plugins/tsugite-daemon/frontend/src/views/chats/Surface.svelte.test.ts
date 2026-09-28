@@ -348,3 +348,29 @@ test('removing a chip targets the queued message by id, not by its position at r
 
   expect(del).toHaveBeenCalledWith('/api/chat/sessions/session-queued/queue/q-0b9a1d34');
 });
+
+async function settleUnread(focused: boolean) {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [row('session-open', { title: 'open chat', busy: true })];
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ ok: true } as never);
+  render(Surface, { params: { sessionId: 'session-open' }, focused });
+  await vi.waitFor(() => expect(headerTitle()).toBe('open chat'));
+  // The turn-end list reload lands busy:false and unread:true together.
+  sessions.rows = [row('session-open', { title: 'open chat', unread: true })];
+  await tick();
+  return post;
+}
+
+test('a turn settling on the chat on screen marks it read', async () => {
+  const post = await settleUnread(true);
+  await vi.waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed'),
+  );
+});
+
+test('a turn settling in an unfocused pane leaves the chat unread', async () => {
+  const post = await settleUnread(false);
+  expect(post).not.toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed');
+  expect(sessions.rows[0]!.unread).toBe(true);
+});

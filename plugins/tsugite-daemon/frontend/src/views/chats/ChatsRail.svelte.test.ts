@@ -9,10 +9,12 @@ import { jobs, type Job } from '$lib/stores/jobs.svelte';
 import { chatsNavBadge } from '$lib/shell/navBadges';
 import { chatsNeedingAnswer } from './sessionModel';
 import { TESTID } from '$lib/testids';
+import { api } from '$lib/api/client';
 
 afterEach(() => {
   sessions.rows = [];
   jobs.jobs = [];
+  vi.restoreAllMocks();
 });
 
 function job(id: string, parent: string, state: string): Job {
@@ -89,4 +91,27 @@ test('a compacted-away chat leaves its card to the successor the rail lists', as
   // The rail never lists the superseded row, so the badge must not count it.
   expect(chatsNavBadge(chatsNeedingAnswer(sessions.rows).length)[0]!.count).toBe(1);
   expect(container.querySelectorAll('.t-srow.is-attn')).toHaveLength(1);
+});
+
+test('clicking the chat already on screen marks it read', async () => {
+  sessions.rows = [row('s1', { title: 'open chat', unread: true })];
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ ok: true } as never);
+  const onOpenChat = vi.fn();
+  await render(ChatsRail, { focusedSessionId: 's1', onOpenChat });
+
+  await page.getByText('open chat').click();
+
+  expect(post).toHaveBeenCalledWith('/api/sessions/s1/mark-viewed');
+  expect(sessions.rows[0]!.unread).toBe(false);
+  expect(onOpenChat).toHaveBeenCalledWith('s1');
+});
+
+test('clicking a read chat posts nothing', async () => {
+  sessions.rows = [row('s1', { title: 'read chat' })];
+  const post = vi.spyOn(api, 'post');
+  await render(ChatsRail, { focusedSessionId: 's1', onOpenChat: vi.fn() });
+
+  await page.getByText('read chat').click();
+
+  expect(post).not.toHaveBeenCalled();
 });

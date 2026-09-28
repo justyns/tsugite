@@ -68,6 +68,26 @@ describe('SessionsStore unread lifecycle', () => {
 
     expect(store.rows.find((r) => r.id === 'a')?.unread).toBe(true);
   });
+
+  it('restores unread when the mark-viewed POST fails', async () => {
+    vi.spyOn(api, 'post').mockRejectedValue(new Error('offline'));
+    const store = new SessionsStore();
+    store.rows = [row('a', { unread: true })];
+
+    await expect(store.markViewed('a')).rejects.toThrow('offline');
+
+    expect(store.rows.find((r) => r.id === 'a')?.unread).toBe(true);
+  });
+
+  it('skips the POST for a row already read', async () => {
+    const post = vi.spyOn(api, 'post');
+    const store = new SessionsStore();
+    store.rows = [row('a')];
+
+    await store.markViewed('a');
+
+    expect(post).not.toHaveBeenCalled();
+  });
 });
 
 // The shell seeds the session list at boot while the chats rail loads it too;
