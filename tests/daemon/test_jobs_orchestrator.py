@@ -674,6 +674,33 @@ async def test_verifier_session_failed_does_not_burn_attempts(store, runner, orc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("acs", [["x"], ["file_exists:out.txt"]], ids=["prose", "predicate"])
+async def test_missing_workspace_errors_instead_of_verifying(store, runner, orchestrator, tmp_path, acs):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=acs)
+    gone = tmp_path / "gone"
+    store.update(job.id, workspace_path=str(gone))
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    refreshed = store.get(job.id)
+    assert not [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
+    assert refreshed.state == JobState.ERRORED.value
+    assert str(gone) in refreshed.error
+    assert refreshed.verify_attempts == 0
+    assert not refreshed.ac_results
+
+
+@pytest.mark.asyncio
+async def test_no_criteria_job_completes_with_a_missing_workspace(store, runner, orchestrator, tmp_path):
+    """A job with no acceptance criteria has nothing to verify, so a vanished
+    workspace does not turn its finished worker summary into a failure."""
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=[])
+    store.update(job.id, workspace_path=str(tmp_path / "gone"))
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    refreshed = store.get(job.id)
+    assert refreshed.state == JobState.DONE.value
+    assert refreshed.result == {"summary": "w1"}
+
+
+@pytest.mark.asyncio
 async def test_verifying_window_has_a_timer(store, runner, orchestrator):
     """A hung verifier must not strand the Job in VERIFYING forever. After the
     transition to VERIFYING, a timer must be armed so _on_timeout can rescue."""
@@ -2258,18 +2285,18 @@ async def test_concurrent_retry_with_hint_spawns_only_one_worker(store, runner, 
 
 
 @pytest.mark.asyncio
-async def test_verifier_runs_in_worker_worktree(store, runner, orchestrator):
+async def test_verifier_runs_in_worker_worktree(store, runner, orchestrator, tmp_path):
     """For repo jobs the verifier must inspect the worker's worktree, not the
     adapter's default workspace - otherwise `git diff` is empty there and every
     prose AC falsely fails."""
     job = store.add(
         Job(id="", parent_session_id="parent-1", prompt="p", acceptance_criteria=["change exists in foo.py"])
     )
-    store.update(job.id, worktree_path="/tmp/wt/job-x")
+    store.update(job.id, worktree_path=str(tmp_path))
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
     await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "did the thing")
     verifier = next(s for s in runner.started if s.agent_file == "job_verifier")
-    assert verifier.workspace_override == "/tmp/wt/job-x"
+    assert verifier.workspace_override == str(tmp_path)
 
 
 @pytest.mark.asyncio

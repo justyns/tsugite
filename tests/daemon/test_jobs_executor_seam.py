@@ -486,6 +486,7 @@ async def test_stuck_job_tears_down_executor_but_keeps_worktree(store, runner, o
     job = _seed_running_executor_job(
         store, orchestrator, acceptance_criteria=["file_exists:missing.txt"], workspace_path=str(tmp_path)
     )
+    (tmp_path / "wt").mkdir()
     store.update(job.id, max_attempts=1, worktree_path=str(tmp_path / "wt"))
     monkeypatch.setattr(orch_mod, "_prune_worktree", lambda path: (seq.append("prune"), True)[1])
 

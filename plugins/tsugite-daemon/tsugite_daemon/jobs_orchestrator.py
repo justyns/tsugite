@@ -106,6 +106,13 @@ def _job_workspace(job: Job) -> Optional[str]:
     return job.worktree_path or job.workspace_path
 
 
+def _missing_workspace_anchor(job: Job) -> Optional[str]:
+    anchor = _job_workspace(job)
+    if anchor and not Path(anchor).is_dir():
+        return anchor
+    return None
+
+
 class JobsOrchestrator:
     """Drives Job state in response to worker/verifier session completions."""
 
@@ -784,12 +791,12 @@ class JobsOrchestrator:
                     logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
                     raise RuntimeError(f"failed to recreate worktree: {e}") from e
             else:
-                anchor = _job_workspace(job)
-                if anchor and not Path(anchor).is_dir():
+                missing = _missing_workspace_anchor(job)
+                if missing:
                     # Worktree/workspace was hand-deleted between STUCK and retry -
                     # refuse rather than spawn a worker into a missing directory.
                     raise RuntimeError(
-                        f"retry_with_hint: workspace at '{anchor}' no longer exists; cannot resume in a missing directory"
+                        f"retry_with_hint: workspace at '{missing}' no longer exists; cannot resume in a missing directory"
                     )
 
             await self._await_job_commands(job_id)
@@ -930,6 +937,11 @@ class JobsOrchestrator:
 
         if not job.acceptance_criteria:
             self._finalize(job, JobState.DONE, result={"summary": result_str})
+            return
+
+        missing = _missing_workspace_anchor(job)
+        if missing:
+            self._finalize(job, JobState.ERRORED, error=f"workspace missing: {missing}")
             return
 
         # Partition into predicates (mechanically decided) vs prose (sent to LLM).
