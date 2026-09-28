@@ -174,9 +174,8 @@ def _copy_session_events(
 
     Used by branching to copy the head (events ``id <= max_id``). Strips ``state_delta``
     from copied ``model_response`` events so the destination starts a fresh provider
-    session instead of ``--resume``-ing into the source's, and drops ``session_end`` so a
-    copied-forward session stays active. Destination rows get fresh ids; source ids are
-    never preserved.
+    session instead of ``--resume``-ing into the source's. Destination rows get fresh ids;
+    source ids are never preserved.
     """
     now_iso = now_iso or iso_utc()
     sql = "SELECT type, ts, data FROM events WHERE session_id = ?"
@@ -186,8 +185,6 @@ def _copy_session_events(
         params.append(max_id)
     sql += " ORDER BY id"
     for row in conn.execute(sql, params).fetchall():
-        if row["type"] == "session_end":
-            continue
         data = json.loads(row["data"])
         if scrub_state_delta and row["type"] == "model_response":
             data.pop("state_delta", None)
@@ -566,7 +563,8 @@ class SqliteHistoryBackend:
 
         Copies the head (events ``id <= at_event_id``) with provider state scrubbed; the
         source is untouched. Lineage is stored in the tree columns (branched_from_session_id /
-        branch_point_event_id), distinct from the linear compaction chain.
+        branch_point_event_id), distinct from the linear compaction chain. If the copied head
+        ends on an unclosed ``user_input``, appends a synthetic ``session_end(status="interrupted")``.
         """
         conn = self._conn()
         cut = conn.execute("SELECT session_id, type FROM events WHERE id=?", (at_event_id,)).fetchone()
@@ -587,6 +585,17 @@ class SqliteHistoryBackend:
                 (new_id, iso_utc(), source_id, at_event_id),
             )
             _copy_session_events(conn, source_id, new_id, max_id=at_event_id, scrub_state_delta=True)
+            last = conn.execute(
+                "SELECT type FROM events WHERE session_id=? AND type IN ('user_input', 'session_end', 'final_result') "
+                "ORDER BY id DESC LIMIT 1",
+                (new_id,),
+            ).fetchone()
+            if last and last["type"] == "user_input":
+                # record_user_input treats an unclosed turn as still in progress.
+                now = datetime.now(timezone.utc)
+                event = Event(type="session_end", ts=now, data={"status": "interrupted"})
+                _insert_event(conn, new_id, event)
+                _fold_event(conn, new_id, event, iso_utc(now))
 
         _run_write(conn, body)
         return new_id

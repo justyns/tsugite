@@ -894,7 +894,7 @@ class TestBranchEndpoint:
         assert mock_adapter.session_store.get_session(session.id).superseded_by is None  # source untouched
 
         btypes = [e.type for e in backend.load(new_id).load_events()]
-        assert btypes == ["session_start", "user_input", "model_response"]
+        assert btypes == ["session_start", "user_input", "model_response", "session_end"]
 
     def test_branch_requires_at_event_id(self, client, test_token, mock_adapter):
         session = mock_adapter.session_store.get_or_create_interactive("web-anonymous")

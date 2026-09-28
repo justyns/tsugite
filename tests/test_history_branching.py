@@ -8,6 +8,7 @@ linear compaction chain (superseded_by).
 
 import pytest
 
+from tsugite.agent_runner.history_integration import record_user_input
 from tsugite.history.sqlite_backend import SqliteHistoryBackend
 from tsugite.history.sqlite_conn import close_all
 
@@ -42,7 +43,7 @@ def test_branch_copies_head_and_leaves_source_untouched(backend):
     branch = backend.load(new_id)
 
     btypes = [e.type for e in branch.load_events()]
-    assert btypes == ["session_start", "user_input", "model_response"]  # head only, up to the cut
+    assert btypes == ["session_start", "user_input", "model_response", "session_end"]  # head up to the cut, closed
     # source is unchanged
     assert [(e.type, e.data) for e in src.load_events()] == before
 
@@ -54,7 +55,7 @@ def test_branch_scrubs_provider_state_delta(backend):
 
     branch_mr = _event_at(backend.load(new_id), "model_response", 0)
     assert "state_delta" not in branch_mr.data  # fresh provider session, no --resume
-    # source still carries its provider state
+    # source keeps its provider state
     assert _event_at(src, "model_response", 0).data["state_delta"] == {"session_id": "PROVIDER-123"}
 
 
@@ -102,3 +103,30 @@ def test_branch_rejects_foreign_or_session_start_cut(backend):
     start_id = _event_at(src, "session_start", 0).id
     with pytest.raises(ValueError):
         backend.create_branch(src.session_id, at_event_id=start_id)  # nothing to continue
+
+
+@pytest.mark.parametrize(
+    "cut_type",
+    ["user_input", "model_response", "final_result", "session_end"],
+)
+def test_first_message_in_branch_is_recorded(backend, cut_type):
+    src = backend.create("chat", "m")
+    src.record("user_input", text="a question that errored")
+    src.record("model_response", raw_content="[Error: boom]")
+    src.record("final_result", result="[Error: boom]")
+    src.record("session_end", status="error", error_message="boom")
+    new_id = backend.create_branch(src.session_id, at_event_id=_event_at(src, cut_type).id)
+
+    record_user_input(backend.load(new_id), "first branch message")
+
+    texts = [e.data["text"] for e in backend.load(new_id).load_events() if e.type == "user_input"]
+    assert texts == ["a question that errored", "first branch message"]
+
+
+def test_branch_keeps_the_copied_turns_session_end(backend):
+    src = backend.create("chat", "m")
+    src.record("user_input", text="a question that errored")
+    src.record("session_end", status="error", error_message="boom")
+    new_id = backend.create_branch(src.session_id, at_event_id=_event_at(src, "session_end").id)
+
+    assert _event_at(backend.load(new_id), "session_end").data == {"status": "error", "error_message": "boom"}
