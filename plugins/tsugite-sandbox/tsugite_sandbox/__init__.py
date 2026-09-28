@@ -35,6 +35,16 @@ _ENV_ALLOWLIST = (
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
     "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+)
+
+_CA_BUNDLE_PATHS = (
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/ssl/certs/ca-bundle.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
 )
 
 # TCP->UDS bridge script: listens on localhost, forwards to UDS proxy socket.
@@ -177,26 +187,16 @@ class BubblewrapSandbox:
         cmd += ["--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev"]
 
         # System read-only binds
-        for sys_dir in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc/ssl", "/etc/resolv.conf"]:
+        for sys_dir in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc/ssl", "/etc/pki", "/etc/resolv.conf"]:
             p = Path(sys_dir)
             if p.exists():
                 cmd += ["--ro-bind", sys_dir, sys_dir]
 
-        # CA certificates: resolve symlinks to find the real path (varies by distro).
-        # Check both bundle files and the cert.pem symlink (Arch/EndeavourOS uses
-        # /etc/ssl/cert.pem -> /etc/ca-certificates/extracted/tls-ca-bundle.pem).
-        for cert_path in [
-            "/etc/ssl/cert.pem",
-            "/etc/ssl/certs/ca-certificates.crt",
-            "/etc/ssl/certs/ca-bundle.crt",
-            "/etc/pki/tls/certs/ca-bundle.crt",
-        ]:
-            p = Path(cert_path)
-            if p.exists():
-                real = p.resolve().parent
-                if real.exists() and not any(str(real).startswith(d) for d in ["/usr", "/etc/ssl"]):
-                    cmd += ["--ro-bind", str(real), str(real)]
-                break
+        # Bundles can symlink outside the bound dirs (Arch: /etc/ssl/cert.pem -> /etc/ca-certificates/extracted/).
+        cert_dirs = {str(Path(c).resolve().parent) for c in _CA_BUNDLE_PATHS if Path(c).exists()}
+        for real in sorted(cert_dirs):
+            if not any(Path(real).is_relative_to(root) for root in ("/usr", "/etc/ssl", "/etc/pki")):
+                cmd += ["--ro-bind", real, real]
 
         # Python venv (read-only)
         venv_path = Path(sys.prefix)

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import tsugite_sandbox
 from tsugite_sandbox import BubblewrapSandbox
 
 from tsugite.core.sandbox import SandboxConfig
@@ -101,22 +102,26 @@ class TestBuildCommand:
         assert "--unshare-net" not in cmd
         assert "HTTP_PROXY" not in cmd
 
-    def test_cert_symlink_resolution(self):
-        """Cert symlink target directory gets bound (Arch: /etc/ssl/cert.pem -> /etc/ca-certificates/...)."""
-        config = SandboxConfig()
-        sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        ro_binds = []
-        for i, v in enumerate(cmd):
-            if v == "--ro-bind" and i + 2 < len(cmd):
-                ro_binds.append(cmd[i + 1])
-        # The real cert path (resolved from symlink) should be in the ro-binds,
-        # unless it's already under /usr or /etc/ssl
-        cert_pem = Path("/etc/ssl/cert.pem")
-        if cert_pem.exists() and cert_pem.is_symlink():
-            real_dir = str(cert_pem.resolve().parent)
-            if not real_dir.startswith("/usr") and not real_dir.startswith("/etc/ssl"):
-                assert real_dir in ro_binds, f"Expected {real_dir} in ro-binds"
+    @pytest.mark.parametrize("var", ["NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"])
+    def test_ca_env_vars_pass_through(self, monkeypatch, var):
+        monkeypatch.setenv(var, "/opt/corp/ca.pem")
+        cmd = BubblewrapSandbox(config=SandboxConfig()).build_command(["true"])
+        setenvs = {cmd[i + 1]: cmd[i + 2] for i, v in enumerate(cmd) if v == "--setenv"}
+        assert setenvs.get(var) == "/opt/corp/ca.pem"
+
+    def test_every_cert_bundle_target_bound(self, monkeypatch, tmp_path):
+        links = []
+        for i, name in enumerate(("a", "b", "b")):
+            (tmp_path / name).mkdir(exist_ok=True)
+            (tmp_path / name / "bundle.pem").touch()
+            link = tmp_path / f"link{i}.pem"
+            link.symlink_to(tmp_path / name / "bundle.pem")
+            links.append(str(link))
+        monkeypatch.setattr(tsugite_sandbox, "_CA_BUNDLE_PATHS", tuple(links))
+        cmd = BubblewrapSandbox(config=SandboxConfig()).build_command(["true"])
+        ro_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--ro-bind"]
+        assert ro_binds.count(str(tmp_path / "a")) == 1
+        assert ro_binds.count(str(tmp_path / "b")) == 1
 
     def test_extra_ro_binds(self):
         """extra_ro_binds paths appear as --ro-bind in command."""
