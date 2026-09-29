@@ -262,6 +262,25 @@ class TestSchedulerExecution:
         assert stored.consecutive_failures == 1
 
     @pytest.mark.asyncio
+    async def test_no_action_run_is_recorded_distinctly_and_counts_as_failing(self, scheduler, run_callback):
+        run_callback.return_value = RunResult(
+            output="I couldn't complete the check.",
+            session_id="s1",
+            status="no_action",
+            error="run ended without executing any code or calling return_value()",
+        )
+        entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        stored = scheduler.get("job1")
+        assert stored.last_status == "no_action"
+        assert "without executing any code" in stored.last_error
+        assert stored.consecutive_failures == 1
+        assert stored.run_count == 0
+        assert stored.run_history[-1]["status"] == "no_action"
+
+    @pytest.mark.asyncio
     async def test_once_auto_removed(self, scheduler, run_callback):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=future)

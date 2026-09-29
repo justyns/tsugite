@@ -368,6 +368,27 @@ class TestAutoReply:
         assert mock_notify.call_count >= 1
 
 
+class TestRunSessionStatus:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("outcome", "session_status"), [("success", "completed"), ("no_action", "failed")])
+    async def test_run_session_status_follows_the_recorded_outcome(self, outcome, session_status):
+        sa, mock_adapter = _make_scheduler_adapter()
+        entry = ScheduleEntry(id="idle", prompt="check", schedule_type="cron", cron_expr="0 9 * * *")
+
+        with (
+            patch("tsugite.interaction.set_interaction_backend"),
+            patch(
+                "tsugite_daemon.adapters.scheduler_adapter._recorded_run_outcome",
+                return_value=(outcome, None),
+            ),
+        ):
+            result = await sa._run_agent(entry)
+
+        assert result.status == outcome
+        final = mock_adapter.session_store.update_session.call_args
+        assert final.kwargs["status"] == session_status
+
+
 class TestAgentExecutionErrorNotification:
     @pytest.mark.asyncio
     async def test_sends_failure_notification_on_agent_execution_error(self):

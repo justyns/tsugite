@@ -615,6 +615,7 @@ async def _execute_agent_with_prompt(
             hook_vars=hook_vars,
             storage=session_storage,
             pre_llm_call=pre_llm_call_cb,
+            expects_action=(channel_metadata or {}).get("source") == "scheduler",
         )
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)

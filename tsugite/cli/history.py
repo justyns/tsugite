@@ -55,7 +55,7 @@ def _format_cost(cost: Optional[float]) -> str:
 
 
 def _status_style(status: Optional[str]) -> str:
-    return {"success": "green", "error": "red", "interrupted": "yellow"}.get(status or "", "dim")
+    return {"success": "green", "error": "red", "no_action": "red", "interrupted": "yellow"}.get(status or "", "dim")
 
 
 def _format_created(dt: Optional[datetime]) -> str:
@@ -77,7 +77,7 @@ def _parse_date(date_str: Optional[str]) -> Optional[datetime]:
 @history_app.command("list")
 def history_list(
     agent: str = typer.Option(None, "--agent", help="Filter by agent name"),
-    status: str = typer.Option(None, "--status", help="Filter by status (success, error, interrupted)"),
+    status: str = typer.Option(None, "--status", help="Filter by status (success, error, interrupted, no_action)"),
     tool: str = typer.Option(None, "--tool", help="Filter by tool/function name"),
     since: str = typer.Option(None, "--since", help="Only sessions after this date (YYYY-MM-DD)"),
     before: str = typer.Option(None, "--before", help="Only sessions before this date (YYYY-MM-DD)"),

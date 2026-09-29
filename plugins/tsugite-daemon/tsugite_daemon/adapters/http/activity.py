@@ -40,11 +40,17 @@ _EVENT_STATUS = {
     "cancelled": "cancelled",
 }
 # "interrupted" is max_turns being hit, not a user cancel, so it reads as a failure.
-_SESSION_END_STATUS = {"success": "ok", "error": "error", "cancelled": "cancelled", "interrupted": "error"}
+_SESSION_END_STATUS = {
+    "success": "ok",
+    "error": "error",
+    "cancelled": "cancelled",
+    "interrupted": "error",
+    "no_action": "error",
+}
 _STATUS_LABEL = {"ok": "completed", "error": "failed", "cancelled": "cancelled"}
 
 _JOB_STATUS = {"done": "ok", "cancelled": "cancelled", "stuck": "error", "errored": "error"}
-_RUN_STATUS = {"success": "ok", "error": "error", "skipped": "skipped"}
+_RUN_STATUS = {"success": "ok", "error": "error", "no_action": "error", "skipped": "skipped"}
 
 
 def _one_line(text: Optional[str], width: int) -> str:

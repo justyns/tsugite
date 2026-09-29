@@ -202,6 +202,23 @@ def test_a_max_turns_run_reads_as_failed(client, test_token, history):
     assert row["label"] == "failed"
 
 
+def test_a_no_action_run_reads_as_failed(client, test_token, history, scheduler):
+    chat = history.create(agent_name="demo", model="test:model", session_id="run-idle")
+    chat.record("session_end", ts=at("09:52:00"), status="no_action", error_message="executed no code")
+    entry = scheduler.list()[0]
+    entry.run_history.append(
+        {"timestamp": at("09:52:00"), "status": "no_action", "error": None, "session_id": "run-idle"}
+    )
+
+    entries = fetch(client, test_token)["entries"]
+
+    session_row = next(e for e in entries if e["session_id"] == "run-idle" and e["type"] == "session")
+    assert session_row["status"] == "error"
+    assert session_row["label"] == "failed"
+    schedule_row = next(e for e in entries if e["session_id"] == "run-idle" and e["type"] == "schedule")
+    assert schedule_row["status"] == "error"
+
+
 def test_a_failed_background_run_carries_its_error(client, test_token):
     entries = fetch(client, test_token)["entries"]
 

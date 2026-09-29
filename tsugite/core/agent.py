@@ -352,6 +352,7 @@ class TsugiteAgent:
         hook_vars: Optional[Dict[str, str]] = None,
         storage: Optional[Any] = None,
         pre_llm_call: Optional[Callable] = None,
+        expects_action: bool = False,
     ):
         """Initialize the agent.
 
@@ -368,6 +369,8 @@ class TsugiteAgent:
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
             hook_vars: Dict of pre_message hook captured outputs (e.g. rag_context)
+            expects_action: The run exists to do work (a scheduled run). One that ends
+                without executing any code is recorded as ``no_action``, not ``success``.
         """
         from tsugite.models import get_model_kwargs, get_provider_and_model
 
@@ -388,6 +391,7 @@ class TsugiteAgent:
         self.previous_messages = previous_messages or []
         self.hook_vars = hook_vars or {}
         self._pre_llm_call = pre_llm_call
+        self.expects_action = expects_action
         self._resume_session = resume_session
         self._resume_after_compaction = resume_after_compaction
 
@@ -449,6 +453,7 @@ class TsugiteAgent:
         cancelled = False
         corrected_tool_call_markup = False
         unexecuted_tool_call_run = False
+        executed_code = False
 
         try:
             for turn_num in range(self.max_turns):
@@ -575,6 +580,7 @@ class TsugiteAgent:
                 exec_start = time.perf_counter()
                 # `code` is the raw LLM string; never substitute an escaped observation (that's model input, not exec input).
                 exec_result = await self.executor.execute(code)
+                executed_code = True
                 exec_duration_ms = int((time.perf_counter() - exec_start) * 1000)
 
                 self._record_code_execution(
@@ -652,6 +658,11 @@ class TsugiteAgent:
             elif unexecuted_tool_call_run:
                 status = "error"
                 error_message = "model answered with unexecuted tool-call markup; no code ran"
+                if self.event_bus:
+                    self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
+            elif self.expects_action and not executed_code:
+                status = "no_action"
+                error_message = "run ended without executing any code or calling return_value()"
                 if self.event_bus:
                     self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             else:

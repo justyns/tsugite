@@ -56,7 +56,7 @@ class ScheduleEntry:
     last_run: str | None = None
     last_scheduled_for: str | None = None  # planned fire time of last run (ISO)
     next_run: str | None = None  # computed
-    last_status: str | None = None  # "success" | "error" | "skipped"
+    last_status: str | None = None  # "success" | "error" | "skipped" | "no_action"
     last_error: str | None = None
     notify: list[str] = field(default_factory=list)
     notify_tool: bool = False
@@ -355,10 +355,10 @@ class Scheduler:
                 else:
                     run_result = await self._run_callback(entry)
                 run_conv_id = run_result.session_id
-                # A row carries success/skipped/error only, so interrupted and
-                # cancelled land as errors.
+                # A row carries success/skipped/error/no_action only, so interrupted
+                # and cancelled land as errors.
                 succeeded = run_result.status == "success"
-                entry.last_status = "success" if succeeded else "error"
+                entry.last_status = run_result.status if run_result.status in ("success", "no_action") else "error"
                 entry.last_error = None if succeeded else (run_result.error or run_result.status)
                 if succeeded:
                     entry.run_count += 1
@@ -371,7 +371,7 @@ class Scheduler:
                 entry.last_status = "error"
                 entry.last_error = str(e)
 
-            if entry.last_status == "error":
+            if entry.last_status in ("error", "no_action"):
                 entry.consecutive_failures += 1
                 self._maybe_notify_repeated_failure(entry)
             elif entry.last_status == "success":

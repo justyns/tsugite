@@ -474,12 +474,13 @@ class SchedulerAdapter:
         # Runs before the status update. The on_complete fallback records in this run
         # session, which `deliver_to_session` refuses once it is finished.
         await self._handle_on_complete(entry, result, run_session_id=conv_id)
-        self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
+        status, error = _recorded_run_outcome(conv_id)
+        session_status = SessionStatus.FAILED if status == "no_action" else SessionStatus.COMPLETED
+        self._update_run_session(conv_id, entry, status=session_status.value, result=result[:2000])
         logger.info("Schedule '%s' completed", entry.id)
 
         await self._publish_result(adapter, entry, result[:_MAX_RESULT_CHARS], resolved_channels)
 
-        status, error = _recorded_run_outcome(conv_id)
         return RunResult(output=result, session_id=conv_id, status=status, error=error)
 
     async def _auto_reply(

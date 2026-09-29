@@ -40,6 +40,7 @@ export function deriveRunStatus(s: Pick<Schedule, 'enabled' | 'last_status'>): R
     case 'success':
       return 'done';
     case 'error':
+    case 'no_action':
       return 'errored';
     case 'skipped':
       return 'skipped';
@@ -82,7 +83,7 @@ export function summarize(list: Schedule[]): ScheduleSummary {
   let disabled = 0;
   for (const s of list) {
     if (!s.enabled) disabled++;
-    else if (s.last_status === 'error') failing++;
+    else if (s.last_status === 'error' || s.last_status === 'no_action') failing++;
   }
   return { total: list.length, failing, disabled };
 }
@@ -105,7 +106,12 @@ function historyItems(runHistory: unknown): RunHistoryItem[] {
   return Array.isArray(runHistory) ? (runHistory as RunHistoryItem[]) : [];
 }
 
-const SPARK_STATUS: Record<string, SparkStatus> = { success: 'ok', error: 'fail', skipped: 'skip' };
+const SPARK_STATUS: Record<string, SparkStatus> = {
+  success: 'ok',
+  error: 'fail',
+  no_action: 'fail',
+  skipped: 'skip',
+};
 // Deterministic, decorative heights (px). Schedule runs carry no magnitude, so
 // this only gives the bar row visual texture - never implies a measured value.
 const SPARK_HEIGHTS = [6, 8, 7, 9, 7, 8, 6, 9, 8, 7];

@@ -46,6 +46,7 @@ describe('deriveRunStatus', () => {
     expect(deriveRunStatus({ enabled: false, last_status: 'success' })).toBe('off');
     expect(deriveRunStatus({ enabled: true, last_status: 'success' })).toBe('done');
     expect(deriveRunStatus({ enabled: true, last_status: 'error' })).toBe('errored');
+    expect(deriveRunStatus({ enabled: true, last_status: 'no_action' })).toBe('errored');
     expect(deriveRunStatus({ enabled: true, last_status: 'skipped' })).toBe('skipped');
     expect(deriveRunStatus({ enabled: true, last_status: null })).toBe('queued');
   });

@@ -545,7 +545,7 @@ def schedule_list(
         sched_str = s.get("cron_expr") or s.get("run_at") or ""
         enabled = "[green]yes[/green]" if s.get("enabled") else "[red]no[/red]"
         status = s.get("last_status") or "-"
-        if status == "error":
+        if status in ("error", "no_action"):
             status = f"[red]{status}[/red]"
         elif status == "success":
             status = f"[green]{status}[/green]"
