@@ -21,6 +21,8 @@ Standard event types (documented for reference; runtime treats `type` as opaque)
 - hook_execution: phase, command, exit_code, stdout, stderr, duration_ms
 - compaction: summary, replaced_count, retained_count, reason, range_start, range_end, source_session_id
 - compacted_into: new_session_id, reason, replaced_count, retained_count
+- any event a compaction re-recorded into the successor has compaction_copy_of (the original event's id);
+  SessionSummary turn_count, tokens, cost and duration skip those rows
 - session_end: status (success|error|interrupted|cancelled|no_action), error_message
 """
 
@@ -28,6 +30,12 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Iterable, Optional
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+COMPACTION_COPY_KEY = "compaction_copy_of"
+
+
+def is_compaction_copy(data: Dict[str, Any]) -> bool:
+    return COMPACTION_COPY_KEY in data
 
 
 def _parse_iso(v):
@@ -102,6 +110,7 @@ class SessionSummary:
         s = cls()
         for event in events:
             data = event.data
+            is_copy = is_compaction_copy(data)
             if event.type == "session_start":
                 s.agent = data.get("agent")
                 s.model = data.get("model")
@@ -109,24 +118,28 @@ class SessionSummary:
                 s.created_at = event.ts
                 s.parent_session = data.get("parent_session")
             elif event.type == "user_input":
-                s.turn_count += 1
+                if not is_copy:
+                    s.turn_count += 1
             elif event.type == "model_response":
-                usage = data.get("usage") or {}
-                if isinstance(usage, dict):
-                    s.total_tokens += int(usage.get("total_tokens") or 0)
-                cost = data.get("cost")
-                if cost:
-                    s.total_cost += float(cost)
+                if not is_copy:
+                    usage = data.get("usage") or {}
+                    if isinstance(usage, dict):
+                        s.total_tokens += int(usage.get("total_tokens") or 0)
+                    cost = data.get("cost")
+                    if cost:
+                        s.total_cost += float(cost)
                 s.last_response_text = data.get("raw_content", s.last_response_text)
             elif event.type == "code_execution":
-                s.total_duration_ms += int(data.get("duration_ms") or 0)
+                if not is_copy:
+                    s.total_duration_ms += int(data.get("duration_ms") or 0)
                 for fn in data.get("tools_called") or []:
                     s.functions_called.add(fn)
             elif event.type == "tool_invocation":
                 name = data.get("name")
                 if name:
                     s.functions_called.add(name)
-                s.total_duration_ms += int(data.get("duration_ms") or 0)
+                if not is_copy:
+                    s.total_duration_ms += int(data.get("duration_ms") or 0)
             elif event.type == "session_end":
                 s.status = data.get("status")
                 s.error_message = data.get("error_message")

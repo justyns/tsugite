@@ -20,7 +20,7 @@ from typing import Any, Iterable, Iterator, List, Optional
 
 from tsugite.config import get_xdg_data_path
 
-from .models import Event, SessionSummary, _parse_iso, iso_utc
+from .models import Event, SessionSummary, _parse_iso, is_compaction_copy, iso_utc
 from .sqlite_conn import connect_history_db
 
 
@@ -117,7 +117,8 @@ def _insert_event(conn: sqlite3.Connection, session_id: str, event: Event) -> in
 def _fold_event(conn: sqlite3.Connection, session_id: str, event: Event, now_iso: str) -> None:
     """Fold one event into the sessions aggregates/metadata (caller owns the transaction).
 
-    Incremental mirror of SessionSummary.from_events. ``updated_at`` is always
+    Incremental mirror of SessionSummary.from_events, including its skip of compaction
+    copies in turn, token, cost and duration totals. ``updated_at`` is always
     wall-clock now (sidebar recency); ``last_event_ts`` tracks the max event ts (event
     semantics, legitimately old after copy-forward).
     """
@@ -128,6 +129,8 @@ def _fold_event(conn: sqlite3.Connection, session_id: str, event: Event, now_iso
         "UPDATE sessions SET updated_at = ?, last_event_ts = MAX(COALESCE(last_event_ts, ''), ?) WHERE session_id = ?",
         (now_iso, ts_iso, session_id),
     )
+    if is_compaction_copy(d) and t in ("user_input", "model_response", "code_execution", "tool_invocation"):
+        return
     if t == "session_start":
         conn.execute(
             "UPDATE sessions SET agent=COALESCE(?, agent), model=COALESCE(?, model), workspace=COALESCE(?, workspace), "

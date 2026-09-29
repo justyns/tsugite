@@ -1356,6 +1356,7 @@ class BaseAdapter(ABC):
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
         from tsugite.history import SessionSummary, events_to_messages, get_history_backend
+        from tsugite.history.models import COMPACTION_COPY_KEY
         from tsugite.hooks import fire_compact_hooks
         from tsugite_daemon.memory import (
             RETENTION_BUDGET_RATIO,
@@ -1561,6 +1562,7 @@ class BaseAdapter(ABC):
                 # and compaction flags) tied to the pre-compaction session. Copying them
                 # makes the next turn resume the old Claude Code session and skip compaction.
                 data = {k: v for k, v in data.items() if k != "state_delta"}
+            data = {**data, COMPACTION_COPY_KEY: data.get(COMPACTION_COPY_KEY, event.id)}
             # Preserve each event's ORIGINAL ts. Without this the retained turns
             # collapse onto the compaction-spawn instant (the whole timeline of a
             # ~minute of real work appears to happen in milliseconds).
