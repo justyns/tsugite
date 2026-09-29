@@ -568,3 +568,77 @@ def test_concurrent_runs_each_see_their_own_skill_manager(tmp_path):
     contextvars.copy_context().run(interleaved)
 
     assert seen == {"alice": True, "bob": True, "dave": True, "carol_after_dave": True}, seen
+
+
+class TestDisableModelInvocation:
+    """`disable-model-invocation: true` gates the model paths but not auto_load_skills."""
+
+    @pytest.fixture
+    def manager(self, tmp_path):
+        root = tmp_path / "skills"
+        _make_skill_dir(
+            root, "gated-skill", body="# Gated\nSecret body.\n", frontmatter_extra="disable-model-invocation: true\n"
+        )
+        _make_skill_dir(root, "open-skill", body="# Open\nOpen body.\n")
+        return SkillManager(extra_paths=[str(root)])
+
+    def test_scan_reads_hyphenated_key(self, manager):
+        manager._ensure_registry_initialized()
+        assert manager._skill_registry["gated-skill"].disable_model_invocation is True
+        assert manager._skill_registry["open-skill"].disable_model_invocation is False
+
+    def test_catalog_omits_gated(self, manager):
+        listing = manager.list_available_skills()
+        assert "open-skill" in listing
+        assert "gated-skill" not in listing
+
+    def test_template_list_omits_gated(self, manager):
+        from tsugite.tools.skills import get_available_skills_list
+
+        set_skill_manager(manager)
+        names = [s["name"] for s in get_available_skills_list()]
+        assert "open-skill" in names
+        assert "gated-skill" not in names
+
+    def test_load_skill_refuses_gated(self, manager):
+        result = manager.load_skill("gated-skill")
+        assert "invocation-gated" in result
+        assert "gated-skill" not in manager.get_loaded_skills()
+
+    def test_load_skill_loads_ungated(self, manager):
+        assert "Successfully loaded" in manager.load_skill("open-skill")
+        assert "Open body." in manager.get_loaded_skills()["open-skill"]
+
+    def test_not_found_hint_omits_gated(self, manager):
+        assert "gated-skill" not in manager.load_skill("missing")
+
+    def test_auto_load_skills_loads_gated_and_ungated(self, manager):
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import AgentConfig
+
+        config = AgentConfig(name="a", auto_load_skills=["gated-skill", "open-skill"])
+        load = AgentPreparer()._load_skills(config, "hello", {}, manager, None)
+        assert {s.name for s in load.skills} == {"gated-skill", "open-skill"}
+        assert "Secret body." in manager.get_loaded_skills()["gated-skill"]
+
+    def test_trigger_match_skips_gated_silently(self, tmp_path):
+        from types import SimpleNamespace
+
+        from tsugite.agent_preparation import AgentPreparer
+        from tsugite.md_agents import AgentConfig
+
+        root = tmp_path / "trig"
+        _make_skill_dir(root, "gated", frontmatter_extra="disable-model-invocation: true\ntriggers: [ship]\n")
+        manager = SkillManager(extra_paths=[str(root)])
+        events = []
+        bus = SimpleNamespace(emit=events.append)
+        config = AgentConfig(name="a")
+
+        turn1 = AgentPreparer()._load_skills(config, "please ship it", {}, manager, bus)
+        assert turn1.triggered == []
+        assert events == []
+
+        # The daemon marks every triggered name sticky for the next turn.
+        sticky = {name: 0 for name in turn1.triggered}
+        turn2 = AgentPreparer()._load_skills(config, "next", {"sticky_skills": sticky}, manager, bus)
+        assert "gated" not in {s.name for s in turn2.skills}

@@ -135,7 +135,7 @@ class SkillManager:
             self._scan_issues = issues
             self._registry_initialized = True
 
-    def load_skill(self, skill_name: str) -> str:
+    def load_skill(self, skill_name: str, explicit: bool = False) -> str:
         """Load a skill to gain additional capabilities.
 
         Reads SKILL.md from the skill directory, renders the body with Jinja2,
@@ -149,6 +149,9 @@ class SkillManager:
 
         Args:
             skill_name: Name of the skill to load (from available skills list)
+            explicit: True when the agent author or user chose the skill (e.g.
+                `auto_load_skills`). Only explicit loads may load a skill with
+                `disable-model-invocation: true`.
 
         Returns:
             Success message or error description
@@ -164,11 +167,17 @@ class SkillManager:
 
         skill = self._skill_registry.get(skill_name)
         if not skill:
-            available = ", ".join(sorted(self._skill_registry.keys()))
+            available = ", ".join(sorted(s.name for s in self._model_visible_skills()))
             if available:
                 return f"Skill '{skill_name}' not found. Available skills: {available}"
             else:
                 return f"Skill '{skill_name}' not found. No skills available."
+
+        if skill.disable_model_invocation and not explicit:
+            return (
+                f"Skill '{skill_name}' is invocation-gated (disable-model-invocation: true) "
+                "and cannot be loaded by the model. It loads only through auto_load_skills."
+            )
 
         try:
             skill_text = skill.skill_md_path.read_text()
@@ -234,6 +243,10 @@ class SkillManager:
 
         return f"✓ Successfully unloaded skill: {skill_name}"
 
+    def _model_visible_skills(self) -> List[SkillMeta]:
+        self._ensure_registry_initialized()
+        return [s for s in self._skill_registry.values() if not s.disable_model_invocation]
+
     def list_available_skills(self) -> str:
         """List all discoverable skills.
 
@@ -242,10 +255,10 @@ class SkillManager:
         """
         self._ensure_registry_initialized()
 
-        if not self._skill_registry:
+        skills = self._model_visible_skills()
+        if not skills:
             return "No skills available"
 
-        skills = list(self._skill_registry.values())
         return build_skill_index(skills)
 
     def get_loaded_skills(self) -> Dict[str, str]:
@@ -279,9 +292,8 @@ class SkillManager:
         Returns:
             List of skill names that matched
         """
-        self._ensure_registry_initialized()
         already_loaded = set(self._loaded_skills.keys())
-        matched = match_triggered_skills(message, list(self._skill_registry.values()), already_loaded, max_skills)
+        matched = match_triggered_skills(message, self._model_visible_skills(), already_loaded, max_skills)
         return [skill.name for skill in matched]
 
     def clear_loaded_skills(self):
@@ -409,13 +421,7 @@ def get_available_skills_list() -> List[Dict[str, str]]:
         List of dicts with 'name' and 'description' keys
     """
     manager = get_skill_manager()
-    manager._ensure_registry_initialized()
-
-    if not manager._skill_registry:
-        return []
-
-    # Convert SkillMeta objects to dicts for template use
-    return [{"name": skill.name, "description": skill.description} for skill in manager._skill_registry.values()]
+    return [{"name": skill.name, "description": skill.description} for skill in manager._model_visible_skills()]
 
 
 def get_failed_skills_list() -> List[Dict[str, str]]:

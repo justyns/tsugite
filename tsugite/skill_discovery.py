@@ -65,6 +65,10 @@ class SkillMeta:
         ttl: Optional time-to-live in turns for sticky persistence (tsugite
             extension). None means fall back to the global config default.
             0 or negative means never expire.
+        disable_model_invocation: True when the frontmatter sets
+            `disable-model-invocation: true`. The skill is hidden from the
+            model-facing catalog and refused by the `load_skill` tool, but
+            `auto_load_skills` still loads it.
     """
 
     name: str
@@ -73,6 +77,7 @@ class SkillMeta:
     skill_md_path: Path
     triggers: List[str] = field(default_factory=list)
     ttl: Optional[int] = None
+    disable_model_invocation: bool = False
 
 
 @dataclass
@@ -274,6 +279,7 @@ def scan_skills_with_issues(
                     skill_md_path=skill_md,
                     triggers=triggers,
                     ttl=ttl,
+                    disable_model_invocation=frontmatter.get("disable-model-invocation") is True,
                 )
             )
             seen_names.add(name)

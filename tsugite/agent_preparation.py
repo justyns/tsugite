@@ -242,7 +242,7 @@ class AgentPreparer:
         auto_load_skills = [s for s in (agent_config.auto_load_skills or []) if s not in suppressed_skills]
 
         for skill_name in auto_load_skills:
-            result = skill_manager.load_skill(skill_name)
+            result = skill_manager.load_skill(skill_name, explicit=True)
             if result.startswith("Failed") or result.startswith("Skill '"):
                 if event_bus:
                     event_bus.emit(SkillLoadFailedEvent(skill_name=skill_name, error_message=result))
@@ -268,7 +268,7 @@ class AgentPreparer:
             if name in auto_load_skills:
                 # Already loaded above; no need to double-load but it's still sticky.
                 continue
-            result = skill_manager.load_skill(name)
+            result = skill_manager.load_skill(name, explicit=True)
             if result.startswith("Failed") or result.startswith("Skill '"):
                 if event_bus:
                     event_bus.emit(SkillLoadFailedEvent(skill_name=name, error_message=result))
