@@ -15,6 +15,9 @@ from tsugite_daemon.job_criteria import ac_text, normalize_criteria
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_POOL = "default"
+
+
 class JobState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -208,6 +211,8 @@ class Job:
     last_activity_at: Optional[str] = None
     # Caller-chosen name for the work. At most one Job per key is live at a time.
     key: Optional[str] = None
+    # Name of the daemon.yaml pool whose slot this job holds.
+    pool: str = DEFAULT_POOL
 
     def __post_init__(self):
         if not self.id:
@@ -259,6 +264,7 @@ class Job:
             "executor": self.executor,
             "worker_terminal_id": self.worker_terminal_id,
             "last_activity_at": self.last_activity_at,
+            "pool": self.pool,
         }
 
 

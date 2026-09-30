@@ -178,6 +178,7 @@ BOOT_ONLY_SECTIONS = (
     "plugins",
     "sandbox",
     "scheduler",
+    "pools",
     "log_level",
     "log_file",
     "log_to_console",
@@ -420,7 +421,11 @@ class Gateway:
 
             self._job_store = JobStore(self.config.state_dir / "jobs.json")
             self._jobs_orchestrator = JobsOrchestrator(
-                self._job_store, self._session_runner, event_bus=event_bus, terminal_store=self._terminal_store
+                self._job_store,
+                self._session_runner,
+                event_bus=event_bus,
+                terminal_store=self._terminal_store,
+                pools=self.config.pools,
             )
             self._jobs_orchestrator.attach()
             self._jobs_orchestrator.recover_orphaned_jobs()

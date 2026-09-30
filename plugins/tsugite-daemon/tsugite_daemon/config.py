@@ -148,6 +148,14 @@ class SchedulerSettings(BaseModel):
     max_scheduled_agent_runs_per_day: Optional[int] = Field(default=None, ge=1)
 
 
+class PoolConfig(BaseModel):
+    """A named cap on concurrently active Jobs."""
+
+    max: int = Field(ge=1)
+    # Waiting jobs allowed while the pool is full; None is unbounded, 0 rejects when full.
+    queue_max: Optional[int] = Field(default=None, ge=0)
+
+
 class DaemonConfig(BaseModel):
     """Main daemon configuration."""
 
@@ -172,6 +180,7 @@ class DaemonConfig(BaseModel):
     identity_links: Dict[str, List[str]] = Field(default_factory=dict)
     plugins: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     sandbox: Optional[SandboxSettings] = None
+    pools: Dict[str, PoolConfig] = Field(default_factory=dict)
 
     @property
     def runtime(self) -> RuntimeDefaults:

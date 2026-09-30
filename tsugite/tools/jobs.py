@@ -50,6 +50,7 @@ def spawn_job(
     skip_hooks: Optional[list[str]] = None,
     hooks: bool = True,
     key: Optional[str] = None,
+    pool: Optional[str] = None,
 ) -> dict:
     """Spawn a background Job with an optional verification loop.
 
@@ -152,6 +153,11 @@ def spawn_job(
             with the key is queued, running, verifying, awaiting_input or stuck,
             spawn_job fails and the error shows that Job's id. The key frees when
             the Job is done, errored or cancelled.
+        pool: Named pool from the daemon's `pools:` config; the Job holds one of its
+            slots until it reaches a terminal state. Defaults to "default" (3 slots
+            unless configured). A full pool leaves the Job `queued`, FIFO, until a
+            slot frees. An undefined pool, or a pool whose `queue_max` is reached,
+            raises an error.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -214,6 +220,7 @@ def spawn_job(
             teardown_when=teardown_when,
             skip_hooks=resolve_skip_hooks(hooks, skip_hooks),
             key=key,
+            pool=pool,
             timeout=180,
         )
     except TimeoutError:

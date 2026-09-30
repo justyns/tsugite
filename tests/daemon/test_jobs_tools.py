@@ -317,6 +317,27 @@ def test_spawn_job_forwards_executor(monkeypatch):
     assert seen["executor"] == "cc", "explicit executor must forward through"
 
 
+def test_spawn_job_forwards_pool(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(jobs_tool, "_jobs_orchestrator", SimpleNamespace(create_and_start_job=lambda **k: None))
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "parent-1")
+
+    seen = {}
+
+    def fake_call(fn, *args, timeout=30, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(id="job-1", notify_when="never", state="queued"), None
+
+    monkeypatch.setattr(jobs_tool, "_call", fake_call)
+
+    jobs_tool.spawn_job(prompt="x")
+    assert seen["pool"] is None
+    result = jobs_tool.spawn_job(prompt="x", pool="dev")
+    assert seen["pool"] == "dev"
+    assert result["state"] == "queued"
+
+
 def test_spawn_job_forwards_effort(monkeypatch):
     from types import SimpleNamespace
 

@@ -23,6 +23,7 @@ from xml.sax.saxutils import quoteattr
 from tsugite.core.record_store import now_iso
 from tsugite.providers import list_all_providers
 from tsugite_daemon.attention_store import SOURCE_JOB
+from tsugite_daemon.config import PoolConfig
 from tsugite_daemon.job_criteria import ac_text
 from tsugite_daemon.job_predicates import (
     JobCommandError,
@@ -50,6 +51,7 @@ from tsugite_daemon.job_reviews import (
 )
 from tsugite_daemon.job_store import (
     _TERMINAL_STATES,
+    DEFAULT_POOL,
     Job,
     JobState,
     JobStateTransitionError,
@@ -140,8 +142,19 @@ def _missing_workspace_anchor(job: Job) -> Optional[str]:
 class JobsOrchestrator:
     """Drives Job state in response to worker/verifier session completions."""
 
-    def __init__(self, job_store: JobStore, session_runner, event_bus=None, terminal_store=None):
+    def __init__(
+        self,
+        job_store: JobStore,
+        session_runner,
+        event_bus=None,
+        terminal_store=None,
+        pools: Optional[dict[str, PoolConfig]] = None,
+    ):
         self._jobs = job_store
+        self._pools = {DEFAULT_POOL: PoolConfig(max=3), **(pools or {})}
+        # Per pool: the jobs holding a slot, and the FIFO of jobs waiting for one.
+        self._pool_slots: dict[str, set[str]] = {name: set() for name in self._pools}
+        self._pool_waiting: dict[str, list[str]] = {name: [] for name in self._pools}
         self._runner = session_runner
         self._jobs.on_pruned = lambda job_id: self._runner.clear_attention_ref(SOURCE_JOB, job_id)
         self._event_bus = event_bus
@@ -312,6 +325,7 @@ class JobsOrchestrator:
         teardown: Optional[str] = None,
         teardown_when: str = "always",
         key: Optional[str] = None,
+        pool: Optional[str] = None,
     ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -332,6 +346,9 @@ class JobsOrchestrator:
             sent only if the job is not terminal by then. Work continues after the
             message, and a daemon restart drops the in-memory timer.
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
+        pool: the daemon.yaml pool whose slot the job holds (default "default"). When
+            the pool is full the job waits in `queued` and starts when a slot frees;
+            a full queue (`queue_max`) or an undefined pool raises ValueError.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
         model: when omitted for an agent executor, the parent session's model
@@ -340,6 +357,16 @@ class JobsOrchestrator:
             another Job with this key is not done, errored or cancelled.
         """
         worker_agent_file = agent or WORKER_AGENT
+        pool = pool or DEFAULT_POOL
+        if pool not in self._pools:
+            raise ValueError(f"Unknown job pool: {pool!r} (defined: {sorted(self._pools)})")
+        cfg = self._pools[pool]
+        if (
+            cfg.queue_max is not None
+            and len(self._pool_slots[pool]) >= cfg.max
+            and len(self._pool_waiting[pool]) >= cfg.queue_max
+        ):
+            raise ValueError(f"Job pool {pool!r} is full ({cfg.max} running, {cfg.queue_max} queued)")
 
         # Reject an unknown executor before persisting anything - a Job pinned to a
         # missing executor would spawn nothing and strand in QUEUED.
@@ -417,6 +444,7 @@ class JobsOrchestrator:
                 teardown=teardown,
                 teardown_when=teardown_when,
                 key=key,
+                pool=pool,
                 **job_kwargs,
             )
         )
@@ -430,14 +458,22 @@ class JobsOrchestrator:
             (prompt or "")[:80],
         )
 
+        if len(self._pool_slots[pool]) >= cfg.max:
+            self._pool_waiting[pool].append(job.id)
+            logger.info("Job '%s' queued: pool '%s' is full", job.id, pool)
+            return job, None
+        self._pool_slots[pool].add(job.id)
+        return job, await self._provision_and_start(job, workspace_root)
+
+    async def _provision_and_start(self, job: Job, workspace_root: Optional[Path]) -> Optional[Session]:
         # Provision a fresh git worktree if --repo was given so the worker has
         # an isolated working tree (no clashes with the parent shell or other jobs).
-        if repo:
+        if job.repo:
             try:
                 # Offload the blocking `git worktree add` so a slow clone/checkout
                 # can't stall the daemon's single event loop (the retry/prune paths
                 # already do this).
-                worktree_path = await asyncio.to_thread(_provision_worktree, repo, job.id, workspace_root)
+                worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
                 job = self._jobs.update(
                     job.id, worktree_path=worktree_path, base_sha=await asyncio.to_thread(_head_sha, worktree_path)
                 )
@@ -445,12 +481,49 @@ class JobsOrchestrator:
                 logger.exception("Failed to provision worktree for job '%s': %s", job.id, e)
                 self._finalize(job, JobState.ERRORED, error=f"worktree provisioning failed: {e}")
                 raise
+            if job.state != JobState.QUEUED.value:
+                await self._prune_and_clear(job.id, worktree_path)
+                return None
 
-        worker_prompt = build_worker_prompt(prompt, job.acceptance_criteria, repo)
-        if setup:
+        worker_prompt = build_worker_prompt(job.prompt, job.acceptance_criteria, job.repo)
+        if job.setup:
             self._after_job_commands(job.id, lambda: self._setup_then_start(job, worker_prompt))
-            return job, None
-        return job, await self._start_worker(job, worker_prompt)
+            return None
+        return await self._start_worker(job, worker_prompt)
+
+    def _release_slot(self, job: Job) -> None:
+        """Free the job's slot (or its place in the queue) and start the next queued job."""
+        pool = job.pool
+        # A job whose pool was removed from daemon.yaml since it started holds no slot.
+        if pool not in self._pools:
+            return
+        self._pool_slots[pool].discard(job.id)
+        if job.id in self._pool_waiting[pool]:
+            self._pool_waiting[pool].remove(job.id)
+        waiting = self._pool_waiting[pool]
+        while waiting and len(self._pool_slots[pool]) < self._pools[pool].max:
+            next_id = waiting.pop(0)
+            queued = self._jobs.get(next_id)
+            if queued is None or queued.state != JobState.QUEUED.value:
+                continue
+            self._pool_slots[pool].add(next_id)
+            if self._spawn_bg(lambda next_id=next_id: self._start_queued(next_id)) is None:
+                self._pool_slots[pool].discard(next_id)
+                waiting.insert(0, next_id)
+                break
+
+    async def _start_queued(self, job_id: str) -> None:
+        # Re-read: the job may have been cancelled after _release_slot scheduled this.
+        job = self._jobs.get(job_id)
+        if job is None or job.state != JobState.QUEUED.value:
+            return
+        try:
+            await self._provision_and_start(job, self._resolve_workspace_root(job.parent_session_id))
+        except Exception as e:
+            logger.exception("Failed to start queued job '%s'", job.id)
+            fresh = self._jobs.get(job.id)
+            if fresh is not None and fresh.state == JobState.QUEUED.value:
+                self._finalize(fresh, JobState.ERRORED, error=f"queued start failed: {e}")
 
     async def _start_worker(self, job: Job, worker_prompt: str) -> Optional[Session]:
         try:
@@ -742,6 +815,9 @@ class JobsOrchestrator:
     ) -> Job:
         """Give a STUCK or ERRORED Job one more shot, with the user's hint as the worker prompt.
 
+        The retry claims a slot in the job's pool and raises JobStateTransitionError
+        when the pool is full.
+
         Args:
             job_id: STUCK/ERRORED job to resurrect.
             hint: Free-text guidance for the new worker. Optional when `model`
@@ -773,101 +849,114 @@ class JobsOrchestrator:
                 )
             self._jobs.check_key(job)
 
-            # Only a repo job has enough on record to rebuild a worktree from.
-            if job.repo and (fresh_workspace or not job.worktree_path):
-                try:
-                    stale = job.worktree_path
-                    # A failed prune leaves the directory behind, and the path is the
-                    # only pointer to it.
-                    if stale and Path(stale).exists():
-                        if await asyncio.to_thread(_prune_worktree, stale, force=True):
-                            job = self._jobs.update(job_id, worktree_path=None)
-                    workspace_root = self._resolve_workspace_root(job.parent_session_id)
-                    worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
-                    job = self._jobs.update(
-                        job_id,
-                        worktree_path=worktree_path,
-                        base_sha=await asyncio.to_thread(_head_sha, worktree_path),
-                        setup_done=False,
-                    )
-                except Exception as e:
-                    logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
-                    raise RuntimeError(f"failed to recreate worktree: {e}") from e
-            else:
-                missing = _missing_workspace_anchor(job)
-                if missing:
-                    # Worktree/workspace was hand-deleted between STUCK and retry -
-                    # refuse rather than spawn a worker into a missing directory.
-                    raise RuntimeError(
-                        f"retry_with_hint: workspace at '{missing}' no longer exists; cannot resume in a missing directory"
-                    )
+            if job.pool not in self._pools:
+                raise ValueError(f"Unknown job pool: {job.pool!r} (defined: {sorted(self._pools)})")
+            if len(self._pool_slots[job.pool]) >= self._pools[job.pool].max:
+                raise JobStateTransitionError(f"Job pool {job.pool!r} is full; retry when a slot frees")
+            self._pool_slots[job.pool].add(job_id)
+            try:
+                # Only a repo job has enough on record to rebuild a worktree from.
+                if job.repo and (fresh_workspace or not job.worktree_path):
+                    try:
+                        stale = job.worktree_path
+                        # A failed prune leaves the directory behind, and the path is the
+                        # only pointer to it.
+                        if stale and Path(stale).exists():
+                            if await asyncio.to_thread(_prune_worktree, stale, force=True):
+                                job = self._jobs.update(job_id, worktree_path=None)
+                        workspace_root = self._resolve_workspace_root(job.parent_session_id)
+                        worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
+                        job = self._jobs.update(
+                            job_id,
+                            worktree_path=worktree_path,
+                            base_sha=await asyncio.to_thread(_head_sha, worktree_path),
+                            setup_done=False,
+                        )
+                    except Exception as e:
+                        logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
+                        raise RuntimeError(f"failed to recreate worktree: {e}") from e
+                else:
+                    missing = _missing_workspace_anchor(job)
+                    if missing:
+                        # Worktree/workspace was hand-deleted between STUCK and retry -
+                        # refuse rather than spawn a worker into a missing directory.
+                        raise RuntimeError(
+                            f"retry_with_hint: workspace at '{missing}' no longer exists; cannot resume in a missing directory"
+                        )
 
-            await self._await_job_commands(job_id)
-            job = self._jobs.get(job_id)
-            # Cancelled while the previous teardown ran.
-            if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
-                return job
-            if job.setup and not job.setup_done:
-                self._jobs.update(job_id, torn_down=False)
-                try:
-                    await self._after_job_commands(job_id, lambda: asyncio.to_thread(_run_job_command, job, job.setup))
-                except JobCommandError as e:
-                    error = f"setup failed: {e}"
-                    self._jobs.update(job_id, error=error, error_detail=e.output or None)
-                    raise RuntimeError(error) from e
+                await self._await_job_commands(job_id)
                 job = self._jobs.get(job_id)
-                # Cancelled while setup ran.
+                # Cancelled while the previous teardown ran.
                 if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
                     return job
-                job = self._jobs.update(job_id, setup_done=True)
-            job = self._jobs.update(job_id, torn_down=False)
+                if job.setup and not job.setup_done:
+                    self._jobs.update(job_id, torn_down=False)
+                    try:
+                        await self._after_job_commands(
+                            job_id, lambda: asyncio.to_thread(_run_job_command, job, job.setup)
+                        )
+                    except JobCommandError as e:
+                        error = f"setup failed: {e}"
+                        self._jobs.update(job_id, error=error, error_detail=e.output or None)
+                        raise RuntimeError(error) from e
+                    job = self._jobs.get(job_id)
+                    # Cancelled while setup ran.
+                    if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
+                        return job
+                    job = self._jobs.update(job_id, setup_done=True)
+                job = self._jobs.update(job_id, torn_down=False)
 
-            if model or verifier_model:
-                fields = {}
-                if model:
-                    fields["model"] = model
-                if verifier_model:
-                    fields["verifier_model"] = verifier_model
-                self._jobs.update(job_id, **fields)
-                job = self._jobs.get(job_id)
+                if model or verifier_model:
+                    fields = {}
+                    if model:
+                        fields["model"] = model
+                    if verifier_model:
+                        fields["verifier_model"] = verifier_model
+                    self._jobs.update(job_id, **fields)
+                    job = self._jobs.get(job_id)
 
-            if reset_counter:
-                self._jobs.update(job_id, verify_attempts=0)
-                job = self._jobs.get(job_id)
+                if reset_counter:
+                    self._jobs.update(job_id, verify_attempts=0)
+                    job = self._jobs.get(job_id)
 
-            # fail_worker() acts only on a live job, so leave the parked state before
-            # the executor starts, or its startup failure is dropped and the job is
-            # activated on top of a worker that never ran.
-            activate_first = job.executor != "agent"
-            if activate_first:
-                self._activate_worker(job_id, None, kind="hint", timeout_minutes=job.timeout_minutes, clear_error=True)
-
-            try:
-                hint_prompt = _build_hint_prompt(job, hint)
-                started = await self._spawn_worker(
-                    job,
-                    prompt=hint_prompt,
-                    workspace=_job_workspace(job),
-                    extra_metadata={"hint_attempt": True},
-                    followup=hint_prompt,
-                )
-            except Exception as e:
-                logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
+                # fail_worker() acts only on a live job, so leave the parked state before
+                # the executor starts, or its startup failure is dropped and the job is
+                # activated on top of a worker that never ran.
+                activate_first = job.executor != "agent"
                 if activate_first:
-                    # The optimistic RUNNING above also cleared the old error, so
-                    # without this the job sits live with no diagnostic, refusing
-                    # further retries until its phase timeout fires.
-                    self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
-                raise RuntimeError(f"failed to spawn retry worker: {e}") from e
-            if not activate_first:
-                self._activate_worker(
-                    job_id,
-                    started.id if started else None,
-                    kind="hint",
-                    timeout_minutes=job.timeout_minutes,
-                    clear_error=True,
-                )
-            return self._jobs.get(job_id)
+                    self._activate_worker(
+                        job_id, None, kind="hint", timeout_minutes=job.timeout_minutes, clear_error=True
+                    )
+
+                try:
+                    hint_prompt = _build_hint_prompt(job, hint)
+                    started = await self._spawn_worker(
+                        job,
+                        prompt=hint_prompt,
+                        workspace=_job_workspace(job),
+                        extra_metadata={"hint_attempt": True},
+                        followup=hint_prompt,
+                    )
+                except Exception as e:
+                    logger.exception("retry_with_hint: failed to spawn worker for job '%s': %s", job_id, e)
+                    if activate_first:
+                        # The optimistic RUNNING above also cleared the old error, so
+                        # without this the job sits live with no diagnostic, refusing
+                        # further retries until its phase timeout fires.
+                        self._finalize(job, JobState.ERRORED, error=f"retry worker spawn failed: {e}")
+                    raise RuntimeError(f"failed to spawn retry worker: {e}") from e
+                if not activate_first:
+                    self._activate_worker(
+                        job_id,
+                        started.id if started else None,
+                        kind="hint",
+                        timeout_minutes=job.timeout_minutes,
+                        clear_error=True,
+                    )
+                return self._jobs.get(job_id)
+            finally:
+                if self._jobs.get(job_id).state in _TERMINAL_STATES:
+                    self._release_slot(job)
 
     async def on_session_complete(self, session: Session, result_str: str) -> None:
         job_id = (session.metadata or {}).get("job_id")
@@ -1557,6 +1646,7 @@ class JobsOrchestrator:
         if fresh and _should_notify(fresh, terminal):
             self._schedule_notify(fresh)
         self.close_batch_barrier(job.parent_session_id)
+        self._release_slot(job)
 
     async def _cancel_executor(self, job: Job) -> None:
         """Best-effort teardown of a non-agent executor's child. No-op for agent
