@@ -133,9 +133,12 @@ class HTTPServer(
         path = request.url.path
 
         if token and self._token_store:
-            valid, identity = self._token_store.validate(token)
-            if valid:
-                logger.debug("auth ok (%s) path=%s", identity, path)
+            t = self._token_store.resolve(token)
+            if t and not t.allows(request.method, path):
+                logger.warning("auth forbidden (%s) %s %s", t.identity, request.method, path)
+                return JSONResponse({"error": "forbidden"}, status_code=403)
+            if t:
+                logger.debug("auth ok (%s) path=%s", t.identity, path)
                 return None
 
         if token:

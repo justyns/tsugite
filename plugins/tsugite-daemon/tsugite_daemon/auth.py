@@ -12,6 +12,7 @@ migration source; the file is left untouched as a backup.
 
 import hashlib
 import logging
+import re
 import secrets
 import threading
 from dataclasses import asdict, dataclass
@@ -25,6 +26,25 @@ logger = logging.getLogger(__name__)
 TOKEN_PREFIX = "tsu_"
 TOKENS_FILENAME = "tokens.json"
 
+SCOPE_SCRIPT_RUN = "script-run"
+
+# The only (method, path) pairs a scoped token may call. Every other route refuses it.
+_SCOPE_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
+    SCOPE_SCRIPT_RUN: tuple(
+        (method, re.compile(pattern))
+        for method, pattern in (
+            ("GET", r"/api/jobs/?"),
+            ("POST", r"/api/jobs/?"),
+            ("GET", r"/api/jobs/[^/]+"),
+            ("POST", r"/api/jobs/[^/]+/cancel"),
+            ("GET", r"/api/schedules/?"),
+            ("GET", r"/api/schedules/[^/]+"),
+            ("POST", r"/api/schedules/[^/]+/run"),
+            ("GET", r"/api/sessions(/.*)?"),
+        )
+    ),
+}
+
 
 @dataclass
 class Token:
@@ -34,6 +54,12 @@ class Token:
     prefix: str  # first 8 chars for display
     persistent: bool = False
     expires_at: str | None = None  # ISO format, None = never
+    scope: str | None = None  # None = full API; else a key of _SCOPE_ROUTES
+
+    def allows(self, method: str, path: str) -> bool:
+        if self.scope is None:
+            return True
+        return any(m == method and pat.fullmatch(path) for m, pat in _SCOPE_ROUTES[self.scope])
 
 
 class TokenStore:
@@ -115,7 +141,7 @@ class TokenStore:
 
     # --- Agent tokens (temporary, with TTL) ---
 
-    def issue(self, schedule_id: str = "", ttl: int | None = None) -> str:
+    def issue(self, schedule_id: str = "", ttl: int | None = None, scope: str | None = None) -> str:
         """Issue a temporary token for a schedule run. Returns the raw token."""
         with self._lock:
             if len(self._tokens) > 100:
@@ -128,6 +154,7 @@ class TokenStore:
             created_at=now.isoformat(),
             prefix=raw[:8],
             expires_at=(now + timedelta(seconds=ttl or self._default_ttl)).isoformat(),
+            scope=scope,
         )
         with self._lock:
             self._tokens[t.hash] = t
@@ -152,14 +179,19 @@ class TokenStore:
 
     def validate(self, token: str) -> tuple[bool, str]:
         """Validate a token. Returns (valid, identity)."""
+        t = self.resolve(token)
+        return (True, t.identity) if t else (False, "")
+
+    def resolve(self, token: str) -> Token | None:
+        """Return the live Token for a raw value, or None if unknown or expired."""
         h = self._hash(token)
         with self._lock:
             t = self._tokens.get(h)
         t = t or self._persistent_token(h)
         if not t:
-            return False, ""
+            return None
         if t.expires_at and t.expires_at < datetime.now(timezone.utc).isoformat():
             with self._lock:
                 self._tokens.pop(h, None)
-            return False, ""
-        return True, t.identity
+            return None
+        return t

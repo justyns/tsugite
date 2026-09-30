@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import subprocess
 from contextlib import nullcontext
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from tsugite.exceptions import AgentExecutionError
 from tsugite.prompt_xml import El, Raw
 from tsugite.tools.notify import notify_context, send_notification
 from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
-from tsugite_daemon.auth import TokenStore
+from tsugite_daemon.auth import SCOPE_SCRIPT_RUN, TokenStore
 from tsugite_daemon.config import NotificationChannelConfig
 from tsugite_daemon.scheduler import (
     DELIVERY_MODE_AUTO,
@@ -339,7 +340,15 @@ class SchedulerAdapter:
     async def _run_script(self, entry: ScheduleEntry) -> RunResult:
         """Run a shell command directly (no LLM)."""
         logger.info("Schedule '%s' executing script: %s", entry.id, entry.command[:100])
+        if entry.daemon_token and not self._token_store:
+            raise RuntimeError(f"Schedule '{entry.id}' sets daemon_token but the daemon has no token store")
         conv_id, _opened = self._create_run_session(entry)
+
+        env = None
+        run_token = ""
+        if entry.daemon_token:
+            run_token = self._token_store.issue(schedule_id=entry.id, ttl=entry.script_timeout, scope=SCOPE_SCRIPT_RUN)
+            env = {**os.environ, "TSUGITE_DAEMON_URL": self._tsugite_api_url, "TSUGITE_DAEMON_TOKEN": run_token}
 
         try:
             proc = await asyncio.to_thread(
@@ -349,6 +358,7 @@ class SchedulerAdapter:
                 capture_output=True,
                 text=True,
                 timeout=entry.script_timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired as e:
             timed_out = f"Script timed out after {entry.script_timeout}s"
@@ -358,6 +368,9 @@ class SchedulerAdapter:
             await self._record_script_output(entry, conv_id, f"{timed_out}: {partial}" if partial else timed_out)
             self._update_run_session(conv_id, entry, status=SessionStatus.FAILED.value, error=str(e))
             raise RuntimeError(timed_out) from e
+        finally:
+            if run_token:
+                self._token_store.revoke(run_token)
 
         if proc.returncode != 0:
             output = (proc.stderr or proc.stdout or "")[:2000]

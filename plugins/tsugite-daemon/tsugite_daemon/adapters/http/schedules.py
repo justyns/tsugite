@@ -109,6 +109,7 @@ class SchedulesMixin:
             "execution_type",
             "command",
             "script_timeout",
+            "daemon_token",
             "target_session",
             "delivery_mode",
             "delivery_kind",

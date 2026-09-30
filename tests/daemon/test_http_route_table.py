@@ -212,6 +212,7 @@ FULL_ROUTE_TABLE = [
     ("/api/schedules", ("POST",), "_create_schedule"),
     ("/api/jobs/", ("GET",), "_api_list_jobs"),
     ("/api/jobs/", ("POST",), "_api_create_job"),
+    ("/api/jobs/{job_id}", ("GET",), "_api_get_job"),
     ("/api/jobs/{job_id}/cancel", ("POST",), "_api_cancel_job"),
     ("/api/jobs/{job_id}/mark-done", ("POST",), "_api_mark_job_done"),
     ("/api/jobs/{job_id}/retry", ("POST",), "_api_retry_job"),

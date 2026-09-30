@@ -33,6 +33,7 @@ class JobsMixin:
                 [
                     Route("/", self._api_list_jobs, methods=["GET"]),
                     Route("/", self._api_create_job, methods=["POST"]),
+                    Route("/{job_id}", self._api_get_job, methods=["GET"]),
                     Route("/{job_id}/cancel", self._api_cancel_job, methods=["POST"]),
                     Route("/{job_id}/mark-done", self._api_mark_job_done, methods=["POST"]),
                     Route("/{job_id}/retry", self._api_retry_job, methods=["POST"]),
@@ -88,6 +89,14 @@ class JobsMixin:
         if limit > 0:
             jobs = jobs[:limit]
         return JSONResponse({"jobs": [j.to_payload() for j in jobs]})
+
+    async def _api_get_job(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_jobs(request):
+            return err
+        job = self.jobs_orchestrator.get_job(request.path_params["job_id"])
+        if job is None:
+            return JSONResponse({"error": "job not found"}, status_code=404)
+        return JSONResponse(job.to_payload())
 
     async def _api_create_job(self, request: Request) -> JSONResponse:
         """Structured job creation. Parses the same fields as the `/job` slash

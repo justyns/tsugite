@@ -71,6 +71,7 @@ class ScheduleEntry:
     execution_type: str = EXECUTION_AGENT
     command: str | None = None
     script_timeout: int = 60
+    daemon_token: bool = False  # script runs get TSUGITE_DAEMON_URL/TOKEN in their env
     # Auto-expiry
     expires_at: str | None = None  # ISO datetime, auto-disable after this time
     max_runs: int | None = None  # Auto-disable after N successful executions
@@ -491,6 +492,8 @@ class Scheduler:
                 datetime.fromisoformat(entry.expires_at)
             except ValueError as e:
                 raise ValueError(f"Invalid expires_at '{entry.expires_at}': {e}") from e
+        if not isinstance(entry.daemon_token, bool):
+            raise ValueError(f"daemon_token must be a boolean, got {entry.daemon_token!r}")
         validate_delivery(entry.delivery_mode, entry.delivery_kind)
         if entry.agent_file and self._validate_agent_file:
             self._validate_agent_file(entry.agent_file)
