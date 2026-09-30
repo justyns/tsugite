@@ -15,23 +15,20 @@ from tsugite.constants import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
 
 @pytest.fixture(autouse=True)
 def no_daemon_env(monkeypatch):
-    for var in ("TSUGITE_DAEMON_HOST", "TSUGITE_DAEMON_PORT", "TSUGITE_DAEMON_TOKEN"):
+    for var in ("TSUGITE_DAEMON_HOST", "TSUGITE_DAEMON_PORT", "TSUGITE_DAEMON_TOKEN", "TSUGITE_DAEMON_URL"):
         monkeypatch.delenv(var, raising=False)
 
 
 def request_url(argv):
     """Run a daemon command against a stubbed transport and return the URL it dialled."""
-    with patch("httpx.request") as mock_request:
-        mock_request.return_value.status_code = 200
-        mock_request.return_value.json.return_value = {"schedules": [], "sessions": []}
+    with patch("tsugite.daemon_client.urlopen") as mock_urlopen:
+        mock_urlopen.return_value.__enter__.return_value.read.return_value = b'{"schedules": [], "sessions": []}'
         CliRunner().invoke(app, argv)
-    assert mock_request.called, f"{argv} never issued an HTTP request"
-    return mock_request.call_args[0][1]
+    assert mock_urlopen.called, f"{argv} never issued an HTTP request"
+    return mock_urlopen.call_args[0][0].full_url
 
 
 def test_default_matches_the_address_the_daemon_serves():
-    """The bug: the CLI defaulted to 8321 while HTTPConfig served 8374. One
-    constant now feeds both, so this fails if either side re-hardcodes."""
     from tsugite_daemon.config import HTTPConfig
 
     served = HTTPConfig()
@@ -60,5 +57,17 @@ def test_env_var_overrides_the_default(monkeypatch):
 
 def test_flag_overrides_env(monkeypatch):
     monkeypatch.setenv("TSUGITE_DAEMON_PORT", "9100")
+
+    assert request_url(["daemon", "schedule", "list", "--port", "9200"]).startswith("http://127.0.0.1:9200")
+
+
+def test_url_env_applies_without_flags(monkeypatch):
+    monkeypatch.setenv("TSUGITE_DAEMON_URL", "http://10.0.0.7:8375")
+
+    assert request_url(["daemon", "schedule", "list"]).startswith("http://10.0.0.7:8375/")
+
+
+def test_flag_overrides_url_env(monkeypatch):
+    monkeypatch.setenv("TSUGITE_DAEMON_URL", "http://10.0.0.7:8375")
 
     assert request_url(["daemon", "schedule", "list", "--port", "9200"]).startswith("http://127.0.0.1:9200")

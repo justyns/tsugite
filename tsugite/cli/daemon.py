@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -11,15 +12,14 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from tsugite.constants import DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT
+from tsugite.daemon_client import DaemonClient, DaemonError
 
 daemon_app = typer.Typer(help="Daemon management commands")
 console = Console()
 
-# Connection flags shared by every daemon client command. Typer resolves
-# flag > env var > default natively, so there is nothing to hand-roll here.
-HOST_OPTION = typer.Option(DEFAULT_DAEMON_HOST, "--host", envvar="TSUGITE_DAEMON_HOST", help="Daemon HTTP host")
-PORT_OPTION = typer.Option(DEFAULT_DAEMON_PORT, "--port", "-p", envvar="TSUGITE_DAEMON_PORT", help="Daemon HTTP port")
+# Precedence: flag > TSUGITE_DAEMON_HOST/PORT > TSUGITE_DAEMON_URL > default.
+HOST_OPTION = typer.Option(None, "--host", envvar="TSUGITE_DAEMON_HOST", help="Daemon HTTP host")
+PORT_OPTION = typer.Option(None, "--port", "-p", envvar="TSUGITE_DAEMON_PORT", help="Daemon HTTP port")
 TOKEN_OPTION = typer.Option(None, "--token", "-t", envvar="TSUGITE_DAEMON_TOKEN", help="Auth token")
 
 
@@ -363,43 +363,25 @@ def init_daemon(
     _show_next_steps(token_file, bot_name)
 
 
-def _daemon_request(method: str, host: str, port: int, path: str, token: Optional[str] = None, **kwargs):
-    """Make an HTTP request to the daemon, handling connection errors and non-2xx responses.
-
-    Returns the parsed JSON response body on success, or exits on failure.
-    """
-    import httpx
-
-    url = f"http://{host}:{port}{path}"
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-
+@contextmanager
+def _daemon_errors():
+    """Print a daemon failure and exit 1."""
     try:
-        resp = httpx.request(method, url, headers=headers, timeout=kwargs.pop("timeout", 10), **kwargs)
-    except httpx.ConnectError:
-        console.print(f"[red]Could not connect to daemon at {host}:{port}[/red]")
+        yield
+    except DaemonError as e:
+        console.print(f"[red]Error ({e.status}):[/red] {e}" if e.status else f"[red]{e}[/red]")
         raise typer.Exit(1)
-
-    if resp.status_code >= 400:
-        try:
-            msg = resp.json().get("error", resp.text)
-        except Exception:
-            msg = resp.text
-        console.print(f"[red]Error ({resp.status_code}):[/red] {msg}")
-        raise typer.Exit(1)
-
-    return resp.json()
 
 
 @daemon_app.command("sessions")
 def list_sessions(
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """List active daemon sessions."""
-    data = _daemon_request("GET", host, port, "/api/chat/sessions", token)
-
-    sessions = data.get("sessions", [])
+    with _daemon_errors():
+        sessions = DaemonClient(host, port, token).list_chat_sessions()
     if not sessions:
         console.print("No active sessions")
         return
@@ -418,20 +400,13 @@ def list_sessions(
 @daemon_app.command("compact")
 def compact_session(
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID to compact"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Force compact a daemon session."""
-    data = _daemon_request(
-        "POST",
-        host,
-        port,
-        "/api/chat/compact",
-        token,
-        json={"user_id": user_id},
-        timeout=120,
-    )
+    with _daemon_errors():
+        data = DaemonClient(host, port, token).compact_chat(user_id)
     console.print(f"[green]✓[/green] Session compacted for user [cyan]{user_id}[/cyan]")
     console.print(f"  old: {data['old_conversation_id']}")
     console.print(f"  new: {data['new_conversation_id']}")
@@ -448,41 +423,40 @@ daemon_app.add_typer(session_app, name="session")
 @session_app.command("set-primary")
 def session_set_primary(
     session_id: str = typer.Argument(help="Session ID to mark as primary"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Mark a session as the user's primary for its agent."""
-    _daemon_request("POST", host, port, f"/api/sessions/{session_id}/set-primary", token, json={})
+    with _daemon_errors():
+        DaemonClient(host, port, token).set_primary_session(session_id)
     console.print(f"[green]✓[/green] Session [cyan]{session_id}[/cyan] is now primary")
 
 
 @session_app.command("clear-primary")
 def session_clear_primary(
     user_id: str = typer.Option("web-anonymous", "--user", "-u", help="User ID"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove the primary flag from any of the user's sessions."""
-    from urllib.parse import urlencode
-
-    path = f"/api/sessions/clear-primary?{urlencode({'user_id': user_id})}"
-    _daemon_request("POST", host, port, path, token)
+    with _daemon_errors():
+        DaemonClient(host, port, token).clear_primary_session(user_id)
     console.print(f"[green]✓[/green] Cleared primary for user [cyan]{user_id}[/cyan]")
 
 
 @session_app.command("list")
 def session_list(
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """List all daemon sessions, indicating which one is primary."""
     from rich.table import Table
 
-    data = _daemon_request("GET", host, port, "/api/sessions", token)
-    sessions = data.get("sessions", [])
+    with _daemon_errors():
+        sessions = DaemonClient(host, port, token).list_sessions()
     if not sessions:
         console.print("No sessions")
         return
@@ -520,15 +494,15 @@ def _parse_every_to_cron(every: str) -> str:
 
 @schedule_app.command("list")
 def schedule_list(
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """List all schedules."""
     from rich.table import Table
 
-    data = _daemon_request("GET", host, port, "/api/schedules", token)
-    schedules = data.get("schedules", [])
+    with _daemon_errors():
+        schedules = DaemonClient(host, port, token).list_schedules()
     if not schedules:
         console.print("No schedules configured")
         return
@@ -572,8 +546,8 @@ def schedule_add(
         "--target-session",
         help="Where the inject_history turn lands: primary, originating, none, name:<n>, or <session_id>",
     ),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Add a new schedule."""
@@ -601,7 +575,8 @@ def schedule_add(
     if target_session:
         body["target_session"] = target_session
 
-    data = _daemon_request("POST", host, port, "/api/schedules", token, json=body)
+    with _daemon_errors():
+        data = DaemonClient(host, port, token).create_schedule(**body)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] created")
     if data.get("next_run"):
         console.print(f"  next run: {data['next_run']}")
@@ -609,12 +584,13 @@ def schedule_add(
 
 @schedule_app.command("cleanup")
 def schedule_cleanup(
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove all orphaned one-off schedules (disabled, already fired)."""
-    data = _daemon_request("POST", host, port, "/api/schedules/cleanup", token)
+    with _daemon_errors():
+        data = DaemonClient(host, port, token).cleanup_schedules()
     removed = data.get("removed", [])
     if not removed:
         console.print("Nothing to clean up")
@@ -627,60 +603,65 @@ def schedule_cleanup(
 @schedule_app.command("remove")
 def schedule_remove(
     schedule_id: str = typer.Argument(help="Schedule ID to remove"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Remove a schedule."""
-    _daemon_request("DELETE", host, port, f"/api/schedules/{schedule_id}", token)
+    with _daemon_errors():
+        DaemonClient(host, port, token).delete_schedule(schedule_id)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] removed")
 
 
 @schedule_app.command("enable")
 def schedule_enable(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Enable a schedule."""
-    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/enable", token)
+    with _daemon_errors():
+        DaemonClient(host, port, token).enable_schedule(schedule_id)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] enabled")
 
 
 @schedule_app.command("disable")
 def schedule_disable(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Disable a schedule."""
-    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/disable", token)
+    with _daemon_errors():
+        DaemonClient(host, port, token).disable_schedule(schedule_id)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] disabled")
 
 
 @schedule_app.command("run")
 def schedule_run(
     schedule_id: str = typer.Argument(help="Schedule ID to trigger now"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Trigger a schedule immediately."""
-    _daemon_request("POST", host, port, f"/api/schedules/{schedule_id}/run", token)
+    with _daemon_errors():
+        DaemonClient(host, port, token).run_schedule(schedule_id)
     console.print(f"[green]✓[/green] Schedule [cyan]{schedule_id}[/cyan] triggered")
 
 
 @schedule_app.command("show")
 def schedule_show(
     schedule_id: str = typer.Argument(help="Schedule ID"),
-    host: str = HOST_OPTION,
-    port: int = PORT_OPTION,
+    host: Optional[str] = HOST_OPTION,
+    port: Optional[int] = PORT_OPTION,
     token: Optional[str] = TOKEN_OPTION,
 ):
     """Show schedule details."""
-    data = _daemon_request("GET", host, port, f"/api/schedules/{schedule_id}", token)
+    with _daemon_errors():
+        data = DaemonClient(host, port, token).get_schedule(schedule_id)
 
     console.print(f"[bold]{data['id']}[/bold]")
     console.print(f"  agent:    {data['agent']}")
