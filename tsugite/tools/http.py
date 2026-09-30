@@ -2,10 +2,12 @@
 
 import json
 from typing import Any, Dict, Optional, Union
+from urllib.parse import urlsplit
 
 import httpx
 
 from tsugite.exceptions import ToolUnavailableError
+from tsugite.permissions import get_permissions, web_fetch_blocked
 from tsugite.secrets.redaction import redact_sensitive_obj
 from tsugite.tools import tool
 from tsugite.user_agent import set_user_agent_header
@@ -66,6 +68,19 @@ class HttpResponse:
         return f"HttpResponse(status_code={self.status_code}, headers={self.headers!r}, text={self.text!r})"
 
 
+def _refuse_denied_host(url: str) -> None:
+    host = (urlsplit(url).hostname or "").lower()
+    if host and web_fetch_blocked(host, get_permissions()):
+        raise RuntimeError(f"Request refused: the user denied fetching {host}. Do not fetch it; tell the user instead.")
+
+
+def _refuse_denied_request(request: httpx.Request) -> None:
+    _refuse_denied_host(str(request.url))
+
+
+_DENYLIST_HOOKS = {"request": [_refuse_denied_request]}
+
+
 def _simple_request(
     url: str,
     method: str,
@@ -81,6 +96,8 @@ def _simple_request(
     method+body on 307/308). With follow_redirects=False a 3xx response is
     returned.
     """
+    _refuse_denied_host(url)
+
     kwargs: Dict[str, Any] = {}
     if isinstance(body, dict):
         kwargs["json"] = body
@@ -88,7 +105,12 @@ def _simple_request(
         kwargs["content"] = body
 
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=follow_redirects, max_redirects=_MAX_REDIRECTS) as client:
+        with httpx.Client(
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+            max_redirects=_MAX_REDIRECTS,
+            event_hooks=_DENYLIST_HOOKS,
+        ) as client:
             response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
             if raise_for_status and (follow_redirects or not response.is_redirect):
                 response.raise_for_status()
@@ -220,12 +242,14 @@ def download_file(url: str, local_path: str, timeout: int = 60, follow_redirects
         timeout: Request timeout in seconds
         follow_redirects: Follow 3xx redirects (default True, max 5 hops)
     """
+    _refuse_denied_host(url)
     try:
         with httpx.Client(
             timeout=timeout,
             headers=_default_headers(),
             follow_redirects=follow_redirects,
             max_redirects=_MAX_REDIRECTS,
+            event_hooks=_DENYLIST_HOOKS,
         ) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
@@ -255,8 +279,9 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
         url: URL to check
         timeout: Request timeout in seconds
     """
+    _refuse_denied_host(url)
     try:
-        with httpx.Client(timeout=timeout, headers=_default_headers()) as client:
+        with httpx.Client(timeout=timeout, headers=_default_headers(), event_hooks=_DENYLIST_HOOKS) as client:
             response = client.head(url, follow_redirects=True)
 
             return {

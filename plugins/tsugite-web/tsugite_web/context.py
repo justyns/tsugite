@@ -20,7 +20,8 @@ from tsugite.approval import request_approval
 from tsugite.attachments import get_specific_handler
 from tsugite.attachments.base import Attachment
 from tsugite.context import ContextProvider, register_context_provider
-from tsugite.permissions import get_permissions
+from tsugite.interaction import NonInteractiveBackend, get_interaction_backend
+from tsugite.permissions import deny_web_fetch_for_session, get_permissions, web_fetch_blocked
 from tsugite.tools.http import fetch_text
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,9 @@ def _may_fetch(url: str) -> bool:
     The denylist is read first, so a host on both lists is never fetched. A host
     on the allowlist fetches silently; any other host - including when there is no
     store at all - is gated on a human approval, and "Always allow" / "Always
-    deny" persist the host to the matching list. A URL with no hostname is never
-    fetched.
+    deny" persist the host to the matching list. A "Deny" answer from an
+    interactive user also blocks the host for the rest of the process. A URL with
+    no hostname is never fetched.
 
     The detector runs on a worker thread, so the blocking approval prompt here
     pauses the send until the user answers.
@@ -73,11 +75,10 @@ def _may_fetch(url: str) -> bool:
     if not host:
         return False
     perms = get_permissions()
-    if perms:
-        if perms.web_fetch_denied(host):
-            return False
-        if perms.web_fetch_allowed(host):
-            return True
+    if web_fetch_blocked(host, perms):
+        return False
+    if perms and perms.web_fetch_allowed(host):
+        return True
     decision = request_approval(f"Fetch content from {host}?", allow_always=True, allow_never=True)
     if decision == "always":
         if perms:
@@ -87,6 +88,9 @@ def _may_fetch(url: str) -> bool:
         if perms:
             perms.web_fetch_deny(host)
         return False
+    if decision == "deny" and not isinstance(get_interaction_backend(), (NonInteractiveBackend, type(None))):
+        # With no interactive backend request_approval denies without asking, which is not a user decision.
+        deny_web_fetch_for_session(host)
     return decision == "approve"
 
 

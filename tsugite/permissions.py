@@ -80,12 +80,16 @@ class Permissions:
         self.runtime_path = Path(runtime_path)
         self._workspace_path = (Path(workspace_dir) / ".tsugite" / "permissions.yaml") if workspace_dir else None
 
-    def is_listed(self, section: str, key: str) -> bool:
-        """True if ``key`` is listed at dotted ``section`` in EITHER source."""
+    def listed(self, section: str) -> list:
+        """Entries at dotted ``section`` across both sources."""
         parts = section.split(".")
-        return key in _get_list(_load_yaml_mapping(self.runtime_path), parts) or key in _get_list(
+        return _get_list(_load_yaml_mapping(self.runtime_path), parts) + _get_list(
             _load_yaml_mapping(self._workspace_path), parts
         )
+
+    def is_listed(self, section: str, key: str) -> bool:
+        """True if ``key`` is listed at dotted ``section`` in EITHER source."""
+        return key in self.listed(section)
 
     def add(self, section: str, key: str) -> None:
         """Append ``key`` to the RUNTIME file's list at dotted ``section``.
@@ -119,6 +123,25 @@ class Permissions:
     def web_fetch_deny(self, domain: str) -> None:
         """Persist ``domain`` to the runtime web fetch denylist."""
         self.add(WEB_FETCH_DENYLIST, domain.lower())
+
+
+_session_denied_hosts: set[str] = set()
+
+
+def deny_web_fetch_for_session(host: str) -> None:
+    """Block ``host`` for the rest of the process. Never written to ``permissions.yaml``."""
+    _session_denied_hosts.add(host.lower())
+
+
+def web_fetch_blocked(host: str, perms: Optional[Permissions]) -> bool:
+    """True if ``host`` is denied for this session or on ``perms``' denylist."""
+    return host.lower() in _session_denied_hosts or bool(perms and perms.web_fetch_denied(host))
+
+
+def web_fetch_blocked_hosts(perms: Optional[Permissions]) -> list[str]:
+    """Every host ``web_fetch_blocked`` refuses, for seeding a subprocess executor's child."""
+    persisted = perms.listed(WEB_FETCH_DENYLIST) if perms else []
+    return sorted(_session_denied_hosts | {h for h in persisted if isinstance(h, str)})
 
 
 _permissions_var: contextvars.ContextVar[Optional[Permissions]] = contextvars.ContextVar("permissions", default=None)

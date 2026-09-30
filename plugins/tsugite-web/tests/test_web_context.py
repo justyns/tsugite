@@ -361,3 +361,50 @@ def test_hostless_url_is_skipped_without_prompting():
     assert items == []
     ask.assert_not_called()
     fetch.assert_not_called()
+
+
+@pytest.fixture
+def _clean_session_denies():
+    from tsugite import permissions
+
+    permissions._session_denied_hosts.clear()
+    yield permissions
+    permissions._session_denied_hosts.clear()
+
+
+def _answer_deny_as(backend, perms=None):
+    from tsugite.interaction import set_interaction_backend
+
+    set_interaction_backend(backend)
+    try:
+        with patch.object(web_ctx, "get_permissions", return_value=perms or _FakePerms()):
+            with patch.object(web_ctx, "request_approval", return_value="deny"):
+                return web_ctx._may_fetch("https://a.example/x")
+    finally:
+        set_interaction_backend(None)
+
+
+def test_one_time_deny_blocks_host_in_memory_only(_clean_session_denies):
+    from tests.interaction_doubles import FakeBackend
+
+    perms = _FakePerms()
+    assert _answer_deny_as(FakeBackend("Deny"), perms) is False
+    assert "a.example" in _clean_session_denies._session_denied_hosts
+    assert perms.denied == set()
+
+
+def test_unprompted_deny_is_not_recorded(_clean_session_denies):
+    from tests.interaction_doubles import SpyNonInteractive
+
+    assert _answer_deny_as(SpyNonInteractive()) is False
+    assert _clean_session_denies._session_denied_hosts == set()
+
+
+def test_session_denied_host_is_skipped_without_prompting(_clean_session_denies):
+    _clean_session_denies.deny_web_fetch_for_session("a.example")
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
+        patch.object(web_ctx, "request_approval") as ask,
+    ):
+        assert web_ctx._may_fetch("https://a.example/x") is False
+    ask.assert_not_called()

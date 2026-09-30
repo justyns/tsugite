@@ -22,6 +22,8 @@ import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from tsugite.permissions import get_permissions, web_fetch_blocked_hosts
+
 from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult, LocalExecutor
 from .state import load_state, save_state
 
@@ -438,6 +440,15 @@ class SubprocessExecutor:
 
         code_escaped = json.dumps(code)
 
+        denied_hosts = web_fetch_blocked_hosts(get_permissions())
+        seed_denied_hosts = (
+            "from tsugite.permissions import deny_web_fetch_for_session\n"
+            f"for _host in {denied_hosts!r}:\n"
+            "    deny_web_fetch_for_session(_host)\n"
+            if denied_hosts
+            else ""
+        )
+
         harness = f"""\
 {_HARNESS_IMPORTS}
 os.environ.setdefault("_TSUGITE_REQ_PATH", {json.dumps(req_fifo)})
@@ -458,6 +469,7 @@ RESULT_PATH = {json.dumps(result_path)}
 
 # Tool stubs
 {"".join(tool_stubs)}
+{seed_denied_hosts}
 
 namespace = {{}}
 namespace["return_value"] = return_value
