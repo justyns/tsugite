@@ -90,10 +90,15 @@ def test_unhandled_events_are_ignored():
     """Each handler covers a subset of event types on purpose."""
 
     class Probe(EventDispatchMixin):
-        @handles(TaskStartEvent)
-        def _handle_task_start(self, event): ...
+        seen = []
 
-    Probe().handle_event(WarningEvent(message="nobody handles this"))
+        @handles(TaskStartEvent)
+        def _handle_task_start(self, event):
+            self.seen.append(event)
+
+    probe = Probe()
+    probe.handle_event(WarningEvent(message="nobody handles this"))
+    assert probe.seen == []
 
 
 def test_subclass_overrides_win_without_redeclaring():

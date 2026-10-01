@@ -682,33 +682,6 @@ class TestAutoDiscovery:
         # May fail on validation or execution, but not on path issues
         # The actual execution depends on whether the API key is set
 
-    @patch("tsugite.agent_runner.run_agent")
-    @patch("tsugite.md_agents.validate_agent_execution")
-    def test_auto_discovery_with_available_agents(self, mock_validate, mock_run, cli_runner, tmp_path, monkeypatch):
-        """Test auto-discovery when agents are available."""
-        monkeypatch.chdir(tmp_path)
-
-        # Create a test agent
-        agents_dir = tmp_path / "agents"
-        agents_dir.mkdir()
-        test_agent = agents_dir / "helper.md"
-        test_agent.write_text("""---
-name: helper
-description: Helps with tasks
----
-Content
-""")
-
-        mock_validate.return_value = (True, "Agent is valid")
-        mock_run.return_value = "Task completed"
-
-        # The default should be able to discover the helper agent
-        # via its prefetch mechanism
-        cli_runner.invoke(app, ["run", "help me with something"])
-
-        # Should execute successfully (verified by no exception)
-        # The actual delegation to helper depends on LLM decision
-
 
 class TestRunCommandHistory:
     """Tests for history integration with run command."""

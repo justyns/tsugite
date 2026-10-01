@@ -418,18 +418,6 @@ result = test_date()
 class TestToolDirectivesIntegration:
     """Integration tests for tool directives with agents."""
 
-    def test_tool_directive_in_regular_agent(self, tmp_path):
-        """Test tool directive in a regular (non-multistep) agent."""
-        # This would require mocking the entire agent execution
-        # For now, we'll test the parsing and execution separately
-        # Full integration tests can be added later
-        pass
-
-    def test_tool_directive_in_multistep_agent(self, tmp_path):
-        """Test tool directive in a multi-step agent."""
-        # Similar to above - would require full agent execution
-        pass
-
     def test_tool_directive_with_jinja_in_content(self):
         """Test that Jinja variables in content still work with tool directives."""
         content = """

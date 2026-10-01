@@ -1,7 +1,5 @@
 """Tests for the retry system in multi-step agents."""
 
-from pathlib import Path
-
 import pytest
 
 from tsugite.md_agents import StepDirective, extract_step_directives
@@ -137,40 +135,3 @@ Use python_interpreter to execute: `final_answer("success")`
         assert steps[0].max_retries == 2
         assert steps[0].retry_delay == 0.1
         assert steps[0].assign_var == "result"
-
-
-class TestRetryExample:
-    """Test the example retry agent."""
-
-    def test_example_agent_exists(self):
-        """Test that the example retry agent exists."""
-        example_path = Path("agents/examples/retry_example.md")
-        if not example_path.exists():
-            pytest.skip("Example retry agent not present")
-
-    def test_example_agent_structure(self):
-        """Test the structure of the example retry agent."""
-        from tsugite.md_agents import parse_agent_file
-
-        example_path = Path("agents/examples/retry_example.md")
-        if not example_path.exists():
-            pytest.skip("Example agent not found")
-
-        agent = parse_agent_file(example_path)
-        assert agent.config.name == "retry_example"
-
-        from tsugite.md_agents import extract_step_directives
-
-        preamble, steps = extract_step_directives(agent.content)
-
-        # Should have at least 2 steps with retry
-        assert len(steps) >= 2
-
-        # First step should have retry
-        assert steps[0].max_retries > 0
-        assert steps[0].retry_delay > 0
-
-        # Check that retry context variables are used
-        assert "is_retry" in steps[0].content
-        assert "retry_count" in steps[0].content
-        assert "last_error" in steps[0].content

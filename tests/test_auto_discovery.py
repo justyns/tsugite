@@ -106,11 +106,6 @@ Research the topic.
         assert "Reviews code for security" in result
         assert "Researches topics" in result
 
-    @pytest.mark.skip(reason="Tests old in-process spawn_agent implementation")
-    def test_spawn_agent_can_execute_discovered_agent(self, agent_setup):
-        """Test that spawn_agent can execute a discovered agent."""
-        pass
-
     def test_conditional_rendering_with_agents(self, agent_setup):
         """Test that {% if available_agents %} works correctly."""
         from jinja2 import Template

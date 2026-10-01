@@ -41,22 +41,6 @@ def test_get_conversation_id_with_session(mock_workspace):
     assert retrieved_id == session_id
 
 
-def test_new_session_flag_prevents_auto_continue(mock_workspace, tmp_path):
-    """Test --new-session flag prevents auto-continuation."""
-    # This test would require mocking the CLI entry point
-    # For now, we verify the logic exists in the code
-    # Manual testing will confirm the full behavior
-    pass
-
-
-def test_explicit_continue_overrides_workspace(mock_workspace):
-    """Test --continue abc123 takes precedence over workspace session."""
-    # This test would require mocking the CLI entry point
-    # For now, we verify the logic exists in the code
-    # Manual testing will confirm the full behavior
-    pass
-
-
 def test_start_new_writes_to_db_not_session_jsonl(mock_workspace):
     """Workspace sessions live in the global store (tagged by workspace), not a marker file."""
     from tsugite.history import get_history_backend
