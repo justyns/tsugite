@@ -19,6 +19,7 @@ import pytest
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
 
 from tests.history_helpers import load_history_session, seed_history_session
+from tsugite.core.record_store import SqliteCollectionStorage
 
 
 def _seed_mid_turn_history(history_dir: Path, session_id: str) -> None:
@@ -84,17 +85,19 @@ def test_boot_repair_skips_clean_sessions(tmp_path, history_dir):
 
 
 def test_begin_and_end_turn_write_through(tmp_path, history_dir):
-    store = SessionStore(tmp_path / "session_store.json")
+    state_file = tmp_path / "session_store.json"
+    store = SessionStore(state_file)
     store.create_session(Session(id="s4", user_id="u"))
-    store.begin_turn("s4")
-    assert SessionStore(tmp_path / "session_store.json").get_session("s4") is not None
 
-    # Marker is durable mid-turn... (fresh store sees it; that reopen also
-    # repairs, so assert against the db row via a plain reopen BEFORE repair
-    # isn't possible - instead assert end_turn clears it durably.)
+    # Read the db row directly. Reopening a SessionStore runs boot repair, which clears the marker.
+    def persisted_marker() -> bool:
+        return SqliteCollectionStorage.for_state_file(state_file, "sessions").get("s4")["turn_in_flight"]
+
+    assert persisted_marker() is False
+    store.begin_turn("s4")
+    assert persisted_marker() is True
     store.end_turn("s4")
-    reopened = SessionStore(tmp_path / "session_store.json")
-    assert reopened.get_session("s4").turn_in_flight is False
+    assert persisted_marker() is False
 
 
 @pytest.mark.asyncio

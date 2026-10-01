@@ -9,6 +9,7 @@ renders it, and that surface is what gets scanned. The dist under
 missing build is caught here rather than at runtime.
 """
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -49,12 +50,12 @@ def test_no_coming_soon_affordances():
 
 @requires_src
 def test_command_palette_shortcut_is_wired():
-    # The palette is real now (searchable commands + chat sessions), so the ⌘K
-    # affordance must exist AND be wired - the old assert-absent guard flips to
-    # asserting the advertised shortcut has a live opener.
-    text = _source_text()
-    assert "⌘K" in text
-    assert "openPalette" in text
+    keymap = (FRONTEND_SRC / "lib" / "shell" / "keymap.ts").read_text(encoding="utf-8")
+    app = (FRONTEND_SRC / "App.svelte").read_text(encoding="utf-8")
+    assert re.search(r"key === 'k'\)?\s*return\s*'toggle-palette'", keymap)
+    assert re.search(r"'toggle-palette'\)\s*paletteOpen\s*=\s*!paletteOpen", app)
+    assert re.search(r"onOpenPalette=\{openPalette\}", app)
+    assert "⌘K" in _source_text()
 
 
 @requires_src

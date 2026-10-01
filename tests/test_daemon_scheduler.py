@@ -129,7 +129,7 @@ class TestNextRunComputation:
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=future)
         scheduler.add(entry)
-        assert scheduler.get("job1").next_run is not None
+        assert datetime.fromisoformat(scheduler.get("job1").next_run) == datetime.fromisoformat(future)
 
     def test_once_past_returns_none(self, scheduler):
         past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
@@ -147,7 +147,8 @@ class TestNextRunComputation:
         )
         scheduler.add(entry)
         stored = scheduler.get("job1")
-        assert stored.next_run is not None
+        next_local = datetime.fromisoformat(stored.next_run).astimezone(ZoneInfo("America/New_York"))
+        assert (next_local.hour, next_local.minute) == (9, 0)
 
 
 CHICAGO = ZoneInfo("America/Chicago")
@@ -575,11 +576,12 @@ class TestAutoExpiry:
         # Set next_run to the past so it fires
         scheduler.get("job1").next_run = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
         scheduler._fire_due_schedules()
+        await asyncio.gather(*scheduler._active_tasks)
 
-        # Should have created a task (fires normally)
-        assert run_callback.call_count == 0  # callback is async, check task was created
+        run_callback.assert_awaited_once()
         stored = scheduler.get("job1")
         assert stored.enabled
+        assert stored.run_count == 1
 
     @pytest.mark.asyncio
     async def test_max_runs_disables(self, scheduler, run_callback):

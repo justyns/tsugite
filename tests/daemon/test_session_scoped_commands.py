@@ -103,7 +103,23 @@ async def test_cmd_context_targets_injected_session(tmp_path):
     result = await cmd_context(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
     # The session exists but has no prompt snapshots yet - the reply must be the
     # 'no data yet' message, NOT 'No active session'.
-    assert "No active session" not in result
+    assert result == "No context data available yet. Send a message first."
+
+
+@pytest.mark.asyncio
+async def test_cmd_context_reports_injected_session_snapshot(tmp_path):
+    adapter, store = _adapter(tmp_path)
+    _session(store)
+    store.append_event(
+        "sess-open-chat",
+        {
+            "type": "prompt_snapshot",
+            "token_breakdown": {"total": 1500, "categories": [{"name": "instructions", "tokens": 1500, "items": []}]},
+        },
+    )
+    result = await cmd_context(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
+    assert result.splitlines()[0] == "Context Breakdown (~1.5k tokens)"
+    assert "instructions" in result
 
 
 def test_session_and_agent_unknown_id_falls_back_to_default_agent_and_warns(tmp_path, caplog):
