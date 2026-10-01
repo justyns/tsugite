@@ -335,6 +335,9 @@ class ClaudeCodeProvider:
             header += ">"
             parts.append(header + "\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
 
+        if self._resume_session and not self._resume_after_compaction:
+            parts.extend(self._unseen_delivery_cards())
+
         # Add the task (last user message — earlier user messages are context/history)
         for msg in reversed(messages):
             if msg.get("role") == "user":
@@ -363,6 +366,22 @@ class ClaudeCodeProvider:
         if text.strip():
             blocks.insert(0, {"type": "text", "text": text})
         return blocks
+
+    def _unseen_delivery_cards(self) -> list[str]:
+        """FYI delivery cards recorded after the last assistant reply.
+
+        A resumed session skips stored history and the CLI transcript never saw
+        these cards. needs_ack cards already render in <pending_deliveries>.
+        """
+        last_reply = max((i for i, m in enumerate(self._previous_messages) if m.get("role") == "assistant"), default=-1)
+        cards = []
+        for msg in self._previous_messages[last_reply + 1 :]:
+            content = msg.get("content")
+            if not isinstance(content, str) or not content.startswith("<tsugite_delivery "):
+                continue
+            if 'kind="needs_ack"' not in content.split("\n", 1)[0]:
+                cards.append(content + "\n")
+        return cards
 
     def _image_blocks(self) -> list[dict]:
         """base64 image `source` payloads for the API-supported image attachments.
