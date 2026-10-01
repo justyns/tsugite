@@ -278,7 +278,7 @@ class TestStream:
     def test_stream_replay_frame_tagged_replay(self, client, headers, terminal_store):
         """The buffered output replayed on connect carries `replay: true`.
 
-        Load-bearing: the frontend now RESETS its buffer/metrics on a replay
+        The frontend RESETS its buffer/metrics on a replay
         frame instead of appending. If the backend dropped the flag, a reconnect
         would double-count output. We connect after the PTY finishes so the only
         output the stream can emit is the replayed ring buffer (the proc lingers
@@ -330,35 +330,48 @@ class TestStream:
         assert replayed, f"expected a disk-replay frame; got {output_chunks}"
         assert any("persisted" in (c.get("chunk") or "") for c in replayed), replayed
 
-    def test_safe_put_swallows_queue_full_on_saturated_queue(self):
-        """The stream's safe-put helper must swallow QueueFull on a full queue.
+    def test_safe_put_swallows_queue_full_on_saturated_queue(
+        self, client, headers, terminal_store, monkeypatch, caplog
+    ):
+        """A saturated stream queue drops chunks instead of raising in the loop.
 
-        Load-bearing: the fix wrapped the enqueue in try/except QueueFull so a
-        slow SSE client can't propagate QueueFull up and crash the reader thread.
-        This pins the exact contract: an unguarded put_nowait raises on a full
-        asyncio.Queue, and the guarded form swallows it without raising.
+        The handler's queue holds one slot, and the `exit` sentinel pushed by
+        `_close()` meets it full. The keepalive timeout is shortened so a dropped
+        sentinel still ends the stream through `closing`. An unguarded put_nowait
+        would raise QueueFull inside a loop callback, which asyncio logs as
+        "Exception in callback".
         """
         import asyncio
 
-        async def run():
-            q: asyncio.Queue = asyncio.Queue(maxsize=2)
-            q.put_nowait("a")
-            q.put_nowait("b")
-            # Sanity: the queue really is full and put_nowait raises.
-            with pytest.raises(asyncio.QueueFull):
-                q.put_nowait("c")
+        from tsugite_daemon.adapters.http import terminals
 
-            # This mirrors http.py's `_safe_put`: drop the chunk on a full queue.
-            def safe_put(payload):
-                try:
-                    q.put_nowait(payload)
-                except asyncio.QueueFull:
-                    pass
+        class TinyQueueAsyncio:
+            def __getattr__(self, name):
+                return getattr(asyncio, name)
 
-            safe_put("c")  # must NOT raise
-            assert q.qsize() == 2  # dropped, queue unchanged
+            @staticmethod
+            def Queue(maxsize=0):  # noqa: N802
+                return asyncio.Queue(maxsize=1)
 
-        asyncio.run(run())
+            @staticmethod
+            def wait_for(awaitable, timeout):
+                # A dropped exit sentinel is only recovered by the keepalive timeout.
+                return asyncio.wait_for(awaitable, timeout=0.2)
+
+        monkeypatch.setattr(terminals, "asyncio", TinyQueueAsyncio())
+        created = client.post(
+            "/api/terminals",
+            json={"cmd": "echo done"},
+            headers=headers,
+        ).json()
+        _wait_for_terminal(terminal_store, created["id"], {TerminalState.SUCCEEDED.value})
+        with caplog.at_level("ERROR", logger="asyncio"):
+            with client.stream("GET", f"/api/terminals/{created['id']}/stream", headers=headers) as resp:
+                assert resp.status_code == 200
+                body = "".join(resp.iter_text())
+
+        assert "Exception in callback" not in caplog.text
+        assert "event: state" in body
 
 
 # ── helpers ──

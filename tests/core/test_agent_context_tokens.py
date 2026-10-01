@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from tsugite_daemon.session_store import SessionStore
 
-from tsugite.agent_runner.models import AgentExecutionResult
 from tsugite.core.agent import AgentResult, TsugiteAgent
 from tsugite.providers.base import CompletionResponse, Usage
 
@@ -159,35 +158,6 @@ def test_session_store_update_token_count_replaces(tmp_path):
     assert store.get_session(session.id).cumulative_tokens == 15000
 
 
-def test_context_tokens_prefers_last_input_tokens():
-    """The adapter should prefer last_input_tokens over token_count for context tracking."""
-    result = AgentExecutionResult(
-        response="test",
-        token_count=50000,
-        last_input_tokens=17000,
-    )
-
-    # Simulate the adapter's logic
-    last_input = getattr(result, "last_input_tokens", None)
-    context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
-
-    assert context_tokens == 17000
-
-
-def test_context_tokens_falls_back_to_token_count():
-    """When last_input_tokens is None, fall back to token_count."""
-    result = AgentExecutionResult(
-        response="test",
-        token_count=50000,
-        last_input_tokens=None,
-    )
-
-    last_input = getattr(result, "last_input_tokens", None)
-    context_tokens = last_input if isinstance(last_input, int) and last_input > 0 else (result.token_count or 0)
-
-    assert context_tokens == 50000
-
-
 @pytest.mark.asyncio
 async def test_run_accumulates_openai_family_cache_reads():
     """A codex/openai turn reports cache reads on `cached_tokens`; the agent's
@@ -205,18 +175,3 @@ async def test_run_accumulates_openai_family_cache_reads():
     await agent.run("test", return_full_result=True)
 
     assert agent.cache_read_tokens == 18000
-
-
-def test_runner_populates_cache_tokens_on_result():
-    """The runner carries the agent's accumulated cache totals onto the result the
-    daemon reads. The same assignment already feeds the CLI usage-store record, so
-    it must appear a SECOND time (on the AgentExecutionResult) - asserted by count,
-    like the schedule_id wiring, so dropping the plumbing can't silently blank the
-    Usage tab again."""
-    import inspect
-
-    from tsugite.agent_runner import runner
-
-    src = inspect.getsource(runner._execute_agent_with_prompt)
-    assert src.count("cache_creation_tokens=agent.cache_creation_tokens") >= 2
-    assert src.count("cache_read_tokens=agent.cache_read_tokens") >= 2

@@ -30,17 +30,24 @@ def session_store(tmp_path):
     return SessionStore(tmp_path / "session_store.json")
 
 
-def _make_adapter(name: str, workspace: Path, store: SessionStore) -> HTTPAgentAdapter:
-    cfg = RuntimeDefaults(workspace_dir=workspace, agent_file="default")
-    return HTTPAgentAdapter(name, cfg, store)
+def _make_adapter(workspace: Path, store: SessionStore, monkeypatch) -> HTTPAgentAdapter:
+    agent_file = workspace / "agent.md"
+    agent_file.write_text("---\nname: test-agent\n---\n\nHi.\n")
+    adapter = HTTPAgentAdapter(RuntimeDefaults(workspace_dir=workspace, agent_file=str(agent_file)), store)
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *a: agent_file)
+    monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
+    monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
+    monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)
+    monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)
+    return adapter
 
 
 @pytest.mark.asyncio
 async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(monkeypatch, two_workspaces, session_store):
     ws_a, ws_b = two_workspaces
 
-    adapter_a = _make_adapter("agent-a", ws_a, session_store)
-    adapter_b = _make_adapter("agent-b", ws_b, session_store)
+    adapter_a = _make_adapter(ws_a, session_store, monkeypatch)
+    adapter_b = _make_adapter(ws_b, session_store, monkeypatch)
 
     observations: list[dict] = []
     obs_lock = threading.Lock()
@@ -81,8 +88,4 @@ async def test_concurrent_handle_message_sees_own_workspace_via_contextvar(monke
     assert len(observations) == 2, observations
 
     for obs in observations:
-        assert obs["observed_workspace"] == obs["expected_workspace"], (
-            f"Concurrent run for {obs['expected_workspace']} saw "
-            f"workspace {obs['observed_workspace']!r} via the CV — expected "
-            f"{obs['expected_workspace']!r}. ContextVar isolation regressed."
-        )
+        assert obs["observed_workspace"] == obs["expected_workspace"]

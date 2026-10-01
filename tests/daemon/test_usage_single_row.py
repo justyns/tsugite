@@ -11,6 +11,7 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
+from tsugite.core.agent import AgentResult
 from tsugite.providers.base import Usage
 
 AGENT = """---
@@ -144,3 +145,74 @@ async def test_cli_run_writes_one_row_sourced_cli(tmp_path, fake_model, store, m
     assert rows[0]["agent"] == "sched_agent"
     assert rows[0]["input_tokens"] == 80
     assert rows[0]["output_tokens"] == 20
+
+
+@pytest.fixture
+def fake_model_result(monkeypatch):
+    """Faked model call that reports `usage` and returns the AgentResult the daemon path gets."""
+
+    def install(usage: Usage):
+        async def fake_agent_run(self, task, return_full_result=False, stream=False):
+            self._accumulate_usage(usage, cost=0.25)
+            return AgentResult(
+                output="OUT",
+                token_usage=self.total_tokens,
+                cost=self.reported_cost,
+                steps=[],
+                last_input_tokens=self.last_input_tokens or None,
+            )
+
+        monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    return install
+
+
+@pytest.mark.asyncio
+async def test_session_context_tokens_use_last_input_tokens(adapter, fake_model_result, store):
+    fake_model_result(
+        Usage(
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=5150,
+            cache_creation_input_tokens=2000,
+            cache_read_input_tokens=3000,
+        )
+    )
+    session = adapter.session_store.get_or_create_interactive("alice")
+    await adapter.handle_message(user_id="alice", message="go", channel_context=_channel_context("http"))
+
+    assert adapter.session_store.get_session(session.id).cumulative_tokens == 5100
+
+
+@pytest.mark.asyncio
+async def test_session_context_tokens_fall_back_to_token_count(adapter, fake_model_result, store):
+    fake_model_result(Usage(prompt_tokens=0, completion_tokens=0, total_tokens=777))
+    session = adapter.session_store.get_or_create_interactive("alice")
+    await adapter.handle_message(user_id="alice", message="go", channel_context=_channel_context("http"))
+
+    assert adapter.session_store.get_session(session.id).cumulative_tokens == 777
+
+
+@pytest.mark.asyncio
+async def test_runner_puts_cache_totals_on_the_result(tmp_path, fake_model_result, store):
+    from tsugite.agent_runner import run_agent_async
+    from tsugite.options import ExecutionOptions
+
+    fake_model_result(
+        Usage(
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            cache_creation_input_tokens=2000,
+            cache_read_input_tokens=3000,
+        )
+    )
+    agent_file = tmp_path / "agent.md"
+    agent_file.write_text(AGENT)
+
+    result = await run_agent_async(
+        agent_path=agent_file, prompt="go", exec_options=ExecutionOptions(return_token_usage=True)
+    )
+
+    assert result.cache_creation_tokens == 2000
+    assert result.cache_read_tokens == 3000

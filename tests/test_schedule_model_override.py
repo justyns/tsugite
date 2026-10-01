@@ -1,9 +1,12 @@
 """Tests for per-schedule model and max_turns override pipeline."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
+from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.scheduler import ScheduleEntry
+from tsugite_daemon.session_store import SessionStore
 
 
 def _make_scheduler_adapter(tmp_path, agent_name="bot"):
@@ -22,14 +25,58 @@ def _make_scheduler_adapter(tmp_path, agent_name="bot"):
     return sa, adapter_mock
 
 
-def _resolve_model_override(metadata, fallback="anthropic:claude-3-sonnet"):
-    """Replicate the model_override resolution logic from BaseAdapter.handle_message."""
-    return (metadata or {}).get("model_override") or fallback
+class _StubAdapter(BaseAdapter):
+    def get_platform_name(self) -> str:
+        return "test"
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
 
 
-def _resolve_max_turns_override(metadata, fallback=50):
-    """Replicate the max_turns_override resolution logic from BaseAdapter.handle_message."""
-    return (metadata or {}).get("max_turns_override") or fallback
+@pytest.fixture
+def run_handle_message(tmp_path, monkeypatch):
+    """Real BaseAdapter.handle_message with run_agent stubbed; returns the exec_options run_agent received."""
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    agent_file = ws / "agent.md"
+    agent_file.write_text("---\nname: test-agent\nmodel: anthropic:claude-3-sonnet\n---\n\nHi.\n")
+    adapter = _StubAdapter(
+        RuntimeDefaults(workspace_dir=ws, agent_file=str(agent_file), max_turns=50),
+        SessionStore(tmp_path / "store.json"),
+    )
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *a, **kw: agent_file)
+    monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
+    monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
+    monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)
+    monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)
+
+    captured = {}
+
+    def fake_run_agent(*args, **kwargs):
+        captured.update(kwargs)
+        return MagicMock(
+            token_count=0,
+            cost=0,
+            execution_steps=[],
+            provider_state={},
+            last_input_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            __str__=lambda self: "ok",
+        )
+
+    monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", fake_run_agent)
+
+    async def run(metadata):
+        adapter.session_store.get_or_create_interactive("alice")
+        ctx = ChannelContext(source="http", channel_id=None, user_id="alice", reply_to="http:alice", metadata=metadata)
+        await adapter.handle_message(user_id="alice", message="hi", channel_context=ctx)
+        return captured["exec_options"]
+
+    return run
 
 
 class TestSchedulerAdapterMetadata:
@@ -59,16 +106,22 @@ class TestSchedulerAdapterMetadata:
 
 
 class TestBaseAdapterModelOverride:
-    """Test the model_override resolution logic used in handle_message."""
+    """Model resolution in BaseAdapter.handle_message."""
 
-    def test_model_override_from_metadata(self, tmp_path):
-        assert _resolve_model_override({"model_override": "openai:gpt-4o-mini"}) == "openai:gpt-4o-mini"
+    @pytest.mark.asyncio
+    async def test_model_override_from_metadata(self, run_handle_message):
+        opts = await run_handle_message({"model_override": "openai:gpt-4o-mini"})
+        assert opts.model_override == "openai:gpt-4o-mini"
 
-    def test_fallback_to_agent_model(self, tmp_path):
-        assert _resolve_model_override({"schedule_id": "test"}) == "anthropic:claude-3-sonnet"
+    @pytest.mark.asyncio
+    async def test_fallback_to_agent_model(self, run_handle_message):
+        opts = await run_handle_message({"schedule_id": "test"})
+        assert opts.model_override == "anthropic:claude-3-sonnet"
 
-    def test_fallback_when_no_metadata(self, tmp_path):
-        assert _resolve_model_override(None) == "anthropic:claude-3-sonnet"
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_metadata(self, run_handle_message):
+        opts = await run_handle_message(None)
+        assert opts.model_override == "anthropic:claude-3-sonnet"
 
 
 class TestSchedulerAdapterMaxTurnsMetadata:
@@ -96,16 +149,22 @@ class TestSchedulerAdapterMaxTurnsMetadata:
 
 
 class TestBaseAdapterMaxTurnsOverride:
-    """Test the max_turns_override resolution logic used in handle_message."""
+    """max_turns resolution in BaseAdapter.handle_message."""
 
-    def test_max_turns_from_metadata(self, tmp_path):
-        assert _resolve_max_turns_override({"max_turns_override": 40}) == 40
+    @pytest.mark.asyncio
+    async def test_max_turns_from_metadata(self, run_handle_message):
+        opts = await run_handle_message({"max_turns_override": 40})
+        assert opts.max_turns_override == 40
 
-    def test_fallback_to_agent_max_turns(self, tmp_path):
-        assert _resolve_max_turns_override({"schedule_id": "test"}) == 50
+    @pytest.mark.asyncio
+    async def test_fallback_to_agent_max_turns(self, run_handle_message):
+        opts = await run_handle_message({"schedule_id": "test"})
+        assert opts.max_turns_override == 50
 
-    def test_fallback_when_no_metadata(self, tmp_path):
-        assert _resolve_max_turns_override(None) == 50
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_metadata(self, run_handle_message):
+        opts = await run_handle_message(None)
+        assert opts.max_turns_override == 50
 
 
 class TestSchedulerAdapterFireTiming:
