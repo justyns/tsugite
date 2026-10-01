@@ -811,18 +811,30 @@ Parse it and use it.
         assert steps[0].assign_var == "data"
         assert steps[0].model_kwargs.get("response_format") == {"type": "json_object"}
 
-    def test_agent_kwargs_include_json_import(self):
-        """Test that CodeAgent is created with json in additional_authorized_imports."""
-        # This is integration-level, so we'll just verify the structure
-        # We can't easily test this without mocking, but we can verify
-        # the function accepts injectable_vars parameter
-        import inspect
+    @pytest.mark.asyncio
+    async def test_assigned_variable_is_documented_in_the_next_step_instructions(self, tmp_path, monkeypatch):
+        """A step's assigned variable is listed in the next step's instructions, not the first's."""
+        from tsugite.agent_runner import runner
 
-        from tsugite.agent_runner import _execute_agent_with_prompt
+        instructions = []
 
-        sig = inspect.signature(_execute_agent_with_prompt)
-        assert "injectable_vars" in sig.parameters
-        assert "model_kwargs" in sig.parameters
+        async def fake_agent_run(self, task, return_full_result=False, stream=False):
+            instructions.append(self.instructions)
+            return "FINDINGS_VALUE"
+
+        monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+        agent_file = tmp_path / "agent.md"
+        agent_file.write_text(
+            "---\nname: two_steps\nmodel: ollama:qwen2.5-coder:7b\nextends: none\ntools: []\n---\n"
+            '<!-- tsu:step name="gather" assign="findings" -->\nGather.\n\n'
+            '<!-- tsu:step name="fix" -->\nFix.\n'
+        )
+        await runner.run_agent_async(agent_file, "test prompt")
+
+        assert len(instructions) == 2
+        assert "- findings:" not in instructions[0]
+        assert "- findings: FINDINGS_VALUE" in instructions[1]
 
 
 class TestLoopingSteps:

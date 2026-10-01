@@ -1,6 +1,8 @@
 """Named execution groups: `with tsu_group("..."):` inside agent Python."""
 
+import ast
 import contextlib
+import re
 
 import pytest
 
@@ -207,4 +209,12 @@ def test_the_system_prompt_shows_the_model_how_to_group():
 
     prompt = build_system_prompt([])
 
-    assert "with tsu_group(" in prompt
+    blocks = re.findall(r"```python-exec\n(.*?)```", prompt, re.DOTALL)
+    grouped = [b for b in blocks if "tsu_group" in b]
+    assert len(grouped) == 1, "the prompt needs one worked python-exec example that uses tsu_group"
+    withs = [n for n in ast.walk(ast.parse(grouped[0])) if isinstance(n, ast.With)]
+    assert any(
+        isinstance(item.context_expr, ast.Call) and getattr(item.context_expr.func, "id", None) == "tsu_group"
+        for node in withs
+        for item in node.items
+    )

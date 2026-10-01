@@ -305,8 +305,15 @@ def test_editor_surface_reaches_the_web_ui_payload(client, headers):
 
 
 def test_editor_page_only_listens_to_its_host_frame(client):
-    """`tsugite:init` carries the daemon token and repaints the page, so any framer could drive it."""
-    assert "if (event.source !== parent) return;" in editor_page(client)
+    """`tsugite:init` includes the daemon token and repaints the page, so any framer could drive it."""
+    listener = re.search(
+        r"addEventListener\('message', \(event\) => \{(.*?)\n      \}\);", editor_page(client), re.DOTALL
+    )
+    assert listener, "the page has no message listener"
+    code = [
+        line.strip() for line in listener.group(1).splitlines() if line.strip() and not line.strip().startswith("//")
+    ]
+    assert code[0] == "if (event.source !== parent) return;", "the source check must run before any message is handled"
 
 
 def test_editor_page_addresses_the_host_rather_than_whoever_framed_it(client):
@@ -320,9 +327,12 @@ def test_editor_page_addresses_the_host_rather_than_whoever_framed_it(client):
 
 
 def test_editor_page_holds_the_spelling_the_daemon_handed_back(client):
-    """An announce names the canonical path, and the page drops an event for any other,
+    """An announce sends the canonical path, and the page drops an event for any other,
     so a tab opened on a caller's own spelling would never hear that an agent edited it."""
-    assert "currentPath = payload.path;" in editor_page(client)
+    opener = re.search(r"async function openDocument\(path\) \{(.*?)\n      \}\n", editor_page(client), re.DOTALL)
+    assert opener, "the page has no openDocument"
+    body = opener.group(1)
+    assert body.index("await fetchConfig(path)") < body.index("currentPath = payload.path;")
 
 
 def test_editor_page_takes_document_events_from_the_host(client):
@@ -330,7 +340,10 @@ def test_editor_page_takes_document_events_from_the_host(client):
     long-lived request to that origin is never sent at all, so this page reads the host's."""
     page = editor_page(client)
     assert "/api/events" not in page, "a stream of this frame's own never reaches the daemon"
-    assert "msg.type === 'tsugite:event'" in page, "the bridge is where a document event arrives"
+    assert re.search(
+        r"msg\.type === 'tsugite:event' && msg\.event\.type === DOCUMENT_EVENT\) \{\s*handleDocumentEvent\(msg\.event\.data\);",
+        page,
+    ), "the bridge is where a document event arrives"
 
 
 # ── only documents ──

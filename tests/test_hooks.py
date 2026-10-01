@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import shlex
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -560,9 +561,8 @@ class TestShellQuoteFilter:
         assert result == "hello"
 
     def test_in_command_context(self):
-        result = _jinja_env.from_string("search {{ msg | shell_quote }} --json").render(msg="it's here")
-        assert result.startswith("search ")
-        assert result.endswith(" --json")
+        result = _jinja_env.from_string("search {{ msg | shell_quote }} --json").render(msg="it's here; $(id)")
+        assert shlex.split(result) == ["search", "it's here; $(id)", "--json"]
 
 
 class TestRunAsList:

@@ -278,12 +278,22 @@ def test_fetch_text_extract_article_raises_on_empty_page(mock_httpx_client):
 
 
 def test_fetch_text_extract_article_takes_precedence(mock_httpx_client):
-    """When both flags set, extract_article takes precedence."""
-    mock_httpx_client.request.return_value = _mock_response(
-        200, text=SAMPLE_ARTICLE_HTML, headers={"content-type": "text/html"}
+    """When both flags set, extract_article takes precedence (the nav and footer are dropped)."""
+    paragraph = (
+        "<p>This is the main article content, with enough text, commas, and sentences to be recognized "
+        "by the readability algorithm as real prose. It keeps going for a while.</p>"
     )
+    html = (
+        "<html><head><title>T</title></head><body>"
+        "<div id='nav'><ul><li><a href='/a'>Menu items</a></li></ul></div>"
+        f"<div id='content'>{paragraph * 6}</div>"
+        "<div id='footer'>Footer stuff</div></body></html>"
+    )
+    mock_httpx_client.request.return_value = _mock_response(200, text=html, headers={"content-type": "text/html"})
     result = fetch_text("https://example.com", strip_html=True, extract_article=True)
     assert "main article content" in result
+    assert "Menu items" not in result
+    assert "Footer stuff" not in result
 
 
 def test_fetch_text_timeout_error(mock_httpx_client):

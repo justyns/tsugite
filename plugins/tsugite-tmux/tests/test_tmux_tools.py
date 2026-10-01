@@ -1,6 +1,7 @@
 """Tests for tmux session management tools."""
 
 import json
+import shlex
 import subprocess
 from unittest.mock import MagicMock, call, patch
 
@@ -140,14 +141,16 @@ class TestTmuxCreate:
 
     @patch("tsugite_tmux._session_exists", return_value=False)
     @patch("tsugite_tmux.subprocess.run")
-    def test_create_pipe_pane_uses_shlex_quote(self, mock_run, mock_exists, mock_metadata):
+    def test_create_pipe_pane_uses_shlex_quote(self, mock_run, mock_exists, mock_metadata, monkeypatch):
         mock_run.return_value = _make_run_result()
+        log_dir = mock_metadata / "log dir; touch pwned"
+        monkeypatch.setattr("tsugite_tmux._get_log_dir", lambda: log_dir)
 
         tmux_create("test")
 
         pipe_call = mock_run.call_args_list[1]
         pipe_arg = pipe_call.args[0][5]  # The -o argument value
-        assert pipe_arg.startswith("cat >> ")
+        assert shlex.split(pipe_arg) == ["cat", ">>", str(log_dir / "test.log")]
 
 
 class TestTmuxRead:

@@ -282,12 +282,12 @@ class TestSummarizerPromptDirective:
     """
 
     def test_summarize_prompt_mentions_attachments(self):
-        assert "auto-attached" in SUMMARIZE_SYSTEM_PROMPT.lower() or "attached" in SUMMARIZE_SYSTEM_PROMPT.lower()
-        assert "MEMORY.md" in SUMMARIZE_SYSTEM_PROMPT or "AGENTS.md" in SUMMARIZE_SYSTEM_PROMPT
+        assert "MEMORY.md" in SUMMARIZE_SYSTEM_PROMPT
+        assert "auto-attached" in SUMMARIZE_SYSTEM_PROMPT
 
     def test_combine_prompt_mentions_attachments(self):
-        assert "auto-attached" in COMBINE_SYSTEM_PROMPT.lower() or "attached" in COMBINE_SYSTEM_PROMPT.lower()
-        assert "MEMORY.md" in COMBINE_SYSTEM_PROMPT or "AGENTS.md" in COMBINE_SYSTEM_PROMPT
+        assert "MEMORY.md" in COMBINE_SYSTEM_PROMPT
+        assert "auto-attached" in COMBINE_SYSTEM_PROMPT
 
 
 # Spelled out rather than derived from _SUMMARY_FORMAT: a test that reads its

@@ -4,7 +4,7 @@ when it's actually installed."""
 from pathlib import Path
 
 import tsugite
-from tsugite.md_agents import AgentConfig
+from tsugite.md_agents import AgentConfig, parse_agent
 
 
 def _default_md() -> str:
@@ -14,7 +14,7 @@ def _default_md() -> str:
 def test_default_agent_still_declares_web_search():
     # Kept in the tools list so it's available when [web] is installed; lenient expansion
     # skips it on a base install rather than failing the agent.
-    assert "web_search" in _default_md()
+    assert "web_search" in parse_agent(_default_md()).config.tools
 
 
 def test_strict_tools_frontmatter_defaults_false_and_toggles():

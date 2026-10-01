@@ -1003,8 +1003,8 @@ def test_list_files_gitignore_with_pattern(temp_dir, file_tools):
     (temp_dir / "test2.py").write_text("content2")
     (temp_dir / "test3.log").write_text("log content")
 
-    # List only .txt files (should also respect .gitignore)
-    txt_files = call_tool("list_files", path=str(temp_dir), pattern="*.txt")
-    assert "test1.txt" in txt_files
-    assert "test2.py" not in txt_files  # Excluded by pattern
-    assert "test3.log" not in txt_files  # Would be excluded by .gitignore anyway
+    # The pattern matches all three files; .gitignore must still drop the .log
+    files = call_tool("list_files", path=str(temp_dir), pattern="test*")
+    assert "test1.txt" in files
+    assert "test2.py" in files
+    assert "test3.log" not in files

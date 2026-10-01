@@ -64,32 +64,31 @@ class TestDeduplicateAttachments:
         symlink.symlink_to(original)
 
         attachments = [
-            make_text_attachment(str(original), "content"),
-            make_text_attachment(str(symlink), "content"),
+            make_text_attachment(str(original), "original content"),
+            make_text_attachment(str(symlink), "symlink content"),
         ]
         result = deduplicate_attachments(attachments)
         assert len(result) == 1
-        # Either name could be first depending on resolution, but should have alias
-        assert "(also:" in result[0].name
-        assert result[0].content == "content"
+        assert result[0].name == f"{original} (also: {symlink})"
+        assert result[0].content == "original content"
 
-    def test_relative_vs_absolute_paths(self, tmp_path):
+    def test_relative_vs_absolute_paths(self, tmp_path, monkeypatch):
         """Test that relative and absolute paths to same file are deduplicated."""
         # Create file
         file_path = tmp_path / "file.txt"
         file_path.write_text("content")
 
-        # Get both relative and absolute paths
+        monkeypatch.chdir(tmp_path)
         abs_path = str(file_path.resolve())
 
         attachments = [
-            make_text_attachment(abs_path, "content"),
-            make_text_attachment(str(file_path), "content"),
+            make_text_attachment(abs_path, "absolute content"),
+            make_text_attachment("file.txt", "relative content"),
         ]
         result = deduplicate_attachments(attachments)
-        # Should deduplicate to 1 if both resolve to same path
         assert len(result) == 1
-        assert result[0].content == "content"
+        assert result[0].name == f"{abs_path} (also: file.txt)"
+        assert result[0].content == "absolute content"
 
     def test_mixed_duplicates(self):
         """Test deduplication with mix of path and content duplicates."""
@@ -197,14 +196,13 @@ class TestDeduplicateAttachments:
         link2.symlink_to(link1)
 
         attachments = [
-            make_text_attachment(str(original), "content"),
-            make_text_attachment(str(link1), "content"),
-            make_text_attachment(str(link2), "content"),
+            make_text_attachment(str(original), "original content"),
+            make_text_attachment(str(link1), "link1 content"),
+            make_text_attachment(str(link2), "link2 content"),
         ]
         result = deduplicate_attachments(attachments)
-        # All should resolve to the same canonical path
         assert len(result) == 1
-        assert "(also:" in result[0].name
+        assert result[0].name == f"{original} (also: {link1}, {link2})"
 
     def test_unicode_content(self):
         """Test deduplication with unicode content."""

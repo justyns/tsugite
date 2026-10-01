@@ -132,7 +132,8 @@ class TestEventsToMessagesStateless:
         msgs = events_to_messages(events)
         # Format error becomes a user-side observation back to the model
         assert msgs[-1]["role"] == "user"
-        assert "Format Error" in msgs[-1]["content"] or "format_error" in msgs[-1]["content"]
+        assert msgs[-1]["content"].startswith('<tsugite_execution_result status="error">')
+        assert "<error>Format Error: 2 python blocks. You must respond with exactly ONE" in msgs[-1]["content"]
 
     def test_delivery_becomes_a_user_message(self):
         events = [

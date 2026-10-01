@@ -112,7 +112,9 @@ def test_default_md_uses_context_blocks_slot():
     from tsugite.agent_inheritance import get_builtin_agents_path
 
     content = (get_builtin_agents_path() / "default.md").read_text()
-    assert "context_blocks" in content
+    slot = "{% if context_blocks is defined and context_blocks %}\n{{ context_blocks }}\n{% endif %}"
+    assert slot in content
+    assert content.index(slot) < content.index("<task>")
     assert "rag_context" not in content
 
 

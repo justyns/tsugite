@@ -340,7 +340,7 @@ def test_filesystem_helper_functions(tmp_path):
     assert read_text(str(tmp_path / "nonexistent.txt"), default="fallback") == "fallback"
 
 
-def test_renderer_with_filesystem_helpers(tmp_path):
+def test_renderer_with_filesystem_helpers(tmp_path, monkeypatch):
     """Test rendering templates with filesystem helper functions."""
     config_file = tmp_path / "config.json"
     config_file.write_text('{"setting": "value"}')
@@ -356,9 +356,13 @@ No config file found.
 
     renderer = AgentRenderer()
     result = renderer.render(content, {"cwd": str(tmp_path)})
-
-    # Without changing working directory, file won't exist
+    # Helpers resolve relative paths against the process cwd
     assert "No config file found." in result
+
+    monkeypatch.chdir(tmp_path)
+    result = renderer.render(content, {"cwd": str(tmp_path)})
+    assert "Config file exists!" in result
+    assert 'Content: {"setting": "value"}' in result
 
 
 def test_renderer_filesystem_conditionals(tmp_path):
