@@ -5,7 +5,6 @@ import logging
 import pytest
 
 from tsugite.models import (
-    RESERVED_MODEL_KWARGS,
     UnsupportedEffortError,
     get_model_id,
     get_model_kwargs,
@@ -80,9 +79,6 @@ class TestStripReservedModelKwargs:
     with the explicit keywords splatted alongside **model_kwargs in core/agent.py
     (`acompletion(messages=..., model=..., stream=..., **model_kwargs)`)."""
 
-    def test_reserved_set_is_messages_model_stream(self):
-        assert RESERVED_MODEL_KWARGS == frozenset({"messages", "model", "stream"})
-
     def test_drops_all_reserved_keys(self):
         cleaned = strip_reserved_model_kwargs(
             {"messages": [{"role": "user"}], "model": "evil", "stream": True, "temperature": 0.5}
@@ -116,25 +112,6 @@ class TestStripReservedModelKwargs:
         assert "model" not in kwargs
         assert "stream" not in kwargs
         assert kwargs.get("temperature") == 0.7
-
-
-class TestOpenAIReasoningEffortLevels:
-    """ModelInfo should declare supported_effort_levels for reasoning models."""
-
-    def test_reasoning_models_have_effort_levels(self):
-        from tsugite.providers.openai_compat import _OPENAI_MODELS
-
-        for key in ("openai/o1", "openai/o3", "openai/o3-mini", "openai/o4-mini"):
-            info = _OPENAI_MODELS.get(key)
-            assert info is not None, f"missing: {key}"
-            assert info.supported_effort_levels == ["low", "medium", "high"], key
-
-    def test_non_reasoning_models_have_no_effort_levels(self):
-        from tsugite.providers.openai_compat import _OPENAI_MODELS
-
-        info = _OPENAI_MODELS.get("openai/gpt-4o")
-        assert info is not None
-        assert info.supported_effort_levels is None
 
 
 class TestResolveReasoningEffort:

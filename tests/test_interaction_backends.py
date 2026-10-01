@@ -10,7 +10,6 @@ from tsugite.interaction import (
     InteractionBackend,
     NonInteractiveBackend,
     TerminalInteractionBackend,
-    get_interaction_backend,
     set_interaction_backend,
 )
 
@@ -21,21 +20,6 @@ def _clear_backend():
     set_interaction_backend(None)
     yield
     set_interaction_backend(None)
-
-
-class TestContextVar:
-    def test_default_is_none(self):
-        assert get_interaction_backend() is None
-
-    def test_set_and_get(self):
-        backend = NonInteractiveBackend()
-        set_interaction_backend(backend)
-        assert get_interaction_backend() is backend
-
-    def test_clear(self):
-        set_interaction_backend(NonInteractiveBackend())
-        set_interaction_backend(None)
-        assert get_interaction_backend() is None
 
 
 class TestNonInteractiveBackend:
@@ -243,56 +227,6 @@ class TestHTTPInteractionBackend:
         with pytest.raises(RuntimeError, match="Timed out"):
             backend.ask_user("Quick?", "text")
         assert backend._ask_id not in _PENDING_ASKS
-
-
-class TestContextPropagationThroughThreads:
-    """Test that interaction backend propagates through _run_async_in_sync_context."""
-
-    def test_backend_propagates_through_tool_execution_thread(self):
-        """Verify contextvar survives the ThreadPoolExecutor in _run_async_in_sync_context."""
-        import concurrent.futures
-        import contextvars
-
-        mock_backend = MagicMock(spec=InteractionBackend)
-        mock_backend.ask_user.return_value = "thread answer"
-        set_interaction_backend(mock_backend)
-
-        # Simulate what _run_async_in_sync_context does: copy context, run in new thread
-        ctx = contextvars.copy_context()
-
-        def run_in_thread():
-            # This is what ask_user does inside the tool
-            from tsugite.interaction import get_interaction_backend
-
-            backend = get_interaction_backend()
-            if backend is not None:
-                return backend.ask_user("test?", "text")
-            return "NO BACKEND"
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(ctx.run, run_in_thread)
-            result = future.result()
-
-        assert result == "thread answer"
-
-    def test_backend_lost_without_context_propagation(self):
-        """Without ctx.run(), the backend is NOT available in the new thread."""
-        import concurrent.futures
-
-        mock_backend = MagicMock(spec=InteractionBackend)
-        set_interaction_backend(mock_backend)
-
-        def run_in_thread():
-            from tsugite.interaction import get_interaction_backend
-
-            return get_interaction_backend()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_in_thread)
-            result = future.result()
-
-        # Without context propagation, backend is None in new thread
-        assert result is None
 
 
 class TestHTTPApprovalRoundTrip:

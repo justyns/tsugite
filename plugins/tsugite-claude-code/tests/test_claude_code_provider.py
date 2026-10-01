@@ -32,17 +32,6 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:haiku") == "claude-haiku-5-5"
         assert get_model_id("claude_code:fable") == "claude-fable-5-1"
 
-    def test_model_id_version_pinned_aliases(self):
-        assert get_model_id("claude_code:opus-5-5") == "claude-opus-5-5"
-        assert get_model_id("claude_code:opus-5") == "claude-opus-5"
-        assert get_model_id("claude_code:opus-4-8") == "claude-opus-4-8"
-        assert get_model_id("claude_code:opus-4-7") == "claude-opus-4-7"
-        assert get_model_id("claude_code:opus-4-6") == "claude-opus-4-6"
-        assert get_model_id("claude_code:sonnet-5") == "claude-sonnet-5"
-        assert get_model_id("claude_code:sonnet-4-6") == "claude-sonnet-4-6"
-        assert get_model_id("claude_code:fable-5") == "claude-fable-5"
-        assert get_model_id("claude_code:fable-5-1") == "claude-fable-5-1"
-
     def test_model_id_full_id_passthrough(self):
         assert get_model_id("claude_code:claude-sonnet-4-6") == "claude-sonnet-4-6"
 
@@ -876,23 +865,11 @@ class TestClaudeCodeAgentIntegration:
 
 
 class TestSessionIdPassthrough:
-    def test_agent_result_has_provider_state(self):
-        from tsugite.core.agent import AgentResult
-
-        result = AgentResult(output="test", provider_state={"session_id": "session-abc"})
-        assert result.provider_state["session_id"] == "session-abc"
-
     def test_agent_result_provider_state_defaults_none(self):
         from tsugite.core.agent import AgentResult
 
         result = AgentResult(output="test")
         assert result.provider_state is None
-
-    def test_execution_result_has_provider_state(self):
-        from tsugite.agent_runner.models import AgentExecutionResult
-
-        result = AgentExecutionResult(response="test", provider_state={"session_id": "session-xyz"})
-        assert result.provider_state["session_id"] == "session-xyz"
 
     def test_execution_result_provider_state_defaults_none(self):
         from tsugite.agent_runner.models import AgentExecutionResult

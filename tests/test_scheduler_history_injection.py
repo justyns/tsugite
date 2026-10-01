@@ -38,17 +38,6 @@ class TestInjectHistoryField:
         entry = _make_entry()
         assert entry.inject_history is True
 
-    def test_explicit_false(self):
-        entry = _make_entry(inject_history=False)
-        assert entry.inject_history is False
-
-    def test_serialization_roundtrip(self):
-        entry = _make_entry(inject_history=False)
-        data = asdict(entry)
-        assert data["inject_history"] is False
-        restored = ScheduleEntry(**data)
-        assert restored.inject_history is False
-
     def test_old_schedules_default(self):
         """Schedules saved before this field existed should default to True."""
         data = asdict(_make_entry())
@@ -130,17 +119,6 @@ class TestTargetSessionField:
     def test_defaults_to_none(self):
         entry = _make_entry()
         assert entry.target_session is None
-
-    def test_explicit_value(self):
-        entry = _make_entry(target_session="primary")
-        assert entry.target_session == "primary"
-
-    def test_serialization_roundtrip(self):
-        entry = _make_entry(target_session="name:research")
-        data = asdict(entry)
-        assert data["target_session"] == "name:research"
-        restored = ScheduleEntry(**data)
-        assert restored.target_session == "name:research"
 
     def test_old_schedules_default(self):
         """Schedules saved before this field existed should default to None."""

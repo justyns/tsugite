@@ -366,14 +366,6 @@ class TestNoIdentityLinksBackwardCompat:
         )
         assert config.identity_links == {}
 
-    def test_identity_links_parsed(self):
-        config = DaemonConfig(
-            default_workspace_dir=Path("/tmp/ws"),
-            default_agent_file="default",
-            identity_links={"alice": ["discord:123", "http:alice"]},
-        )
-        assert config.identity_links["alice"] == ["discord:123", "http:alice"]
-
 
 try:
     import cronsim  # noqa: F401

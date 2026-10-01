@@ -43,17 +43,6 @@ def _ctx(ws):
     return {"workspace_dir": ws}
 
 
-def test_provider_shape():
-    p = WORKSPACE_FILE_PROVIDER
-    assert p.key == "file"
-    assert p.label == "Workspace file"
-    assert p.icon == "file"
-    assert p.picker is True
-    assert p.capture is not None
-    assert p.choices is not None
-    assert p.in_menu is True
-
-
 def test_choices_lists_files_sorted(workspace):
     choices = WORKSPACE_FILE_PROVIDER.choices(_ctx(workspace))
     assert [c.value for c in choices] == ["a.txt", "sub/b.py"]

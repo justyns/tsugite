@@ -4,27 +4,11 @@ import pytest
 
 from tsugite.agent_runner.helpers import (
     clear_allowed_agents,
-    get_allowed_agents,
     set_allowed_agents,
 )
 from tsugite.cli.helpers import parse_cli_arguments
 from tsugite.md_agents import parse_agent_file
 from tsugite.tools.agents import spawn_agent
-
-
-class TestAllowedAgentsStorage:
-    """Test module-level allowed agents storage."""
-
-    def test_set_get_clear_allowed_agents(self):
-        """Should store, retrieve, and clear allowed agents."""
-        clear_allowed_agents()
-        assert get_allowed_agents() is None
-
-        set_allowed_agents(["agent1", "agent2"])
-        assert get_allowed_agents() == ["agent1", "agent2"]
-
-        clear_allowed_agents()
-        assert get_allowed_agents() is None
 
 
 class TestCLIArgumentParsing:

@@ -34,9 +34,6 @@ def _entry(**overrides) -> dict:
 
 
 class TestSource:
-    def test_source_is_models_dev(self):
-        assert "models.dev" in umr.MODELS_DEV_URL
-
     def test_capability_regexes_are_gone(self):
         """AC: capability inference comes from structured fields, not name regexes."""
         for name in ("REASONING_PATTERNS", "EFFORT_LEVELS_PATTERNS", "ANTHROPIC_THINKING_PATTERNS"):

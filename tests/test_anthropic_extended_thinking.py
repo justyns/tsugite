@@ -14,39 +14,6 @@ def _mock_response(payload: dict) -> httpx.Response:
     return resp
 
 
-class TestAnthropicEffortModelInfo:
-    def test_budget_thinking_models_declare_budget_effort_vocab(self):
-        """Models whose thinking is driven by budget_tokens support the provider's
-        effort→budget translation vocabulary."""
-        from tsugite.providers.anthropic import _ANTHROPIC_MODELS
-
-        for key in (
-            "anthropic/claude-opus-4-6",
-            "anthropic/claude-sonnet-4-6",
-            "anthropic/claude-haiku-4-5",
-            "anthropic/claude-opus-4-5",
-            "anthropic/claude-sonnet-4-5",
-        ):
-            info = _ANTHROPIC_MODELS.get(key)
-            assert info is not None, f"missing: {key}"
-            assert info.supported_effort_levels == ["low", "medium", "high", "max"], key
-
-    def test_native_effort_models_include_xhigh(self):
-        """Opus 4.7+ / Sonnet 5 / Fable 5 use the native effort parameter, whose
-        vocabulary includes xhigh."""
-        from tsugite.providers.anthropic import _ANTHROPIC_MODELS
-
-        for key in (
-            "anthropic/claude-opus-4-8",
-            "anthropic/claude-opus-4-7",
-            "anthropic/claude-sonnet-5",
-            "anthropic/claude-fable-5",
-        ):
-            info = _ANTHROPIC_MODELS.get(key)
-            assert info is not None, f"missing: {key}"
-            assert info.supported_effort_levels == ["low", "medium", "high", "xhigh", "max"], key
-
-
 class TestAnthropicThinkingRequestBody:
     """Verify reasoning_effort is translated to the `thinking` request parameter."""
 

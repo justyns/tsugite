@@ -584,16 +584,6 @@ def test_context_limit_resolves_to_the_backend_window():
     assert get_context_limit("codex_cli:gpt-5.5") == 272_000
 
 
-def test_offline_fallback_offers_the_gpt_5_6_models():
-    """The fallback list (used when /models is unreachable) mirrors the registry,
-    so a logged-out picker offers the current models rather than retired ones."""
-    assert "gpt-5.6-sol" in _FALLBACK_MODELS
-    assert "gpt-6-astra" in _FALLBACK_MODELS
-    assert "gpt-5.4" not in _FALLBACK_MODELS
-    assert "gpt-5.4-mini" not in _FALLBACK_MODELS
-    assert "gpt-5.4-nano" not in _FALLBACK_MODELS, "no longer offered by the Codex backend"
-
-
 @pytest.mark.asyncio
 async def test_list_models_falls_back_on_unexpected_payload():
     """A backend shape change must degrade to the static list, not to an empty

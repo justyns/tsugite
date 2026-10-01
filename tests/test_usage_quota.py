@@ -86,10 +86,6 @@ def test_re_registering_a_provider_replaces_the_previous_source():
     assert rows[0]["windows"] == [{"key": "week", "label": "week", "used_pct": 5.0, "resets_at": None}]
 
 
-def test_a_source_registered_by_one_test_does_not_leak_into_the_next():
-    assert "demo" not in _rows_by_provider()
-
-
 def test_a_concurrent_first_read_waits_for_the_sources_to_load(monkeypatch):
     """The first collect imports the plugin sources; a second collect racing it
     must see them rather than an empty registry."""

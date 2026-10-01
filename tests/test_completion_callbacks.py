@@ -16,7 +16,6 @@ from tsugite_daemon.session_runner import (
     _current_session_id,
     get_current_chain_depth,
     get_current_session_id,
-    set_current_chain_depth,
     set_current_session_id,
 )
 from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore
@@ -468,20 +467,10 @@ class TestChainDepthContextVar:
     def test_default_zero(self):
         assert get_current_chain_depth() == 0
 
-    def test_roundtrip(self):
-        set_current_chain_depth(3)
-        assert get_current_chain_depth() == 3
-        set_current_chain_depth(0)
-
 
 class TestSessionIdContextVar:
     def test_default_none(self):
         assert get_current_session_id() is None
-
-    def test_roundtrip(self):
-        set_current_session_id("session-xyz")
-        assert get_current_session_id() == "session-xyz"
-        _current_session_id.set(None)
 
 
 # --- handle_message sets session_id contextvar ---

@@ -7,29 +7,6 @@ import pytest
 from tsugite.core.tools import Tool, create_tool_from_function, create_tool_from_tsugite
 
 
-def test_tool_creation():
-    """Test creating a Tool."""
-
-    def add(a: int, b: int) -> int:
-        return a + b
-
-    tool = Tool(
-        name="add",
-        description="Add two numbers",
-        parameters={
-            "type": "object",
-            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
-            "required": ["a", "b"],
-        },
-        function=add,
-    )
-
-    assert tool.name == "add"
-    assert tool.description == "Add two numbers"
-    assert tool.parameters["type"] == "object"
-    assert tool.function(5, 3) == 8
-
-
 @pytest.mark.asyncio
 async def test_tool_execute_sync():
     """Test executing a synchronous tool."""

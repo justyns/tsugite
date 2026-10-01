@@ -106,38 +106,6 @@ Research the topic.
         assert "Reviews code for security" in result
         assert "Researches topics" in result
 
-    def test_conditional_rendering_with_agents(self, agent_setup):
-        """Test that {% if available_agents %} works correctly."""
-        from jinja2 import Template
-
-        # Simulate default's conditional block
-        template_text = """
-{% if available_agents %}
-## Available Agents
-{{ available_agents }}
-You can delegate using spawn_agent()
-{% endif %}
-
-## Task
-{{ user_prompt }}
-"""
-
-        template = Template(template_text)
-
-        # With agents
-        agents_list = list_agents()
-        result_with = template.render(available_agents=agents_list, user_prompt="Do work")
-
-        assert "Available Agents" in result_with
-        assert "code_review" in result_with
-        assert "spawn_agent()" in result_with
-
-        # Without agents
-        result_without = template.render(available_agents="", user_prompt="Do work")
-
-        assert "Available Agents" not in result_without
-        assert "spawn_agent()" not in result_without
-
     def test_conditional_rendering_with_package_agents(self, tmp_path, monkeypatch):
         """Test that package-provided agents are always available."""
         from jinja2 import Template

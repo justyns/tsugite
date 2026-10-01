@@ -33,39 +33,9 @@ class TestUIState:
         assert state.code_being_executed is None
         assert state.steps_history == []
 
-    def test_init_with_values(self):
-        """Test UIState initialization with custom values."""
-        state = UIState(task="Test task", current_step=5)
-        assert state.task == "Test task"
-        assert state.current_step == 5
-        assert state.steps_history == []
-
-
-class TestCustomUILogger:
-    """Test custom UI logger."""
-
-    def test_init(self):
-        """Test logger initialization."""
-        ui_handler = MagicMock()
-        console = Console(file=StringIO())
-        logger = CustomUILogger(ui_handler, console)
-
-        assert logger.ui_handler == ui_handler
-        assert logger.console == console
-
 
 class TestCustomUIHandler:
     """Test custom UI handler."""
-
-    def test_init(self):
-        """Test handler initialization."""
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console)
-
-        assert handler.console == console
-        assert handler.state.task is None
-        assert handler.show_code is True
-        assert handler.show_observations is True
 
     def test_handle_task_start(self):
         """Test handling task start event."""

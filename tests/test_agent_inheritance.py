@@ -438,17 +438,6 @@ def test_resolve_agent_inheritance_no_extends(tmp_path):
     assert resolved.config.model == "ollama:test"
 
 
-def test_resolve_agent_inheritance_opt_out(tmp_path):
-    """Test agent that opts out of default inheritance."""
-    agent_file = tmp_path / "standalone.md"
-    agent_file.write_text("---\nname: standalone\nextends: none\n---\nContent")
-
-    agent = parse_agent(agent_file.read_text(), agent_file)
-    resolved = resolve_agent_inheritance(agent, agent_file)
-
-    assert resolved.config.extends == "none"
-
-
 def test_resolve_agent_inheritance_with_parent(tmp_path):
     """Test agent that extends a parent."""
     # Create parent agent

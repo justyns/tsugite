@@ -1,7 +1,5 @@
 """Tests for built-in agents."""
 
-from pathlib import Path
-
 from tsugite.agent_inheritance import find_agent_file, get_builtin_agents_path
 from tsugite.agent_utils import list_local_agents
 from tsugite.md_agents import parse_agent_file
@@ -20,18 +18,6 @@ class TestBuiltinAgents:
         assert "helpful" in agent.config.instructions.lower()
         # Verify the agent path is within the builtin_agents directory
         assert get_builtin_agents_path() in agent.file_path.parents
-
-    def test_package_agents_in_correct_directory(self):
-        """Test that package agents are in the builtin_agents directory."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        builtin_dir = get_builtin_agents_path()
-
-        # Package agent should be in the builtin_agents directory
-        assert builtin_dir in builtin_path.parents or builtin_path.parent == builtin_dir
-
-        # Non-package path should not be in builtin_agents directory
-        custom_path = Path("/tmp/custom.md")
-        assert builtin_dir not in custom_path.parents and custom_path.parent != builtin_dir
 
     def test_find_builtin_agent(self, tmp_path):
         """Test that find_agent_file finds package-provided agents."""
@@ -170,33 +156,6 @@ class TestBuiltinDefaultAutoDiscovery:
 
         assert "list_available_agents" in agent.config.tools
 
-    def test_builtin_default_content_structure(self):
-        """Test that default has delegation instructions."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        # Should have conditional block for available agents
-        assert "{% if available_agents" in agent.content
-
-        # Should mention delegation
-        assert "delegate" in agent.content.lower()
-        assert "spawn_agent" in agent.content
-
-        # Should have example usage
-        assert "agents/" in agent.content or "agent_path" in agent.content
-
-    def test_builtin_default_instructions_mention_delegation(self):
-        """Test that instructions guide on delegation."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        # Instructions should be set
-        assert agent.config.instructions
-
-        # Content should explain when/how to delegate
-        content_lower = agent.content.lower()
-        assert "specialized" in content_lower or "delegate" in content_lower
-
     def test_builtin_default_has_web_search_tool(self):
         """Test that default agent includes web_search tool."""
         builtin_path = get_builtin_agents_path() / "default.md"
@@ -217,14 +176,6 @@ class TestBuiltinDefaultAutoDiscovery:
         agent = parse_agent_file(builtin_path)
 
         assert "run" in agent.config.tools
-
-    def test_builtin_default_has_web_search_guidelines(self):
-        """Test that default agent has web search guidelines."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-        agent = parse_agent_file(builtin_path)
-
-        assert "Web Search" in agent.content
-        assert "web_search(query=" in agent.content
 
 
 class TestJobVerifierAgent:

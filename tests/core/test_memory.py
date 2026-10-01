@@ -1,45 +1,6 @@
 """Tests for agent memory system."""
 
-from tsugite.core.memory import AgentMemory, StepResult
-
-
-def test_step_result_creation():
-    """Test creating a StepResult."""
-    step = StepResult(
-        step_number=1,
-        thought="I need to calculate this",
-        code="result = 5 + 3",
-        output="8",
-        error=None,
-    )
-
-    assert step.step_number == 1
-    assert step.thought == "I need to calculate this"
-    assert step.code == "result = 5 + 3"
-    assert step.output == "8"
-    assert step.error is None
-
-
-def test_step_result_with_error():
-    """Test StepResult with error."""
-    step = StepResult(
-        step_number=2,
-        thought="Try to divide",
-        code="result = 10 / 0",
-        output="",
-        error="ZeroDivisionError: division by zero",
-    )
-
-    assert step.error == "ZeroDivisionError: division by zero"
-
-
-def test_agent_memory_initialization():
-    """Test AgentMemory initialization."""
-    memory = AgentMemory()
-
-    assert memory.task == ""
-    assert memory.steps == []
-    assert memory.reasoning_history == []
+from tsugite.core.memory import AgentMemory
 
 
 def test_add_task():

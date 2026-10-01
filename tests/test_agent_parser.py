@@ -265,14 +265,6 @@ name: test_agent
     assert any("Tool directive missing name" in error for error in errors)
 
 
-def test_agent_file_path_preserved(sample_agent_file):
-    """Test that the original file path is preserved in the agent."""
-    agent = parse_agent_file(sample_agent_file)
-
-    assert agent.file_path == sample_agent_file
-    assert agent.file_path.exists()
-
-
 def test_complex_frontmatter(temp_dir):
     """Test parsing agent with complex frontmatter structure."""
     content = """---

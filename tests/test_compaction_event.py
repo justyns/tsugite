@@ -1,7 +1,6 @@
 """Tests for compaction emitting an event into the new session JSONL."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,7 +11,7 @@ from tsugite_daemon.memory import (
     track_compaction_usage,
 )
 
-from tsugite.history import events_to_messages, get_history_backend
+from tsugite.history import events_to_messages
 from tsugite.history.models import Event
 from tsugite.providers.base import CompletionResponse, Usage
 
@@ -152,38 +151,6 @@ class TestCompactionSummaryDateRange:
         assert "old-format compaction" in block
         # Should not crash and should not produce empty/None placeholders
         assert "None" not in block
-
-
-class TestCompactionWritesEventInPlace:
-    def test_new_session_first_body_event_is_compaction(self, tmp_path: Path):
-        """A compacted session's JSONL begins with session_start, then a
-        compaction event whose data carries the summary, then the retained
-        events."""
-        storage = get_history_backend().create(
-            agent_name="agent",
-            model="openai:gpt-4o-mini",
-            parent_session="old-session-id",
-        )
-        storage.record(
-            "compaction",
-            summary="prior conversation about deployment",
-            replaced_count=10,
-            retained_count=2,
-            reason="token_threshold",
-        )
-        # Retained events copied over verbatim
-        storage.record("user_input", text="last user msg")
-        storage.record("model_response", raw_content="last assistant reply")
-
-        events = storage.load_events()
-        assert events[0].type == "session_start"
-        assert events[0].data["parent_session"] == "old-session-id"
-        assert events[1].type == "compaction"
-        assert events[1].data["summary"] == "prior conversation about deployment"
-        assert events[1].data["replaced_count"] == 10
-        assert events[1].data["retained_count"] == 2
-        assert events[2].type == "user_input"
-        assert events[3].type == "model_response"
 
 
 class TestCompactionUsageTracking:

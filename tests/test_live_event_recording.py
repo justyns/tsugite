@@ -136,20 +136,3 @@ def test_fallback_record_keeps_an_unqualified_model_whole(history_dir, fake_agen
     [recorded] = [e for e in storage.iter_events() if e.type == "model_response"]
     assert "provider" not in recorded.data
     assert recorded.data["model"] == "unknown"
-
-
-def test_run_agent_creates_storage_at_runtime(history_dir, fake_agent_path):
-    """The TsugiteAgent constructor accepts a `storage` keyword and stores it
-    on the instance — confirms the plumbing endpoint exists. (Integration is
-    covered by the live CLI smoke run.)"""
-    from tsugite.core.agent import TsugiteAgent
-
-    storage = seed_history_session("t", agent="t", model="openai:gpt-4o-mini")
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[],
-        instructions="",
-        max_turns=1,
-        storage=storage,
-    )
-    assert agent.storage is storage

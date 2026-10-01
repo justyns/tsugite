@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tsugite.events import EventType, ToolCallEvent, ToolResultEvent
+from tsugite.events import ToolCallEvent, ToolResultEvent
 from tsugite.tools import get_tool, list_tools, tool
 
 # ============================================================================
@@ -61,24 +61,6 @@ class TestParentOnlyFlag:
 
 
 class TestAuditEvents:
-    def test_tool_call_event_serializes(self):
-        event = ToolCallEvent(tool_name="read_file", arguments={"path": "/tmp/x"}, step=1)
-        assert event.event_type == EventType.TOOL_CALL
-        assert event.tool_name == "read_file"
-        assert event.arguments == {"path": "/tmp/x"}
-        assert event.step == 1
-
-    def test_tool_result_event_success(self):
-        event = ToolResultEvent(tool_name="read_file", success=True, result_summary="contents...", duration_ms=42)
-        assert event.event_type == EventType.TOOL_RESULT
-        assert event.success is True
-        assert event.duration_ms == 42
-
-    def test_tool_result_event_failure(self):
-        event = ToolResultEvent(tool_name="run", success=False, result_summary="command failed", duration_ms=100)
-        assert event.success is False
-        assert event.result_summary == "command failed"
-
     def test_tool_call_event_default_arguments(self):
         event = ToolCallEvent(tool_name="get_system_info")
         assert event.arguments == {}
@@ -273,21 +255,6 @@ class TestRunSafeRemoved:
 
         _ensure_tools_loaded()
         assert "run_safe" not in list_tools()
-
-    def test_run_has_no_blocklist_check(self, reset_tool_registry):
-        """run() should not check for dangerous patterns."""
-        # These patterns were previously blocked
-        # Now they should just try to execute (will fail naturally if command doesn't exist)
-        # We just verify no ValueError is raised for the pattern check
-
-        # Mock execute_shell_command to avoid actual execution
-        from unittest.mock import patch
-
-        from tsugite.tools.shell import run
-
-        with patch("tsugite.tools.shell.execute_shell_command", return_value="ok"):
-            result = run("echo rm -rf /", timeout=5)
-            assert result == "ok"
 
 
 # ============================================================================

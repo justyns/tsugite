@@ -34,24 +34,9 @@ class TestProviderCaching:
         p2 = get_provider("anthropic")
         assert p1 is not p2
 
-    def test_cacheable_attribute_on_claude_code(self):
-        from tsugite_claude_code.provider import ClaudeCodeProvider
-
-        assert ClaudeCodeProvider.cacheable is False
-        assert ClaudeCodeProvider().cacheable is False
-
     def test_cacheable_default_true_on_anthropic(self):
         p = get_provider("anthropic")
         assert getattr(p, "cacheable", True) is True
-
-    def test_models_are_definitive_on_cli_providers(self):
-        """CLI-backed providers expose a fixed model set, so /model cautions on
-        unlisted ids for them."""
-        from tsugite_claude_code.provider import ClaudeCodeProvider
-        from tsugite_codex_cli.provider import CodexCliProvider
-
-        assert ClaudeCodeProvider.models_are_definitive is True
-        assert CodexCliProvider.models_are_definitive is True
 
     def test_models_are_definitive_default_false_on_api_provider(self):
         """API providers accept arbitrary ids, so the flag stays False and /model

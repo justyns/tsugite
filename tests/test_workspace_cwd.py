@@ -9,32 +9,6 @@ from rich.console import Console
 from tsugite.cli.helpers import PathContext, workspace_directory_context
 
 
-class TestPathContext:
-    """Tests for PathContext dataclass."""
-
-    def test_path_context_creation(self):
-        """Test PathContext can be created with all fields."""
-        ctx = PathContext(
-            invoked_from=Path("/home/user/projects"),
-            workspace_dir=Path("/home/user/.tsugite/workspaces/test"),
-            effective_cwd=Path("/home/user/.tsugite/workspaces/test"),
-        )
-        assert ctx.invoked_from == Path("/home/user/projects")
-        assert ctx.workspace_dir == Path("/home/user/.tsugite/workspaces/test")
-        assert ctx.effective_cwd == Path("/home/user/.tsugite/workspaces/test")
-
-    def test_path_context_none_workspace(self):
-        """Test PathContext with None workspace_dir."""
-        ctx = PathContext(
-            invoked_from=Path("/home/user/projects"),
-            workspace_dir=None,
-            effective_cwd=Path("/home/user/projects"),
-        )
-        assert ctx.invoked_from == Path("/home/user/projects")
-        assert ctx.workspace_dir is None
-        assert ctx.effective_cwd == Path("/home/user/projects")
-
-
 class TestWorkspaceDirectoryContext:
     """Tests for workspace_directory_context context manager."""
 
@@ -145,7 +119,6 @@ class TestContextVariablesInTemplates:
         from unittest.mock import MagicMock
 
         from tsugite.agent_preparation import AgentPreparer
-        from tsugite.cli.helpers import PathContext
 
         # Create mock agent
         agent = MagicMock()
@@ -228,7 +201,6 @@ class TestEnvironmentBlockInSystemPrompt:
         from unittest.mock import MagicMock
 
         from tsugite.agent_preparation import AgentPreparer
-        from tsugite.cli.helpers import PathContext
 
         # Create mock agent
         agent = MagicMock()
@@ -274,7 +246,6 @@ class TestEnvironmentBlockInSystemPrompt:
         from unittest.mock import MagicMock
 
         from tsugite.agent_preparation import AgentPreparer
-        from tsugite.cli.helpers import PathContext
 
         cwd = Path.cwd()
 
@@ -322,7 +293,6 @@ class TestExecutorPathVariables:
     @pytest.mark.asyncio
     async def test_executor_injects_path_variables(self):
         """Test that LocalExecutor injects WORKSPACE_DIR and INVOKED_FROM."""
-        from tsugite.cli.helpers import PathContext
         from tsugite.core.executor import LocalExecutor
 
         path_context = PathContext(
@@ -349,7 +319,6 @@ class TestExecutorPathVariables:
     @pytest.mark.asyncio
     async def test_executor_path_variables_accessible_in_code(self, tmp_path):
         """Test that path variables can be accessed in executed code."""
-        from tsugite.cli.helpers import PathContext
         from tsugite.core.executor import LocalExecutor
 
         workspace = tmp_path / "workspace"

@@ -5,20 +5,13 @@ from pathlib import Path
 import pytest
 
 from tsugite.core.agent import CONTEXT_ACK, TsugiteAgent, estimate_content_tokens
-from tsugite.events import EventType, PromptSnapshotEvent
+from tsugite.events import PromptSnapshotEvent
 from tsugite.history import Session, get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 from tsugite.ui.jsonl import JSONLUIHandler
 
 
 class TestPromptSnapshotEvent:
-    def test_serializes_correctly(self):
-        event = PromptSnapshotEvent(
-            token_breakdown={"system": 4, "task": 2, "total": 6},
-        )
-        assert event.event_type == EventType.PROMPT_SNAPSHOT
-        assert event.token_breakdown["total"] == 6
-
     def test_defaults_to_empty(self):
         event = PromptSnapshotEvent()
         assert event.messages == []

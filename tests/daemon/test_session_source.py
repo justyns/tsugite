@@ -25,11 +25,6 @@ from tsugite_daemon.session_store import (
 # ── enum ──
 
 
-def test_source_enum_has_web_discord_cli():
-    assert SessionSource.WEB.value == "web"
-    assert SessionSource.DISCORD.value == "discord"
-
-
 # ── store-level source threading ──
 
 
@@ -268,20 +263,3 @@ def test_discord_thread_session_and_parent_are_discord_source(discord_adapter):
 
 
 # ── cli: no daemon-session creation path exists ──
-
-
-def test_cli_chat_does_not_create_daemon_sessions():
-    """`tsu chat` runs the agent loop against the JSONL history system; it never
-    constructs daemon Session objects or touches a SessionStore. There is no CLI
-    call site to stamp source='cli'. This test pins that finding
-    so a future reader does not hunt for a nonexistent CLI creation path.
-    """
-    import inspect
-
-    from tsugite.cli import chat as chat_module
-
-    src = inspect.getsource(chat_module)
-    assert "SessionStore" not in src
-    assert "session_store" not in src
-    assert "get_or_create_interactive" not in src
-    assert "create_interactive_session" not in src

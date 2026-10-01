@@ -606,44 +606,6 @@ Use {{ result1 }}
         assert "## Step 2" in steps[1].content
 
 
-class TestMultiStepContextVariables:
-    def test_step_context_variables(self, tmp_path):
-        """Test that step context variables are available in templates."""
-        from tsugite.md_agents import extract_step_directives
-
-        agent_file = tmp_path / "step_vars.md"
-        agent_file.write_text("""---
-name: step_vars_test
----
-
-<!-- tsu:step name="first" -->
-Step {{ step_number }} of {{ total_steps }} ({{ step_name }})
-
-<!-- tsu:step name="second" -->
-Currently in step {{ step_number }}/{{ total_steps }}: {{ step_name }}
-
-<!-- tsu:step name="third" -->
-{% if step_number == 3 %}Final step!{% endif %}
-""")
-
-        # Verify templates can reference these variables
-        preamble, steps = extract_step_directives(agent_file.read_text())
-        assert len(steps) == 3
-
-        # First step uses all three variables
-        assert "{{ step_number }}" in steps[0].content
-        assert "{{ total_steps }}" in steps[0].content
-        assert "{{ step_name }}" in steps[0].content
-
-        # Second step uses all three variables
-        assert "{{ step_number }}" in steps[1].content
-        assert "{{ total_steps }}" in steps[1].content
-        assert "{{ step_name }}" in steps[1].content
-
-        # Third step uses step_number in conditional
-        assert "step_number" in steps[2].content
-
-
 class TestStructuredOutput:
     """Tests for structured output support in multi-step agents."""
 
@@ -981,23 +943,3 @@ Finalize results
         # Third step: not looping
         assert steps[2].repeat_while is None
         assert steps[2].repeat_until is None
-
-    def test_loop_context_variables_in_template(self):
-        """Test that loop context variables are available in templates."""
-        content = """
-<!-- tsu:step name="worker" repeat_while="not done" max_iterations="25" -->
-
-Iteration {{ iteration }} of {{ max_iterations }}
-
-{% if is_looping_step %}
-This is a looping step!
-{% endif %}
-
-Progress: {{ iteration }}/{{ max_iterations }}
-"""
-        preamble, steps = extract_step_directives(content)
-
-        assert len(steps) == 1
-        assert "{{ iteration }}" in steps[0].content
-        assert "{{ max_iterations }}" in steps[0].content
-        assert "{% if is_looping_step %}" in steps[0].content

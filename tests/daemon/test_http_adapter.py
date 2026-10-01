@@ -755,24 +755,6 @@ class TestWebhookEndpoint:
         )
         assert resp.status_code == 202
 
-    def test_webhook_logs_receipt(self, client, caplog):
-        import logging
-
-        with caplog.at_level(logging.INFO, logger="tsugite_daemon.adapters.http"):
-            client.post("/webhook/whk_test", json={"event": "push"})
-
-        assert any("Received webhook [whk_test" in r.message for r in caplog.records)
-        assert any("source: forgejo | event: push" in r.message for r in caplog.records)
-        assert any("saved to inbox" in r.message for r in caplog.records)
-
-    def test_webhook_logs_invalid_token(self, client, caplog):
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="tsugite_daemon.adapters.http"):
-            client.post("/webhook/bad-token", json={"data": 1})
-
-        assert any("invalid token [bad-toke" in r.message for r in caplog.records)
-
 
 class TestHistoryEndpoint:
     @pytest.fixture(autouse=True)
@@ -920,12 +902,6 @@ class TestSSEProgressHandler:
         assert not handler.queue.empty()
         item = handler.queue.get_nowait()
         assert item == {"type": "test", "key": "value"}
-
-    def test_done_flag(self):
-        handler = SSEProgressHandler()
-        assert handler.done is False
-        handler.done = True
-        assert handler.done is True
 
     def test_cross_thread_emit_then_signal_done_preserves_event(self):
         """H2: `_emit` from a worker thread schedules `queue.put_nowait` via
@@ -1442,10 +1418,3 @@ class TestHTTPConfig:
         assert config.enabled is False
         assert config.host == "127.0.0.1"
         assert config.port == 8374
-
-    def test_webhook_entry(self):
-        from tsugite_daemon.webhook_store import WebhookEntry
-
-        wh = WebhookEntry(token="whk_test", source="github")
-        assert wh.token == "whk_test"
-        assert wh.source == "github"

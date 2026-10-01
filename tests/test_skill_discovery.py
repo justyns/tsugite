@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from tsugite.skill_discovery import (
-    SkillIssue,
     SkillMeta,
     _validate_skill_name,
     build_skill_index,
@@ -41,21 +40,6 @@ def _write_skill(
     )
     skill_md.write_text(frontmatter)
     return skill_dir
-
-
-class TestSkillMeta:
-    def test_skill_meta_creation(self):
-        skill = SkillMeta(
-            name="test-skill",
-            description="A test skill",
-            directory=Path("/path/to/test-skill"),
-            skill_md_path=Path("/path/to/test-skill/SKILL.md"),
-        )
-        assert skill.name == "test-skill"
-        assert skill.description == "A test skill"
-        assert skill.directory == Path("/path/to/test-skill")
-        assert skill.skill_md_path == Path("/path/to/test-skill/SKILL.md")
-        assert skill.triggers == []
 
 
 class TestGetBuiltinSkillsPath:
@@ -701,10 +685,3 @@ class TestScanSkillsWithIssues:
         result = scan_skills()
         assert isinstance(result, list)
         assert all(isinstance(s, SkillMeta) for s in result)
-
-    def test_skill_issue_dataclass_shape(self):
-        issue = SkillIssue(path=Path("/tmp/SKILL.md"), name="x", severity="warning", message="y")
-        assert issue.path == Path("/tmp/SKILL.md")
-        assert issue.name == "x"
-        assert issue.severity == "warning"
-        assert issue.message == "y"

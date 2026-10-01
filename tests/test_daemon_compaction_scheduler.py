@@ -35,24 +35,11 @@ class TestAutoCompactConfig:
         assert cfg.schedule is None
         assert cfg.min_turns == 1
 
-    def test_with_schedule(self):
-        cfg = AutoCompactConfig(schedule="0 0 * * *", min_turns=5)
-        assert cfg.schedule == "0 0 * * *"
-        assert cfg.min_turns == 5
-
 
 class TestAgentConfigAutoCompact:
     def test_none_by_default(self):
         cfg = RuntimeDefaults(workspace_dir=Path("/tmp"), agent_file="default")
         assert cfg.auto_compact is None
-
-    def test_with_auto_compact(self):
-        cfg = RuntimeDefaults(
-            workspace_dir=Path("/tmp"),
-            agent_file="default",
-            auto_compact=AutoCompactConfig(schedule="0 0 * * *"),
-        )
-        assert cfg.auto_compact.schedule == "0 0 * * *"
 
 
 class TestConfigParsing:

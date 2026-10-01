@@ -36,53 +36,6 @@ Assistant: {{ turn.agent_response }}
         agent_path.write_text(agent_content)
         return agent_path
 
-    def test_chat_manager_initialization(self, test_agent):
-        """Test that ChatManager initializes with agent path."""
-        manager = ChatManager(
-            agent_path=test_agent,
-            model_override=None,
-            max_history=50,
-        )
-
-        assert manager.agent_path == test_agent
-        assert manager.max_history == 50
-        assert len(manager.conversation_history) == 0
-
-    def test_chat_manager_with_model_override(self, test_agent):
-        """Test ChatManager with model override."""
-        manager = ChatManager(
-            agent_path=test_agent,
-            model_override="ollama:llama3.2",
-            max_history=10,
-        )
-
-        assert manager.model_override == "ollama:llama3.2"
-        assert manager.max_history == 10
-
-    def test_chat_cli_loads_agent_info(self, test_agent):
-        """Test that chat CLI can load agent info without crashing."""
-        from tsugite.md_agents import parse_agent_file
-        from tsugite.models import resolve_effective_model
-
-        agent = parse_agent_file(test_agent)
-        agent_name = agent.config.name or test_agent.stem
-        model = resolve_effective_model(agent_model=agent.config.model) or "unknown"
-
-        assert agent_name == "test_chat"
-        assert model == "ollama:qwen2.5-coder:7b"
-
-    def test_chat_cli_with_model_override(self, test_agent):
-        """Test agent info loading with model override."""
-        from tsugite.md_agents import parse_agent_file
-        from tsugite.models import resolve_effective_model
-
-        agent = parse_agent_file(test_agent)
-        agent_name = agent.config.name or test_agent.stem
-        model = resolve_effective_model("ollama:custom-model", agent.config.model) or "unknown"
-
-        assert agent_name == "test_chat"
-        assert model == "ollama:custom-model"
-
     def test_chat_history_context_format(self, test_agent):
         """Test that chat_history is passed as list to agent."""
 

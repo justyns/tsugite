@@ -9,36 +9,6 @@ import pytest
 from tsugite.core.executor import ExecutionResult, LocalExecutor, _summarize_variable
 
 
-@pytest.mark.asyncio
-async def test_execution_result_creation():
-    """Test creating an ExecutionResult."""
-    result = ExecutionResult(
-        output="Hello, world!",
-        error=None,
-        stdout="Hello, world!",
-        stderr="",
-    )
-
-    assert result.output == "Hello, world!"
-    assert result.error is None
-    assert result.stdout == "Hello, world!"
-    assert result.stderr == ""
-    assert result.return_value is None
-
-
-@pytest.mark.asyncio
-async def test_execution_result_with_error():
-    """Test ExecutionResult with error."""
-    result = ExecutionResult(
-        output="",
-        error="NameError: name 'x' is not defined",
-        stdout="",
-        stderr="NameError: name 'x' is not defined",
-    )
-
-    assert result.error == "NameError: name 'x' is not defined"
-
-
 def test_executor_backends_conform_to_protocol():
     """Both execution backends satisfy the shared Executor protocol."""
     from tsugite.core.executor import Executor

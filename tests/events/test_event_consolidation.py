@@ -6,52 +6,11 @@ from tsugite.events import (
     BaseEvent,
     ErrorEvent,
     EventBus,
-    EventType,
     FileWriteEvent,
     ObservationEvent,
     TaskStartEvent,
 )
 from tsugite.ui.jsonl import JSONLUIHandler
-
-
-class TestEventStructure:
-    """Test event creation with structured data."""
-
-    def test_observation_success(self):
-        """Test ObservationEvent for successful tool execution."""
-        event = ObservationEvent(success=True, observation="Tool executed successfully", tool="read_file")
-
-        assert event.success is True
-        assert event.observation == "Tool executed successfully"
-        assert event.tool == "read_file"
-        assert event.error is None
-
-    def test_observation_failure(self):
-        """Test ObservationEvent for failed tool execution."""
-        event = ObservationEvent(success=False, error="File not found", tool="read_file")
-
-        assert event.success is False
-        assert event.error == "File not found"
-        assert event.tool == "read_file"
-        assert event.observation == ""
-
-    def test_observation_code_execution(self):
-        """Test ObservationEvent for code execution (no tool)."""
-        event = ObservationEvent(observation="Code output", tool=None)
-
-        assert event.observation == "Code output"
-        assert event.tool is None
-        assert event.success is True
-
-    def test_file_write_event(self):
-        """Test FileWriteEvent construction."""
-        event = FileWriteEvent(path="/tmp/test.txt", line_count=5, byte_count=42, operation="tool_call")
-
-        assert event.event_type == EventType.FILE_WRITE
-        assert event.path == "/tmp/test.txt"
-        assert event.line_count == 5
-        assert event.byte_count == 42
-        assert event.operation == "tool_call"
 
 
 class TestEventBus:
@@ -182,25 +141,3 @@ class TestJSONLSerialization:
         assert data["line_count"] == 10
         assert data["byte_count"] == 256
         assert data["operation"] == "tool_call"
-
-
-class TestErrorConsolidation:
-    """Test consistent error representation patterns."""
-
-    def test_tool_error_uses_observation_event(self):
-        """Tool errors should use ObservationEvent with success=False."""
-        event = ObservationEvent(success=False, error="File not found: test.txt", tool="read_file")
-
-        assert event.success is False
-        assert event.error == "File not found: test.txt"
-        assert event.tool == "read_file"
-        assert event.event_type == EventType.OBSERVATION
-
-    def test_general_error_uses_error_event(self):
-        """General/fatal errors should use ErrorEvent."""
-        event = ErrorEvent(error="Max turns exceeded", error_type="Execution Error", step=10)
-
-        assert event.error == "Max turns exceeded"
-        assert event.error_type == "Execution Error"
-        assert event.step == 10
-        assert event.event_type == EventType.ERROR

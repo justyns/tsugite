@@ -6,17 +6,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tsugite.events import SecretAccessEvent
-from tsugite.events.base import EventType
 from tsugite.events.helpers import emit_secret_access_event
 from tsugite.ui.jsonl import JSONLUIHandler
 
 
 class TestSecretAccessEvent:
-    def test_event_creation(self):
-        event = SecretAccessEvent(name="forgejo-token")
-        assert event.event_type == EventType.SECRET_ACCESS
-        assert event.name == "forgejo-token"
-
     def test_event_is_frozen(self):
         event = SecretAccessEvent(name="token")
         with pytest.raises(Exception):

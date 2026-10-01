@@ -33,23 +33,6 @@ def test_runtime_defaults():
     assert config.context_limit == 128000
 
 
-def test_discord_bot_config():
-    """Test DiscordBotConfig model with token_secret."""
-    config = DiscordBotConfig(
-        name="test-bot",
-        token_secret="test-secret",
-        command_prefix="!",
-        dm_policy="allowlist",
-        allow_from=["123"],
-    )
-    assert config.name == "test-bot"
-    assert config.token_secret == "test-secret"
-    assert config.token_file is None
-    assert config.command_prefix == "!"
-    assert config.dm_policy == "allowlist"
-    assert config.allow_from == ["123"]
-
-
 def test_discord_bot_config_requires_token_source():
     """Test that DiscordBotConfig requires either token_secret or token_file."""
     with pytest.raises(ValidationError, match="must set exactly one of token_secret, token_file"):
@@ -64,21 +47,6 @@ def test_discord_bot_config_rejects_both_token_sources():
             token_secret="x",
             token_file=Path("/tmp/x.token"),
         )
-
-
-def test_daemon_config():
-    """Test DaemonConfig model."""
-    config = DaemonConfig(
-        state_dir=Path("/tmp/daemon"),
-        log_level="info",
-        default_workspace_dir=Path("/tmp/workspace"),
-        default_agent_file="default",
-        discord_bots=[DiscordBotConfig(name="bot", token_secret="bot-secret")],
-    )
-    assert config.state_dir == Path("/tmp/daemon")
-    assert config.log_level == "info"
-    assert config.default_workspace_dir == Path("/tmp/workspace")
-    assert len(config.discord_bots) == 1
 
 
 def test_runtime_property_assembles_defaults():

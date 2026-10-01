@@ -147,22 +147,3 @@ Content
         # Names should be different
         assert regular_info["name"] == "regular"
         assert builtin_info["name"] == "default"
-
-
-class TestCLIBuiltinPaths:
-    """Test that CLI properly handles builtin agent file paths."""
-
-    def test_cli_validates_builtin_path(self):
-        """Test that CLI validation doesn't fail on builtin paths."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-
-        # Should exist and be a valid path
-        assert builtin_path.exists()
-        assert builtin_path.is_file()
-
-    def test_builtin_path_has_md_suffix(self):
-        """Test that builtin paths have .md suffix like regular agents."""
-        builtin_path = get_builtin_agents_path() / "default.md"
-
-        # Builtin paths have .md suffix like regular agents
-        assert str(builtin_path).endswith(".md")

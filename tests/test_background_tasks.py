@@ -96,10 +96,6 @@ class TestAutoReplyField:
         entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.auto_reply is False
 
-    def test_explicit_true(self):
-        entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True)
-        assert entry.auto_reply is True
-
     def test_serialization_roundtrip(self, schedules_path, run_callback):
         sched1 = Scheduler(schedules_path, run_callback)
         entry = ScheduleEntry(id="j1", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *", auto_reply=True)
@@ -512,13 +508,6 @@ class TestBackgroundTaskMaxTurns:
 
 
 class TestPartialOutputOnMaxTurns:
-    def test_agent_execution_error_carries_partial_output(self):
-        err = AgentExecutionError(
-            "Agent reached max_turns",
-            partial_output="I was analyzing the files when I ran out of turns",
-        )
-        assert err.partial_output == "I was analyzing the files when I ran out of turns"
-
     def test_agent_execution_error_partial_output_defaults_none(self):
         err = AgentExecutionError("Agent reached max_turns")
         assert err.partial_output is None

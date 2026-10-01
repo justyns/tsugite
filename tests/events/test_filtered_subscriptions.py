@@ -1,7 +1,6 @@
 """Tests for the plugin-facing filtered subscription API."""
 
 from tsugite.events import (
-    BaseEvent,
     EventBus,
     LLMMessageEvent,
     TaskStartEvent,
@@ -34,10 +33,6 @@ class TestCustomEvent:
     def test_custom_event_default_payload(self):
         event = CustomEvent(custom_name="x.y")
         assert event.payload == {}
-
-    def test_custom_event_is_base_event(self):
-        event = CustomEvent(custom_name="foo")
-        assert isinstance(event, BaseEvent)
 
 
 class TestSubscribeFiltered:

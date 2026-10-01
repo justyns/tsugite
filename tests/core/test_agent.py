@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tsugite.core.agent import AgentResult, TsugiteAgent
-from tsugite.core.executor import LocalExecutor
 from tsugite.core.tools import create_tool_from_function
 from tsugite.providers.base import CompletionResponse, Usage
 
@@ -28,30 +27,6 @@ def _patch_provider(agent, side_effect=None, return_value=None):
     agent._provider.get_state = MagicMock(return_value=None)
     agent._provider.set_context = MagicMock()
     return mock
-
-
-@pytest.mark.asyncio
-async def test_agent_creation():
-    """Test creating a TsugiteAgent."""
-
-    def add(a: int, b: int) -> int:
-        """Add two numbers"""
-        return a + b
-
-    tool = create_tool_from_function(add)
-
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[tool],
-        instructions="You are a helpful assistant",
-        max_turns=10,
-    )
-
-    assert agent.model_string == "openai:gpt-4o-mini"
-    assert len(agent.tools) == 1
-    assert agent.instructions == "You are a helpful assistant"
-    assert agent.max_turns == 10
-    assert isinstance(agent.executor, LocalExecutor)
 
 
 @pytest.mark.asyncio

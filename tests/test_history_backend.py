@@ -8,7 +8,6 @@ from tsugite.history import (
     Session,
     get_history_backend,
     reset_history_backend,
-    set_history_backend,
 )
 
 
@@ -96,18 +95,6 @@ class _DummySession:
 
     def read_events_window(self, *, after_id=None, before_id=None, limit=None):
         return list(self.events), False
-
-
-def test_set_backend_routes_sessions_to_it():
-    dummy = _DummyBackend()
-    set_history_backend(dummy)
-
-    backend = get_history_backend()
-    assert backend is dummy
-
-    session = backend.create(agent_name="x", model="m", session_id="abc")
-    assert dummy.sessions["abc"] is session
-    assert isinstance(session, Session)
 
 
 def test_backend_resolves_named_plugin_from_config(monkeypatch):

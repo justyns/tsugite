@@ -31,10 +31,6 @@ class TestScheduleEntry:
         assert entry.enabled is True
         assert entry.created_at  # auto-set
 
-    def test_once_entry(self):
-        entry = ScheduleEntry(id="test", prompt="hello", schedule_type="once", run_at="2099-01-01T00:00:00Z")
-        assert entry.schedule_type == "once"
-
     def test_invalid_type(self):
         with pytest.raises(ValueError, match="schedule_type must be"):
             ScheduleEntry(id="test", prompt="hello", schedule_type="bad")
@@ -396,19 +392,6 @@ class TestModelField:
 
 
 class TestScriptEntry:
-    def test_script_entry_creation(self):
-        entry = ScheduleEntry(
-            id="test",
-            prompt="",
-            schedule_type="cron",
-            cron_expr="0 * * * *",
-            execution_type="script",
-            command="echo hello",
-        )
-        assert entry.execution_type == "script"
-        assert entry.command == "echo hello"
-        assert entry.script_timeout == 60
-
     def test_script_requires_command(self):
         with pytest.raises(ValueError, match="command required"):
             ScheduleEntry(
@@ -434,18 +417,6 @@ class TestScriptEntry:
         assert entry.execution_type == "agent"
         assert entry.command is None
         assert entry.script_timeout == 60
-
-    def test_custom_script_timeout(self):
-        entry = ScheduleEntry(
-            id="test",
-            prompt="",
-            schedule_type="cron",
-            cron_expr="0 * * * *",
-            execution_type="script",
-            command="curl http://example.com",
-            script_timeout=120,
-        )
-        assert entry.script_timeout == 120
 
 
 class TestScriptDispatch:

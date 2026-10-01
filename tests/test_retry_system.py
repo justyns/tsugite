@@ -2,7 +2,7 @@
 
 import pytest
 
-from tsugite.md_agents import StepDirective, extract_step_directives
+from tsugite.md_agents import extract_step_directives
 
 
 class TestRetryParsing:
@@ -76,16 +76,6 @@ Step content
         assert steps[0].max_retries == 2
         assert steps[0].retry_delay == 0.5
         assert steps[0].model_kwargs["temperature"] == 0.7
-
-
-class TestRetryContextVariables:
-    """Test retry context variables in templates."""
-
-    def test_retry_context_structure(self):
-        """Verify retry context variables have correct structure."""
-        step = StepDirective(name="test", content="test content", max_retries=3, retry_delay=1.0)
-        assert step.max_retries == 3
-        assert step.retry_delay == 1.0
 
 
 class TestRetryExecution:

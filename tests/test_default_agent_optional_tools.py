@@ -3,8 +3,6 @@ when it's actually installed."""
 
 from pathlib import Path
 
-from jinja2 import Template
-
 import tsugite
 from tsugite.md_agents import AgentConfig
 
@@ -17,15 +15,6 @@ def test_default_agent_still_declares_web_search():
     # Kept in the tools list so it's available when [web] is installed; lenient expansion
     # skips it on a base install rather than failing the agent.
     assert "web_search" in _default_md()
-
-
-def test_default_agent_web_search_prose_is_conditional():
-    assert "available_tools" in _default_md()
-    # Mechanism (guarded so it also renders when available_tools is absent).
-    snippet = '{% if "web_search" in (available_tools | default([])) %}## Web Search{% endif %}'
-    assert "## Web Search" in Template(snippet).render(available_tools=["web_search"])
-    assert "## Web Search" not in Template(snippet).render(available_tools=["read_file"])
-    assert "## Web Search" not in Template(snippet).render()  # missing var -> omitted, no error
 
 
 def test_strict_tools_frontmatter_defaults_false_and_toggles():

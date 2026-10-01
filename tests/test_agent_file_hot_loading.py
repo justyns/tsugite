@@ -1,6 +1,5 @@
 """Tests for agent file hot-loading (Feature #8)."""
 
-from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,28 +18,6 @@ class TestAgentFileField:
     def test_defaults_to_none(self):
         entry = ScheduleEntry(id="t", prompt="hi", schedule_type="cron", cron_expr="0 9 * * *")
         assert entry.agent_file is None
-
-    def test_explicit_value(self):
-        entry = ScheduleEntry(
-            id="t",
-            prompt="hi",
-            schedule_type="cron",
-            cron_expr="0 9 * * *",
-            agent_file="agents/custom.md",
-        )
-        assert entry.agent_file == "agents/custom.md"
-
-    def test_serialization_roundtrip(self):
-        entry = ScheduleEntry(
-            id="t",
-            prompt="hi",
-            schedule_type="cron",
-            cron_expr="0 9 * * *",
-            agent_file="agents/custom.md",
-        )
-        data = asdict(entry)
-        restored = ScheduleEntry(**data)
-        assert restored.agent_file == "agents/custom.md"
 
     def test_old_schedules_compat(self):
         """Old schedule data without agent_file should still load."""

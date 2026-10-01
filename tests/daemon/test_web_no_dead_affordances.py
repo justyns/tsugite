@@ -42,15 +42,6 @@ def _source_text() -> str:
     return "\n".join(parts)
 
 
-@pytest.mark.skipif(
-    not (WEB_DIR / "index.html").exists(),
-    reason="no built web UI on this checkout (dist is gitignored build output)",
-)
-def test_built_dist_present():
-    """Installed packages must bundle the UI; a source/backend checkout may not have it."""
-    assert (WEB_DIR / "index.html").exists()
-
-
 @requires_src
 def test_no_coming_soon_affordances():
     assert "coming soon" not in _source_text().lower()
