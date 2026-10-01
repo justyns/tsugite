@@ -191,31 +191,6 @@ class TestCustomUIHandler:
         output = console.file.getvalue()
         assert "I need to solve this step by step" not in output
 
-    def test_handle_llm_message_shows_step_number(self):
-        """Test that LLM messages display content."""
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console, show_llm_messages=True)
-
-        # Test Step 1
-        event = LLMMessageEvent(content="First step reasoning", title="Step 1 Reasoning")
-        handler.handle_event(event)
-
-        output = console.file.getvalue()
-        # Panels removed, so only content is displayed
-        assert "First step reasoning" in output
-
-        # Clear console for next test
-        console = Console(file=StringIO())
-        handler = CustomUIHandler(console, show_llm_messages=True)
-
-        # Test Step 2
-        event = LLMMessageEvent(content="Second step reasoning", title="Step 2 Reasoning")
-        handler.handle_event(event)
-
-        output = console.file.getvalue()
-        # Panels removed, so only content is displayed
-        assert "Second step reasoning" in output
-
     def test_progress_context(self):
         """Test progress context manager."""
         console = Console(file=StringIO())

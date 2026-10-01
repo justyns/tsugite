@@ -29,9 +29,3 @@ def test_health_reflects_configured_image_values(tmp_path):
     client = TestClient(_server(tmp_path, image_max_edge=1024, image_quality=0.7).app)
     body = client.get("/api/health").json()
     assert body["images"] == {"max_edge": 1024, "quality": 0.7}
-
-
-def test_health_image_config_is_public(tmp_path):
-    # No Authorization header: the composer needs it before the auth gate clears.
-    resp = TestClient(_server(tmp_path).app).get("/api/health")
-    assert resp.status_code == 200

@@ -82,6 +82,10 @@ def test_valid_transitions(store, from_state, to_state):
         (TerminalState.CANCELLED, TerminalState.RUNNING),
         (TerminalState.STREAM_LOST, TerminalState.RUNNING),
         (TerminalState.SUCCEEDED, TerminalState.FAILED),
+        (TerminalState.SUCCEEDED, TerminalState.STARTING),
+        (TerminalState.FAILED, TerminalState.STARTING),
+        (TerminalState.CANCELLED, TerminalState.STARTING),
+        (TerminalState.STREAM_LOST, TerminalState.STARTING),
     ],
 )
 def test_invalid_transition_raises(store, from_state, to_state):
@@ -90,20 +94,6 @@ def test_invalid_transition_raises(store, from_state, to_state):
         _force_state(store, t.id, from_state.value)
     with pytest.raises(TerminalStateTransitionError):
         store.update_state(t.id, to_state.value)
-
-
-def test_terminal_states_are_terminal(store):
-    for terminal in (
-        TerminalState.SUCCEEDED,
-        TerminalState.FAILED,
-        TerminalState.CANCELLED,
-        TerminalState.STREAM_LOST,
-    ):
-        t = store.add(_make_terminal())
-        _force_state(store, t.id, terminal.value)
-        for target in (TerminalState.RUNNING, TerminalState.STARTING):
-            with pytest.raises(TerminalStateTransitionError):
-                store.update_state(t.id, target.value)
 
 
 def test_resolved_at_set_on_terminal_transition(store):

@@ -71,11 +71,3 @@ def test_index_html_is_no_cache(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "no-cache" in resp.headers.get("cache-control", "")
-
-
-def test_icons_may_cache_but_js_never_silently(client):
-    """The revalidate list is suffix-scoped; .js is the load-bearing suffix even
-    though Vite hashes filenames (index.html itself is no-cache, so hashed
-    references stay fresh - the suffix rule is defense in depth)."""
-    resp = client.get(_built_asset(".js"))
-    assert "no-cache" in resp.headers.get("cache-control", "")

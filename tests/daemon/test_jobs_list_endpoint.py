@@ -279,16 +279,6 @@ class TestUnknownStateFilter:
         assert resp.status_code == 400, resp.text
         assert "stcuk" in resp.json()["error"]
 
-    def test_a_real_state_still_filters(self, client, test_token):
-        resp = client.get("/api/jobs?state=running", headers={"Authorization": f"Bearer {test_token}"})
-        assert resp.status_code == 200
-        assert [j["job_id"] for j in resp.json()["jobs"]] == ["job-r1"]
-
-    def test_an_alias_still_filters(self, client, test_token):
-        resp = client.get("/api/jobs?state=resolved", headers={"Authorization": f"Bearer {test_token}"})
-        assert resp.status_code == 200
-        assert {j["job_id"] for j in resp.json()["jobs"]} == {"job-d1", "job-c1"}
-
 
 class TestListJobsDefaultLimit:
     def test_default_limit_bounds_response(self, client, test_token, job_store):

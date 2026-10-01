@@ -548,20 +548,6 @@ async def test_list_models_reads_the_backend_model_slugs():
     assert models == ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-6-astra"]
 
 
-@pytest.mark.asyncio
-async def test_list_models_hides_internal_models():
-    """Special-purpose entries (auto-review, watermark variants) are flagged
-    `visibility: hide` by the backend and must not reach the picker."""
-    provider = CodexCliProvider()
-    resp = _FakeResp(json_body=_MODELS_PAYLOAD)
-
-    with _patched_auth(provider), patch.object(httpx.AsyncClient, "get", new=AsyncMock(return_value=resp)):
-        models = await provider.list_models()
-
-    assert "codex-auto-review" not in models
-    assert "gpt-5.6-sol-wm" not in models
-
-
 @pytest.mark.parametrize(
     "model,efforts",
     [

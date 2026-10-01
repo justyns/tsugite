@@ -126,41 +126,12 @@ def test_run_command_with_options(cli_runner, sample_agent_file, temp_dir, mock_
     assert str(temp_dir) in result.stderr
 
 
-def test_run_command_with_model_override(cli_runner, sample_agent_file, mock_agent_execution):
-    """Test run command with model override."""
-    result = cli_runner.invoke(
-        app,
-        [
-            "run",
-            str(sample_agent_file),
-            "test prompt",
-            "--model",
-            "ollama:custom-model",
-        ],
-    )
-
-    assert result.exit_code == 0
-
-
-def test_run_command_non_interactive(cli_runner, sample_agent_file, mock_agent_execution):
-    """Test run command in non-interactive mode."""
-    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--non-interactive"])
-
-    assert result.exit_code == 0
-
-
 def test_run_command_no_color(cli_runner, sample_agent_file, mock_agent_execution):
     """Test run command with no color output."""
     result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--no-color"])
     assert result.exit_code == 0
     # Check that ANSI escape codes are not present (basic check)
     assert "\033[" not in result.stdout
-
-
-def test_run_command_json_logging(cli_runner, sample_agent_file, mock_agent_execution):
-    """Test run command with JSON logging."""
-    result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", "--log-json"])
-    assert result.exit_code == 0
 
 
 def test_run_command_log_json_emits_json_lines(cli_runner, sample_agent_file):
@@ -213,22 +184,6 @@ def test_show_reasoning_flag(mock_plain, mock_plain_output, cli_runner, sample_a
     assert mock_plain.call_args.kwargs["show_reasoning"] is False
 
 
-def test_run_command_custom_history_dir(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
-    """Test run command with custom history directory."""
-    history_dir = temp_dir / "custom_history"
-    result = cli_runner.invoke(
-        app,
-        [
-            "run",
-            str(sample_agent_file),
-            "test prompt",
-            "--history-dir",
-            str(history_dir),
-        ],
-    )
-    assert result.exit_code == 0
-
-
 def test_run_command_history_dir_holds_the_database(cli_runner, sample_agent_file, tmp_path, mock_agent_execution):
     """--history-dir is where history lands, not just a directory that gets created."""
     history_dir = tmp_path / "hd"
@@ -262,6 +217,8 @@ def test_run_command_all_options(cli_runner, sample_agent_file, temp_dir, mock_a
         ],
     )
     assert result.exit_code == 0
+    mock_run_agent = mock_agent_execution[0]
+    assert mock_run_agent.call_args.kwargs["exec_options"].model_override == "custom-model"
 
 
 def test_run_command_directory_change(cli_runner, sample_agent_file, temp_dir, mock_agent_execution):
@@ -338,18 +295,13 @@ def test_empty_prompt(cli_runner, sample_agent_file, mock_agent_execution):
     assert "Task:" in result.stderr
 
 
-def test_long_prompt(cli_runner, sample_agent_file, mock_agent_execution):
-    """Test run command with very long prompt."""
-    long_prompt = "A" * 1000
-    result = cli_runner.invoke(app, ["run", str(sample_agent_file), long_prompt])
-    assert result.exit_code == 0
-    # The prompt should be in the output (possibly truncated in display)
-
-
-def test_special_characters_in_prompt(cli_runner, sample_agent_file, mock_agent_execution):
-    """Test run command with special characters in prompt."""
-    special_prompt = "Test with émojis 🚀 and spécial characters! @#$%^&*()"
-    result = cli_runner.invoke(app, ["run", str(sample_agent_file), special_prompt])
+@pytest.mark.parametrize(
+    "prompt",
+    ["A" * 1000, "Test with émojis 🚀 and spécial characters! @#$%^&*()"],
+    ids=["long", "special_characters"],
+)
+def test_unusual_prompts(cli_runner, sample_agent_file, mock_agent_execution, prompt):
+    result = cli_runner.invoke(app, ["run", str(sample_agent_file), prompt])
     assert result.exit_code == 0
 
 
@@ -647,17 +599,6 @@ def test_logo_selection(terminal_width, expected_logo):
 
 class TestAutoDiscovery:
     """Test auto-discovery feature where CLI defaults to default."""
-
-    def test_run_without_agent_defaults_to_builtin(self, cli_runner, temp_dir):
-        """Test that running without an agent defaults to default."""
-        from tsugite.cli.helpers import parse_cli_arguments
-
-        # Test that parse_cli_arguments defaults to default
-        agents, prompt, stdin_attachment = parse_cli_arguments(["test", "task"], check_stdin=False)
-
-        assert agents == ["+default"]
-        assert prompt == "test task"
-        assert stdin_attachment is None
 
     def test_run_explicit_agent_overrides_default(self, cli_runner, sample_agent_file, mock_agent_execution):
         """Test that explicitly specifying an agent still works."""

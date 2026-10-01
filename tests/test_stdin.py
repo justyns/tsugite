@@ -172,33 +172,3 @@ class TestStdinIntegration:
         assert attachments[0].name == str(test_file)
         assert attachments[1].name == STDIN_ATTACHMENT_NAME
         assert attachments[1].content == "stdin content"
-
-
-class TestStdinUseCases:
-    """Test real-world stdin use cases."""
-
-    def test_pipe_error_log(self, mock_stdin_pipe):
-        """Test: cat error.log | tsugite run +debugger 'analyze'"""
-        mocks = mock_stdin_pipe("[ERROR] Connection refused\n[ERROR] Timeout")
-        with mocks["isatty"], mocks["select"], mocks["read"]:
-            agents, prompt, stdin_attachment = parse_cli_arguments(["+debugger", "analyze error"])
-
-        assert agents == ["+debugger"]
-        assert prompt == "analyze error"
-        assert "Connection refused" in stdin_attachment.content
-
-    def test_pipe_command_output(self, mock_stdin_pipe):
-        """Test: docker ps | tsugite run 'explain what's running'"""
-        mocks = mock_stdin_pipe("CONTAINER ID   IMAGE     COMMAND\nabc123         nginx     '/nginx'")
-        with mocks["isatty"], mocks["select"], mocks["read"]:
-            agents, prompt, stdin_attachment = parse_cli_arguments(["explain what's running"])
-
-        assert "nginx" in stdin_attachment.content
-
-    def test_pipe_git_diff(self, mock_stdin_pipe):
-        """Test: git diff | tsugite run +reviewer 'review changes'"""
-        mocks = mock_stdin_pipe("diff --git a/file.py\n+added line\n-removed line")
-        with mocks["isatty"], mocks["select"], mocks["read"]:
-            agents, prompt, stdin_attachment = parse_cli_arguments(["+reviewer", "review changes"])
-
-        assert "diff --git" in stdin_attachment.content

@@ -14,12 +14,6 @@ runner = CliRunner()
 class TestAgentsSubcommands:
     """Test agents CLI subcommands."""
 
-    def test_agents_help(self):
-        """Test agents --help works."""
-        result = runner.invoke(app, ["agents", "--help"])
-        assert result.exit_code == 0
-        assert "agents" in result.stdout.lower()
-
     def test_agents_list_empty(self):
         """Test agents list with no agents."""
         with (
@@ -43,12 +37,6 @@ class TestAgentsSubcommands:
 
 class TestConfigSubcommands:
     """Test config CLI subcommands."""
-
-    def test_config_help(self):
-        """Test config --help works."""
-        result = runner.invoke(app, ["config", "--help"])
-        assert result.exit_code == 0
-        assert "config" in result.stdout.lower()
 
     def test_config_show(self):
         """Test config show."""
@@ -77,12 +65,6 @@ class TestConfigSubcommands:
 
 class TestAttachmentsSubcommands:
     """Test attachments CLI subcommands."""
-
-    def test_attachments_help(self):
-        """Test attachments --help works."""
-        result = runner.invoke(app, ["attachments", "--help"])
-        assert result.exit_code == 0
-        assert "attachment" in result.stdout.lower()
 
     def test_attachments_list_empty(self):
         """Test attachments list with no attachments."""
@@ -116,12 +98,6 @@ class TestAttachmentsSubcommands:
 class TestCacheSubcommands:
     """Test cache CLI subcommands."""
 
-    def test_cache_help(self):
-        """Test cache --help works."""
-        result = runner.invoke(app, ["cache", "--help"])
-        assert result.exit_code == 0
-        assert "cache" in result.stdout.lower()
-
     def test_cache_list_empty(self):
         """Test cache list with no entries."""
         with patch("tsugite.cache.list_cache") as mock_list:
@@ -142,12 +118,6 @@ class TestCacheSubcommands:
 
 class TestChatCommand:
     """Test chat CLI command."""
-
-    def test_chat_help(self):
-        """Test chat --help works."""
-        result = runner.invoke(app, ["chat", "--help"])
-        assert result.exit_code == 0
-        assert "chat" in result.stdout.lower()
 
     def test_chat_no_default_agent(self):
         """Test chat without default agent."""

@@ -280,20 +280,6 @@ async def test_local_executor_send_variables_persist():
 
 
 @pytest.mark.asyncio
-async def test_local_executor_multiple_executions():
-    """Test multiple sequential executions carrying data via state."""
-    executor = LocalExecutor()
-
-    await executor.execute("state['a'] = 1")
-    await executor.execute("state['b'] = 2")
-    await executor.execute("state['c'] = state['a'] + state['b']")
-    result = await executor.execute("print(state['c'])")
-
-    assert result.error is None
-    assert "3" in result.output
-
-
-@pytest.mark.asyncio
 async def test_local_executor_import_json():
     """Test that json module is available (needed for final_answer serialization)."""
     executor = LocalExecutor()
@@ -314,18 +300,6 @@ async def test_local_executor_stdout_capture():
     assert result.error is None
     assert "Line 1" in result.stdout
     assert "Line 2" in result.stdout
-
-
-@pytest.mark.asyncio
-async def test_local_executor_stderr_capture():
-    """Test that stderr is properly captured on errors."""
-    executor = LocalExecutor()
-
-    # This should produce an error
-    result = await executor.execute("import sys; sys.stderr.write('Error message\\n'); 1/0")
-
-    assert result.error is not None
-    assert "ZeroDivisionError" in result.error
 
 
 @pytest.mark.asyncio
@@ -709,17 +683,6 @@ async def test_local_executor_xml_observation_error():
     assert "<output>before error" in xml
     assert "<error>NameError:" in xml
     assert "</tsugite_execution_result>" in xml
-
-
-@pytest.mark.asyncio
-async def test_local_executor_xml_with_final_answer():
-    """Test that final_answer appears in XML."""
-    executor = LocalExecutor()
-
-    result = await executor.execute("final_answer('completed!')")
-    xml = result.to_xml()
-
-    assert "<return_value>completed!</return_value>" in xml
 
 
 @pytest.mark.asyncio

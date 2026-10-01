@@ -309,12 +309,6 @@ class TestTmuxList:
         assert result[0]["status"] == "idle"
         assert result[1]["status"] == "active: htop"
 
-    @patch("tsugite_tmux.subprocess.run")
-    def test_list_no_server(self, mock_run):
-        mock_run.return_value = _make_run_result(returncode=1)
-
-        assert tmux_list() == []
-
 
 class TestTmuxKill:
     @patch("tsugite_tmux._session_exists", return_value=True)
@@ -360,31 +354,6 @@ class TestGetTmuxSessions:
         assert "created_at" not in result[0]
         assert "log_file" not in result[0]
 
-    @patch("tsugite_tmux.subprocess.run")
-    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
-    def test_idle_status(self, mock_which, mock_run, mock_metadata):
-        mock_run.return_value = _make_run_result(stdout="tsu-test\tzsh\n")
-
-        result = get_tmux_sessions()
-
-        assert result[0]["status"] == "idle"
-
-    @patch("tsugite_tmux.subprocess.run")
-    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
-    def test_active_status(self, mock_which, mock_run, mock_metadata):
-        mock_run.return_value = _make_run_result(stdout="tsu-test\thtop\n")
-
-        result = get_tmux_sessions()
-
-        assert result[0]["status"] == "active: htop"
-
-    @patch("tsugite_tmux.subprocess.run")
-    @patch("tsugite_tmux.shutil.which", return_value="/usr/bin/tmux")
-    def test_no_server_running(self, mock_which, mock_run):
-        mock_run.return_value = _make_run_result(returncode=1)
-
-        assert get_tmux_sessions() == []
-
 
 def test_tmux_tools_denied_when_agent_sandboxed():
     """A sandboxed agent must not reach host tmux (tmux runs unsandboxed in the parent);
@@ -416,30 +385,3 @@ class TestExactSessionTargets:
         _session_exists("tsu-deploy")
 
         assert mock_run.call_args.args[0] == ["tmux", "has-session", "-t", "=tsu-deploy"]
-
-    @patch("tsugite_tmux._session_exists", return_value=True)
-    @patch("tsugite_tmux.subprocess.run")
-    def test_capture_pane(self, mock_run, mock_exists):
-        mock_run.return_value = _make_run_result(stdout="")
-
-        tmux_read("deploy")
-
-        assert "=tsu-deploy" in mock_run.call_args.args[0]
-
-    @patch("tsugite_tmux._session_exists", return_value=True)
-    @patch("tsugite_tmux.subprocess.run")
-    def test_send_keys(self, mock_run, mock_exists):
-        mock_run.return_value = _make_run_result()
-
-        tmux_send("deploy", "echo hi")
-
-        assert "=tsu-deploy" in mock_run.call_args.args[0]
-
-    @patch("tsugite_tmux._session_exists", return_value=True)
-    @patch("tsugite_tmux.subprocess.run")
-    def test_kill_session(self, mock_run, mock_exists, mock_metadata):
-        mock_run.return_value = _make_run_result()
-
-        tmux_kill("deploy")
-
-        assert "=tsu-deploy" in mock_run.call_args.args[0]

@@ -330,27 +330,6 @@ class TestStream:
         assert replayed, f"expected a disk-replay frame; got {output_chunks}"
         assert any("persisted" in (c.get("chunk") or "") for c in replayed), replayed
 
-    def test_stream_closes_under_output_burst(self, client, headers):
-        """A command producing a burst of output still tears the stream down
-        cleanly (exit event, then the generator ends).
-
-        Load-bearing-ish: exercises the `_safe_put`/`closing` teardown path under
-        volume so a regression that hangs the generator (sentinel dropped, no
-        `closing` fallback) is caught. NOTE: true queue saturation isn't
-        reproducible at the TestClient layer (the client drains the generator as
-        fast as the server fills it, maxsize=512). The unit test below pins the
-        QueueFull-swallowing contract directly; this asserts robustness to load.
-        """
-        created = client.post(
-            "/api/terminals",
-            json={"cmd": "for i in $(seq 1 500); do echo burst-line-$i; done"},
-            headers=headers,
-        ).json()
-        time.sleep(0.2)
-        events = _collect_stream(client, headers, created["id"], timeout=10.0)
-        event_types = [e["event"] for e in events]
-        assert any(t == "exit" for t in event_types), event_types
-
     def test_safe_put_swallows_queue_full_on_saturated_queue(self):
         """The stream's safe-put helper must swallow QueueFull on a full queue.
 

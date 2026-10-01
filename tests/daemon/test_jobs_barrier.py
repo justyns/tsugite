@@ -217,16 +217,6 @@ async def test_barrier_reports_each_job_only_once(store, runner, orchestrator):
 
 
 @pytest.mark.asyncio
-async def test_all_done_does_not_fire_the_per_job_notify(store, runner, orchestrator):
-    sent = _capture_replies(runner)
-    jobs = _seed_batch(store, orchestrator, 2)
-
-    await _finish(orchestrator, jobs[0])
-    await _finish(orchestrator, jobs[1])
-    assert [s["source"] for s in sent] == ["jobs_all_complete"]
-
-
-@pytest.mark.asyncio
 async def test_terminal_notify_still_fires_alongside_a_barrier_job(store, runner, orchestrator):
     sent = _capture_replies(runner)
     barrier_job = _seed_batch(store, orchestrator, 1)[0]

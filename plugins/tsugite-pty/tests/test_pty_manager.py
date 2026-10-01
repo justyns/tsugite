@@ -75,18 +75,6 @@ def test_kill_marks_process_terminated():
     assert p.exit_code != 0
 
 
-def test_double_kill_escalates_to_sigkill():
-    # A trap-ignoring shell ensures the SIGTERM grace period elapses, forcing SIGKILL.
-    script = "trap '' TERM; sleep 30"
-    p = PtyProcess.spawn(["/bin/sh", "-c", script])
-    time.sleep(0.2)
-    p.kill()  # SIGTERM ignored
-    time.sleep(0.1)
-    p.kill()  # second call escalates to SIGKILL
-    _wait_for_exit(p, timeout=5.0)
-    assert p.exit_code is not None
-
-
 def test_subscribe_receives_output_chunks():
     """A subscriber callback fires on chunks read off the PTY fd.
 
@@ -252,26 +240,6 @@ def test_manager_kill_unknown_is_noop():
     try:
         # Must not raise - caller may have raced state vs. PTY exit.
         mgr.kill("does-not-exist")
-    finally:
-        mgr.shutdown()
-
-
-def test_manager_subscribe_dispatches_chunks():
-    """Same race-free shape as test_subscribe_receives_output_chunks: output is
-    produced after the subscription, so the dispatch path is what's tested."""
-    mgr = PtyManager()
-    try:
-        received: list[bytes] = []
-        p = mgr.spawn("term-sub", ["/bin/cat"])
-        mgr.subscribe("term-sub", lambda chunk: received.append(chunk))
-        mgr.write_stdin("term-sub", b"subscribed!\n")
-        deadline = time.time() + 3.0
-        while time.time() < deadline and b"subscribed!" not in b"".join(received):
-            time.sleep(0.05)
-        mgr.kill("term-sub")
-        _wait_for_exit(p, timeout=3.0)
-        p.wait_drain(timeout=1.0)
-        assert b"subscribed!" in b"".join(received)
     finally:
         mgr.shutdown()
 

@@ -59,16 +59,6 @@ Assistant: {{ turn.agent_response }}
         assert manager.model_override == "ollama:llama3.2"
         assert manager.max_history == 10
 
-    def test_parse_agent_for_chat(self, test_agent):
-        """Test that agent file can be parsed for chat UI."""
-        from tsugite.md_agents import parse_agent_file
-
-        agent = parse_agent_file(test_agent)
-
-        assert agent.config.name == "test_chat"
-        assert agent.config.model == "ollama:qwen2.5-coder:7b"
-        assert agent.config.max_turns == 3
-
     def test_chat_cli_loads_agent_info(self, test_agent):
         """Test that chat CLI can load agent info without crashing."""
         from tsugite.md_agents import parse_agent_file

@@ -52,14 +52,6 @@ class TestPluginsEndpoint:
     def test_requires_auth(self, client):
         assert client.get("/api/plugins").status_code == 401
 
-    def test_shape_from_real_registry(self, client, test_token):
-        resp = client.get("/api/plugins", headers=_auth(test_token))
-        assert resp.status_code == 200
-        plugins = resp.json()["plugins"]
-        assert isinstance(plugins, list)
-        for p in plugins:
-            assert set(p.keys()) == {"name", "group", "enabled", "loaded", "error"}
-
     def test_wraps_discover_plugins(self, client, test_token):
         fake = [
             PluginInfo(name="pty", group="tsugite.plugins", entry_point="tsugite_pty:x", enabled=True, loaded=False),

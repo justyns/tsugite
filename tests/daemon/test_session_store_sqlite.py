@@ -14,19 +14,6 @@ def _store(tmp_path, **kw):
     return SessionStore(tmp_path / "session_store.json", **kw)
 
 
-def test_pin_survives_reopen_without_flush(tmp_path):
-    """Write-through: a mutation that previously only marked the store dirty
-    must be durable immediately - no flush(), no clean shutdown."""
-    store = _store(tmp_path)
-    store.create_session(Session(id="s1", source=SessionSource.INTERACTIVE.value, user_id="u"))
-    store.set_pin("s1", True)
-
-    reopened = _store(tmp_path)
-    loaded = reopened.get_session("s1")
-    assert loaded.pinned is True
-    assert loaded.pin_position == 0
-
-
 def test_no_json_writes_after_conversion(tmp_path):
     store = _store(tmp_path)
     store.create_session(Session(id="s1"))

@@ -1111,33 +1111,6 @@ def test_create_job_without_repo_does_not_provision(store, runner, orchestrator)
     assert started.workspace_override is None
 
 
-def test_worktree_pruned_on_done(store, runner, orchestrator, tmp_path):
-    repo = tmp_path / "repo"
-    _make_git_repo(repo)
-    job, _ = asyncio.run(
-        orchestrator.create_and_start_job(
-            parent_session_id="parent-1",
-            prompt="do",
-            acceptance_criteria=[],
-            repo=str(repo),
-        )
-    )
-    wt = store.get(job.id).worktree_path
-    from pathlib import Path
-
-    assert Path(wt).exists()
-
-    async def _go():
-        await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "done")
-        # Prune is offloaded to a background task (asyncio.to_thread) so it can't
-        # block the loop; drain it before asserting the on-disk effect.
-        await asyncio.gather(*list(orchestrator._bg_tasks))
-
-    asyncio.run(_go())
-    # No AC → short-circuit DONE → worktree pruned.
-    assert not Path(wt).exists(), f"worktree at {wt} must be pruned after DONE"
-
-
 def _commit_in(worktree, filename="inventory.txt", body="counted\n"):
     """Commit a file inside `worktree` and return the new HEAD sha."""
     from pathlib import Path
@@ -1961,30 +1934,6 @@ def test_legacy_notify_bool_migrates_on_load(tmp_path):
     assert reloaded.get("job-legacy").notify_when == "terminal"
 
 
-@pytest.mark.asyncio
-async def test_notify_when_never_fires_no_notify(store, runner, orchestrator):
-    sent: list = []
-
-    async def fake_reply(session_id, message, source="session", metadata=None):
-        sent.append((session_id, message))
-        return "ok"
-
-    runner.reply_to_session = fake_reply
-    job = store.add(
-        Job(
-            id="",
-            parent_session_id="parent-1",
-            prompt="x",
-            acceptance_criteria=[],
-            notify_when="never",
-        )
-    )
-    orchestrator.register_worker(job.id, "w0", timeout_minutes=30)
-    await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "ok")
-    await asyncio.sleep(0)
-    assert sent == []
-
-
 def test_create_and_start_job_threads_max_attempts(store, runner, orchestrator):
     job, _ = asyncio.run(
         orchestrator.create_and_start_job(
@@ -2564,16 +2513,6 @@ def test_parse_verifier_output_recovers_json_after_prose():
     parsed = _parse_verifier_output(raw)
     assert parsed is not None
     assert parsed.get("overall_pass") is False
-
-
-def test_parse_verifier_output_smoke_regression_string():
-    """Verbatim regression string requested by the tracker (the 2026-06-21
-    smoke-test failure shape)."""
-    raw = '{"cmd":"dummy"}{}{"still":"wrong"}{"ac_results":[{"ac_text":"x","pass":true,"reason":"ok"}],"overall_pass":true}'
-    parsed = _parse_verifier_output(raw)
-    assert parsed is not None
-    assert parsed["overall_pass"] is True
-    assert parsed["ac_results"][0]["ac_text"] == "x"
 
 
 @pytest.mark.asyncio

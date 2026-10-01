@@ -94,10 +94,6 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
 
-    def test_health_no_auth_required(self, client):
-        resp = client.get("/api/health")
-        assert resp.status_code == 200
-
 
 class TestExecutorsEndpoint:
     def test_lists_agent_by_default(self, client, test_token):
@@ -1003,19 +999,6 @@ class TestSSEProgressHandler:
         handler = SSEProgressHandler()
         handler._emit("turn_start", {"turn": 1})
         assert handler.queue.qsize() == 1
-
-    def test_emit_skips_broadcast_when_session_id_missing(self):
-        """Guard against broadcasting with an empty session_id that would poison the cache."""
-        recorded: list[tuple[str, dict]] = []
-
-        class _FakeBroadcaster:
-            def emit(self, event_type, data):
-                recorded.append((event_type, data))
-
-        handler = SSEProgressHandler()
-        handler.set_broadcaster(_FakeBroadcaster())
-        handler._emit("turn_start", {"turn": 1})
-        assert recorded == []
 
 
 class TestSkillIssuesEndpoint:

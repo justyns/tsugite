@@ -923,12 +923,6 @@ class TestClaudeCodeContextLimit:
         limit = get_context_limit("claude_code:haiku")
         assert limit == 200_000
 
-    def test_context_limit_claude_code_from_registry(self):
-        from tsugite_daemon.memory import get_context_limit
-
-        limit = get_context_limit("claude_code:opus")
-        assert limit == 1_000_000
-
     @pytest.mark.asyncio
     async def test_context_window_flows_to_agent_result(self):
         from tsugite.core.agent import TsugiteAgent

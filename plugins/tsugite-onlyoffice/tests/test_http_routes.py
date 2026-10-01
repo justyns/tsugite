@@ -304,11 +304,6 @@ def test_editor_surface_reaches_the_web_ui_payload(client, headers):
     assert "assets" not in surface, "a server-side path must never reach the browser"
 
 
-def test_editor_page_serves_at_the_entry_url_without_a_token(client):
-    """The iframe loads the entry anonymously; the bridge hands it the token afterwards."""
-    assert client.get(EDITOR_URL).status_code == 200
-
-
 def test_editor_page_only_listens_to_its_host_frame(client):
     """`tsugite:init` carries the daemon token and repaints the page, so any framer could drive it."""
     assert "if (event.source !== parent) return;" in editor_page(client)

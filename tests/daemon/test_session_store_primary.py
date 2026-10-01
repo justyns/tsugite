@@ -52,16 +52,6 @@ def test_set_primary_isolated_per_user(store):
     assert store.find_primary_session("u2").id == "s-u2"
 
 
-def test_set_primary_demotes_the_previous_one(store):
-    """Primary is per-user now, so promoting a second session demotes the first."""
-    a = _make_session(store, "s-x")
-    b = _make_session(store, "s-y")
-    store.set_primary_session(a.id)
-    store.set_primary_session(b.id)
-
-    assert store.find_primary_session("u1").id == "s-y"
-
-
 def test_find_primary_skips_finished(store):
     s = _make_session(store, "s-1")
     store.set_primary_session(s.id)

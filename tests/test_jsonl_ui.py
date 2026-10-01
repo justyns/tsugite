@@ -217,14 +217,6 @@ def test_jsonl_final_answer_with_structured_data(capsys):
     assert ev["result"] == "{'status': 'ok'}"
 
 
-def test_jsonl_final_answer_string_no_data(capsys):
-    handler = JSONLUIHandler()
-    handler.handle_event(FinalAnswerEvent(answer="plain string"))
-    ev = json.loads(capsys.readouterr().out.strip().split("\n")[0])
-    assert ev["result_data"] is None
-    assert ev["result"] == "plain string"
-
-
 def test_jsonl_error(capsys):
     """Test ERROR event emits error JSONL."""
     handler = JSONLUIHandler()

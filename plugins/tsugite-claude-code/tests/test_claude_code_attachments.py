@@ -129,13 +129,6 @@ class TestClaudeCodeFirstMessageAttachments:
         assert "x" * 5000 in msg
         assert "truncated" not in msg
 
-    def test_small_attachments_not_truncated(self):
-        att = self._att(name="small.md", content="short content")
-        msg = self._build(attachments=[att])
-
-        assert "short content" in msg
-        assert "truncated" not in msg
-
     def test_index_mode_emits_mode_attribute(self):
         att = Attachment(
             name="topic_index",

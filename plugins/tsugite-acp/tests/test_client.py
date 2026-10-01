@@ -213,7 +213,11 @@ class TestStopReasonHandling:
     discarding everything."""
 
     @pytest.mark.asyncio
-    async def test_max_tokens_preserves_content(self, mock_conn):
+    @pytest.mark.parametrize(
+        "stop_reason, text",
+        [("max_tokens", "partial answer"), ("refusal", "I can't help with that.")],
+    )
+    async def test_incomplete_stop_reason_preserves_content(self, mock_conn, stop_reason, text):
         from acp.schema import PromptResponse
         from tsugite_acp.client import ACPClientHandler, ACPClientSession
 
@@ -222,36 +226,16 @@ class TestStopReasonHandling:
         await session.start(cwd="/tmp")
 
         async def fake_prompt(*, prompt, session_id, **_):
-            await handler.session_update(session_id=session_id, update=_make_message_chunk("partial answer"))
-            return PromptResponse(stop_reason="max_tokens")
+            await handler.session_update(session_id=session_id, update=_make_message_chunk(text))
+            return PromptResponse(stop_reason=stop_reason)
 
         mock_conn.prompt.side_effect = fake_prompt
 
         events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
-        text = "".join(c.text for c in events if c.kind == "text")
+        assert text in "".join(c.text for c in events if c.kind == "text")
         done = [c for c in events if c.kind == "done"]
-        assert "partial answer" in text
         assert len(done) == 1
-        assert done[0].stop_reason == "max_tokens"
-
-    @pytest.mark.asyncio
-    async def test_refusal_preserves_content(self, mock_conn):
-        from acp.schema import PromptResponse
-        from tsugite_acp.client import ACPClientHandler, ACPClientSession
-
-        handler = ACPClientHandler()
-        session = ACPClientSession(handler=handler, conn=mock_conn)
-        await session.start(cwd="/tmp")
-
-        async def fake_prompt(*, prompt, session_id, **_):
-            await handler.session_update(session_id=session_id, update=_make_message_chunk("I can't help with that."))
-            return PromptResponse(stop_reason="refusal")
-
-        mock_conn.prompt.side_effect = fake_prompt
-
-        events = [c async for c in session.prompt(blocks=[{"type": "text", "text": "hi"}])]
-        assert "I can't help with that." in "".join(c.text for c in events if c.kind == "text")
-        assert [c for c in events if c.kind == "done"][0].stop_reason == "refusal"
+        assert done[0].stop_reason == stop_reason
 
     @pytest.mark.asyncio
     async def test_prompt_rpc_error_still_raises(self, mock_conn):

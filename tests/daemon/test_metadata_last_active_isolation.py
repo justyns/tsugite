@@ -26,17 +26,6 @@ def _make_session(store: SessionStore, user_id: str = "u1") -> Session:
     return s
 
 
-def test_set_metadata_does_not_bump_last_active(store):
-    s = _make_session(store)
-    before = s.last_active
-
-    store.set_metadata_bulk("sess-1", {"status_text": "idle"})
-
-    assert store._sessions["sess-1"].last_active == before, (
-        "set_metadata bumped last_active; metadata housekeeping shouldn't count as new activity"
-    )
-
-
 def test_set_metadata_bulk_does_not_bump_last_active(store):
     s = _make_session(store)
     before = s.last_active

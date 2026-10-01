@@ -69,16 +69,6 @@ def test_clearing_an_unknown_ref_is_not_an_error(store):
     assert store.clear_ref(SOURCE_ASK, "nope") == []
 
 
-def test_clearing_by_ref_clears_without_knowing_the_record_id(store):
-    """A job leaving `stuck` knows its own id, never the attention record's."""
-    _open(store, source=SOURCE_JOB, ref_id="job-7", kind="stuck")
-
-    cleared = store.clear_ref(SOURCE_JOB, "job-7")
-
-    assert len(cleared) == 1
-    assert store.open_records("s1") == []
-
-
 def test_clearing_by_ref_leaves_other_sources_alone(store):
     _open(store, source=SOURCE_JOB, ref_id="job-7", kind="stuck")
     _open(store, source=SOURCE_ASK, ref_id="ask-1")

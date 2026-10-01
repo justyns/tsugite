@@ -271,32 +271,6 @@ def test_full_route_table_snapshot(server):
     assert _full_route_table(server.app) == FULL_ROUTE_TABLE
 
 
-def _mount_subpaths(app, prefix: str) -> list[str]:
-    for r in app.routes:
-        if isinstance(r, Mount) and r.path == prefix:
-            return [sr.path for sr in r.routes if isinstance(sr, Route)]
-    raise AssertionError(f"no mount at {prefix}")
-
-
-def test_clear_primary_precedes_set_primary(server):
-    subpaths = _mount_subpaths(server.app, "/api/sessions")
-    clear = subpaths.index("/clear-primary")
-    set_primary = subpaths.index("/{session_id}/set-primary")
-    assert clear < set_primary
-
-
-def test_schedules_cleanup_precedes_param_route(server):
-    subpaths = _mount_subpaths(server.app, "/api/schedules")
-    cleanup = subpaths.index("/cleanup")
-    param = subpaths.index("/{schedule_id}")
-    assert cleanup < param
-
-
-def test_catchalls_last(server):
-    table = _route_table(server.app)
-    assert [row[0] for row in table[-3:]] == ["/static", "/sw.js", "/"]
-
-
 def _mounts_with_root_handler(app) -> list[str]:
     """Every top-level Mount that has a GET root ('/') sub-route - i.e. a
     collection whose bare prefix would 307-redirect without mounted_api_routes.

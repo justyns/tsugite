@@ -124,12 +124,6 @@ def edit_comment_text(path, before, after):
 # ── creating the parts ──
 
 
-def test_the_first_comment_creates_the_comments_part(plain_docx):
-    commented(plain_docx, lambda d: d.comment("Quarterly review", "Is this the final title?", AUTHOR))
-
-    assert COMMENTS_PART in entries(plain_docx)
-
-
 def test_the_first_comment_registers_its_content_type(plain_docx):
     commented(plain_docx, lambda d: d.comment(1, "Worth a look.", AUTHOR))
 

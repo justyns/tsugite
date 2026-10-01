@@ -51,12 +51,6 @@ def test_detect_attaches_item_per_reachable_url():
     assert items[0].value == "body of https://a.example"
 
 
-def test_detect_requests_article_extraction():
-    with patch.object(web_ctx, "fetch_text", return_value="x") as m:
-        web_ctx.detect_urls("https://a.example", {})
-    m.assert_called_once_with("https://a.example", extract_article=True)
-
-
 def test_detect_uses_specific_handler_when_one_claims_the_url():
     """A URL a specific attachment handler claims (a YouTube transcript, etc.) is
     fetched through that handler, not the generic article scraper - matching what

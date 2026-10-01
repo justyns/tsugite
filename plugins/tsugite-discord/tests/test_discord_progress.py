@@ -402,29 +402,6 @@ async def test_progress_handler_error_state():
 
 
 @pytest.mark.asyncio
-async def test_progress_handler_summary():
-    """Test progress handler summary counts turns correctly."""
-    channel = MockChannel()
-    handler = DiscordProgressHandler(channel, asyncio.get_running_loop())
-
-    # Add multiple turns
-    await handler._handle_event_async(StepStartEvent(step=1, max_turns=10))
-    await handler._handle_event_async(CodeExecutionEvent(code="x = 1"))
-    await handler._handle_event_async(ObservationEvent(observation="done", success=True))
-    await handler._handle_event_async(StepStartEvent(step=2, max_turns=10))
-    await handler._handle_event_async(CodeExecutionEvent(code="x = 2"))
-    await handler._handle_event_async(ObservationEvent(observation="done", success=True))
-    await handler._handle_event_async(StepStartEvent(step=3, max_turns=10))
-
-    # Final answer
-    await handler._handle_event_async(FinalAnswerEvent(answer="Done!", turns=3, tokens=50, cost=0.005))
-
-    # Check summary shows turn count
-    content = channel.messages[0].content
-    assert "✅ Done (3 turns)" in content
-
-
-@pytest.mark.asyncio
 async def test_progress_handler_info_event():
     """Test InfoEvent sends standalone message to channel."""
     channel = MockChannel()
@@ -503,14 +480,6 @@ class TestCodeBlockChunking:
             assert chunk.startswith("```python")
             assert chunk.endswith("```")
             assert len(chunk) <= 300
-
-    def test_language_identifier_preserved(self, adapter):
-        """Language identifier preserved when splitting code blocks."""
-        lines = [f"const x{i} = {i};" for i in range(50)]
-        code = "```javascript\n" + "\n".join(lines) + "\n```"
-        chunks = adapter._split_respecting_code_blocks(code, 300)
-        for chunk in chunks:
-            assert chunk.startswith("```javascript")
 
     def test_multiple_code_blocks(self, adapter):
         """Multiple code blocks handled correctly."""

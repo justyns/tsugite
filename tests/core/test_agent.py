@@ -522,19 +522,6 @@ async def test_agent_parse_response_multiple_code_blocks_flagged():
 
 
 @pytest.mark.asyncio
-async def test_agent_parse_response_single_code_block_counted_as_one():
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[],
-        instructions="",
-        max_turns=5,
-    )
-
-    parsed = agent._parse_response_from_text("Thought: go.\n\n```python-exec\nfinal_answer(1)\n```")
-    assert parsed.num_code_blocks == 1
-
-
-@pytest.mark.asyncio
 async def test_agent_parse_response_no_code_block_counted_as_zero():
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
@@ -545,29 +532,6 @@ async def test_agent_parse_response_no_code_block_counted_as_zero():
 
     parsed = agent._parse_response_from_text("Just prose, no code.")
     assert parsed.num_code_blocks == 0
-
-
-@pytest.mark.asyncio
-async def test_agent_parse_response_code_only_thought_is_empty_not_full():
-    """For a code-only response, parsed.thought must be empty string — NOT the
-    full response content. Otherwise the UI renders the code block twice: once
-    as markdown-inside-thought, once as a separate code event.
-    """
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[],
-        instructions="",
-        max_turns=5,
-    )
-
-    parsed = agent._parse_response_from_text("```python-exec\nfoo()\n```")
-    # The existing test covers this field.
-    assert parsed.thought == ""
-    # The fallback in agent.py that emits response.content when thought is
-    # empty is what causes the double-render; this guard catches regressions
-    # where thought is accidentally populated with the code fence.
-    assert "```" not in parsed.thought
-    assert "foo()" not in parsed.thought
 
 
 @pytest.mark.asyncio

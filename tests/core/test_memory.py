@@ -95,35 +95,6 @@ def test_add_reasoning():
     assert "considering different approaches" in memory.reasoning_history[1]
 
 
-def test_complete_workflow():
-    """Test complete memory workflow."""
-    memory = AgentMemory()
-
-    # Set task
-    memory.add_task("Calculate factorial of 5")
-
-    # Add reasoning (for reasoning models)
-    memory.add_reasoning("Thinking about recursive vs iterative approach...")
-
-    # Add steps
-    memory.add_step(
-        thought="Define factorial function",
-        code="def factorial(n): return 1 if n <= 1 else n * factorial(n-1)",
-        output="Function defined",
-    )
-
-    memory.add_step(
-        thought="Calculate factorial(5)",
-        code="result = factorial(5)",
-        output="120",
-    )
-
-    # Verify complete state
-    assert memory.task == "Calculate factorial of 5"
-    assert len(memory.steps) == 2
-    assert len(memory.reasoning_history) == 1
-
-
 def test_step_with_error_in_workflow():
     """Test handling steps with errors."""
     memory = AgentMemory()

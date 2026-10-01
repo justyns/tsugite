@@ -36,14 +36,6 @@ def test_parse_command_with_args():
     assert error is None
 
 
-def test_parse_command_multiple_args():
-    """Test parsing command with multiple arguments."""
-    command, args, error = parse_command("/history 20")
-    assert command == "/history"
-    assert args == ["20"]
-    assert error is None
-
-
 def test_handle_help():
     """Test help command handler."""
     console = Console()

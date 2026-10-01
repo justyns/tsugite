@@ -9,12 +9,18 @@ from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
 
 
-def test_save_and_load_round_trip(tmp_path):
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"greeting": "hello", "count": 7},
+        {"list": [1, 2, 3], "nested": {"a": True, "b": None}},
+    ],
+)
+def test_save_and_load_round_trip(tmp_path, data):
     path = tmp_path / "session1" / "state.json"
-    save_state({"greeting": "hello", "count": 7}, path)
+    save_state(data, path)
 
-    loaded = load_state(path)
-    assert loaded == {"greeting": "hello", "count": 7}
+    assert load_state(path) == data
 
 
 def test_save_creates_file_mode_0600(tmp_path):
@@ -75,11 +81,3 @@ def test_load_from_existing_file(tmp_path):
     path.write_text(json.dumps({"pre": "existing"}))
 
     assert load_state(path) == {"pre": "existing"}
-
-
-def test_save_serializes_nested_structures(tmp_path):
-    path = tmp_path / "state.json"
-    data = {"list": [1, 2, 3], "nested": {"a": True, "b": None}}
-    save_state(data, path)
-
-    assert load_state(path) == data

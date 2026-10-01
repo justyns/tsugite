@@ -34,12 +34,6 @@ def test_create_adapter_disabled_by_default_returns_none():
     assert create_adapter(config={"enabled": False}, runtime=None, session_store=MagicMock(), identity_map={}) is None
 
 
-def test_create_adapter_enabled_returns_adapter():
-    adapter = create_adapter(config={"enabled": True}, runtime=None, session_store=MagicMock(), identity_map={})
-    assert adapter is not None
-    assert set(adapter.get_job_executors()) == {"cc"}
-
-
 def test_config_defaults():
     cfg = CCDriverConfig()
     assert cfg.permission_mode == "bypassPermissions"

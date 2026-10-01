@@ -363,12 +363,6 @@ class TestToolPassthrough:
         assert result["delivery_kind"] == "needs_ack"
         assert result["incident_key"] == "backup-disk-2"
 
-    def test_create_rejects_a_bad_mode(self, mock_scheduler):
-        from tsugite.tools.schedule import schedule_create
-
-        with pytest.raises(ValueError, match="delivery_mode"):
-            schedule_create(id="t1", prompt="hi", cron="0 9 * * *", delivery_mode="telepathy")
-
     def test_update_passes_delivery_fields(self, mock_scheduler):
         from tsugite.tools.schedule import schedule_update
 

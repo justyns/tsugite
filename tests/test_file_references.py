@@ -121,22 +121,6 @@ class TestExpandFileReferences:
         assert updated_prompt == prompt
         assert attachments == []
 
-    def test_mixed_content(self, tmp_path):
-        """Test prompt with text before and after @filename."""
-        test_file = tmp_path / "code.py"
-        test_file.write_text("def main(): pass")
-
-        prompt = "Please review the code in @code.py and suggest improvements"
-        updated_prompt, attachments = expand_file_references(prompt, tmp_path)
-
-        # Prompt with @code.py replaced by code.py
-        assert updated_prompt == "Please review the code in code.py and suggest improvements"
-        assert "@code.py" not in updated_prompt
-        # File contents returned as Attachment
-        assert len(attachments) == 1
-        assert attachments[0].name == "code.py"
-        assert attachments[0].content == "def main(): pass"
-
     def test_unicode_content(self, tmp_path):
         """Test files with unicode content."""
         test_file = tmp_path / "unicode.txt"
@@ -176,46 +160,6 @@ class TestExpandFileReferences:
         assert attachments[1].name == "repeated.txt"
         assert attachments[1].content == "Repeated content"
 
-    def test_file_at_start_of_prompt(self, tmp_path):
-        """Test @filename at the beginning of prompt."""
-        test_file = tmp_path / "start.txt"
-        test_file.write_text("Start content")
-
-        prompt = "@start.txt is the file to analyze"
-        updated_prompt, attachments = expand_file_references(prompt, tmp_path)
-
-        assert updated_prompt == "start.txt is the file to analyze"
-        assert len(attachments) == 1
-        assert attachments[0].name == "start.txt"
-        assert attachments[0].content == "Start content"
-
-    def test_file_at_end_of_prompt(self, tmp_path):
-        """Test @filename at the end of prompt."""
-        test_file = tmp_path / "end.txt"
-        test_file.write_text("End content")
-
-        prompt = "Analyze this file: @end.txt"
-        updated_prompt, attachments = expand_file_references(prompt, tmp_path)
-
-        # Prompt with @end.txt replaced by end.txt
-        assert updated_prompt == "Analyze this file: end.txt"
-        assert len(attachments) == 1
-        assert attachments[0].name == "end.txt"
-        assert attachments[0].content == "End content"
-
-    def test_complex_path_with_dots(self, tmp_path):
-        """Test path with dots and special characters."""
-        test_file = tmp_path / "my.config.json"
-        test_file.write_text('{"key": "value"}')
-
-        prompt = "Parse @my.config.json"
-        updated_prompt, attachments = expand_file_references(prompt, tmp_path)
-
-        assert updated_prompt == "Parse my.config.json"
-        assert len(attachments) == 1
-        assert attachments[0].name == "my.config.json"
-        assert attachments[0].content == '{"key": "value"}'
-
     def test_empty_file(self, tmp_path):
         """Test expansion of empty file."""
         test_file = tmp_path / "empty.txt"
@@ -229,18 +173,30 @@ class TestExpandFileReferences:
         assert attachments[0].name == "empty.txt"
         assert attachments[0].content == ""
 
-    def test_large_file(self, tmp_path):
-        """Test expansion of larger file."""
-        test_file = tmp_path / "large.txt"
-        content = "Line {}\n".format("x" * 100) * 1000  # ~100KB
-        test_file.write_text(content)
+    @pytest.mark.parametrize(
+        "filename,content,prompt,expected_prompt",
+        [
+            (
+                "code.py",
+                "def main(): pass",
+                "Please review the code in @code.py and suggest improvements",
+                "Please review the code in code.py and suggest improvements",
+            ),
+            ("start.txt", "Start content", "@start.txt is the file to analyze", "start.txt is the file to analyze"),
+            ("end.txt", "End content", "Analyze this file: @end.txt", "Analyze this file: end.txt"),
+            ("my.config.json", '{"key": "value"}', "Parse @my.config.json", "Parse my.config.json"),
+            ("large.txt", "Line {}\n".format("x" * 100) * 1000, "@large.txt", "large.txt"),
+        ],
+        ids=["mixed_content", "at_start", "at_end", "dots_in_name", "large_file"],
+    )
+    def test_reference_position_and_content(self, tmp_path, filename, content, prompt, expected_prompt):
+        (tmp_path / filename).write_text(content)
 
-        prompt = "@large.txt"
         updated_prompt, attachments = expand_file_references(prompt, tmp_path)
 
-        assert updated_prompt == "large.txt"
+        assert updated_prompt == expected_prompt
         assert len(attachments) == 1
-        assert attachments[0].name == "large.txt"
+        assert attachments[0].name == filename
         assert attachments[0].content == content
 
     def test_at_symbol_with_special_chars_not_expanded(self, tmp_path):

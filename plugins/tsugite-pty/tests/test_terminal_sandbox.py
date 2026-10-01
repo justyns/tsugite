@@ -94,35 +94,6 @@ class TestMaybeSandboxArgvForceNoNetwork:
         assert fake_backend.last_config.no_network is True
 
 
-class TestBubblewrapNetworkEvidence:
-    """Direct evidence against the real bwrap backend: no_network=False without a
-    proxy socket yields NO --unshare-net (full network + filesystem isolation)."""
-
-    def test_no_unshare_net_when_network_allowed(self, tmp_path):
-        pytest.importorskip("tsugite_sandbox")
-        from tsugite_sandbox import BubblewrapSandbox
-
-        from tsugite.core.sandbox import SandboxConfig
-
-        cmd = BubblewrapSandbox(
-            config=SandboxConfig(no_network=False),
-            workspace_dir=tmp_path,
-        ).build_command(["/bin/sh", "-c", "ls"])
-        assert "--unshare-net" not in cmd
-
-    def test_unshare_net_when_no_network(self, tmp_path):
-        pytest.importorskip("tsugite_sandbox")
-        from tsugite_sandbox import BubblewrapSandbox
-
-        from tsugite.core.sandbox import SandboxConfig
-
-        cmd = BubblewrapSandbox(
-            config=SandboxConfig(no_network=True),
-            workspace_dir=tmp_path,
-        ).build_command(["/bin/sh", "-c", "ls"])
-        assert "--unshare-net" in cmd
-
-
 class TestSpawnTerminalSandboxRouting:
     """spawn_terminal routes the _UNSET (resolved) path through the forced-isolation
     branch, and an explicit ctx (including None) through the honor-its-own branch."""

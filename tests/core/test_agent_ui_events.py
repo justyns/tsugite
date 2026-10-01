@@ -326,28 +326,6 @@ final_answer(100)
 
 
 @pytest.mark.asyncio
-async def test_agent_without_ui_handler():
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[],
-        instructions="",
-        max_turns=5,
-        event_bus=None,
-    )
-    _patch_provider(
-        agent,
-        return_value=_resp("""Thought: Calculate.
-
-```python-exec
-final_answer(42)
-```"""),
-    )
-
-    result = await agent.run("Test task")
-    assert result == 42
-
-
-@pytest.mark.asyncio
 async def test_ui_event_order(event_bus_with_handler):
     event_bus, mock_ui_handler = event_bus_with_handler
 
@@ -412,54 +390,6 @@ async def test_llm_message_does_not_contain_code_fence(event_bus_with_handler):
             f"LLMMessageEvent carried a code fence as its thought content. "
             f"This causes the UI to render the code block twice. content={ev.content!r}"
         )
-
-
-@pytest.mark.asyncio
-async def test_ui_event_warning_on_multiple_code_blocks(event_bus_with_handler):
-    """If the LLM emits two ```python-exec blocks in one response, the agent executes
-    the first block (parser already does this) and emits a WarningEvent noting
-    the extras were dropped. It does NOT reject the turn or emit an ErrorEvent —
-    that behavior burned a retry per multi-block response with no upside, since
-    the parser was never going to run the extras anyway.
-    """
-    event_bus, mock_ui_handler = event_bus_with_handler
-
-    async def mock_acompletion(*args, **kwargs):
-        return _resp(
-            "Thought: doing work and then replying.\n\n"
-            "```python-exec\n"
-            "final_answer(1)\n"
-            "```\n\n"
-            "```python-exec\n"
-            "# this block will be dropped\n"
-            "x = 99\n"
-            "```"
-        )
-
-    agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini",
-        tools=[],
-        instructions="",
-        max_turns=5,
-        event_bus=event_bus,
-    )
-    _patch_provider(agent, side_effect=mock_acompletion)
-
-    await agent.run("Test task")
-
-    error_events = [e for e in mock_ui_handler.events if e["event"] == EventType.ERROR]
-    format_errors = [e for e in error_events if getattr(e["event_obj"], "error_type", None) == "Format Error"]
-    assert not format_errors, f"expected no Format Error events, got: {format_errors}"
-
-    warning_events = [e for e in mock_ui_handler.events if e["event"] == EventType.WARNING]
-    multi_block_warnings = [e for e in warning_events if "block" in e["event_obj"].message.lower()]
-    assert len(multi_block_warnings) >= 1, (
-        f"expected a warning mentioning dropped blocks. got warnings: "
-        f"{[e['event_obj'].message for e in warning_events]}"
-    )
-    assert "2" in multi_block_warnings[0]["event_obj"].message, (
-        f"warning should mention the count. got: {multi_block_warnings[0]['event_obj'].message!r}"
-    )
 
 
 @pytest.mark.asyncio

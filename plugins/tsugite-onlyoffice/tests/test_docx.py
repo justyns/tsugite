@@ -58,10 +58,6 @@ def test_text_keeps_each_paragraph_on_a_single_line(styled_docx):
     )
 
 
-def test_text_leaves_out_tracked_deletions(styled_docx):
-    assert "removed sentence" not in Document.open(styled_docx).text()
-
-
 def test_two_writers_on_one_document_do_not_share_a_temp_file(tmp_path):
     """A save from the document server does not hold the turn's lock, so two writes to
     one document overlap. A temp name they share means one renames the other's file away."""

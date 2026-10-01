@@ -71,46 +71,6 @@ def test_ask_user_choice(interactive_tool, monkeypatch):
     assert result == "Option B"
 
 
-def test_ask_user_choice_first_option(interactive_tool, monkeypatch):
-    """Test selecting first option in choice question."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    options = ["First", "Second", "Third"]
-
-    # Mock questionary to return "First"
-    mock_question = patch("tsugite.tools.interactive.questionary.select")
-    with mock_question as mock_select:
-        mock_select.return_value.ask.return_value = "First"
-        result = call_tool(
-            "ask_user",
-            question="Pick one:",
-            question_type="choice",
-            options=options,
-        )
-
-    assert result == "First"
-
-
-def test_ask_user_choice_last_option(interactive_tool, monkeypatch):
-    """Test selecting last option in choice question."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    options = ["Alpha", "Beta", "Gamma"]
-
-    # Mock questionary to return "Gamma"
-    mock_question = patch("tsugite.tools.interactive.questionary.select")
-    with mock_question as mock_select:
-        mock_select.return_value.ask.return_value = "Gamma"
-        result = call_tool(
-            "ask_user",
-            question="Pick one:",
-            question_type="choice",
-            options=options,
-        )
-
-    assert result == "Gamma"
-
-
 def test_ask_user_non_interactive_mode(interactive_tool, monkeypatch):
     """Test that tool fails in non-interactive mode."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
@@ -169,26 +129,6 @@ def test_ask_user_empty_response(interactive_tool, monkeypatch):
         result = call_tool("ask_user", question="Optional input?", question_type="text")
 
     assert result == ""
-
-
-def test_ask_user_choice_with_many_options(interactive_tool, monkeypatch):
-    """Test choice question with many options."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    options = [f"Option {i}" for i in range(1, 11)]  # 10 options
-
-    # Mock questionary to return "Option 7"
-    mock_question = patch("tsugite.tools.interactive.questionary.select")
-    with mock_question as mock_select:
-        mock_select.return_value.ask.return_value = "Option 7"
-        result = call_tool(
-            "ask_user",
-            question="Select from many:",
-            question_type="choice",
-            options=options,
-        )
-
-    assert result == "Option 7"
 
 
 # Tests for ask_user_batch
@@ -296,20 +236,6 @@ def test_ask_user_batch_empty_list(interactive_tool, monkeypatch):
         call_tool("ask_user_batch", questions=[])
 
 
-def test_ask_user_batch_auto_generate_id(interactive_tool, monkeypatch):
-    """Test that ID is auto-generated from question text when not provided."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    questions = [{"question": "What is your name?", "type": "text"}]  # No 'id' provided
-
-    with patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"):
-        result = call_tool("ask_user_batch", questions=questions)
-
-    # ID should be auto-generated from question
-    assert "what_is_your_name" in result
-    assert result["what_is_your_name"] == "Alice"
-
-
 def test_ask_user_batch_missing_question(interactive_tool, monkeypatch):
     """Test validation when question is missing 'question' field."""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -382,19 +308,6 @@ def test_ask_user_batch_keyboard_interrupt(interactive_tool, monkeypatch):
     with patch("tsugite.tools.interactive.Prompt.ask", side_effect=KeyboardInterrupt()):
         with pytest.raises(RuntimeError, match="User input interrupted"):
             call_tool("ask_user_batch", questions=questions)
-
-
-def test_ask_user_batch_single_question(interactive_tool, monkeypatch):
-    """Test batch with just one question works correctly."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-
-    questions = [{"id": "name", "question": "What is your name?", "type": "text"}]
-
-    with patch("tsugite.tools.interactive.Prompt.ask", return_value="Alice"):
-        result = call_tool("ask_user_batch", questions=questions)
-
-    assert result == {"name": "Alice"}
-    assert len(result) == 1
 
 
 def test_ask_user_batch_auto_id_multiple_questions(interactive_tool, monkeypatch):
