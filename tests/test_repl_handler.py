@@ -1,5 +1,6 @@
 """Tests for REPL UI handler."""
 
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
@@ -16,6 +17,10 @@ from tsugite.events import (
 from tsugite.ui.repl_handler import ReplUIHandler
 
 
+def _capture_console():
+    return Console(file=StringIO(), width=120, color_system=None)
+
+
 def test_handler_initialization():
     """Test handler initialization."""
     console = Console()
@@ -28,15 +33,11 @@ def test_handler_initialization():
 
 def test_handle_task_start():
     """Test task start event."""
-    console = Console()
+    console = _capture_console()
     handler = ReplUIHandler(console, show_debug_messages=True)
 
-    event = TaskStartEvent(task="test task", model="test-model")
-
-    with patch.object(console, "print") as mock_print:
-        handler.handle_event(event)
-        # Should print model in debug mode
-        assert mock_print.called
+    handler.handle_event(TaskStartEvent(task="test task", model="test-model"))
+    assert "Model: test-model" in console.file.getvalue()
 
 
 def test_handle_step_start():
@@ -78,15 +79,13 @@ def test_handle_final_answer():
 
 def test_handle_error():
     """Test error event."""
-    console = Console()
+    console = _capture_console()
     handler = ReplUIHandler(console)
 
-    event = ErrorEvent(error="Test error", error_type="TestError", suppress_from_ui=False)
-
-    with patch.object(console, "print") as mock_print:
-        handler.handle_event(event)
-        # Should print error panel
-        assert mock_print.called
+    handler.handle_event(ErrorEvent(error="Test error", error_type="TestError", suppress_from_ui=False))
+    out = console.file.getvalue()
+    assert "TestError" in out
+    assert "Test error" in out
 
 
 def test_handle_error_suppressed():
@@ -104,7 +103,7 @@ def test_handle_error_suppressed():
 
 def test_handle_cost_summary():
     """Test cost summary event."""
-    console = Console()
+    console = _capture_console()
     handler = ReplUIHandler(console)
 
     event = CostSummaryEvent(
@@ -115,11 +114,11 @@ def test_handle_cost_summary():
         cache_creation_input_tokens=50,
         cache_read_input_tokens=50,
     )
-
-    with patch.object(console, "print") as mock_print:
-        handler.handle_event(event)
-        # Should print cost summary
-        assert mock_print.called
+    handler.handle_event(event)
+    out = console.file.getvalue()
+    assert "2.5s" in out
+    assert "$0.001234" in out
+    assert "1,000 tokens" in out
 
 
 def test_contains_error():

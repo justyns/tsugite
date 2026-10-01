@@ -252,10 +252,12 @@ class TestMultiStepContext:
         handler.set_multistep_context(1, "research", 4)
         assert handler._get_display_prefix() == "  └─ "
 
-    def test_step_start_with_multistep_shows_round(self):
-        """Test that step start shows 'Round' when in multi-step context."""
+    def test_step_start_indents_turn_under_workflow_step(self):
+        """Step start progress is indented under the workflow step when in multi-step context."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
+        handler.progress = MagicMock()
+        handler.task_id = 0
 
         # Set multi-step context
         handler.set_multistep_context(1, "research", 4)
@@ -264,13 +266,17 @@ class TestMultiStepContext:
         event = StepStartEvent(step=1, title="Step 1")
         handler.handle_event(event)
 
-        # Should show "Round" instead of "Step"
         assert handler.state.current_step == 1
+        description = handler.progress.update.call_args.kwargs["description"]
+        assert description.startswith("  └─ ")
+        assert "Turn 1" in description
 
-    def test_step_start_without_multistep_shows_step(self):
-        """Test that step start shows 'Step' when not in multi-step context."""
+    def test_step_start_not_indented_outside_multistep(self):
+        """Step start progress shows the turn without a workflow-step indent outside multi-step."""
         console = Console(file=StringIO())
         handler = CustomUIHandler(console)
+        handler.progress = MagicMock()
+        handler.task_id = 0
 
         # No multi-step context
         assert handler.state.multistep_context is None
@@ -279,5 +285,7 @@ class TestMultiStepContext:
         event = StepStartEvent(step=1, title="Step 1")
         handler.handle_event(event)
 
-        # Should show "Step"
         assert handler.state.current_step == 1
+        description = handler.progress.update.call_args.kwargs["description"]
+        assert not description.startswith(" ")
+        assert "Turn 1" in description

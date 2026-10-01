@@ -1,5 +1,6 @@
 """Tests for REPL command handlers."""
 
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
@@ -20,6 +21,10 @@ from tsugite.ui.repl_commands import (
 )
 
 
+def _capture_console():
+    return Console(file=StringIO(), width=120, color_system=None)
+
+
 def test_parse_command_simple():
     """Test parsing simple command."""
     command, args, error = parse_command("/help")
@@ -38,11 +43,12 @@ def test_parse_command_with_args():
 
 def test_handle_help():
     """Test help command handler."""
-    console = Console()
-    with patch.object(console, "print") as mock_print:
-        handle_help(console)
-        # Should print help table
-        assert mock_print.called
+    console = _capture_console()
+    handle_help(console)
+    out = console.file.getvalue()
+    assert "Available Commands" in out
+    assert "/attach <path>" in out
+    assert "Type your message to chat with the agent." in out
 
 
 def test_handle_clear():
@@ -55,20 +61,18 @@ def test_handle_clear():
 
 def test_handle_stats():
     """Test stats command handler."""
-    console = Console()
+    console = _capture_console()
 
-    # Create a simple class to hold stats
     class StatsHolder:
         turn_count = 5
         total_tokens = 1000
         total_cost = 0.05
 
-    manager = StatsHolder()
-
-    with patch.object(console, "print") as mock_print:
-        handle_stats(console, manager)
-        # Should print stats table
-        assert mock_print.called
+    handle_stats(console, StatsHolder())
+    out = console.file.getvalue()
+    assert "Session Statistics" in out
+    assert "1,000" in out
+    assert "$0.050000" in out
 
 
 def test_handle_history():
@@ -122,14 +126,12 @@ def test_handle_attach_success(tmp_path):
 
 def test_handle_detach_no_attachments():
     """Test detach with no attachments."""
-    console = Console()
+    console = _capture_console()
     manager = MagicMock()
     manager.attachments = {}
 
-    with patch.object(console, "print") as mock_print:
-        handle_detach(console, "test.txt", manager)
-        # Should indicate no attachments
-        assert mock_print.called
+    handle_detach(console, "test.txt", manager)
+    assert "No attachments to remove." in console.file.getvalue()
 
 
 def test_handle_detach_success():
@@ -149,50 +151,44 @@ def test_handle_detach_success():
 
 def test_handle_list_attachments_empty():
     """Test listing attachments when none exist."""
-    console = Console()
+    console = _capture_console()
     manager = MagicMock()
     manager.attachments = {}
 
-    with patch.object(console, "print") as mock_print:
-        handle_list_attachments(console, manager)
-        # Should indicate no attachments
-        assert mock_print.called
+    handle_list_attachments(console, manager)
+    assert "No attachments." in console.file.getvalue()
 
 
 def test_handle_list_attachments():
     """Test listing attachments."""
-    console = Console()
+    console = _capture_console()
     manager = MagicMock()
-    manager.attachments = {"file1.txt": "content1", "file2.txt": "content2"}
+    manager.attachments = {"file1.txt": "content1", "file2.txt": "x" * 2048}
 
-    with patch.object(console, "print") as mock_print:
-        handle_list_attachments(console, manager)
-        # Should print table
-        assert mock_print.called
+    handle_list_attachments(console, manager)
+    out = console.file.getvalue()
+    assert "file1.txt" in out and "8B" in out
+    assert "file2.txt" in out and "2.0KB" in out
 
 
 def test_handle_save_no_conversation():
     """Test save with no active conversation."""
-    console = Console()
+    console = _capture_console()
     manager = MagicMock()
     manager.conversation_id = None
 
-    with patch.object(console, "print") as mock_print:
-        handle_save(console, "output.md", manager)
-        # Should indicate no conversation
-        assert mock_print.called
+    handle_save(console, "output.md", manager)
+    assert "No active conversation to save." in console.file.getvalue()
 
 
 def test_handle_tools_no_tools():
     """Test tools command with no tools."""
-    console = Console()
+    console = _capture_console()
     manager = MagicMock()
     manager.available_tools = []
 
-    with patch.object(console, "print") as mock_print:
-        handle_tools(console, manager)
-        # Should indicate no tools
-        assert mock_print.called
+    handle_tools(console, manager)
+    assert "No tools available for this agent." in console.file.getvalue()
 
 
 def test_handle_stream_on():

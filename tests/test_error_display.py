@@ -21,8 +21,8 @@ def test_observation_with_error_highlighted():
     # Get output
     result = output.getvalue()
 
-    # Should contain error markers
-    assert "Error" in result or "error" in result.lower()
+    assert result.startswith("\x1b[31m⚠️  Error: Tool")
+    assert "visit_webpage" in result
 
 
 def test_observation_normal_not_highlighted():
@@ -38,8 +38,9 @@ def test_observation_normal_not_highlighted():
     # Get output
     result = output.getvalue()
 
-    # Should contain the observation but not as error
-    assert "Search completed successfully" in result or "Search" in result
+    assert result.startswith("\x1b[2m💡 Search completed successfully")
+    assert "⚠️" not in result
+    assert "\x1b[31m" not in result
 
 
 def test_error_event_handling():
@@ -80,6 +81,4 @@ def test_error_keywords_detection():
         handler.handle_event(event)
         result = output.getvalue()
 
-        # Each should be detected as an error
-        # (We can't easily test for red color in text mode, but we can verify it's not truncated)
-        assert len(result) > 0, f"No output for error message: {msg}"
+        assert result.startswith(f"\x1b[31m⚠️  {msg}"), f"{msg!r} not shown as an error: {result!r}"
