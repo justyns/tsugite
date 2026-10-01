@@ -26,13 +26,8 @@
 </script>
 
 <script lang="ts">
-  // Conversation-header model control: a compact chip showing the session's
-  // current model (GET /api/sessions/{id}/settings) that opens a filterable,
-  // keyboard-navigable popover of GET /api/models. The popover groups models
-  // under provider headers and shows each model's context window, price, and
-  // vision/reasoning badges. Selecting a model PATCHes the session settings and
-  // toasts the outcome. The models list (~80 entries) is fetched once and cached
-  // at module scope so reopening / switching sessions is instant.
+  // With `onPick` it is a controlled chip with no session and no PATCH. The launcher
+  // dialog owns the value. The models list is fetched once and cached at module scope.
   import { tick, untrack } from 'svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import { pwmIgnore } from '$lib/components/inputs/pwmIgnore';
@@ -47,6 +42,8 @@
     sessionId,
     resolvedModel = null,
     onChanged,
+    value = null,
+    onPick,
   }: {
     sessionId: string | null;
     /** The effective model when no per-session override is set (the agent/global
@@ -54,6 +51,10 @@
     resolvedModel?: string | null;
     /** Fired after a model change is persisted (the effort control refetches). */
     onChanged?: () => void;
+    /** Controlled mode: the chosen model id, null for the default. */
+    value?: string | null;
+    /** Controlled mode: called with the picked id instead of patching a session. */
+    onPick?: (id: string) => void;
   } = $props();
 
   let current = $state<string | null>(null);
@@ -73,6 +74,10 @@
   let settingsFor: string | null = null;
   let settingsRev = -1;
   $effect(() => {
+    if (onPick) {
+      current = value;
+      return;
+    }
     const id = sessionId;
     const rev = id ? (sessions.settingsRev[id] ?? 0) : 0;
     const idChanged = id !== settingsFor;
@@ -178,6 +183,10 @@
 
   async function choose(model: Model) {
     open = false;
+    if (onPick) {
+      onPick(model.id);
+      return;
+    }
     if (!sessionId || model.id === current) return;
     const prev = current;
     current = model.id; // optimistic
@@ -222,7 +231,7 @@
   });
 </script>
 
-{#if sessionId}
+{#if sessionId || onPick}
   <div class="model-anchor" bind:this={root}>
     <button
       type="button"

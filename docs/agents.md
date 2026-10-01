@@ -52,6 +52,7 @@ All fields are optional except `name`.
 | `disable_history`  | bool | `false`          | Don't save this agent's sessions                                  |
 | `auto_context`     | bool | none             | Override auto-context file loading                                |
 | `spawnable`        | bool | `true`           | Whether other agents can spawn this one                           |
+| `chat`             | bool | `false`          | Offer this agent in the web UI's new-chat picker (the daemon's own agent always is) |
 | `network`          | dict | none             | Allowed domains for sandbox mode                                  |
 | `allowed_secrets`  | list | `[]`             | Restrict which secrets this agent can access (empty = all)        |
 | `run_if`           | str  | none             | Jinja2 condition, skip agent if false, useful for scheduled tasks |

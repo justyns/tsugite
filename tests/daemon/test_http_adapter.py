@@ -553,6 +553,284 @@ class TestSessionSettingsEndpoint:
         assert settings[-1]["reasoning_effort"] == "high"
 
 
+def _write_agent(directory: Path, name: str, extra: str = "") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{name}.md"
+    path.write_text(f"---\nname: {name}\n{extra}---\nbody\n")
+    return path
+
+
+class TestSessionAgentSetting:
+    """`agent_file` is a per-session setting next to `model`."""
+
+    @pytest.fixture(autouse=True)
+    def _real_workspace_lookup(self, mock_adapter):
+        # The fixture builds the adapter under a patched Workspace, leaving a MagicMock behind.
+        mock_adapter._workspace = None
+
+    def _auth(self, test_token):
+        return {"Authorization": f"Bearer {test_token}"}
+
+    def test_patch_sets_and_clears_chat_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        agent = _write_agent(tmp_workspace / "agents", "chatty", "chat: true\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-set")
+        url = f"/api/sessions/{session.id}/settings"
+
+        resp = client.patch(url, json={"agent_file": str(agent)}, headers=self._auth(test_token))
+        assert resp.status_code == 200
+        assert resp.json()["agent_file"] == str(agent)
+        assert mock_adapter.session_store.get_agent_file(session.id) == str(agent)
+
+        resp = client.patch(url, json={"agent_file": None}, headers=self._auth(test_token))
+        assert resp.json()["agent_file"] is None
+
+    def test_patch_accepts_the_daemon_default_agent(self, client, mock_adapter, test_token):
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-default")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": "default"}, headers=self._auth(test_token)
+        )
+        assert resp.status_code == 200
+
+    def test_patch_rejects_unknown_file(self, client, mock_adapter, test_token):
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-unknown")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"agent_file": "no-such-agent"},
+            headers=self._auth(test_token),
+        )
+        assert resp.status_code == 400
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+
+    def test_patch_rejects_non_chat_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        agent = _write_agent(tmp_workspace / "agents", "batchy")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-nonchat")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": str(agent)}, headers=self._auth(test_token)
+        )
+        assert resp.status_code == 400
+        assert "chat-capable" in resp.json()["error"]
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+
+    def test_patch_rejects_unparsable_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        broken = _write_agent(tmp_workspace / "agents", "broken", "chat: true\n")
+        broken.write_text("---\nname: [unclosed\n---\nbody\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-broken")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": str(broken)}, headers=self._auth(test_token)
+        )
+        assert resp.status_code == 400
+        assert "broken.md" in resp.json()["error"]
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+
+    def test_patch_rejects_unreadable_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        unreadable = tmp_workspace / "agents" / "dir.md"
+        unreadable.mkdir(parents=True)
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-unreadable")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": str(unreadable)}, headers=self._auth(test_token)
+        )
+        assert resp.status_code == 400
+        assert "dir.md" in resp.json()["error"]
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+
+    def test_patch_broadcasts_agent_change(self, client, server, mock_adapter, tmp_workspace, test_token):
+        agent = _write_agent(tmp_workspace / "agents", "chatty", "chat: true\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-bcast")
+        recorded: list[dict] = []
+        original_emit = server.event_bus.emit
+
+        def capture(event_type, data=None):
+            if event_type == "session_update":
+                recorded.append(dict(data or {}))
+            return original_emit(event_type, data)
+
+        with patch.object(server.event_bus, "emit", side_effect=capture):
+            client.patch(
+                f"/api/sessions/{session.id}/settings",
+                json={"agent_file": str(agent)},
+                headers=self._auth(test_token),
+            )
+        settings = [r for r in recorded if r.get("action") == "settings"]
+        assert settings[-1]["agent_file"] == str(agent)
+
+    def test_agent_files_list_flags_chat_capable(self, client, tmp_workspace, test_token):
+        _write_agent(tmp_workspace / "agents", "chatty", "chat: true\n")
+        _write_agent(tmp_workspace / "agents", "batchy")
+        files = client.get("/api/agent-files", headers=self._auth(test_token)).json()["files"]
+        by_name = {f["name"]: f for f in files}
+        assert by_name["chatty"]["chat"] is True
+        assert by_name["batchy"]["chat"] is False
+
+    def test_agent_files_list_flags_the_default_by_path(self, client, mock_adapter, tmp_workspace, test_token):
+        default = _write_agent(tmp_workspace / "agents", "defname", "name: other-name\n")
+        _write_agent(tmp_workspace / "agents", "twin")
+        mock_adapter.runtime.agent_file = str(default)
+        files = client.get("/api/agent-files", headers=self._auth(test_token)).json()["files"]
+        assert [f["path"] for f in files if f["default"]] == [str(default)]
+
+    def test_agent_files_list_includes_a_default_outside_agent_dirs(
+        self, client, mock_adapter, tmp_workspace, test_token
+    ):
+        default = _write_agent(tmp_workspace, "rootagent")
+        mock_adapter.runtime.agent_file = "rootagent"
+        files = client.get("/api/agent-files", headers=self._auth(test_token)).json()["files"]
+        assert [(f["path"], f["chat"]) for f in files if f["default"]] == [(str(default.resolve()), True)]
+
+    def test_agent_files_list_survives_an_unparsable_agent(self, client, tmp_workspace, test_token):
+        broken = tmp_workspace / "agents" / "broken.md"
+        broken.parent.mkdir(exist_ok=True)
+        broken.write_text("---\nchat: [unclosed\n---\n")
+        files = client.get("/api/agent-files", headers=self._auth(test_token)).json()["files"]
+        assert [f["chat"] for f in files if f["path"] == str(broken)] == [False]
+
+    def test_chat_flag_is_inherited_through_extends(self, mock_adapter, tmp_workspace):
+        _write_agent(tmp_workspace / "agents", "chatbase", "extends: none\nchat: true\n")
+        child = _write_agent(tmp_workspace / "agents", "chatchild", "extends: chatbase\n")
+        assert mock_adapter.is_chat_capable(child)
+
+    def test_daemon_agent_reached_through_symlink_is_chat_capable(self, mock_adapter, tmp_workspace):
+        real = _write_agent(tmp_workspace / "agents", "real")
+        link = tmp_workspace / "link.md"
+        link.symlink_to(real)
+        with patch.object(mock_adapter, "_resolve_agent_path", return_value=link):
+            assert mock_adapter.is_chat_capable(real)
+
+    def test_patch_rejects_agent_outside_agent_dirs(self, client, mock_adapter, tmp_path, test_token):
+        agent = _write_agent(tmp_path / "elsewhere", "stray", "chat: true\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-stray")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": str(agent)}, headers=self._auth(test_token)
+        )
+        assert resp.status_code == 400
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+
+    def test_session_model_follows_session_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        mock_adapter.runtime.model = None
+        agent = _write_agent(tmp_workspace / "agents", "chatty", "chat: true\nmodel: openai:gpt-4o-mini\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-model")
+        client.patch(
+            f"/api/sessions/{session.id}/settings", json={"agent_file": str(agent)}, headers=self._auth(test_token)
+        )
+        assert mock_adapter.resolve_session_model(session.id) == "openai:gpt-4o-mini"
+
+    def test_patch_validates_effort_against_the_new_agent(self, client, mock_adapter, tmp_workspace, test_token):
+        mock_adapter.runtime.model = None
+        default = _write_agent(tmp_workspace / "agents", "plain", "extends: none\nmodel: openai:o3-mini\n")
+        mock_adapter.runtime.agent_file = str(default)
+        agent = _write_agent(tmp_workspace / "agents", "opus", "extends: none\nchat: true\nmodel: claude_code:opus\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-effort")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"agent_file": str(agent), "reasoning_effort": "xhigh"},
+            headers=self._auth(test_token),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] == "xhigh"
+
+    def test_patch_clears_stored_effort_the_new_model_rejects(self, client, mock_adapter, test_token):
+        session = mock_adapter.session_store.get_or_create_interactive("user-effort-clear")
+        mock_adapter.session_store.set_model_override(session.id, "claude_code:opus")
+        mock_adapter.session_store.set_reasoning_effort(session.id, "xhigh")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"model": "openai:o3-mini"},
+            headers=self._auth(test_token),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reasoning_effort"] is None
+
+    def test_rejected_patch_changes_nothing(self, client, mock_adapter, tmp_workspace, test_token):
+        agent = _write_agent(tmp_workspace / "agents", "chatty", "chat: true\n")
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-atomic")
+        resp = client.patch(
+            f"/api/sessions/{session.id}/settings",
+            json={"agent_file": str(agent), "model": "claude_code:opus", "reasoning_effort": "nope"},
+            headers=self._auth(test_token),
+        )
+        assert resp.status_code == 400
+        assert mock_adapter.session_store.get_agent_file(session.id) is None
+        assert mock_adapter.session_store.get_model_override(session.id) is None
+
+    def test_attachments_follow_session_agent(self, mock_adapter, tmp_workspace):
+        notes = tmp_workspace / "NOTES.md"
+        notes.write_text("notes")
+        agent = _write_agent(
+            tmp_workspace / "agents", "withnotes", f"extends: none\nchat: true\nattachments:\n  - {notes}\n"
+        )
+        session = mock_adapter.session_store.get_or_create_interactive("user-agent-attach")
+        mock_adapter.session_store.set_agent_file(session.id, str(agent))
+        assert [a.name for a in mock_adapter._get_all_attachments(session.id)] == ["NOTES.md"]
+
+
+class TestNewChatSessionSettings:
+    def _new(self, client, test_token, body):
+        return client.post("/api/chat/sessions/new", json=body, headers={"Authorization": f"Bearer {test_token}"})
+
+    def test_settings_apply_to_the_new_session(self, client, mock_adapter, tmp_workspace, test_token):
+        agent = _write_agent(tmp_workspace / "agents", "chatty", "chat: true\n")
+        resp = self._new(
+            client,
+            test_token,
+            {"agent_file": str(agent), "model": "claude_code:opus", "reasoning_effort": "high"},
+        )
+        assert resp.status_code == 201
+        sid = resp.json()["id"]
+        assert mock_adapter.session_store.get_agent_file(sid) == str(agent)
+        assert mock_adapter.session_store.get_model_override(sid) == "claude_code:opus"
+        assert mock_adapter.session_store.get_reasoning_effort(sid) == "high"
+
+    def test_invalid_settings_create_no_session(self, client, mock_adapter, test_token):
+        before = len(mock_adapter.session_store.list_sessions())
+        resp = self._new(client, test_token, {"model": "claude_code:opus", "reasoning_effort": "nope"})
+        assert resp.status_code == 400
+        assert len(mock_adapter.session_store.list_sessions()) == before
+
+    def test_unparsable_agent_is_400(self, client, mock_adapter, tmp_workspace, test_token):
+        broken = tmp_workspace / "agents" / "broken.md"
+        broken.parent.mkdir(exist_ok=True)
+        broken.write_text("---\nname: [unclosed\n---\nbody\n")
+        before = len(mock_adapter.session_store.list_sessions())
+        resp = self._new(client, test_token, {"agent_file": str(broken)})
+        assert resp.status_code == 400
+        assert "broken.md" in resp.json()["error"]
+        assert len(mock_adapter.session_store.list_sessions()) == before
+
+
+class TestStartSessionReasoningEffort:
+    @pytest.fixture(autouse=True)
+    def _stub_runner(self, server, mock_adapter):
+        from types import SimpleNamespace
+
+        server.session_runner = SimpleNamespace(start_session=lambda session: session, store=mock_adapter.session_store)
+
+    def test_effort_is_stored_on_the_new_session(self, client, server, mock_adapter, test_token):
+        captured = {}
+
+        def fake_start(session):
+            captured["session"] = session
+            session.status = "running"
+            return session
+
+        with patch.object(server.session_runner, "start_session", side_effect=fake_start):
+            resp = client.post(
+                "/api/sessions/",
+                json={"prompt": "go", "model": "claude_code:opus", "reasoning_effort": "high"},
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+        assert resp.status_code == 201
+        assert captured["session"].reasoning_effort == "high"
+
+    def test_unsupported_effort_is_400(self, client, server, test_token):
+        with patch.object(server.session_runner, "start_session") as start:
+            resp = client.post(
+                "/api/sessions/",
+                json={"prompt": "go", "model": "claude_code:opus", "reasoning_effort": "nope"},
+                headers={"Authorization": f"Bearer {test_token}"},
+            )
+        assert resp.status_code == 400
+        start.assert_not_called()
+
+
 def _capture_chat_channel_context(client, test_token, body):
     handle = AsyncMock(return_value="ok")
     with patch.object(HTTPAgentAdapter, "handle_message", new=handle):

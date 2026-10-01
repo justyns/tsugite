@@ -145,6 +145,7 @@ export const TESTID = {
   chatLoadEarlier: 'chat-load-earlier',
   chatEmpty: 'chat-empty',
   chatLocalEcho: 'chat-local-echo',
+  chatAgentSelect: 'chat-agent-select',
   chatModelTrigger: 'chat-model-trigger',
   chatModelPopover: 'chat-model-popover',
   chatModelSearch: 'chat-model-search',
@@ -193,6 +194,10 @@ export const TESTID = {
   agentModeSeg: 'agent-mode-seg',
   agentSave: 'agent-save',
   agentRun: 'agent-run',
+  // Launcher dialog (new chat / run once)
+  launcherMode: 'launcher-mode',
+  launcherAgent: 'launcher-agent',
+  launcherStart: 'launcher-start',
   // Webhooks view
   webhooksNew: 'webhooks-new',
   webhooksTable: 'webhooks-table',

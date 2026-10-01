@@ -330,9 +330,12 @@ class AgentsMixin:
         title = body.get("title")
         if title is not None and not isinstance(title, str):
             return JSONResponse({"error": "title must be a string"}, status_code=400)
-
+        agents = adapter.session_store.agents
         agent_id = body.get("agent_id")
-        if err := agent_id_error(adapter.session_store.agents, agent_id):
+        if err := agent_id_error(agents, agent_id):
+            return err
+        settings, err = self._validate_session_settings(adapter, body, agents.get(agents.effective_id(agent_id)))
+        if err:
             return err
 
         from tsugite_daemon.session_store import SessionSource, create_interactive_session
@@ -345,6 +348,7 @@ class AgentsMixin:
             source=SessionSource.WEB.value,
             agent_id=agent_id,
         )
+        self._apply_session_settings(adapter, session_id, settings)
         return JSONResponse({"id": session_id}, status_code=201)
 
     async def _status(self, request: Request) -> JSONResponse:
@@ -360,7 +364,7 @@ class AgentsMixin:
         resolved_model = _resolve_full_model_id(model)
         attachments = [
             {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
-            for a in adapter._get_all_attachments()
+            for a in adapter._get_all_attachments(session.id if session else None)
         ]
         if session is not None:
             tokens = session.cumulative_tokens
@@ -436,7 +440,7 @@ class AgentsMixin:
         if err:
             return err
         attachments = []
-        for a in adapter._get_all_attachments():
+        for a in adapter._get_all_attachments(request.query_params.get("session_id")):
             entry = {"name": a.name, "content_type": a.content_type.value, "mime_type": a.mime_type}
             if a.content_type.value == "text":
                 entry["content"] = a.content
@@ -972,7 +976,7 @@ class AgentsMixin:
                             "threshold": adapter.session_store.get_session_compaction_threshold(session_id),
                             "message_count": refreshed.message_count,
                             "model": adapter.resolve_session_model(session_id),
-                            "attachments": [a.name for a in adapter._get_all_attachments()],
+                            "attachments": [a.name for a in adapter._get_all_attachments(session_id)],
                         },
                     )
             except asyncio.CancelledError:
@@ -1101,7 +1105,7 @@ class AgentsMixin:
         target_session_id = target_session.id
 
         reasoning_effort, err_resp = self._resolve_effort_or_400(
-            adapter, body.get("reasoning_effort"), target_session_id
+            body.get("reasoning_effort"), lambda: adapter.resolve_session_model(target_session_id)
         )
         if err_resp:
             return err_resp

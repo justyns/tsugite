@@ -10,6 +10,7 @@ from starlette.routing import Route
 
 from tsugite.agent_inheritance import iter_agent_search_paths
 from tsugite.config import get_xdg_config_dir, load_config
+from tsugite.md_agents import parse_agent_file
 from tsugite.skill_discovery import get_builtin_skills_path
 from tsugite.utils import parse_yaml_frontmatter
 from tsugite_daemon.adapters.http.helpers import (
@@ -140,7 +141,19 @@ class FilesMixin:
     async def _list_agent_files(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
             return err
-        return JSONResponse({"files": self._collect_md_files(self._get_allowed_agent_dirs(), "*.md")})
+        files = self._collect_md_files(self._get_allowed_agent_dirs(), "*.md")
+        default = self.adapter._resolve_agent_path()
+        default_path = str(default.resolve()) if default else None
+        if default and default_path not in {f["path"] for f in files}:
+            files += self._collect_md_files([(default.parent, "daemon", True)], default.name)
+        for f in files:
+            f["default"] = f["path"] == default_path
+            try:
+                f["chat"] = f["default"] or parse_agent_file(Path(f["path"])).config.chat
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to parse agent file %s: %s", f["path"], exc)
+                f["chat"] = False
+        return JSONResponse({"files": files})
 
     async def _read_agent_file(self, request: Request) -> JSONResponse:
         return await self._read_md_file(request, self._get_allowed_agent_dirs())

@@ -10,7 +10,7 @@ vi.mock('$lib/api/client', () => ({
 
 import { api } from '$lib/api/client';
 import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
-import { spaces } from '$lib/stores/spaces.svelte';
+import { launcher } from './launcher.svelte';
 import View from './View.svelte';
 
 const HOLLIS_PATH = '/ws/agents/hollis.md';
@@ -46,6 +46,7 @@ const FILES = [
     source: 'project',
     readonly: false,
     description: 'Primary interactive operator agent.',
+    chat: true,
   },
   {
     path: '/ws/agents/ops-runner.md',
@@ -53,6 +54,7 @@ const FILES = [
     source: 'project',
     readonly: false,
     description: 'Background automation agent.',
+    chat: false,
   },
   {
     path: DEFAULT_PATH,
@@ -60,6 +62,7 @@ const FILES = [
     source: 'builtin',
     readonly: true,
     description: 'Default base agent.',
+    chat: false,
   },
 ];
 
@@ -151,26 +154,21 @@ test('the editor offers exactly form and markdown modes (no preview tab)', async
   await expect.element(page.getByRole('button', { name: 'preview' })).not.toBeInTheDocument();
 });
 
-test('Run opens the launcher, whose Start is gated on a non-empty prompt and docks a chat surface', async () => {
-  const openSpy = vi.spyOn(spaces, 'open');
+test('Run opens the launcher on the selected agent, chat-capable or not', async () => {
+  launcher.close();
   render(View);
   await expect.element(page.getByTestId('agent-run')).toBeInTheDocument();
 
   await page.getByTestId('agent-run').click();
-  const start = page.getByRole('button', { name: /Start chat/ });
-  await expect.element(start).toBeInTheDocument();
-  await expect.element(start).toBeDisabled();
+  expect(launcher.isOpen).toBe(true);
+  expect(launcher.agent).toBe(HOLLIS_PATH);
 
-  await page.getByLabelText('Run prompt').fill('summarise open incidents');
-  await expect.element(start).toBeEnabled();
-  await start.click();
-
-  expect(openSpy).toHaveBeenCalledTimes(1);
-  const ref = openSpy.mock.calls[0]![0] as { kind: string; params?: Record<string, string> };
-  expect(ref.kind).toBe('chat');
-  expect(ref.params?.agent).toBe('hollis');
-  expect(ref.params?.prompt).toBe('summarise open incidents');
-  openSpy.mockRestore();
+  launcher.close();
+  await page.getByTestId('agent-row-ops-runner').click();
+  await page.getByTestId('agent-run').click();
+  expect(launcher.isOpen).toBe(true);
+  expect(launcher.agent).toBe('/ws/agents/ops-runner.md');
+  launcher.close();
 });
 
 test('the roster filter narrows the list by name', async () => {

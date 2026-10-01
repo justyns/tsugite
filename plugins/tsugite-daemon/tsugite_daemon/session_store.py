@@ -683,6 +683,18 @@ class SessionStore:
             session = self._sessions.get(session_id)
             return session.model_override if session else None
 
+    def set_agent_file(self, session_id: str, value: str | None) -> None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.agent_file = value or None
+                self._persist(session)
+
+    def get_agent_file(self, session_id: str) -> str | None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            return session.agent_file if session else None
+
     def bump_unused_counters(self, session_id: str, referenced: set[str]) -> None:
         """Advance one turn: reset referenced skills, increment the rest.
 

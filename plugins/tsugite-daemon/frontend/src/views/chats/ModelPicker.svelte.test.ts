@@ -251,3 +251,16 @@ test('a chip near a clipping pane left edge keeps the popover inside that pane',
   expect(r.left).toBeGreaterThanOrEqual(pane.left);
   expect(r.right).toBeLessThanOrEqual(pane.right);
 });
+
+test('controlled mode reports the pick without a session or a settings patch', async () => {
+  const onPick = vi.fn();
+  vi.mocked(api.patch).mockClear();
+  render(ModelPicker, { sessionId: null, value: null, onPick });
+  const trigger = page.getByTestId('chat-model-trigger');
+  await expect.element(trigger).toHaveTextContent('default model');
+
+  await trigger.click();
+  await page.getByTestId('chat-model-opt-openai:gpt-5.4').click();
+  expect(onPick).toHaveBeenCalledWith('openai:gpt-5.4');
+  expect(vi.mocked(api.patch)).not.toHaveBeenCalled();
+});

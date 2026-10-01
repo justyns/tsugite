@@ -1083,7 +1083,7 @@ test('raw metadata shows the session fields that live outside the metadata block
     .mockImplementation(async (input) =>
       String(input).includes('/api/sessions/')
         ? new Response(JSON.stringify(detail), { headers: { 'content-type': 'application/json' } })
-        : new Response('{}', { headers: { 'content-type': 'application/json' } }),
+        : new Response('{"files":[]}', { headers: { 'content-type': 'application/json' } }),
     );
   try {
     render(Conversation, { ctrl, row, railCollapsed: false, ...callbacks });

@@ -6,6 +6,7 @@
   // "default" label.
   import { sessions } from '$lib/stores/sessions.svelte';
   import { fetchEffortLevels } from './effortLevels';
+  import AgentChip from './AgentChip.svelte';
   import ModelPicker from './ModelPicker.svelte';
   import EffortSeg from './EffortSeg.svelte';
 
@@ -47,6 +48,7 @@
   });
 </script>
 
+<AgentChip {sessionId} />
 <ModelPicker {sessionId} {resolvedModel} onChanged={() => (modelRev += 1)} />
 {#if showEffort}
   <EffortSeg {sessionId} {modelRev} />

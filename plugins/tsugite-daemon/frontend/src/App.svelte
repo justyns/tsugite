@@ -69,6 +69,8 @@
   import { modelPickerRequest } from './views/chats/modelPickerSignal.svelte';
   import SoloWindow from '$lib/shell/SoloWindow.svelte';
   import { SOLO_VIEW } from '$lib/shell/solo';
+  import RunLauncher from './views/agents/RunLauncher.svelte';
+  import { launcher } from './views/agents/launcher.svelte';
   import TopBar from '$lib/shell/TopBar.svelte';
   import NavRail from '$lib/shell/NavRail.svelte';
   import ContextRail from '$lib/shell/ContextRail.svelte';
@@ -338,14 +340,6 @@
       })),
     ),
   );
-  // At shell scope so ⌘/Ctrl+Shift+O and the palette reach it from any view.
-  async function newChat(): Promise<string | null> {
-    const id = await sessions.newSession();
-    await sessions.load();
-    selectChat(id);
-    return id;
-  }
-
   // A ⌘K command pick, decided by the command's arg hint (commandPaletteAction):
   // a `/model` opens that chat's header model picker; anything else runs now (every
   // param auto-injected, e.g. /status) or prefills `/name ` for the user to complete
@@ -365,8 +359,9 @@
     if (targetId) {
       selectChat(targetId);
     } else {
-      targetId = await newChat(); // already navigates (with the agent hint)
-      if (!targetId) return;
+      targetId = await sessions.newSession();
+      await sessions.load();
+      selectChat(targetId);
     }
     if (action.kind === 'model-picker') modelPickerRequest.request(targetId);
     else composerPrefill.request(targetId, action.text, action.kind === 'run');
@@ -379,7 +374,7 @@
     setSpace: (id) => spaces.setActive(id),
     openSettings: () => (settingsOpen = true),
     openSession: (id, replace) => openChatFromPalette(id, replace),
-    newChat: () => void newChat(),
+    newChat: () => launcher.open(),
     showHelp: () => (helpOpen = true),
     runCommand: (name) => void runCommand(name),
   };
@@ -517,7 +512,7 @@
     if (action === 'toggle-palette') paletteOpen = !paletteOpen;
     else if (action === 'open-palette') paletteOpen = true;
     else if (action === 'open-settings') settingsOpen = true;
-    else if (action === 'new-chat') void newChat();
+    else if (action === 'new-chat') launcher.open();
     else if (action === 'show-help') helpOpen = !helpOpen;
     else if (action === 'next-chat') stepChat(1);
     else if (action === 'prev-chat') stepChat(-1);
@@ -679,6 +674,12 @@
     {sessionItems}
     viewItems={paletteViewItems}
     onSelect={(item, replace) => runPaletteHref(item.href, paletteCtx, replace)}
+  />
+  <RunLauncher
+    open={launcher.isOpen}
+    initialAgent={launcher.agent}
+    onOpen={(id) => selectChat(id)}
+    onClose={() => launcher.close()}
   />
   <HelpOverlay bind:open={helpOpen} />
 {/if}

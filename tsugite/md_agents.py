@@ -114,6 +114,7 @@ class AgentConfig(BaseModel):
     auto_context: Optional[bool] = None  # Auto-load context files (None = use config default)
     visibility: str = "public"  # Agent visibility: public, private, internal
     spawnable: bool = True  # Whether this agent can be spawned by other agents
+    chat: bool = False  # Offered as a chat agent in the web UI's new-chat picker
     network: Optional[Dict[str, Any]] = None  # Network hints for sandbox proxy allowlist
     # Tighten-only sandbox self-restriction: {enabled, no_network, allow_domains}.
     # Can opt into the sandbox, force no network, or narrow the domain allowlist;

@@ -1,99 +1,201 @@
 <script lang="ts">
-  // One-shot run launcher: a freeform prompt bound to a registered agent, opened
-  // as a new chat surface. Agents declare no typed-input schema today, so the
-  // launcher is always a single freeform prompt (plus an optional effort
-  // override, which maps to the chat stream's reasoning_effort). Model override
-  // is intentionally omitted - the chat send path carries no model field.
   import Modal from '$lib/components/overlays/Modal.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Seg from '$lib/components/inputs/Seg.svelte';
+  import Select from '$lib/components/inputs/Select.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
+  import ModelPicker from '../chats/ModelPicker.svelte';
+  import { composerPrefill } from '../chats/composerPrefill.svelte';
+  import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
+  import { sessions } from '$lib/stores/sessions.svelte';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
+  import { TESTID } from '$lib/testids';
+  import { agentLabel, chatAgents, chatSettings } from './launcher';
 
   let {
     open = false,
-    agentName,
-    agentDescription,
-    defaultEffort,
-    onLaunch,
+    initialAgent = null,
+    onOpen,
     onClose,
   }: {
     open?: boolean;
-    agentName: string;
-    agentDescription?: string;
-    /** The agent's declared reasoning_effort, shown as the pre-selected override. */
-    defaultEffort?: string;
-    onLaunch: (opts: { prompt: string; effort?: string }) => void;
+    /** Path of the agent file to preselect. */
+    initialAgent?: string | null;
+    onOpen: (sessionId: string) => void;
     onClose: () => void;
   } = $props();
 
+  const MODES = ['chat', 'run once'];
   const EFFORTS = ['default', 'low', 'medium', 'high'];
 
-  let prompt = $state('');
+  let mode = $state('chat');
+  let agentPath = $state('');
+  let model = $state<string | null>(null);
   let effort = $state('default');
+  let message = $state('');
+  let busy = $state(false);
 
-  // Reset the form each time the launcher opens for a (possibly different) agent.
+  const pool = $derived(
+    mode === 'chat' ? chatAgents(agentsMeta.agentFiles) : agentsMeta.agentFiles,
+  );
+  const labels = $derived(pool.map((f) => agentLabel(f, agentsMeta.agentFiles)));
+  const agent = $derived(pool.find((f) => f.path === agentPath));
+  const agentSel = $derived(agent ? agentLabel(agent, agentsMeta.agentFiles) : '');
+
+  // Reset the form each time the launcher opens. The requested agent is applied
+  // once its file is known (a cold load lists files after open), which also picks
+  // the mode that agent supports.
   let wasOpen = false;
+  let initialPending = false;
   $effect(() => {
     if (open && !wasOpen) {
-      prompt = '';
-      effort = defaultEffort && EFFORTS.includes(defaultEffort) ? defaultEffort : 'default';
+      agentsMeta.loadAgentFiles().catch((err) => {
+        toasts.push('err', 'Could not load agents', {
+          body: err instanceof Error ? err.message : String(err),
+        });
+      });
+      model = null;
+      effort = 'default';
+      message = '';
+      busy = false;
+      mode = 'chat';
+      agentPath = '';
+      initialPending = initialAgent !== null;
     }
     wasOpen = open;
   });
 
-  const canLaunch = $derived(prompt.trim().length > 0);
-  const initial = $derived(agentName.slice(0, 1).toUpperCase());
+  $effect(() => {
+    if (!open || !initialPending) return;
+    const wanted = agentsMeta.agentFiles.find((f) => f.path === initialAgent);
+    if (!wanted) return;
+    initialPending = false;
+    mode = wanted.chat ? 'chat' : 'run once';
+    agentPath = wanted.path;
+  });
 
-  function launch() {
-    if (!canLaunch) return;
-    onLaunch({ prompt: prompt.trim(), effort: effort === 'default' ? undefined : effort });
+  $effect(() => {
+    if (open && !initialPending && !agent) {
+      const fallback = pool.find((f) => f.default) ?? pool[0];
+      if (fallback) agentPath = fallback.path;
+    }
+  });
+
+  const canStart = $derived(!busy && !!agent && (mode === 'chat' || message.trim().length > 0));
+
+  async function start() {
+    if (!canStart || !agent) return;
+    busy = true;
+    try {
+      if (mode === 'chat') {
+        const id = await sessions.newSession({
+          settings: chatSettings({ agent, model, effort }),
+        });
+        if (message.trim()) composerPrefill.request(id, message.trim(), true);
+        await sessions.load();
+        onOpen(id);
+        onClose();
+      } else {
+        const id = await sessions.startRun({
+          prompt: message.trim(),
+          agentFile: agent.path,
+          model: model || undefined,
+          effort: effort === 'default' ? undefined : effort,
+        });
+        toasts.push('ok', 'Run started', {
+          body: `${agent.name} · one-off run`,
+          actionLabel: 'Open',
+          onAction: () => onOpen(id),
+        });
+        onClose();
+      }
+    } catch (e) {
+      toasts.push('err', mode === 'chat' ? 'Could not start chat' : 'Could not start run', {
+        body: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      busy = false;
+    }
   }
 
-  function onPromptKeydown(e: KeyboardEvent) {
-    // Cmd/Ctrl+Enter sends, matching the composer's send affordance.
+  function onMessageKeydown(e: KeyboardEvent) {
+    // Cmd/Ctrl+Enter starts, matching the composer's send affordance.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      launch();
+      void start();
     }
   }
 </script>
 
-<Modal {open} onclose={onClose} title={`Run ${agentName}`}>
+<Modal {open} onclose={onClose} title={mode === 'chat' ? 'New chat' : 'Run agent'}>
   <div class="rl">
-    <div class="rl-agent">
-      <span class="rl-av" aria-hidden="true">{initial}</span>
-      <div class="rl-meta">
-        <div class="rl-name mono">{agentName}</div>
-        {#if agentDescription}<div class="rl-desc">{agentDescription}</div>{/if}
-      </div>
+    <div class="rl-field rl-row" data-testid={TESTID.launcherMode}>
+      <Seg options={MODES} bind:value={mode} ariaLabel="Launch mode" />
+      <span class="rl-hint"
+        >{mode === 'chat'
+          ? 'a conversation with a chat agent'
+          : 'one background run, any agent'}</span
+      >
     </div>
 
-    <label class="rl-field">
-      <span class="rl-lbl">prompt <span class="req" aria-hidden="true">*</span></span>
-      <textarea
-        class="t-input"
-        rows="4"
-        placeholder="What should {agentName} do?"
-        bind:value={prompt}
-        onkeydown={onPromptKeydown}
-        data-autofocus
-        aria-label="Run prompt"></textarea>
-    </label>
+    <div class="rl-field rl-row">
+      <span class="rl-lbl">agent</span>
+      {#key mode}
+        <span data-testid={TESTID.launcherAgent}>
+          <Select
+            options={labels}
+            value={agentSel}
+            ariaLabel="Agent"
+            onchange={(label) => {
+              const i = labels.indexOf(label);
+              if (i >= 0) agentPath = pool[i]!.path;
+            }}
+          />
+        </span>
+      {/key}
+    </div>
+    {#if agent?.description}<div class="rl-desc">{agent.description}</div>{/if}
+
+    <div class="rl-field rl-row">
+      <span class="rl-lbl">model</span>
+      <ModelPicker sessionId={null} value={model} onPick={(id) => (model = id)} />
+      <span class="rl-hint">{model ? 'for this session' : "the agent's own model"}</span>
+    </div>
 
     <div class="rl-field rl-row">
       <span class="rl-lbl">effort</span>
       <Seg options={EFFORTS} bind:value={effort} ariaLabel="Reasoning effort override" />
-      <span class="rl-hint"
-        >{effort === 'default' ? "the agent's own setting" : 'override for this run'}</span
-      >
     </div>
+
+    <label class="rl-field">
+      <span class="rl-lbl"
+        >{mode === 'chat' ? 'starting message' : 'prompt'}
+        {#if mode === 'run once'}<span class="req" aria-hidden="true">*</span>{/if}</span
+      >
+      <textarea
+        class="t-input"
+        rows="4"
+        placeholder={mode === 'chat'
+          ? 'Optional. Sent as the first message.'
+          : 'What should the agent do?'}
+        bind:value={message}
+        onkeydown={onMessageKeydown}
+        data-autofocus
+        aria-label={mode === 'chat' ? 'Starting message' : 'Run prompt'}></textarea>
+    </label>
   </div>
 
   {#snippet footer()}
     <Button onclick={onClose}>Cancel</Button>
-    <Button variant="pri" disabled={!canLaunch} onclick={launch}>
+    <Button
+      variant="pri"
+      disabled={!canStart}
+      loading={busy}
+      data-testid={TESTID.launcherStart}
+      onclick={() => void start()}
+    >
       {#snippet icon()}<Icon name="sparkle" />{/snippet}
-      Start chat
+      {mode === 'chat' ? 'Start chat' : 'Run'}
     </Button>
   {/snippet}
 </Modal>
@@ -104,34 +206,10 @@
     gap: 13px;
     min-width: min(390px, 72vw);
   }
-  .rl-agent {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 11px;
-    border: 1px solid var(--bd1);
-    border-radius: var(--r-md);
-    background: var(--bg1);
-  }
-  .rl-av {
-    width: 28px;
-    height: 28px;
-    border-radius: var(--r-sm);
-    display: grid;
-    place-items: center;
-    color: var(--on-acc);
-    background: var(--acc);
-    font: 700 var(--fs-sm) var(--font-ui);
-    flex: none;
-  }
-  .rl-name {
-    font: 600 var(--fs-sm) var(--font-mono);
-    color: var(--tx0);
-  }
   .rl-desc {
     font-size: var(--fs-xs);
     color: var(--tx2);
-    margin-top: 1px;
+    margin-top: -6px;
   }
   .rl-field {
     display: grid;
@@ -172,8 +250,5 @@
     outline: none;
     border-color: var(--acc);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--acc) 22%, transparent);
-  }
-  .mono {
-    font-family: var(--font-mono);
   }
 </style>

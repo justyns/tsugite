@@ -297,6 +297,36 @@ describe('SessionsStore attention', () => {
   });
 });
 
+describe('SessionsStore.startRun', () => {
+  test('posts the agent file, model and effort and resolves to the new session id', async () => {
+    const store = new SessionsStore();
+    apiPost.mockResolvedValueOnce({ id: 'run-9', status: 'running' });
+    const id = await store.startRun({
+      prompt: 'go',
+      agentFile: '/ws/nightly.md',
+      model: 'openai:gpt-5.4',
+      effort: 'high',
+    });
+    expect(id).toBe('run-9');
+    expect(api.post).toHaveBeenCalledWith('/api/sessions', {
+      prompt: 'go',
+      agent_file: '/ws/nightly.md',
+      model: 'openai:gpt-5.4',
+      reasoning_effort: 'high',
+    });
+  });
+
+  test('leaves model and effort out when unset', async () => {
+    const store = new SessionsStore();
+    apiPost.mockResolvedValueOnce({ id: 'run-10' });
+    await store.startRun({ prompt: 'go', agentFile: '/ws/nightly.md' });
+    expect(api.post).toHaveBeenLastCalledWith('/api/sessions', {
+      prompt: 'go',
+      agent_file: '/ws/nightly.md',
+    });
+  });
+});
+
 describe('SessionsStore list loading', () => {
   test('an earlier search that lands late does not overwrite the newest result', async () => {
     const store = new SessionsStore();

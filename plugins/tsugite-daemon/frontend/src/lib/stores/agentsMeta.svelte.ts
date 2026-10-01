@@ -22,6 +22,8 @@ export interface MdFile {
   source: string;
   readonly: boolean;
   description: string;
+  chat?: boolean;
+  default?: boolean;
 }
 
 export interface MdFileContent {

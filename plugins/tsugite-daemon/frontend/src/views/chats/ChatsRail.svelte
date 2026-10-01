@@ -13,6 +13,7 @@
   import { jobs } from '$lib/stores/jobs.svelte';
   import { jobTallyBySession } from '$lib/stores/jobsFilter';
   import SessionsRail from './SessionsRail.svelte';
+  import { launcher } from '../agents/launcher.svelte';
   import { resolveDefaultSession } from './defaultSession';
   import { attentionSessions } from './sessionModel';
   import { roomBusy } from './roomModel';
@@ -59,12 +60,6 @@
     rooms.load().catch(() => {});
   }
 
-  async function newSession() {
-    const id = await sessions.newSession();
-    await sessions.load();
-    onOpenChat(id);
-  }
-
   async function openAgent(agentId: string) {
     try {
       const id = await agents.openMain(agentId);
@@ -105,7 +100,7 @@
   {jobCounts}
   loading={sessions.loading}
   onSelect={select}
-  onNew={newSession}
+  onNew={() => launcher.open()}
   onOpenAgent={openAgent}
   onServerSearch={serverSearch}
   onOpenSchedule={(id) => navigate('schedules', { id })}

@@ -1,21 +1,15 @@
 <script lang="ts">
-  // Agents builder: a master roster of agent `.md` files (left) and a
-  // form / markdown editor (right). The Markdown tab is the editable source of
-  // truth (PUT /api/agent-files/content); Form is a parsed structured reflection
-  // of the frontmatter. The Run launcher opens a one-shot chat surface bound to
-  // the agent. Roster reconciles two backend lists: the editable file set
-  // (/api/agent-files) enriched with the registered-agent roster (/api/agents),
-  // which carries running_tasks and marks which files are live runnable agents.
+  // The Markdown tab is the editable source of truth (PUT /api/agent-files/content);
+  // Form is a parsed reflection of the frontmatter. /api/runtime reports running_tasks
+  // for the daemon's own agent only.
   import { onMount, untrack } from 'svelte';
   import { TESTID } from '$lib/testids';
   import { agentsMeta, type MdFile } from '$lib/stores/agentsMeta.svelte';
-  import { spaces } from '$lib/stores/spaces.svelte';
-  import { navigate } from '$lib/router.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { nextRovingIndex } from '$lib/actions/rovingNav';
   import { parseAgentFile, summarizeAgent } from './agentFrontmatter';
   import AgentForm from './AgentForm.svelte';
-  import RunLauncher from './RunLauncher.svelte';
+  import { launcher } from './launcher.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Badge from '$lib/components/buttons/Badge.svelte';
   import Dot from '$lib/components/buttons/Dot.svelte';
@@ -36,7 +30,6 @@
   let contentError = $state<string | null>(null);
   let saving = $state(false);
   let justSaved = $state(false);
-  let launcherOpen = $state(false);
 
   let contentSeq = 0;
 
@@ -133,17 +126,6 @@
     } finally {
       saving = false;
     }
-  }
-
-  function launch(opts: { prompt: string; effort?: string }): void {
-    const params: Record<string, string> = { agent: agentName, prompt: opts.prompt };
-    if (opts.effort) params.effort = opts.effort;
-    spaces.open({ kind: 'chat', params, title: `Run: ${agentName}` });
-    launcherOpen = false;
-    // This is a full-area view: the tab just docked into the HIDDEN workspace,
-    // so switch to it - otherwise the launch looks like a no-op.
-    navigate('chats');
-    toasts.push('ok', 'Chat started', { body: `${agentName} · new session` });
   }
 
   function onRowKeydown(e: KeyboardEvent, index: number): void {
@@ -275,12 +257,14 @@
           <Seg options={['form', 'markdown']} bind:value={mode} ariaLabel="Editor mode" />
         </div>
         <div class="grow"></div>
-        {#if registered}
-          <Button size="sm" data-testid={TESTID.agentRun} onclick={() => (launcherOpen = true)}>
-            {#snippet icon()}<Icon name="sparkle" />{/snippet}
-            Run
-          </Button>
-        {/if}
+        <Button
+          size="sm"
+          data-testid={TESTID.agentRun}
+          onclick={() => launcher.open(selectedFile.path)}
+        >
+          {#snippet icon()}<Icon name="sparkle" />{/snippet}
+          Run
+        </Button>
         <Button
           size="sm"
           variant="pri"
@@ -330,17 +314,6 @@
       {/if}
     {/if}
   </div>
-
-  {#if selectedFile}
-    <RunLauncher
-      open={launcherOpen}
-      {agentName}
-      agentDescription={summary.description ?? selectedFile.description}
-      defaultEffort={summary.effort}
-      onLaunch={launch}
-      onClose={() => (launcherOpen = false)}
-    />
-  {/if}
 </section>
 
 <style>

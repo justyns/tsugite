@@ -1,6 +1,7 @@
 """SessionsMixin: sessions HTTP handlers for HTTPServer."""
 
-from typing import Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -12,6 +13,9 @@ from tsugite_daemon.adapters.http.helpers import (
     mounted_api_routes,
 )
 from tsugite_daemon.session_store import AliasConflictError, attention_fields
+
+if TYPE_CHECKING:
+    from tsugite_daemon.agent_store import Agent
 
 
 class SessionsMixin:
@@ -65,15 +69,15 @@ class SessionsMixin:
         return None, None, JSONResponse({"error": f"unknown session: {session_id}"}, status_code=404)
 
     def _resolve_effort_or_400(
-        self, adapter: "HTTPAgentAdapter", value: Any, session_id: Optional[str] = None
+        self, value: Any, model: Callable[[], str]
     ) -> tuple[Optional[str], Optional[JSONResponse]]:
-        """Validate a reasoning_effort value against the session's resolved model."""
+        """Validate a reasoning_effort value against the model `model()` resolves."""
         if value is None:
             return None, None
         from tsugite.models import UnsupportedEffortError, resolve_reasoning_effort
 
         try:
-            return resolve_reasoning_effort(adapter.resolve_session_model(session_id), value), None
+            return resolve_reasoning_effort(model(), value), None
         except UnsupportedEffortError as err:
             return None, JSONResponse({"error": str(err), "supported": err.supported}, status_code=400)
 
@@ -84,12 +88,101 @@ class SessionsMixin:
         return {
             "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
             "model": adapter.session_store.get_model_override(session_id),
+            "agent_file": session.agent_file,
             "context_limit": session.context_limit,
             "defaults": {
                 "model": runtime.model,
                 "context_limit": runtime.context_limit,
             },
         }
+
+    @staticmethod
+    def _effective_model(
+        adapter: "HTTPAgentAdapter", model: Optional[str], agent_file: Optional[str], agent: "Agent"
+    ) -> str:
+        agent_path = adapter._resolve_agent_path(agent_file or agent.template, Path(agent.workspace))
+        return model or agent.model or adapter.resolve_model(agent_path)
+
+    def _chat_agent_or_400(self, adapter: "HTTPAgentAdapter", raw: str) -> Optional[JSONResponse]:
+        agent_path = adapter._resolve_agent_path(raw)
+        if agent_path is None:
+            return JSONResponse({"error": f"unknown agent file: {raw}"}, status_code=400)
+        resolved = agent_path.resolve()
+        listed = any(resolved.is_relative_to(d.resolve()) for d, _, _ in self._get_allowed_agent_dirs())
+        if not listed and not adapter.is_default_agent(agent_path):
+            return JSONResponse({"error": f"agent file is not in an agent directory: {raw}"}, status_code=400)
+        try:
+            chat_capable = adapter.is_chat_capable(agent_path)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": f"cannot parse agent file {raw}: {exc}"}, status_code=400)
+        if not chat_capable:
+            return JSONResponse({"error": f"agent is not chat-capable: {raw}"}, status_code=400)
+        return None
+
+    def _validate_session_settings(
+        self, adapter: "HTTPAgentAdapter", body: dict, agent: "Agent", session_id: Optional[str] = None
+    ) -> tuple[dict, Optional[JSONResponse]]:
+        """Validate the agent_file/model/reasoning_effort keys of `body` without applying them.
+
+        Effort is checked against the model the session will run after this update.
+        """
+        updates: dict = {}
+        store = adapter.session_store
+
+        for key in ("agent_file", "model"):
+            if key not in body:
+                continue
+            raw = body[key]
+            if raw is None or raw == "":
+                updates[key] = None
+                continue
+            if not isinstance(raw, str):
+                return {}, JSONResponse({"error": f"{key} must be a string"}, status_code=400)
+            if key == "agent_file":
+                if err := self._chat_agent_or_400(adapter, raw):
+                    return {}, err
+            else:
+                from tsugite.models import get_provider_and_model
+
+                try:
+                    get_provider_and_model(raw)
+                except Exception as exc:  # noqa: BLE001
+                    return {}, JSONResponse({"error": f"unknown model: {raw} ({exc})"}, status_code=400)
+            updates[key] = raw
+
+        stored_effort = session_id and store.get_reasoning_effort(session_id)
+        if "reasoning_effort" in body or (stored_effort and updates):
+            model = updates.get("model", session_id and store.get_model_override(session_id))
+            agent_file = updates.get("agent_file", session_id and store.get_agent_file(session_id))
+            updates["reasoning_effort"], err = self._resolve_effort_or_400(
+                body.get("reasoning_effort", stored_effort),
+                lambda: self._effective_model(adapter, model, agent_file, agent),
+            )
+            if err and "reasoning_effort" in body:
+                return {}, err
+
+        return updates, None
+
+    def _apply_session_settings(self, adapter: "HTTPAgentAdapter", session_id: str, updates: dict) -> None:
+        if not updates:
+            return
+        store = adapter.session_store
+        if "agent_file" in updates:
+            store.set_agent_file(session_id, updates["agent_file"])
+        if "model" in updates:
+            store.set_model_override(session_id, updates["model"])
+        if "reasoning_effort" in updates:
+            store.set_reasoning_effort(session_id, updates["reasoning_effort"])
+        self.event_bus.emit(
+            "session_update",
+            {
+                "action": "settings",
+                "id": session_id,
+                "model": store.get_model_override(session_id),
+                "reasoning_effort": store.get_reasoning_effort(session_id),
+                "agent_file": store.get_agent_file(session_id),
+            },
+        )
 
     async def _session_settings_get(self, request: Request) -> JSONResponse:
         adapter, session_id, err = self._resolve_session_for_settings(request)
@@ -107,40 +200,12 @@ class SessionsMixin:
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
-        if "reasoning_effort" in body:
-            value, err_resp = self._resolve_effort_or_400(adapter, body["reasoning_effort"], session_id)
-            if err_resp:
-                return err_resp
-            adapter.session_store.set_reasoning_effort(session_id, value)
-
-        if "model" in body:
-            raw = body["model"]
-            if raw is None or raw == "":
-                adapter.session_store.set_model_override(session_id, None)
-            elif not isinstance(raw, str):
-                return JSONResponse({"error": "model must be a string"}, status_code=400)
-            else:
-                from tsugite.models import get_provider_and_model
-
-                try:
-                    get_provider_and_model(raw)
-                except Exception as exc:  # noqa: BLE001
-                    return JSONResponse({"error": f"unknown model: {raw} ({exc})"}, status_code=400)
-                adapter.session_store.set_model_override(session_id, raw)
-
-        # A model/effort change broadcasts a session_update so the same chat open
-        # in other tabs refreshes its chips live (one shape shared with /model,
-        # /effort). Emitted only when one of those actually changed.
-        if "model" in body or "reasoning_effort" in body:
-            self.event_bus.emit(
-                "session_update",
-                {
-                    "action": "settings",
-                    "id": session_id,
-                    "model": adapter.session_store.get_model_override(session_id),
-                    "reasoning_effort": adapter.session_store.get_reasoning_effort(session_id),
-                },
-            )
+        store = adapter.session_store
+        agent = store.agents.for_session(store.get_session(session_id))
+        updates, err = self._validate_session_settings(adapter, body, agent, session_id)
+        if err:
+            return err
+        self._apply_session_settings(adapter, session_id, updates)
 
         return JSONResponse(self._session_settings_payload(adapter, session_id))
 
@@ -189,11 +254,24 @@ class SessionsMixin:
         if not prompt:
             return JSONResponse({"error": "prompt is required"}, status_code=400)
 
+        agents = self.session_runner.store.agents
         agent_id = body.get("agent_id")
-        if err := agent_id_error(self.session_runner.store.agents, agent_id):
+        if err := agent_id_error(agents, agent_id):
             return err
 
         from tsugite_daemon.session_store import Session, SessionSource
+
+        reasoning_effort, err = self._resolve_effort_or_400(
+            body.get("reasoning_effort"),
+            lambda: self._effective_model(
+                self.adapter,
+                body.get("model"),
+                body.get("agent_file"),
+                agents.get(agents.effective_id(agent_id)),
+            ),
+        )
+        if err:
+            return err
 
         session = Session(
             id=body.get("session_id", ""),
@@ -202,6 +280,7 @@ class SessionsMixin:
             model=body.get("model"),
             agent_file=body.get("agent_file"),
             agent_id=agent_id,
+            reasoning_effort=reasoning_effort,
             notify=body.get("notify", []),
         )
 

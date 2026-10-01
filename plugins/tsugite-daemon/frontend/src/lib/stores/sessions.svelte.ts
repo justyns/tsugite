@@ -80,7 +80,10 @@ export interface SessionRow extends SessionRowLike {
 export interface SessionSettings {
   reasoning_effort: string | null;
   model: string | null;
+  agent_file: string | null;
 }
+
+export type ChatSettingsPatch = Partial<SessionSettings>;
 
 export interface SessionListOpts {
   source?: string;
@@ -331,11 +334,27 @@ export class SessionsStore {
 
   // --- lifecycle mutations (keyed by session id) ---
 
-  async newSession(opts: { title?: string; userId?: string } = {}): Promise<string> {
-    const body: Record<string, unknown> = {};
+  async newSession(
+    opts: { title?: string; userId?: string; settings?: ChatSettingsPatch } = {},
+  ): Promise<string> {
+    const body: Record<string, unknown> = { ...opts.settings };
     if (opts.title != null) body.title = opts.title;
     if (opts.userId != null) body.user_id = opts.userId;
     const res = await api.post<{ id: string }>('/api/chat/sessions/new', body);
+    return res.id;
+  }
+
+  /** Start a one-off background run of an agent file; resolves to the new session id. */
+  async startRun(opts: {
+    prompt: string;
+    agentFile: string;
+    model?: string;
+    effort?: string;
+  }): Promise<string> {
+    const body: Record<string, unknown> = { prompt: opts.prompt, agent_file: opts.agentFile };
+    if (opts.model) body.model = opts.model;
+    if (opts.effort) body.reasoning_effort = opts.effort;
+    const res = await api.post<{ id: string }>('/api/sessions', body);
     return res.id;
   }
 
@@ -443,10 +462,7 @@ export class SessionsStore {
 
   /** Persist a model or reasoning_effort change for a session; returns the merged
    *  settings the server echoes back. */
-  async patchSettings(
-    id: string,
-    patch: Partial<Pick<SessionSettings, 'model' | 'reasoning_effort'>>,
-  ): Promise<SessionSettings> {
+  async patchSettings(id: string, patch: ChatSettingsPatch): Promise<SessionSettings> {
     return api.patch<SessionSettings>(`/api/sessions/${encodeURIComponent(id)}/settings`, patch);
   }
 

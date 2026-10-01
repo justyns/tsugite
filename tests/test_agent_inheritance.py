@@ -618,6 +618,7 @@ FIELD_SAMPLES = {
     "auto_context": True,
     "visibility": "private",
     "spawnable": False,
+    "chat": True,
     "network": {"allow_domains": ["example.test"]},
     "sandbox": {"enabled": True},
     "allowed_secrets": ["child-token"],

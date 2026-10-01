@@ -399,13 +399,13 @@ class BaseAdapter(ABC):
         """
         return []
 
-    def _get_all_attachments(self):
+    def _get_all_attachments(self, session_id: Optional[str] = None):
         """Build all attachments from the agent's front-matter config (for UI display)."""
         attachments = []
 
-        agent_path = self._resolve_agent_path()
-        if agent_path:
-            try:
+        try:
+            agent_path = self.session_agent_path(session_id)
+            if agent_path:
                 from tsugite.agent_preparation import (
                     resolve_agent_config_attachments,
                     split_attachment_removals,
@@ -422,8 +422,8 @@ class BaseAdapter(ABC):
                 template_vars = {"CWD": ws or str(Path.cwd()), "INVOKED_FROM": ws, "WORKSPACE_DIR": ws}
                 loaded, _ = resolve_agent_config_attachments(keep_items, workspace_path, template_vars)
                 attachments.extend(loaded)
-            except Exception as e:
-                logger.debug("Failed to load agent config attachments: %s", e)
+        except Exception as e:
+            logger.debug("Failed to load agent config attachments: %s", e)
 
         # Deduplicate by name (keep first occurrence)
         seen: set[str] = set()
@@ -488,6 +488,21 @@ class BaseAdapter(ABC):
         """The session's own agent file, else its agent's template, resolved in the agent's workspace."""
         agent_file = (session.agent_file if session else None) or agent.template
         return self._resolve_agent_path(agent_file, Path(agent.workspace))
+
+    def session_agent_path(self, session_id: Optional[str]) -> Optional[Path]:
+        return self._session_agent_path(*self._session_and_agent(session_id))
+
+    def is_default_agent(self, agent_path: Path) -> bool:
+        default = self._resolve_agent_path()
+        return bool(default) and agent_path.resolve() == default.resolve()
+
+    def is_chat_capable(self, agent_path: Path) -> bool:
+        """True for the daemon's own agent and any agent file with `chat: true`."""
+        if self.is_default_agent(agent_path):
+            return True
+        from tsugite.md_agents import parse_agent_file
+
+        return parse_agent_file(agent_path).config.chat
 
     def resolve_model(self, agent_path: Optional[Path] = None) -> str:
         """Resolve the effective model name, returning 'unknown' on failure.
@@ -1443,7 +1458,7 @@ class BaseAdapter(ABC):
         # the agent actually attaches rather than a hardcoded list.
         frontmatter_basenames: set[str] = set()
         try:
-            agent_path = self._resolve_agent_path()
+            agent_path = self.session_agent_path(session_id)
             if agent_path:
                 from tsugite.attachments.agent_config import split_attachment_removals
                 from tsugite.md_agents import parse_agent_file

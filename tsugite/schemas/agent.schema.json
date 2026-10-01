@@ -277,6 +277,11 @@
       "title": "Spawnable",
       "type": "boolean"
     },
+    "chat": {
+      "default": false,
+      "title": "Chat",
+      "type": "boolean"
+    },
     "network": {
       "anyOf": [
         {
