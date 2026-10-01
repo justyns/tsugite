@@ -129,8 +129,9 @@ def record_user_input(
         data["attachments"] = [
             {"name": a.name, "type": a.content_type.value, "source_url": a.source_url} for a in uploads
         ]
-    if channel_metadata:
-        data["channel"] = channel_metadata
+    channel = {k: v for k, v in (channel_metadata or {}).items() if k != "tsugite_token"}
+    if channel:
+        data["channel"] = channel
     # Structured client context, recorded alongside the folded <client_context> XML
     # in `text` so the UI reads it back without re-parsing the prompt string.
     if client_context_items:

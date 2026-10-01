@@ -80,3 +80,21 @@ def test_no_attachments_key_when_only_auto_context(tmp_path):
     record_user_input(storage, "hi", attachments=[_att("USER.md", False), _att("AGENTS.md", False)])
     ev = next(e for e in storage.iter_events() if e.type == "user_input")
     assert "attachments" not in ev.data
+
+
+def test_daemon_bearer_token_is_not_persisted_or_exported(tmp_path):
+    """The per-run scheduler token must not reach history.db or `tsu history export`."""
+    storage = _new_storage(tmp_path)
+    record_user_input(
+        storage,
+        "scheduled run",
+        channel_metadata={
+            "schedule_id": "s1",
+            "tsugite_url": "http://localhost:8000",
+            "tsugite_token": "tsu_secretvalue123",
+        },
+    )
+    ev = next(e for e in storage.iter_events() if e.type == "user_input")
+    assert ev.data["channel"] == {"schedule_id": "s1", "tsugite_url": "http://localhost:8000"}
+    exported = "\n".join(get_history_backend().export_jsonl(storage.session_id))
+    assert "tsu_secretvalue123" not in exported
