@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from uuid import uuid4
 
 from tsugite.core.record_store import RecordStore, now_iso
@@ -280,6 +280,8 @@ class JobStore(RecordStore):
         # Retention cap for resolved jobs - without it jobs.json grows forever
         # and every save re-serializes the entire history.
         self._max_terminal_jobs = max_terminal_jobs
+        self.on_pruned: Optional[Callable[[str], None]] = None
+        self._pruned_ids: list[str] = []
         super().__init__(path)
 
     def list_all(self) -> list[Job]:
@@ -310,19 +312,30 @@ class JobStore(RecordStore):
             return _coerce_ac_list(value)
         return value
 
+    def update_state(self, record_id: str, new_state: str):
+        job = super().update_state(record_id, new_state)
+        with self._lock:
+            pruned, self._pruned_ids = self._pruned_ids, []
+        if self.on_pruned:
+            for job_id in pruned:
+                self.on_pruned(job_id)
+        return job
+
     def _on_state_updated(self, job: Job) -> None:
         if job.state in _TERMINAL_STATES:
-            self._prune_terminal_overflow()
+            self._pruned_ids.extend(self._prune_terminal_overflow())
 
-    def _prune_terminal_overflow(self) -> None:
-        """Drop the oldest resolved jobs beyond the retention cap. Caller holds the lock."""
+    def _prune_terminal_overflow(self) -> list[str]:
+        """Drop the oldest resolved jobs beyond the retention cap and return their ids. Caller holds the lock."""
         terminal = [j for j in self._records.values() if j.state in _TERMINAL_STATES]
         overflow = len(terminal) - self._max_terminal_jobs
         if overflow <= 0:
-            return
+            return []
         terminal.sort(key=lambda j: j.resolved_at or j.updated_at or "")
-        for victim in terminal[:overflow]:
+        victims = terminal[:overflow]
+        for victim in victims:
             self._delete_record(victim.id)
+        return [victim.id for victim in victims]
 
     def _load_entry(self, entry: dict) -> Optional[Job]:
         # Migrate legacy state values that no longer exist in JobState.

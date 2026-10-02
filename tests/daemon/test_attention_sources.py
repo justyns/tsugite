@@ -236,6 +236,47 @@ class TestJobSource:
 
         assert len(store.attention.open_records("s1")) == 1
 
+    def test_pruning_an_errored_job_closes_its_record(self, tmp_path, store, runner, bus):
+        _session(store)
+        jobs = JobStore(tmp_path / "jobs.json", max_terminal_jobs=1)
+        JobsOrchestrator(jobs, runner, event_bus=bus)
+        old = jobs.add(Job(id="job-old", parent_session_id="s1", prompt="a", state=JobState.RUNNING.value))
+        jobs.update_state(old.id, JobState.ERRORED.value)
+        runner.open_attention("s1", source=SOURCE_JOB, ref_id=old.id, kind=JobState.ERRORED.value)
+        newer = jobs.add(Job(id="job-new", parent_session_id="s1", prompt="b", state=JobState.RUNNING.value))
+        bus.events.clear()
+
+        jobs.update_state(newer.id, JobState.ERRORED.value)
+
+        assert jobs.get(old.id) is None
+        assert store.attention.open_records("s1") == []
+        assert bus.of("session_update", "attention")
+
+    def test_on_pruned_runs_outside_the_store_lock(self, tmp_path):
+        jobs = JobStore(tmp_path / "jobs.json", max_terminal_jobs=1)
+        seen = []
+        jobs.on_pruned = lambda job_id: seen.append((job_id, jobs.get(job_id)))
+        for job_id in ("job-old", "job-new"):
+            jobs.add(Job(id=job_id, parent_session_id="s1", prompt="a", state=JobState.RUNNING.value))
+            jobs.update_state(job_id, JobState.ERRORED.value)
+
+        assert seen == [("job-old", None)]
+
+    def test_boot_reconcile_closes_a_record_whose_job_is_gone(self, tmp_path, store, runner, bus):
+        _session(store)
+        jobs = JobStore(tmp_path / "jobs.json")
+        jobs.add(Job(id="job-1", parent_session_id="s1", prompt="ship it", state=JobState.STUCK.value))
+        runner.open_attention("s1", source=SOURCE_JOB, ref_id="job-gone", kind=JobState.ERRORED.value)
+        runner.open_attention("s1", source=SOURCE_ERROR, ref_id="job-gone", kind="send_failed")
+
+        JobsOrchestrator(jobs, runner, event_bus=bus).reconcile_attention()
+
+        assert sorted((r.source, r.ref_id) for r in store.attention.open_records("s1")) == [
+            (SOURCE_ERROR, "job-gone"),
+            (SOURCE_JOB, "job-1"),
+        ]
+        assert bus.of("session_update", "attention")
+
     def test_a_running_job_opens_nothing(self, jobs, store, orchestrator):
         job = self._job(jobs, store)
 

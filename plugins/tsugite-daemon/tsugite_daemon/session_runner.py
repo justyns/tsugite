@@ -596,6 +596,10 @@ class SessionRunner:
         for record in self._store.attention.clear_ref(source, ref_id):
             self._emit_attention(record.owner_id)
 
+    def clear_attention_source_except(self, source: str, live_ref_ids: set[str]) -> None:
+        for record in self._store.attention.clear_source_except(source, live_ref_ids):
+            self._emit_attention(record.owner_id)
+
     def _emit_attention(self, session_id: str) -> None:
         if not self._event_bus:
             return

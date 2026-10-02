@@ -88,6 +88,12 @@ class AttentionStore:
             record = self._open_for_ref_locked(source, ref_id)
             return [self._remove_locked(record)] if record else []
 
+    def clear_source_except(self, source: str, live_ref_ids: set[str]) -> list[AttentionRecord]:
+        """Close open records of a source whose ref is not in live_ref_ids."""
+        with self._lock:
+            targets = [r for r in self._records.values() if r.source == source and r.ref_id not in live_ref_ids]
+            return [self._remove_locked(r) for r in targets]
+
     def clear_owner(self, owner_id: str, *, source: Optional[str] = None) -> list[AttentionRecord]:
         with self._lock:
             targets = [

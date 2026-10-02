@@ -119,6 +119,7 @@ class JobsOrchestrator:
     def __init__(self, job_store: JobStore, session_runner, event_bus=None, terminal_store=None):
         self._jobs = job_store
         self._runner = session_runner
+        self._jobs.on_pruned = lambda job_id: self._runner.clear_attention_ref(SOURCE_JOB, job_id)
         self._event_bus = event_bus
         # Optional: when wired, the orchestrator includes worker_terminal_id in
         # the job_status payload so the frontend tile can mount the embedded
@@ -1747,9 +1748,12 @@ class JobsOrchestrator:
         """Match every job's record to its state at daemon start.
 
         A parked job emits nothing until someone acts on it, so a record opened or
-        left over by a previous process is only reachable from here.
+        left over by a previous process is only reachable from here. Records whose
+        job no longer exists close too.
         """
-        for job in self._jobs.list_all():
+        jobs = self._jobs.list_all()
+        self._runner.clear_attention_source_except(SOURCE_JOB, {j.id for j in jobs})
+        for job in jobs:
             self._sync_attention(job)
 
     def _sync_attention(self, job: Job) -> None:
