@@ -146,6 +146,52 @@ export function groupSessions(rows: SessionRow[], hints: GroupHints): SessionGro
   return { pinned, active, recent, ended };
 }
 
+export interface ScheduleCollapse {
+  /** `rows` with each schedule's unpinned runs replaced by one run, titled with the schedule id:
+   *  the newest run in `attn`, else the latest run. */
+  rows: SessionRow[];
+  /** Collapsed row id -> number of loaded runs it stands for. */
+  runs: Map<string, number>;
+  /** Every collapsed run id -> the id of the row standing for it. */
+  rowOf: Map<string, string>;
+}
+
+function lastTouched(row: SessionRow): number {
+  return Date.parse(row.last_active ?? row.created_at) || 0;
+}
+
+/** Collapses schedule runs (`source: schedule`, grouped on `parent_id`) to one row
+ *  per schedule, kept at the latest run's position. Pinned runs stay individual. */
+export function collapseScheduleRuns(rows: SessionRow[], attn: Set<string>): ScheduleCollapse {
+  const groups = new Map<string, SessionRow[]>();
+  for (const row of rows) {
+    if (row.source !== 'schedule' || !row.parent_id || row.pinned) continue;
+    const group = groups.get(row.parent_id) ?? [];
+    group.push(row);
+    groups.set(row.parent_id, group);
+  }
+  const runs = new Map<string, number>();
+  const rowOf = new Map<string, string>();
+  const replacement = new Map<string, SessionRow | null>();
+  const newest = (group: SessionRow[]) =>
+    group.reduce((a, b) => (lastTouched(b) > lastTouched(a) ? b : a));
+  for (const [scheduleId, group] of groups) {
+    const latest = newest(group);
+    const waiting = group.filter((run) => attn.has(run.id));
+    const shown = waiting.length ? newest(waiting) : latest;
+    for (const run of group) {
+      replacement.set(run.id, null);
+      rowOf.set(run.id, shown.id);
+    }
+    replacement.set(latest.id, { ...shown, title: scheduleId });
+    runs.set(shown.id, group.length);
+  }
+  const out = rows.flatMap((row) =>
+    replacement.has(row.id) ? (replacement.get(row.id) ?? []) : [row],
+  );
+  return { rows: out, runs, rowOf };
+}
+
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /** Compact relative stamp for the row's `when` slot: now / Nm / Nh / "jul 12". */

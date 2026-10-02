@@ -1,15 +1,18 @@
 /// <reference types="@vitest/browser/context" />
 import { page } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ChatsRail from './ChatsRail.svelte';
-import { sessions } from '$lib/stores/sessions.svelte';
+import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
 import { sessionRow as row, attentionRecord as rec } from './__fixtures__/sessionRow';
 import { jobs, type Job } from '$lib/stores/jobs.svelte';
 import { chatsNavBadge } from '$lib/shell/navBadges';
 import { chatsNeedingAnswer } from './sessionModel';
 import { TESTID } from '$lib/testids';
 import { api } from '$lib/api/client';
+
+// The ended section persists its open/closed choice across tests.
+beforeEach(() => localStorage.removeItem('tsugite_rail_ended_open'));
 
 afterEach(() => {
   sessions.rows = [];
@@ -114,4 +117,89 @@ test('clicking a read chat posts nothing', async () => {
   await page.getByText('read chat').click();
 
   expect(post).not.toHaveBeenCalled();
+});
+
+function run(id: string, scheduleId: string, minute: number, extra: Partial<SessionRow> = {}) {
+  return row(id, {
+    source: 'schedule',
+    parent_id: scheduleId,
+    status: 'completed',
+    last_active: `2026-07-17T00:${String(minute).padStart(2, '0')}:00Z`,
+    ...extra,
+  });
+}
+
+test('every run of one schedule collapses to a single rail row with its run count', async () => {
+  sessions.rows = [
+    run('r1', 'dev-land', 10),
+    run('r2', 'dev-land', 20),
+    run('r3', 'dev-land', 30),
+    run('k1', 'kuma-ingest', 15),
+  ];
+  const { container } = await render(ChatsRail, base);
+  await page.getByRole('button', { name: /ended 2/ }).click();
+  expect(container.querySelectorAll('.t-srow')).toHaveLength(2);
+  await expect.element(page.getByLabelText('3 runs')).toBeInTheDocument();
+  await expect.element(page.getByLabelText('1 run', { exact: true })).toBeInTheDocument();
+  await expect.element(page.getByText('kuma-ingest')).toBeInTheDocument();
+});
+
+test('clicking a collapsed schedule row opens its latest run', async () => {
+  sessions.rows = [run('r1', 'dev-land', 10), run('r2', 'dev-land', 20)];
+  const onOpenChat = vi.fn();
+  vi.spyOn(api, 'post').mockResolvedValue({ ok: true } as never);
+  await render(ChatsRail, { focusedSessionId: null, onOpenChat });
+  await page.getByRole('button', { name: /ended 1/ }).click();
+  await page.getByRole('button', { name: /^dev-land,/ }).click();
+  expect(onOpenChat).toHaveBeenCalledWith('r2');
+});
+
+test("a collapsed row's schedule link opens the Schedules view on that schedule", async () => {
+  sessions.rows = [run('r1', 'dev-land', 10)];
+  await render(ChatsRail, base);
+  await page.getByRole('button', { name: /ended 1/ }).click();
+  await page.getByTestId(TESTID.sessionOpenSchedule).click();
+  expect(location.hash).toBe('#schedules?id=dev-land');
+});
+
+test('a run with open attention flags the collapsed row and counts once toward needs you', async () => {
+  sessions.rows = [
+    run('r1', 'dev-land', 10, { status: 'active', attention: [rec('ask')] }),
+    run('r2', 'dev-land', 20, { status: 'active', attention: [rec('ask')] }),
+    run('r3', 'dev-land', 30, { status: 'active' }),
+  ];
+  const { container } = await render(ChatsRail, base);
+  expect(container.querySelectorAll('.t-srow')).toHaveLength(1);
+  expect(container.querySelectorAll('.t-srow.is-attn')).toHaveLength(1);
+  await expect.element(page.getByTestId(TESTID.chatNeedsYou)).toHaveTextContent('needs you 1');
+  await page.getByLabelText('Filter sessions').fill('is:needs-you');
+  await expect.element(page.getByText('dev-land')).toBeInTheDocument();
+});
+
+test('a collapsed row stays live and opens the waiting run when an older run needs you', async () => {
+  sessions.rows = [
+    run('r1', 'dev-land', 10, { status: 'active', attention: [rec('ask')] }),
+    run('r2', 'dev-land', 20),
+  ];
+  const onOpenChat = vi.fn();
+  vi.spyOn(api, 'post').mockResolvedValue({ ok: true } as never);
+  const { container } = await render(ChatsRail, { focusedSessionId: null, onOpenChat });
+  await expect.element(page.getByRole('button', { name: /^dev-land,/ })).toBeVisible();
+  expect(container.querySelectorAll('.t-srow.is-attn')).toHaveLength(1);
+  await page.getByRole('button', { name: /^dev-land,/ }).click();
+  expect(onOpenChat).toHaveBeenCalledWith('r1');
+});
+
+test('a new run arriving over the live feed updates the existing row', async () => {
+  let served = [run('r1', 'dev-land', 10)];
+  vi.spyOn(api, 'get').mockImplementation(async () => ({ sessions: served }) as never);
+  const { container } = await render(ChatsRail, base);
+  await page.getByRole('button', { name: /ended 1/ }).click();
+  await expect.element(page.getByLabelText('1 run', { exact: true })).toBeInTheDocument();
+
+  served = [run('r2', 'dev-land', 20, { status: 'active', busy: true }), ...served];
+  sessions.applySessionUpdate({ action: 'created', id: 'r2' });
+
+  await expect.element(page.getByLabelText('2 runs')).toBeInTheDocument();
+  expect(container.querySelectorAll('.t-srow')).toHaveLength(1);
 });

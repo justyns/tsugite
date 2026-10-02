@@ -20,6 +20,7 @@ const base = {
   onSelect: vi.fn(),
   onNew: vi.fn(),
   onServerSearch: vi.fn(),
+  onOpenSchedule: vi.fn(),
 };
 
 test('right-clicking a session row opens the actions menu', async () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '$lib/components/icon/Icon.svelte';
   import Spin from '$lib/components/feedback/Spin.svelte';
+  import { TESTID } from '$lib/testids';
   import {
     buildSessionRowAriaLabel,
     NEEDS_YOU_META,
@@ -22,7 +23,9 @@
     isUnread = false,
     activeJobCount = 0,
     waitingOnCount = 0,
+    runCount = 0,
     onSelect,
+    onOpenSchedule,
     onOpenNewTab,
   }: {
     title: string;
@@ -36,8 +39,11 @@
     isUnread?: boolean;
     activeJobCount?: number;
     waitingOnCount?: number;
+    /** Runs a collapsed schedule row stands for; 0 for an ordinary session. */
+    runCount?: number;
     onSelect?: () => void;
     onOpenNewTab?: () => void;
+    onOpenSchedule?: () => void;
   } = $props();
 
   const meta = $derived(sessionStateMeta(state));
@@ -45,11 +51,13 @@
   // take the slot.
   const showUnreadDot = $derived(isUnread && !needsYou && (state === 'idle' || state === 'done'));
   const ariaLabel = $derived(buildSessionRowAriaLabel({ title, state, needsYou, isUnread }));
-  const hasMarkers = $derived(needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned);
+  const hasMarkers = $derived(
+    needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned || runCount > 0,
+  );
   const isEnded = $derived(state === 'done' || state === 'failed');
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
       e.preventDefault();
       onSelect?.();
     }
@@ -104,6 +112,24 @@
           >
             <Icon name="clock" size={10} />{waitingOnCount}
           </span>
+        {/if}
+        {#if runCount > 0}
+          <span class="t-badge" aria-label="{runCount} run{runCount === 1 ? '' : 's'}"
+            >{runCount}&times;</span
+          >
+          <button
+            type="button"
+            class="sched-link"
+            aria-label="Open schedule {title}"
+            data-testid={TESTID.sessionOpenSchedule}
+            onclick={(e) => {
+              e.stopPropagation();
+              onOpenSchedule?.();
+            }}
+            ondblclick={(e) => e.stopPropagation()}
+          >
+            <Icon name="sched" size={10} />
+          </button>
         {/if}
         {#if isPinned}
           <Icon name="pin" size={10} />
@@ -245,6 +271,19 @@
     font: 600 var(--fs-2xs) / 1 var(--font-mono);
     color: var(--tx2);
     flex: none;
+  }
+
+  .t-srow .sched-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 2px;
+    background: none;
+    border: 0;
+    color: var(--tx2);
+    cursor: pointer;
+  }
+  .t-srow .sched-link:hover {
+    color: var(--tx0);
   }
 
   /* t-dot (unread marker) */

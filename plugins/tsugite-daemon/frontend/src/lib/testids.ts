@@ -112,6 +112,7 @@ export const TESTID = {
   chatSearch: 'chat-search',
   chatNewSession: 'chat-new-session',
   chatNeedsYou: 'chat-needs-you',
+  sessionOpenSchedule: 'session-open-schedule',
   chatConversation: 'chat-conversation',
   chatTranscript: 'chat-transcript',
   /** A rendered client-context gutter row (keyed by provider) above a user turn. */

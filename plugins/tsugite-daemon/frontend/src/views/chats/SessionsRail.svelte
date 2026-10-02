@@ -28,6 +28,7 @@
     type SessionFilterRow,
   } from './sessionFilter';
   import {
+    collapseScheduleRuns,
     groupSessions,
     sessionSourceType,
     sessionRowState,
@@ -38,7 +39,7 @@
   import { attachRecordToChat, copyReference } from './attachRecord';
 
   let {
-    rows,
+    rows: loadedRows,
     selectedId,
     attn,
     jobCounts = new Map(),
@@ -46,6 +47,7 @@
     onSelect,
     onNew,
     onServerSearch,
+    onOpenSchedule,
   }: {
     rows: Row[];
     selectedId: string | null;
@@ -56,7 +58,12 @@
     onNew: () => void;
     /** Free-text portion of the query, for the store's server-merge search. */
     onServerSearch: (q: string) => void;
+    /** Opens the Schedules view with this schedule's drawer open. */
+    onOpenSchedule: (scheduleId: string) => void;
   } = $props();
+
+  const collapsed = $derived(collapseScheduleRuns(loadedRows, attn));
+  const rows = $derived(collapsed.rows);
 
   let search = $state('');
   let quick = $state<'all' | 'needs-you' | 'pinned'>('all');
@@ -119,6 +126,10 @@
     ];
   });
 
+  function rowNeedsYou(r: Row): boolean {
+    return attn.has(r.id) && !isFinishedSession(r);
+  }
+
   function toFilterRow(r: Row): SessionFilterRow {
     return {
       id: r.id,
@@ -131,7 +142,7 @@
       isPrimary: r.is_primary,
       // A finished session never flags needs-you - a stray ask can't linger past
       // the end, and is:needs-you must not surface it.
-      needsYou: attn.has(r.id) && !isFinishedSession(r),
+      needsYou: rowNeedsYou(r),
     };
   }
 
@@ -143,9 +154,7 @@
   const filter = $derived(parseSessionFilter(effectiveQuery));
   const filtered = $derived(rows.filter((r) => sessionMatchesFilter(toFilterRow(r), filter)));
   const groups = $derived(groupSessions(filtered, { attn }));
-  const needsYouCount = $derived(
-    rows.filter((r) => attn.has(r.id) && !isFinishedSession(r)).length,
-  );
+  const needsYouCount = $derived(rows.filter(rowNeedsYou).length);
   const pinnedCount = $derived(rows.filter((r) => r.pinned).length);
 
   // The three live buckets render in the recency flow; ended renders below them
@@ -264,7 +273,7 @@
   </div>
 
   {#snippet rowItem(row: Row, index = 0)}
-    {@const display = sessionRowState(row, { needsYou: attn.has(row.id) })}
+    {@const display = sessionRowState(row, { needsYou: rowNeedsYou(row) })}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="srow-drag"
@@ -287,12 +296,14 @@
         state={display.state}
         needsYou={display.needsYou}
         sourceType={sessionSourceType(row)}
-        isActive={row.id === selectedId}
+        isActive={row.id === (collapsed.rowOf.get(selectedId ?? '') ?? selectedId)}
         isPinned={row.pinned}
         isUnread={row.unread}
         activeJobCount={jobCounts.get(row.id)?.open ?? 0}
         waitingOnCount={row.waiting_on?.length ?? 0}
+        runCount={collapsed.runs.get(row.id) ?? 0}
         onSelect={() => onSelect(row.id)}
+        onOpenSchedule={() => onOpenSchedule(row.parent_id!)}
         onOpenNewTab={() => openInNewTab(row)}
       />
     </div>

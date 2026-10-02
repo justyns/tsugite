@@ -26,6 +26,7 @@
     formatStamp,
     type SortDir,
   } from './schedulesView';
+  import { router, replaceRoute } from '$lib/router.svelte';
   import { formatAgo } from '$lib/relativeTime';
   import RunStatusPill from './RunStatusPill.svelte';
   import EnableSwitch from './EnableSwitch.svelte';
@@ -89,6 +90,17 @@
     selectedId = s.id;
     drawerOpen = true;
   }
+  // The chats rail's schedule row lands here as #schedules?id=<schedule id>: open
+  // that drawer once the list has it, then drop the param so closing stays closed.
+  $effect(() => {
+    const id = router.params.id;
+    if (!id) return;
+    const target = schedules.list.find((s) => s.id === id);
+    if (!target) return;
+    openEdit(target);
+    replaceRoute('schedules');
+  });
+
   function closeDrawer() {
     drawerOpen = false;
     selectedId = null;

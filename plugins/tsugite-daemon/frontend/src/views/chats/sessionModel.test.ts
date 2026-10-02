@@ -4,6 +4,7 @@ import {
   sessionSourceType,
   sessionRowState,
   groupSessions,
+  collapseScheduleRuns,
   isFinishedSession,
   isResumableSession,
   formatWhen,
@@ -322,5 +323,62 @@ describe('liveSessionId', () => {
   });
   it('returns an id the rows do not hold at all', () => {
     expect(liveSessionId(chain(['a', null]), 'unknown')).toBe('unknown');
+  });
+});
+
+describe('collapseScheduleRuns', () => {
+  const run = (id: string, scheduleId: string, minute: number, over: Partial<SessionRow> = {}) =>
+    base({
+      id,
+      source: 'schedule',
+      parent_id: scheduleId,
+      status: 'completed',
+      last_active: `2026-07-14T15:${String(minute).padStart(2, '0')}:00+00:00`,
+      ...over,
+    });
+
+  it('collapses N runs of one schedule to its latest run, titled with the schedule id', () => {
+    const rows = [run('r1', 'dev-land', 10), run('r3', 'dev-land', 30), run('r2', 'dev-land', 20)];
+    const out = collapseScheduleRuns(rows, new Set());
+    expect(out.rows.map((r) => r.id)).toEqual(['r3']);
+    expect(out.rows[0]!.title).toBe('dev-land');
+    expect(out.runs.get('r3')).toBe(3);
+    expect(out.rowOf.get('r1')).toBe('r3');
+    expect(out.rowOf.get('r3')).toBe('r3');
+  });
+
+  it('keeps two schedules as two rows and leaves other sessions alone', () => {
+    const rows = [
+      run('a1', 'kuma', 10),
+      base({ id: 'chat' }),
+      run('b1', 'dev-land', 20),
+      run('a2', 'kuma', 30),
+    ];
+    const out = collapseScheduleRuns(rows, new Set());
+    expect(out.rows.map((r) => r.id)).toEqual(['chat', 'b1', 'a2']);
+    expect(out.runs.get('a2')).toBe(2);
+    expect(out.runs.get('b1')).toBe(1);
+  });
+
+  it('stands for the newest run that needs you when the latest run has finished', () => {
+    const rows = [
+      run('r1', 'dev-land', 10, { status: 'active' }),
+      run('r2', 'dev-land', 20, { status: 'active' }),
+      run('r3', 'dev-land', 30),
+    ];
+    const attn = new Set(['r1', 'r2']);
+    const out = collapseScheduleRuns(rows, attn);
+    expect(out.rows.map((r) => r.id)).toEqual(['r2']);
+    expect(out.rows[0]!.title).toBe('dev-land');
+    expect(out.rowOf.get('r3')).toBe('r2');
+    expect(groupSessions(out.rows, { attn }).active.map((r) => r.id)).toEqual(['r2']);
+  });
+
+  it('leaves a pinned run as its own row', () => {
+    const rows = [run('r1', 'dev-land', 10, { pinned: true }), run('r2', 'dev-land', 20)];
+    const out = collapseScheduleRuns(rows, new Set());
+    expect(out.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+    expect(out.rows[0]!.title).not.toBe('dev-land');
+    expect(out.runs.has('r1')).toBe(false);
   });
 });
