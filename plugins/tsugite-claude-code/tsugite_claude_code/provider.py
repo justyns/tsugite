@@ -335,7 +335,7 @@ class ClaudeCodeProvider:
             header += ">"
             parts.append(header + "\n" + "\n\n".join(history_lines) + "\n</conversation_history>\n")
 
-        if self._resume_session and not self._resume_after_compaction:
+        if self._resume_session:
             parts.extend(self._unseen_delivery_cards())
 
         # Add the task (last user message — earlier user messages are context/history)
