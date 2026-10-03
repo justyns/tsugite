@@ -65,7 +65,7 @@ def _may_fetch(url: str) -> bool:
     on the allowlist fetches silently; any other host - including when there is no
     store at all - is gated on a human approval, and "Always allow" / "Always
     deny" persist the host to the matching list. A "Deny" answer from an
-    interactive user also blocks the host for the rest of the process. A URL with
+    interactive user also blocks the host for the rest of the session. A URL with
     no hostname is never fetched.
 
     The detector runs on a worker thread, so the blocking approval prompt here

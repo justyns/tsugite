@@ -1,13 +1,24 @@
 """fetch_text / http_request / download_file / check_url honor the web fetch denylist and one-time denies."""
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from tsugite_daemon.session_runner import _current_session_id
 
 from tsugite import permissions
 from tsugite.permissions import Permissions, deny_web_fetch_for_session, set_permissions
 from tsugite.tools.http import check_url, download_file, fetch_text, http_request
+
+
+@contextmanager
+def in_session(session_id):
+    token = _current_session_id.set(session_id)
+    try:
+        yield
+    finally:
+        _current_session_id.reset(token)
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +98,16 @@ def test_one_time_deny_blocks_fetch_with_no_store(client):
         fetch_text("https://once.test/x")
 
 
+def test_one_time_deny_is_scoped_to_its_session(client):
+    with in_session("A"):
+        deny_web_fetch_for_session("once.test")
+    with in_session("B"):
+        assert fetch_text("https://once.test/x") == "fetched"
+    with in_session("A"):
+        with pytest.raises(RuntimeError, match="once.test"):
+            fetch_text("https://once.test/x")
+
+
 def test_undenied_host_still_fetches(client, perms):
     perms.web_fetch_deny("bad.test")
     deny_web_fetch_for_session("once.test")
@@ -145,3 +166,30 @@ async def test_subprocess_executor_child_refuses_denied_host(reset_tool_registry
     finally:
         ex.cleanup()
     assert "denied fetching denied.invalid" in result.output
+
+
+async def _child_fetch_output(host):
+    from tsugite.core.subprocess_executor import SubprocessExecutor
+    from tsugite.core.tools import create_tool_from_tsugite
+
+    ex = SubprocessExecutor()
+    try:
+        ex.set_tools([create_tool_from_tsugite("fetch_text")])
+        result = await ex.execute(
+            f"try:\n    fetch_text('https://{host}/', timeout=2)\nexcept Exception as e:\n    print('child:', e)"
+        )
+    finally:
+        ex.cleanup()
+    return result.output
+
+
+@pytest.mark.asyncio
+async def test_subprocess_executor_child_sees_only_its_sessions_denies(reset_tool_registry):
+    from tsugite.tools import _register_tool
+
+    _register_tool(fetch_text)
+    with in_session("A"):
+        deny_web_fetch_for_session("denied.invalid")
+        assert "denied fetching denied.invalid" in await _child_fetch_output("denied.invalid")
+    with in_session("B"):
+        assert "denied fetching" not in await _child_fetch_output("denied.invalid")

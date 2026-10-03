@@ -389,7 +389,7 @@ def test_one_time_deny_blocks_host_in_memory_only(_clean_session_denies):
 
     perms = _FakePerms()
     assert _answer_deny_as(FakeBackend("Deny"), perms) is False
-    assert "a.example" in _clean_session_denies._session_denied_hosts
+    assert _clean_session_denies.web_fetch_blocked("a.example", None)
     assert perms.denied == set()
 
 
@@ -397,7 +397,7 @@ def test_unprompted_deny_is_not_recorded(_clean_session_denies):
     from tests.interaction_doubles import SpyNonInteractive
 
     assert _answer_deny_as(SpyNonInteractive()) is False
-    assert _clean_session_denies._session_denied_hosts == set()
+    assert not _clean_session_denies.web_fetch_blocked("a.example", None)
 
 
 def test_session_denied_host_is_skipped_without_prompting(_clean_session_denies):
@@ -408,3 +408,23 @@ def test_session_denied_host_is_skipped_without_prompting(_clean_session_denies)
     ):
         assert web_ctx._may_fetch("https://a.example/x") is False
     ask.assert_not_called()
+
+
+def test_deny_in_one_session_still_prompts_in_another(_clean_session_denies):
+    from tsugite_daemon.session_runner import _current_session_id
+
+    token = _current_session_id.set("A")
+    try:
+        _clean_session_denies.deny_web_fetch_for_session("a.example")
+    finally:
+        _current_session_id.reset(token)
+    token = _current_session_id.set("B")
+    try:
+        with (
+            patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
+            patch.object(web_ctx, "request_approval", return_value="approve") as ask,
+        ):
+            assert web_ctx._may_fetch("https://a.example/x") is True
+    finally:
+        _current_session_id.reset(token)
+    ask.assert_called_once()

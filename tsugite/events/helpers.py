@@ -60,7 +60,7 @@ def emit_info_event(message: str) -> None:
     _emit(InfoEvent(message=message))
 
 
-def _current_session_id() -> Optional[str]:
+def current_session_id() -> Optional[str]:
     """Return the active daemon session_id from the contextvar, or None.
 
     Lazy import so the events package doesn't hard-depend on the daemon layer
@@ -82,7 +82,7 @@ def emit_skill_loaded_event(skill_name: str, description: str) -> None:
     """
     from tsugite.events import SkillLoadedEvent
 
-    _emit(SkillLoadedEvent(skill_name=skill_name, description=description, session_id=_current_session_id()))
+    _emit(SkillLoadedEvent(skill_name=skill_name, description=description, session_id=current_session_id()))
 
 
 def emit_skill_unloaded_event(skill_name: str) -> None:
@@ -93,7 +93,7 @@ def emit_skill_unloaded_event(skill_name: str) -> None:
     """
     from tsugite.events import SkillUnloadedEvent
 
-    _emit(SkillUnloadedEvent(skill_name=skill_name, session_id=_current_session_id()))
+    _emit(SkillUnloadedEvent(skill_name=skill_name, session_id=current_session_id()))
 
 
 def emit_secret_access_event(name: str) -> None:

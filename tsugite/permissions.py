@@ -31,6 +31,7 @@ from typing import List, Optional
 
 import yaml
 
+from tsugite.events.helpers import current_session_id
 from tsugite.utils import atomic_write_text
 
 WEB_FETCH_ALLOWLIST = "web.fetch_allowlist"
@@ -125,23 +126,27 @@ class Permissions:
         self.add(WEB_FETCH_DENYLIST, domain.lower())
 
 
-_session_denied_hosts: set[str] = set()
+_session_denied_hosts: dict[Optional[str], set[str]] = {}
 
 
 def deny_web_fetch_for_session(host: str) -> None:
-    """Block ``host`` for the rest of the process. Never written to ``permissions.yaml``."""
-    _session_denied_hosts.add(host.lower())
+    """Block ``host`` for the current session only. Never written to ``permissions.yaml``."""
+    _session_denied_hosts.setdefault(current_session_id(), set()).add(host.lower())
+
+
+def _denied_in_session() -> set[str]:
+    return _session_denied_hosts.get(current_session_id(), set())
 
 
 def web_fetch_blocked(host: str, perms: Optional[Permissions]) -> bool:
-    """True if ``host`` is denied for this session or on ``perms``' denylist."""
-    return host.lower() in _session_denied_hosts or bool(perms and perms.web_fetch_denied(host))
+    """True if ``host`` is denied for the current session or on ``perms``' denylist."""
+    return host.lower() in _denied_in_session() or bool(perms and perms.web_fetch_denied(host))
 
 
 def web_fetch_blocked_hosts(perms: Optional[Permissions]) -> list[str]:
     """Every host ``web_fetch_blocked`` refuses, for seeding a subprocess executor's child."""
     persisted = perms.listed(WEB_FETCH_DENYLIST) if perms else []
-    return sorted(_session_denied_hosts | {h for h in persisted if isinstance(h, str)})
+    return sorted(_denied_in_session() | {h for h in persisted if isinstance(h, str)})
 
 
 _permissions_var: contextvars.ContextVar[Optional[Permissions]] = contextvars.ContextVar("permissions", default=None)
