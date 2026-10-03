@@ -22,9 +22,6 @@ from tsugite_daemon.session_store import (
     create_interactive_session,
 )
 
-# ── enum ──
-
-
 # ── store-level source threading ──
 
 
@@ -260,6 +257,3 @@ def test_discord_thread_session_and_parent_are_discord_source(discord_adapter):
     session = discord_adapter._resolve_target_session(msg, cc, is_thread=True, is_dm=False, thread_id="888")
     assert session.source == "discord"
     assert discord_adapter.session_store.get_session(session.parent_id).source == "discord"
-
-
-# ── cli: no daemon-session creation path exists ──

@@ -755,6 +755,14 @@ class TestWebhookEndpoint:
         )
         assert resp.status_code == 202
 
+    def test_webhook_logs_invalid_token(self, client, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="tsugite_daemon.adapters.http"):
+            client.post("/webhook/bad-token", json={"data": 1})
+
+        assert any("invalid token" in r.message for r in caplog.records)
+
 
 class TestHistoryEndpoint:
     @pytest.fixture(autouse=True)
