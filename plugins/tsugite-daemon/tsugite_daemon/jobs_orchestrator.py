@@ -801,6 +801,10 @@ class JobsOrchestrator:
                     )
 
             await self._await_job_commands(job_id)
+            job = self._jobs.get(job_id)
+            # Cancelled while the previous teardown ran.
+            if job.state not in (JobState.STUCK.value, JobState.ERRORED.value):
+                return job
             if job.setup and not job.setup_done:
                 self._jobs.update(job_id, torn_down=False)
                 try:

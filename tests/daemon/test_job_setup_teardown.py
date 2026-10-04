@@ -246,18 +246,54 @@ def test_fresh_workspace_retry_reruns_setup(orchestrator, repo, store, tmp_path)
 async def test_cancel_during_retry_setup_starts_no_worker_and_tears_down_after_setup(
     orchestrator, runner, repo, store, tmp_path
 ):
-    log = tmp_path / "log"
-    job = await _create_async(orchestrator, repo, setup=f"sleep 1; echo up >> {log}", teardown=f"echo down >> {log}")
+    log, started, go = tmp_path / "log", tmp_path / "setup_started", tmp_path / "go"
+    go.touch()
+    job = await _create_async(
+        orchestrator,
+        repo,
+        setup=f"touch {started}; until [ -e {go} ]; do sleep 0.02; done; echo up >> {log}",
+        teardown=f"echo down >> {log}",
+    )
+    started.unlink()
+    go.unlink()
     orchestrator._finalize(store.get(job.id), JobState.STUCK)
     workers_before = len(runner.started)
 
     retry = asyncio.create_task(orchestrator.retry_with_hint(job.id, hint="try again"))
-    await asyncio.sleep(0.3)
+    while not started.exists() and not retry.done():
+        await asyncio.sleep(0.02)
     await orchestrator.cancel_job(job.id)
+    go.touch()
     await retry
     await _drain(orchestrator)
 
     assert log.read_text().split() == ["up", "down", "up", "down"]
+    assert len(runner.started) == workers_before
+    assert store.get(job.id).state == JobState.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_cancel_while_retry_waits_for_the_previous_teardown_skips_setup(
+    orchestrator, runner, repo, store, tmp_path
+):
+    log, go = tmp_path / "log", tmp_path / "go"
+    job = await _create_async(
+        orchestrator,
+        repo,
+        setup=f"echo up >> {log}",
+        teardown=f"until [ -e {go} ]; do sleep 0.02; done; echo down >> {log}",
+    )
+    orchestrator._finalize(store.get(job.id), JobState.STUCK)
+    workers_before = len(runner.started)
+
+    retry = asyncio.create_task(orchestrator.retry_with_hint(job.id, hint="try again"))
+    await asyncio.sleep(0)
+    await orchestrator.cancel_job(job.id)
+    go.touch()
+    await retry
+    await _drain(orchestrator)
+
+    assert log.read_text().split() == ["up", "down"]
     assert len(runner.started) == workers_before
     assert store.get(job.id).state == JobState.CANCELLED.value
 
