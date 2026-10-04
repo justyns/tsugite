@@ -60,6 +60,17 @@ def emit_info_event(message: str) -> None:
     _emit(InfoEvent(message=message))
 
 
+def emit_warning_event(message: str) -> None:
+    """Emit WarningEvent if an event bus is available.
+
+    Args:
+        message: Warning message to emit
+    """
+    from tsugite.events import WarningEvent
+
+    _emit(WarningEvent(message=message))
+
+
 def current_session_id() -> Optional[str]:
     """Return the active daemon session_id from the contextvar, or None.
 

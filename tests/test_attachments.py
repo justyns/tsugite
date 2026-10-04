@@ -16,6 +16,7 @@ from tsugite.attachments import (
 )
 from tsugite.attachments.agent_config import resolve_agent_config_attachments
 from tsugite.attachments.base import AttachmentContentType
+from tsugite.events import EventBus, WarningEvent
 from tsugite.md_agents import (
     Agent,
     AgentConfig,
@@ -24,7 +25,19 @@ from tsugite.md_agents import (
     parse_agent_file,
     validate_agent_execution,
 )
+from tsugite.ui_context import clear_ui_context, set_ui_context
 from tsugite.utils import resolve_attachments
+
+
+@pytest.fixture
+def warning_events():
+    """Collect WarningEvents emitted through the ui_context event bus."""
+    bus = EventBus()
+    events = []
+    bus.subscribe(lambda e: events.append(e) if isinstance(e, WarningEvent) else None)
+    set_ui_context(event_bus=bus)
+    yield events
+    clear_ui_context()
 
 
 class TestAttachmentStorage:
@@ -707,13 +720,53 @@ class TestSpecResolution:
         assert atts == []
         assert bindings == {"memory_content": "invisible content"}
 
-    def test_assign_missing_file_binds_none(self, tmp_path):
+    def test_assign_missing_file_binds_none(self, tmp_path, warning_events):
         missing = tmp_path / "does_not_exist.md"
 
         atts, bindings = resolve_agent_config_attachments([AttachmentSpec(path=str(missing), assign="memory")])
 
         assert atts == []
         assert bindings == {"memory": None}
+        assert warning_events == []
+
+    def test_missing_spec_attachment_warns(self, tmp_path, warning_events):
+        missing = tmp_path / "does_not_exist.md"
+
+        atts, _ = resolve_agent_config_attachments([AttachmentSpec(path=str(missing))])
+
+        assert atts == []
+        assert len(warning_events) == 1
+        assert str(missing) in warning_events[0].message
+
+    def test_missing_string_attachment_warns(self, tmp_path, warning_events):
+        present = tmp_path / "present.md"
+        present.write_text("here")
+        missing = tmp_path / "gone.md"
+
+        atts, _ = resolve_agent_config_attachments([str(present), str(missing)])
+
+        assert [a.content for a in atts] == ["here"]
+        assert len(warning_events) == 1
+        assert str(missing) in warning_events[0].message
+
+    def test_unreadable_glob_match_warns(self, tmp_path, warning_events):
+        (tmp_path / "bad.md").write_bytes(b"\xff\xfe\x00")
+        (tmp_path / "good.md").write_text("ok")
+
+        _, bindings = resolve_agent_config_attachments(
+            [AttachmentSpec(path=str(tmp_path / "*.md"), assign="notes", attach=False)]
+        )
+
+        assert [b["content"] for b in bindings["notes"]] == ["ok"]
+        assert len(warning_events) == 1
+        assert str(tmp_path / "bad.md") in warning_events[0].message
+
+    def test_unrenderable_attachment_path_warns(self, tmp_path, warning_events):
+        atts, _ = resolve_agent_config_attachments(["{{ undefined_func() }}/notes.md"], workspace_path=tmp_path)
+
+        assert atts == []
+        assert len(warning_events) == 1
+        assert "{{ undefined_func() }}/notes.md" in warning_events[0].message
 
     def test_glob_produces_alpha_sorted_attachments(self, tmp_path):
         (tmp_path / "c.md").write_text("c")

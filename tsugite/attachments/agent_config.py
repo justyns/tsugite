@@ -17,6 +17,12 @@ from tsugite.utils import has_glob_chars
 logger = logging.getLogger(__name__)
 
 
+def _warn_skipped(subject: str, detail: str) -> None:
+    from tsugite.events.helpers import emit_warning_event
+
+    emit_warning_event(f"Agent attachment skipped: {subject} ({detail})")
+
+
 def _render_path(template: str, template_vars: Dict[str, Any]) -> Optional[str]:
     """Render a Jinja path template; return None on render failure."""
     from tsugite.renderer import AgentRenderer
@@ -24,7 +30,7 @@ def _render_path(template: str, template_vars: Dict[str, Any]) -> Optional[str]:
     try:
         return AgentRenderer().render_string(template, template_vars)
     except Exception as e:
-        logger.debug("Failed to render attachment path %r: %s", template, e)
+        _warn_skipped(template, f"path template failed to render: {e}")
         return None
 
 
@@ -124,12 +130,10 @@ def _resolve_string_item(
         return
     resolved = _resolve_path(rendered, workspace_path)
     if not resolved.exists():
-        logger.debug("Agent attachment not found (skipped): %s", resolved)
+        _warn_skipped(template, f"not found: {resolved}")
         return
-    att = file_handler.fetch(str(resolved))
-    if att:
-        attachments.append(att)
-        logger.debug("Loaded agent attachment: %s", resolved)
+    attachments.append(file_handler.fetch(str(resolved)))
+    logger.debug("Loaded agent attachment: %s", resolved)
 
 
 def _resolve_spec(
@@ -161,13 +165,12 @@ def _resolve_spec(
             if not spec.attach and spec.assign:
                 try:
                     content = path.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError) as e:
+                    _warn_skipped(str(path), f"unreadable: {e}")
                     continue
                 bindings[spec.assign].append({"path": str(path), "content": content})
                 continue
             att = file_handler.fetch(str(path))
-            if not att:
-                continue
             if spec.attach:
                 attachments.append(att)
             if spec.assign and att.content_type == AttachmentContentType.TEXT:
@@ -178,14 +181,11 @@ def _resolve_spec(
     if not resolved.exists():
         if spec.assign:
             bindings[spec.assign] = None
-        logger.debug("Agent attachment not found (skipped): %s", resolved)
+        else:
+            _warn_skipped(spec.path, f"not found: {resolved}")
         return
 
     att = file_handler.fetch(str(resolved))
-    if not att:
-        if spec.assign:
-            bindings[spec.assign] = None
-        return
     if spec.attach:
         attachments.append(att)
     if spec.assign:
