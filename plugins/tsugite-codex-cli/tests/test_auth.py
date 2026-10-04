@@ -217,13 +217,10 @@ async def test_concurrent_refresh_serialises(codex_home):
     )
     proc.start()
     try:
-        # Wait until the child has actually acquired the lock
-        for _ in range(100):
-            if holding.exists():
-                break
+        # No deadline: a forkserver child (3.14's default) takes a second or more to boot.
+        while not holding.exists():
+            assert proc.is_alive() or holding.exists(), f"child exited ({proc.exitcode}) before taking the lock"
             await asyncio.sleep(0.02)
-        else:
-            pytest.fail("child process never reported lock acquisition")
 
         with patch("httpx.post", return_value=FakeResp()) as mock_post:
             store = CodexAuthStore()
