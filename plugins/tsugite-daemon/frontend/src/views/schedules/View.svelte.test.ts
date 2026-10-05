@@ -6,7 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 const SEED = [
   {
     id: 'dev-land',
-    agent: 'odyn',
+    agent: 'assistant',
     prompt: 'land it',
     schedule_type: 'cron',
     cron_expr: '*/10 * * * *',
