@@ -751,6 +751,29 @@ class TestRunCommandHistory:
             assert "model_response" in types
             assert "session_end" in types
 
+    def test_failed_run_records_its_turn_id(self, cli_runner, sample_agent_file, tmp_path):
+        with (
+            patch("tsugite.history.sqlite_backend.get_history_dir", return_value=tmp_path),
+            patch("tsugite.agent_runner.run_agent", side_effect=RuntimeError("boom")),
+            patch("tsugite.md_agents.validate_agent_execution", return_value=(True, "Valid")),
+            patch("tsugite.config.load_config", return_value=MagicMock(history_enabled=True)),
+            patch("tsugite.md_agents.parse_agent_file") as mock_parse,
+        ):
+            from tsugite.history import get_history_backend, set_history_backend
+            from tsugite.history.sqlite_backend import SqliteHistoryBackend
+
+            set_history_backend(SqliteHistoryBackend())
+            mock_parse.return_value = MagicMock(config=MagicMock(disable_history=False, name="test_agent"))
+
+            result = cli_runner.invoke(app, ["run", str(sample_agent_file), "task"])
+
+            assert result.exit_code == 1
+            backend = get_history_backend()
+            events = backend.load(backend.list_sessions()[0]).load_events()
+            turn_ids = {e.data.get("turn_id") for e in events if e.type in ("user_input", "session_end")}
+            assert len(turn_ids) == 1
+            assert None not in turn_ids
+
     def test_run_command_history_error_handling(self, cli_runner, sample_agent_file, capsys):
         """Test that history errors don't crash the run."""
         from tests.conftest import mock_agent_execution_result

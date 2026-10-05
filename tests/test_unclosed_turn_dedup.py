@@ -7,7 +7,9 @@ import pytest
 from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
 
+from tests.core.test_user_input_dedup import turn  # noqa: F401
 from tests.test_post_compaction_counters import _patches, _seed_session_events, _StubAdapter
+from tsugite.agent_runner.helpers import get_turn_id
 from tsugite.agent_runner.history_integration import record_user_input
 from tsugite.history import get_history_backend
 from tsugite.history.models import Event
@@ -63,6 +65,21 @@ async def test_retry_after_prompt_too_long_compaction_is_not_recorded_twice(tmp_
     now = datetime.now(timezone.utc)
     successor = await _compact_with_retained(
         tmp_path, history_dir, [Event(type="user_input", ts=now, data={"text": "too long question"})]
+    )
+
+    record_user_input(get_history_backend().load(successor.id), "too long question")
+
+    assert _user_input_texts(successor.id) == ["too long question"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("turn")
+async def test_retry_in_the_same_turn_after_compaction_is_not_recorded_twice(tmp_path, history_dir):
+    now = datetime.now(timezone.utc)
+    successor = await _compact_with_retained(
+        tmp_path,
+        history_dir,
+        [Event(type="user_input", ts=now, data={"text": "too long question", "turn_id": get_turn_id()})],
     )
 
     record_user_input(get_history_backend().load(successor.id), "too long question")

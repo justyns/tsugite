@@ -283,6 +283,7 @@ def run(
         tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
     """
     from tsugite.agent_runner import get_agent_info, run_agent
+    from tsugite.agent_runner.helpers import reset_turn, start_turn
     from tsugite.console import get_stderr_console
     from tsugite.md_agents import validate_agent_execution
     from tsugite.secrets import init_cli as init_secrets
@@ -597,6 +598,8 @@ def run(
             except Exception:
                 pass
 
+        # One turn id for the run and the save_run_to_history after it.
+        turn_token = start_turn()
         try:
             executor_kwargs = _build_executor_kwargs(
                 agent_file,
@@ -653,3 +656,5 @@ def run(
             if not ui_opts.log_json:
                 stderr_console.print("\n[dim]Use --log-json for machine-readable output[/dim]")
             raise typer.Exit(1)
+        finally:
+            reset_turn(turn_token)

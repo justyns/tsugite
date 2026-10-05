@@ -13,7 +13,10 @@ belongs to the current turn.
 
 from pathlib import Path
 
-from tsugite.agent_runner.history_integration import record_user_input, save_run_to_history
+import pytest
+
+from tsugite.agent_runner.helpers import get_turn_id, reset_turn, start_turn
+from tsugite.agent_runner.history_integration import record_session_end, record_user_input, save_run_to_history
 from tsugite.history import Session, get_history_backend
 
 
@@ -119,3 +122,44 @@ def test_failed_continued_turn_is_closed(tmp_path: Path):
 
     record_user_input(reloaded, "q3")
     assert [e.data["text"] for e in _user_inputs(reloaded)] == ["q1", "q2", "q3"]
+
+
+@pytest.fixture
+def turn():
+    token = start_turn()
+    yield get_turn_id()
+    reset_turn(token)
+
+
+def _in_other_turn(fn, *args, **kwargs):
+    token = start_turn()
+    try:
+        fn(*args, **kwargs)
+    finally:
+        reset_turn(token)
+
+
+@pytest.mark.parametrize(
+    "head", [[], ["model_request"], ["model_response"]], ids=["user_input", "model_request", "model_response"]
+)
+def test_turn_left_open_before_turn_ids_does_not_swallow_the_next_message(tmp_path: Path, turn, head):
+    """Sessions recorded before turn ids (pre-close branches, older compacted
+    successors, cancelled turns) can end on a turn with no session_end."""
+    storage = _storage(tmp_path)
+    storage.record("user_input", text="old question")
+    for event_type in head:
+        storage.record(event_type)
+
+    record_user_input(storage, "next question")
+
+    assert [e.data["text"] for e in _user_inputs(storage)] == ["old question", "next question"]
+
+
+def test_late_session_end_from_another_turn_does_not_reopen_this_one(tmp_path: Path, turn):
+    storage = _storage(tmp_path)
+    record_user_input(storage, "hello")
+    _in_other_turn(record_session_end, storage, status="cancelled")
+
+    record_user_input(storage, "hello")
+
+    assert [e.data["text"] for e in _user_inputs(storage)] == ["hello"]

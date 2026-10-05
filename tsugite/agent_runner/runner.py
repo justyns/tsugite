@@ -28,13 +28,16 @@ from .helpers import (  # noqa: E402
     _stderr_console,
     build_sandbox_policy,
     get_display_console,
+    get_turn_id,
     get_ui_handler,
     reset_allowed_secrets,
     reset_current_agent,
     reset_sandbox_context,
+    reset_turn,
     set_allowed_secrets,
     set_current_agent,
     set_sandbox_context,
+    start_turn,
 )
 from .models import AgentExecutionResult, AgentSkippedError  # noqa: E402
 
@@ -1183,6 +1186,7 @@ async def run_agent_async(
     # inside this one and must restore what it found rather than clobber it.
     agent_token = set_current_agent(agent_config.name)
     secrets_token = set_allowed_secrets(agent_config.allowed_secrets)
+    turn_token = start_turn() if get_turn_id() is None else None
 
     setup = _RunSetup(
         exec_options=exec_options,
@@ -1217,6 +1221,8 @@ async def run_agent_async(
     finally:
         reset_current_agent(agent_token)
         reset_allowed_secrets(secrets_token)
+        if turn_token is not None:
+            reset_turn(turn_token)
 
 
 def preview_multistep_agent(

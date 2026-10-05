@@ -1,6 +1,7 @@
 """Shared helper functions for agent execution."""
 
 import contextvars
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
@@ -197,6 +198,30 @@ def reset_allowed_secrets(token: contextvars.Token) -> None:
 def get_allowed_secrets() -> Optional[List[str]]:
     """Return the current run's secret allowlist. Empty or None = unrestricted."""
     return _allowed_secrets_var.get()
+
+
+_turn_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("turn_id", default=None)
+
+
+def start_turn() -> contextvars.Token:
+    """Mint a fresh turn id for the history events recorded in this context. Returns a reset token."""
+    return _turn_id_var.set(uuid.uuid4().hex)
+
+
+def reset_turn(token: contextvars.Token) -> None:
+    """Restore whatever turn id was current before the matching start_turn."""
+    _turn_id_var.reset(token)
+
+
+def get_turn_id() -> Optional[str]:
+    """Return the current turn's id, or None outside a turn."""
+    return _turn_id_var.get()
+
+
+def turn_fields() -> dict:
+    """The turn_id field for an event recorded now, or nothing outside a turn."""
+    turn_id = _turn_id_var.get()
+    return {"turn_id": turn_id} if turn_id else {}
 
 
 def clear_current_agent() -> None:

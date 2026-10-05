@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.core.test_user_input_dedup import turn  # noqa: F401
 from tsugite.agent_runner.runner import _RunSetup
 from tsugite.agent_runner.steps import _execute_step_with_retries
 from tsugite.md_agents import parse_agent
@@ -327,6 +328,65 @@ async def test_each_step_records_its_own_turn_not_a_repeat_of_the_prompt(tmp_pat
     await runner.run_agent_async(agent_file, "triage the build")
 
     assert recorded == ["[Step 1/2: gather]", "[Step 2/2: fix]"], f"got {recorded}"
+
+
+@pytest.mark.asyncio
+async def test_each_step_after_the_first_records_its_own_turn_id(tmp_path, monkeypatch):
+    from tsugite.agent_runner import runner
+    from tsugite.agent_runner.history_integration import record_session_end
+    from tsugite.history import get_history_backend
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        record_session_end(self.storage)
+        return "done"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+    await runner.run_agent_async(agent_file, "triage the build")
+
+    backend = get_history_backend()
+    inputs = [e for e in backend.load(backend.list_sessions()[0]).iter_events() if e.type == "user_input"]
+    assert [e.data["text"] for e in inputs] == ["[Step 1/2: gather]", "[Step 2/2: fix]"]
+    turn_ids = {e.data.get("turn_id") for e in inputs}
+    assert len(turn_ids) == 2
+    assert None not in turn_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("turn")
+async def test_cli_records_session_end_for_a_later_step_that_fails(tmp_path, monkeypatch):
+    """Step 1's session_end shares the CLI's turn id and does not close the failed step 2."""
+    from tsugite.agent_runner import runner
+    from tsugite.agent_runner.history_integration import record_session_end, save_run_to_history
+    from tsugite.history import get_history_backend
+
+    async def fake_agent_run(self, task, return_full_result=False, stream=False):
+        self.storage.record("model_response", raw_content="partial")
+        if "FIX_INSTRUCTIONS" in task:
+            raise RuntimeError("step 2 failed")
+        record_session_end(self.storage)
+        return "done"
+
+    monkeypatch.setattr("tsugite.core.agent.TsugiteAgent.run", fake_agent_run)
+
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+    backend = get_history_backend()
+    with pytest.raises(Exception):
+        await runner.run_agent_async(agent_file, "triage the build")
+    save_run_to_history(
+        agent_path=agent_file,
+        agent_name="fold_in_demo",
+        prompt="triage the build",
+        result="",
+        model="ollama:qwen2.5-coder:7b",
+        continue_conversation_id=backend.list_sessions()[0],
+        status="error",
+        error_message="step 2 failed",
+    )
+
+    ends = [e for e in backend.load(backend.list_sessions()[0]).iter_events() if e.type == "session_end"]
+    assert ends[-1].data["status"] == "error"
 
 
 @pytest.mark.asyncio

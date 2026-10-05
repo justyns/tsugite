@@ -17,7 +17,9 @@ from .helpers import (
     clear_multistep_ui_context,
     get_ui_handler,
     print_step_progress,
+    reset_turn,
     set_multistep_ui_context,
+    start_turn,
 )
 from .metrics import StepMetrics, display_step_metrics
 from .models import AgentExecutionResult, AgentSkippedError
@@ -560,6 +562,8 @@ async def run_steps(
         except Exception as e:
             logger.debug("Could not pre-create session for multi-step run: %s", e)
 
+    # The first step continues the run's turn. Each later step or iteration starts its own.
+    turn_token = None
     try:
         # Execute each step sequentially
         final_result = None
@@ -584,6 +588,9 @@ async def run_steps(
                 step_context["iteration"] = iteration
                 step_context["max_iterations"] = step.max_iterations
                 step_context["is_looping_step"] = step_is_looping
+                if i > 1 or iteration > 1:
+                    token = start_turn()
+                    turn_token = turn_token or token
 
                 # Show step progress (unless in debug mode which has its own output)
                 if step_is_looping:
@@ -698,4 +705,6 @@ async def run_steps(
             session_id=setup.conversation_id,
         )
     finally:
+        if turn_token is not None:
+            reset_turn(turn_token)
         clear_multistep_ui_context(custom_logger)

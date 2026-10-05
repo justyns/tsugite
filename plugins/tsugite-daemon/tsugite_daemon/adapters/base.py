@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
+from tsugite.agent_runner.helpers import reset_turn, start_turn, turn_fields
 from tsugite.agent_runner.models import AgentSkippedError
 from tsugite.attachments.base import Attachment
 from tsugite.attachments.file import FileHandler
@@ -213,7 +214,7 @@ def build_session_event_persister(session_store: "SessionStore", session_id: str
             return
         session_store.append_event(
             session_id,
-            {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
+            {**payload, **turn_fields(), "timestamp": datetime.now(timezone.utc).isoformat()},
         )
 
     return _persist
@@ -835,11 +836,13 @@ class BaseAdapter(ABC):
             Agent's response
         """
         broadcast_state: Dict[str, Optional[str]] = {"conv_id": None}
+        turn_token = start_turn()
         try:
             return await self._handle_message_inner(
                 user_id, message, channel_context, custom_logger, _broadcast_state=broadcast_state
             )
         finally:
+            reset_turn(turn_token)
             # Clear the durable in-flight marker set when the session resolved
             # (see _handle_message_inner); a daemon death before this line is
             # what boot recovery repairs.

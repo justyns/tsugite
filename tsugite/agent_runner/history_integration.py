@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from tsugite.agent_runner.helpers import get_turn_id, turn_fields
 from tsugite.attachments.base import Attachment
 from tsugite.config import load_config
 from tsugite.history import (
@@ -88,6 +89,14 @@ def open_or_create_session(
     return backend.create(agent_name=agent_name, model=model, workspace=workspace)
 
 
+def _turn_has(storage: Session, event_type: str) -> Optional[bool]:
+    """Whether the current turn recorded an event_type; None outside a turn."""
+    turn_id = get_turn_id()
+    if turn_id is None:
+        return None
+    return any(e.data.get("turn_id") == turn_id for e in storage.iter_events(types=(event_type,)))
+
+
 def _current_turn_already_has_user_input(storage: Session) -> bool:
     """True if the in-progress turn already recorded a user_input.
 
@@ -98,7 +107,13 @@ def _current_turn_already_has_user_input(storage: Session) -> bool:
     A genuinely repeated message opens a new turn *after* the prior session_end,
     so this stays False for it. A final_result also ends a turn copied without
     its session_end (branches, older compacted sessions).
+
+    That event-order rule covers callers with no turn id. With one set, only a
+    user_input carrying it counts.
     """
+    has = _turn_has(storage, "user_input")
+    if has is not None:
+        return has
     events = list(storage.iter_events(types=("user_input", "session_end", "final_result")))
     return bool(events) and events[-1].type == "user_input"
 
@@ -122,7 +137,7 @@ def record_user_input(
     """
     if _current_turn_already_has_user_input(storage):
         return
-    data: Dict[str, Any] = {"text": text}
+    data: Dict[str, Any] = {"text": text, **turn_fields()}
     # Only files the user actually uploaded ride here: this field is display-only
     # (the web UI renders them as clickable `uploads/<name>` chips). The agent's
     # auto-included context (workspace memory files like USER.md, config
@@ -158,11 +173,15 @@ def record_final_result(
     the agent reaches its end-of-run recording). Skip in that case so the
     conversation view doesn't render the answer twice.
     """
-    for event in reversed(list(storage.iter_events(types=("user_input", "final_result")))):
-        if event.type == "user_input":
-            break
-        if event.type == "final_result":
-            return
+    has = _turn_has(storage, "final_result")
+    if has:
+        return
+    if has is None:
+        for event in reversed(list(storage.iter_events(types=("user_input", "final_result")))):
+            if event.type == "user_input":
+                break
+            if event.type == "final_result":
+                return
     storage.record(
         "final_result",
         result=result,
@@ -170,6 +189,7 @@ def record_final_result(
         turns=turns,
         tokens=tokens,
         cost=cost,
+        **turn_fields(),
     )
 
 
@@ -189,7 +209,7 @@ def record_session_end(
     liveness. The two stores tracking different things (last-turn outcome vs
     conversation open/closed) is expected, not a desync.
     """
-    storage.record("session_end", status=status, error_message=error_message)
+    storage.record("session_end", status=status, error_message=error_message, **turn_fields())
 
 
 def save_run_to_history(
