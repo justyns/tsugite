@@ -16,6 +16,7 @@ _ACP_MODELS: dict[str, ModelInfo] = {
     "acp/claude-fable-5-1": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-haiku-4-5": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
+    "acp/claude-haiku-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-opus-4-5": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-opus-4-5-20251101": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-opus-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
@@ -23,8 +24,8 @@ _ACP_MODELS: dict[str, ModelInfo] = {
     "acp/claude-opus-4-8": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-opus-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-opus-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
-    "acp/claude-sonnet-4-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
-    "acp/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
+    "acp/claude-sonnet-4-5": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
+    "acp/claude-sonnet-4-5-20250929": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-sonnet-4-6": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-sonnet-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-sonnet-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
@@ -43,7 +44,8 @@ _ALIASES: dict[str, str] = {
     "sonnet": "claude-sonnet-4-6",
     "sonnet-5-5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
-    "haiku": "claude-haiku-4-5-20251001",
+    "haiku": "claude-haiku-5-5",
+    "haiku-5-5": "claude-haiku-5-5",
 }
 
 

@@ -29,7 +29,7 @@ class TestClaudeCodeModelParams:
     def test_model_id_maps_short_names(self):
         assert get_model_id("claude_code:sonnet") == "claude-sonnet-5"
         assert get_model_id("claude_code:opus") == "claude-opus-4-8"
-        assert get_model_id("claude_code:haiku") == "claude-haiku-4-5-20251001"
+        assert get_model_id("claude_code:haiku") == "claude-haiku-5-5"
         assert get_model_id("claude_code:fable") == "claude-fable-5-1"
 
     def test_model_id_version_pinned_aliases(self):
@@ -917,11 +917,11 @@ class TestClaudeCodeContextLimit:
         limit = get_context_limit("claude_code:sonnet")
         assert limit == 1_000_000
 
-    def test_context_limit_haiku_returns_200k(self):
+    def test_context_limit_haiku_returns_1m(self):
         from tsugite_daemon.memory import get_context_limit
 
-        limit = get_context_limit("claude_code:haiku")
-        assert limit == 200_000
+        assert get_context_limit("claude_code:haiku") == 1_000_000
+        assert get_context_limit("claude_code:haiku-4-5") == 200_000
 
     @pytest.mark.asyncio
     async def test_context_window_flows_to_agent_result(self):

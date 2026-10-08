@@ -11,7 +11,7 @@ class TestAliases:
 
         assert resolve_model_alias("opus") == "claude-opus-4-8"
         assert resolve_model_alias("sonnet") == "claude-sonnet-4-6"
-        assert resolve_model_alias("haiku") == "claude-haiku-4-5-20251001"
+        assert resolve_model_alias("haiku") == "claude-haiku-5-5"
 
     def test_full_id_passthrough(self):
         from tsugite_acp.models import resolve_model_alias
