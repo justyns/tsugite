@@ -796,6 +796,61 @@ class TestSchedulerHardening:
         removed = scheduler.cleanup()
         assert set(removed) >= {"badtz", "missed"}
 
+    def test_restart_past_due_cron_records_skipped_history(self, scheduler):
+        now = datetime.now(timezone.utc)
+        missed = (now - timedelta(minutes=30)).isoformat()
+        entry = ScheduleEntry(id="daily", prompt="p", schedule_type="cron", cron_expr="0 3 * * *")
+        entry.next_run = missed
+        scheduler._schedules["daily"] = entry
+
+        scheduler._arm_loaded_schedules()
+
+        assert datetime.fromisoformat(entry.next_run) > now
+        assert len(entry.run_history) == 1
+        assert entry.run_history[0]["status"] == "skipped"
+        assert missed in entry.run_history[0]["error"]
+        assert entry.last_status is None
+        assert entry.run_count == 0
+
+    def test_restart_with_garbage_next_run_keeps_schedule_enabled(self, scheduler):
+        entry = ScheduleEntry(id="daily", prompt="p", schedule_type="cron", cron_expr="0 3 * * *")
+        entry.next_run = "garbage"
+        scheduler._schedules["daily"] = entry
+
+        scheduler._arm_loaded_schedules()
+
+        assert entry.enabled
+        assert datetime.fromisoformat(entry.next_run) > datetime.now(timezone.utc)
+        assert entry.run_history == []
+
+    def test_restart_past_due_disabled_cron_records_nothing(self, scheduler):
+        entry = ScheduleEntry(id="daily", prompt="p", schedule_type="cron", cron_expr="0 3 * * *", enabled=False)
+        entry.next_run = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        scheduler._schedules["daily"] = entry
+
+        scheduler._arm_loaded_schedules()
+
+        assert entry.run_history == []
+
+    def test_restart_past_due_once_records_nothing(self, scheduler):
+        past = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        entry = ScheduleEntry(id="once", prompt="p", schedule_type="once", run_at=past)
+        entry.next_run = past
+        scheduler._schedules["once"] = entry
+
+        scheduler._arm_loaded_schedules()
+
+        assert entry.run_history == []
+
+    def test_restart_before_due_cron_records_nothing(self, scheduler):
+        entry = ScheduleEntry(id="daily", prompt="p", schedule_type="cron", cron_expr="0 3 * * *")
+        entry.next_run = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        scheduler._schedules["daily"] = entry
+
+        scheduler._arm_loaded_schedules()
+
+        assert entry.run_history == []
+
 
 class TestRepeatedFailureNotification:
     """Schedules must not fail silently: notify once after N consecutive errors."""

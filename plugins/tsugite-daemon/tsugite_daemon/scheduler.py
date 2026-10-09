@@ -198,8 +198,15 @@ class Scheduler:
         until schedules.json was hand-edited. One-offs whose time passed beyond
         grace while the daemon was down get a disabled_reason so cleanup()
         reaps them instead of leaving enabled zombies that can never fire.
+        Past-due cron runs get a `skipped` history row.
         """
+        now = datetime.now(timezone.utc)
         for entry in self._schedules.values():
+            missed_run = entry.next_run
+            try:
+                missed_at = datetime.fromisoformat(missed_run) if missed_run else None
+            except ValueError:
+                missed_at = None
             try:
                 entry.next_run = self._compute_next_run_iso(entry)
             except Exception as e:
@@ -208,6 +215,17 @@ class Scheduler:
                 entry.disabled_reason = f"invalid schedule data: {e}"
                 entry.next_run = None
                 continue
+            if (
+                entry.enabled
+                and entry.schedule_type == "cron"
+                and missed_at
+                and missed_at.tzinfo is not None
+                and missed_at <= now
+            ):
+                logger.warning("Schedule '%s' missed its %s run while the daemon was down", entry.id, missed_run)
+                self._append_history(
+                    entry, "skipped", f"missed {missed_run} while the daemon was down", None, now.isoformat()
+                )
             if entry.schedule_type == "once" and entry.enabled and not entry.next_run and not entry.disabled_reason:
                 logger.warning("Schedule '%s' missed its one-off run while the daemon was down; disabling", entry.id)
                 entry.enabled = False
@@ -383,20 +401,25 @@ class Scheduler:
             # "skipped" leaves the streak unchanged: not a failure, not a real run.
 
             entry.last_run = datetime.now(timezone.utc).isoformat()
-            entry.run_history.append(
-                {
-                    "timestamp": entry.last_run,
-                    "status": entry.last_status,
-                    "error": entry.last_error,
-                    "session_id": run_conv_id,
-                }
-            )
-            if len(entry.run_history) > 20:
-                entry.run_history = entry.run_history[-20:]
+            self._append_history(entry, entry.last_status, entry.last_error, run_conv_id, entry.last_run)
 
             if entry.schedule_type == "once":
                 self._schedules.pop(entry.id, None)
             self._save()
+
+    @staticmethod
+    def _append_history(
+        entry: ScheduleEntry, status: str, error: str | None, session_id: str | None, timestamp: str
+    ) -> None:
+        entry.run_history.append(
+            {
+                "timestamp": timestamp,
+                "status": status,
+                "error": error,
+                "session_id": session_id,
+            }
+        )
+        entry.run_history = entry.run_history[-20:]
 
     def _maybe_notify_repeated_failure(self, entry: ScheduleEntry):
         """Surface a schedule that keeps failing instead of letting it die silently.
