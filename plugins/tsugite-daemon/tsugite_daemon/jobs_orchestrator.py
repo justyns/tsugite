@@ -988,6 +988,10 @@ class JobsOrchestrator:
                     current.state if current else "deleted",
                 )
                 return
+            missing = _missing_workspace_anchor(job)
+            if missing:
+                self._finalize(job, JobState.ERRORED, error=f"workspace missing: {missing}")
+                return
             # Pre-record predicate verdicts. Even on predicate failure the UI
             # should be able to render them; on the prose-spawn path the
             # verifier completion will merge against these.

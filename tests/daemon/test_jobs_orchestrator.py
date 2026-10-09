@@ -689,6 +689,29 @@ async def test_missing_workspace_errors_instead_of_verifying(store, runner, orch
 
 
 @pytest.mark.asyncio
+async def test_worktree_vanishing_during_predicates_errors_instead_of_verifying(
+    store, runner, orchestrator, tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    worktree = repo / ".tsugite-jobs" / "job-x"
+    worktree.mkdir(parents=True)
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["file_exists:a.txt", "prose ac"])
+    store.update(job.id, worktree_path=str(worktree))
+
+    def remove_worktree_then_pass(predicate, **kw):
+        worktree.rmdir()
+        return {"ac_index": kw["ac_index"], "ac_text": kw["ac_text"], "pass": True, "attempt": kw["attempt"]}
+
+    monkeypatch.setattr(orch_mod, "_evaluate_predicate", remove_worktree_then_pass)
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+
+    refreshed = store.get(job.id)
+    assert not [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
+    assert refreshed.state == JobState.ERRORED.value
+    assert refreshed.error.startswith("workspace missing")
+
+
+@pytest.mark.asyncio
 async def test_no_criteria_job_completes_with_a_missing_workspace(store, runner, orchestrator, tmp_path):
     """A job with no acceptance criteria has nothing to verify, so a vanished
     workspace does not turn its finished worker summary into a failure."""
