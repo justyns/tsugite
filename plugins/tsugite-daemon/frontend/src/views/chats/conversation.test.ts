@@ -876,3 +876,67 @@ test('a send the server runs anyway still shows the bubble when serverBusy is st
     'and also check the logs',
   ]);
 });
+
+test('switching back to a chat shows its cached turns at once, then appends only the newer events', async () => {
+  const ctrl = new ConversationController();
+  const getPaths = () => apiMock.get.mock.calls.map((c) => String(c[0]));
+  apiMock.get.mockResolvedValueOnce({
+    events: [
+      { id: 1, type: 'user_input', text: 'q', timestamp: 't1' },
+      { id: 2, type: 'final_result', result: 'a' },
+    ],
+    has_more: true,
+    oldest_id: 1,
+  });
+  await ctrl.open('sess-1');
+  apiMock.get.mockResolvedValueOnce({
+    events: [{ id: 10, type: 'user_input', text: 'x', timestamp: 't' }],
+  });
+  await ctrl.open('sess-2');
+
+  let release!: (v: unknown) => void;
+  apiMock.get.mockReturnValueOnce(new Promise((r) => (release = r)));
+  const reopen = ctrl.open('sess-1');
+  expect(ctrl.events.map((e) => e.id)).toEqual([1, 2]);
+  expect(ctrl.hasEarlier).toBe(true);
+
+  release({ events: [{ id: 3, type: 'user_input', text: 'q2', timestamp: 't3' }] });
+  await reopen;
+
+  expect(getPaths().at(-1)).toContain('/sess-1/events?after_id=2');
+  expect(ctrl.events.map((e) => e.id)).toEqual([1, 2, 3]);
+});
+
+test('a chat without storage ids is refetched in full on switch back', async () => {
+  const ctrl = new ConversationController();
+  apiMock.get.mockResolvedValue({ events: [{ type: 'user_input', text: 'q', timestamp: 't1' }] });
+  await ctrl.open('sess-1');
+  await ctrl.open('sess-2');
+  await ctrl.open('sess-1');
+
+  expect(String(apiMock.get.mock.calls.at(-1)![0])).toContain('limit=200');
+});
+
+test('a slow uncached load does not replace a cached chat opened after it', async () => {
+  const ctrl = new ConversationController();
+  apiMock.get.mockResolvedValueOnce({
+    events: [{ id: 1, type: 'user_input', text: 'b', timestamp: 't' }],
+  });
+  await ctrl.open('sess-b');
+  apiMock.get.mockResolvedValueOnce({
+    events: [{ id: 5, type: 'user_input', text: 'c', timestamp: 't' }],
+  });
+  await ctrl.open('sess-c');
+
+  let release!: (v: unknown) => void;
+  apiMock.get.mockReturnValueOnce(new Promise((r) => (release = r)));
+  const slow = ctrl.open('sess-a');
+  apiMock.get.mockResolvedValueOnce({ events: [] });
+  await ctrl.open('sess-b');
+
+  release({ events: [{ id: 9, type: 'user_input', text: 'a', timestamp: 't' }] });
+  await slow;
+
+  expect(ctrl.events.map((e) => e.id)).toEqual([1]);
+  expect(ctrl.loading).toBe(false);
+});

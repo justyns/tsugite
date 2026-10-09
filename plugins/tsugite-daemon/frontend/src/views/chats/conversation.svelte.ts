@@ -52,6 +52,8 @@ const ASK_ORDER = ['session_complete', 'session_end', 'final_result'];
  *  small enough that a fat session's open ships a page instead of the whole log. */
 const WINDOW = 200;
 
+const CACHED_SESSIONS = 8;
+
 /** Compaction rewrites the log's shape (turns replaced by a summary), so a delta
  *  carrying one can't be appended as a plain suffix - the window is reloaded. */
 const COMPACTION_TYPES = new Set(['compaction', 'compaction_started', 'compacted']);
@@ -163,6 +165,7 @@ export class ConversationController {
 
   private handle: ChatStreamHandle | null = null;
   private loadToken = 0;
+  private windows = new Map<string, EventsPage>();
 
   readonly timeline: Timeline = $derived(buildTimeline(this.events));
 
@@ -185,6 +188,7 @@ export class ConversationController {
   async open(sessionId: string | null): Promise<void> {
     if (sessionId === this.sessionId) return;
     this.closeStream();
+    this.cacheWindow();
     this.sessionId = sessionId;
     this.events = [];
     this.ask = null;
@@ -199,6 +203,14 @@ export class ConversationController {
     this.lastEventId = null;
     if (!sessionId) return;
     const token = ++this.loadToken;
+    const cached = this.windows.get(sessionId);
+    if (cached) {
+      // Show the last window now; resync pulls whatever landed since.
+      this.loading = false;
+      this.setWindow(cached);
+      await this.resync();
+      return;
+    }
     this.loading = true;
     try {
       // Load only the newest window; older turns arrive on demand via loadEarlier.
@@ -210,6 +222,18 @@ export class ConversationController {
     } finally {
       if (token === this.loadToken) this.loading = false;
     }
+  }
+
+  /** Remember the open session's id-bearing events so reopening it skips the
+   *  full refetch. Id-less logs have no resync cursor, so they are not cached. */
+  private cacheWindow(): void {
+    const id = this.sessionId;
+    if (!id) return;
+    this.windows.delete(id);
+    const events = this.events.filter((e) => typeof e.id === 'number');
+    if (events.length === 0) return;
+    this.windows.set(id, { events, hasMore: this.hasEarlier, oldestId: this.oldestId });
+    if (this.windows.size > CACHED_SESSIONS) this.windows.delete(this.windows.keys().next().value!);
   }
 
   /** Prepend the chunk of events immediately before the loaded window. Explicit
