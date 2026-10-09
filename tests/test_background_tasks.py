@@ -56,6 +56,29 @@ class TestFireNow:
         run_callback.assert_awaited_once()
         assert run_callback.call_args[0][0].id == "job1"
 
+    @pytest.mark.asyncio
+    async def test_run_does_not_inherit_callers_session(self, schedules_path):
+        from tsugite_daemon.session_runner import _current_session_id, get_current_session_id
+
+        seen = []
+
+        async def callback(entry):
+            seen.append(get_current_session_id())
+            return RunResult(output="done")
+
+        scheduler = Scheduler(schedules_path, callback)
+        scheduler.add(ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *"))
+
+        token = _current_session_id.set("calling_chat")
+        try:
+            scheduler.fire_now("job1")
+            await asyncio.gather(*scheduler._active_tasks)
+            assert get_current_session_id() == "calling_chat"
+        finally:
+            _current_session_id.reset(token)
+
+        assert seen == [None]
+
     def test_rejects_disabled_entry(self, scheduler):
         entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *")
         scheduler.add(entry)

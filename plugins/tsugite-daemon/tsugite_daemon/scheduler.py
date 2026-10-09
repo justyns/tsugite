@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from dataclasses import dataclass, field, replace
 from dataclasses import fields as dataclass_fields
@@ -653,7 +654,7 @@ class Scheduler:
         entry = self.get(schedule_id)
         if not entry.enabled:
             raise ValueError(f"Schedule '{schedule_id}' is disabled")
-        task = asyncio.create_task(self._fire_schedule(entry))
+        task = asyncio.create_task(self._fire_schedule(entry), context=contextvars.Context())
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
 
