@@ -192,14 +192,12 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     """Whether Claude Code already trusts `cwd`, so an unattended spawn won't hang
     on the fresh-cwd "Is this a project you trust?" dialog.
 
-    A dir is trusted when itself OR an ancestor up to the first enclosing git
-    root has projects["<abs path>"].hasTrustDialogAccepted == true in the config
-    Claude reads. Claude Code treats a subdir of a trusted project as trusted
-    (verified against claude 2.1.207), which is what lets a `--repo` Job's worker
-    launch in a fresh worktree at <repo>/.tsugite-jobs/<id>. It does not extend
-    trust across a nested git root, so the walk stops at a dir holding a `.git`
-    directory. A linked worktree's `.git` is a file, so the worktree still
-    inherits its repo root's trust.
+    Claude Code resolves a linked worktree to its main repo. A worktree is trusted
+    when projects["<abs path>"].hasTrustDialogAccepted is true for that root; an entry
+    on the worktree path is not consulted. Any other dir is checked up through its
+    ancestors to the first enclosing git root, and a subdir of a trusted project
+    counts as trusted (verified against claude 2.1.207). The walk stops at a
+    dir holding a `.git` directory and never crosses a nested git root.
 
     config_path defaults to <CLAUDE_CONFIG_DIR>/.claude.json (or ~/.claude.json).
     Tolerant: a missing / unreadable / malformed config means "not trusted".
@@ -213,7 +211,7 @@ def is_workspace_trusted(cwd, config_path=None) -> bool:
     if not isinstance(data, dict):
         return False
     projects = data.get("projects") or {}
-    resolved = Path(cwd).resolve()
+    resolved = trust_provision_target(cwd)
     for path in (resolved, *resolved.parents):
         project = projects.get(str(path))
         if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
@@ -278,18 +276,12 @@ def ensure_workspace_trusted(cwd, config_path=None) -> bool:
 
 def trust_provision_target(cwd) -> Path:
     """The path to provision trust for when `cwd` needs it: the main repo root
-    when cwd is a linked git worktree living under it (tsugite's --repo
-    worktrees are <repo>/.tsugite-jobs/<id>), else cwd itself.
+    when cwd is a linked git worktree (wherever it lives), else cwd itself.
 
-    Trusting the repo root instead of the ephemeral worktree keeps
-    ~/.claude.json from accumulating one dead entry per --repo job - the
-    ancestor rule then covers every future worktree under that root. An
-    external worktree (outside the repo root) still gets its own entry, since
-    the ancestor rule wouldn't reach it.
-
-    A linked worktree's `.git` is a *file* containing
-    `gitdir: <repo>/.git/worktrees/<name>`; anything else means cwd is not a
-    worktree.
+    A linked worktree's `.git` is a file containing
+    `gitdir: <repo>/.git/worktrees/<name>`. Trusting the repo root instead of
+    the ephemeral worktree keeps ~/.claude.json from accumulating one dead
+    entry per --repo job.
     """
     cwd = Path(cwd).resolve()
     gitfile = cwd / ".git"
@@ -307,8 +299,7 @@ def trust_provision_target(cwd) -> Path:
     gitdir = gitdir.resolve()
     if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
         return cwd
-    root = gitdir.parent.parent.parent
-    return root if cwd.is_relative_to(root) else cwd
+    return gitdir.parent.parent.parent
 
 
 def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str = "claude", settings_dir=None):

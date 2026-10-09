@@ -170,6 +170,41 @@ def test_is_workspace_trusted_true_for_worktree_of_trusted_repo_root(tmp_path):
     assert is_workspace_trusted(worktree, config_path=cfg) is True
 
 
+def test_is_workspace_trusted_ignores_entry_on_the_worktree_path(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = _fake_linked_worktree(repo, "job-3")
+    cfg = _write_trust_config(tmp_path / "cfg", worktree)
+    assert is_workspace_trusted(worktree, config_path=cfg) is False
+
+
+def _worktree_of_external_worktree(workspace: Path):
+    """<ws>/repos/main is the main checkout; <ws>/repos/main-fix is a linked worktree of
+    it; the job worktree is a linked worktree under main-fix (its gitdir is in main/.git)."""
+    main = workspace / "repos" / "main"
+    (main / ".git" / "worktrees" / "job-1").mkdir(parents=True)
+    job = workspace / "repos" / "main-fix" / ".tsugite-jobs" / "job-1"
+    job.mkdir(parents=True)
+    (job / ".git").write_text(f"gitdir: {main / '.git' / 'worktrees' / 'job-1'}\n")
+    (job.parent.parent / ".git").write_text(f"gitdir: {main / '.git' / 'worktrees' / 'main-fix'}\n")
+    return main, job
+
+
+def test_is_workspace_trusted_false_for_job_under_worktree_of_untrusted_repo(tmp_path):
+    workspace = tmp_path / "ws"
+    _, job = _worktree_of_external_worktree(workspace)
+    cfg = _write_trust_config(tmp_path / "cfg", workspace)  # trusts the workspace root only
+    assert is_workspace_trusted(job, config_path=cfg) is False
+
+
+def test_ensure_workspace_trusted_via_target_covers_job_under_worktree(tmp_path):
+    workspace = tmp_path / "ws"
+    main, job = _worktree_of_external_worktree(workspace)
+    cfg = _write_trust_config(tmp_path / "cfg", workspace)
+    ensure_workspace_trusted(trust_provision_target(job), config_path=cfg)
+    assert json.loads(cfg.read_text())["projects"][str(main.resolve())]["hasTrustDialogAccepted"] is True
+    assert is_workspace_trusted(job, config_path=cfg) is True
+
+
 def test_is_workspace_trusted_false_when_only_a_sibling_is_trusted(tmp_path):
     # A trusted path that is NOT an ancestor must not leak trust.
     trusted = tmp_path / "other"
@@ -292,15 +327,13 @@ def test_trust_provision_target_plain_repo_is_itself(tmp_path):
     assert trust_provision_target(bare) == bare.resolve()
 
 
-def test_trust_provision_target_external_worktree_is_itself(tmp_path):
-    # A worktree OUTSIDE the repo root: trusting the repo root wouldn't cover
-    # it (the ancestor rule only reaches subdirs), so it needs its own entry.
+def test_trust_provision_target_external_worktree_maps_to_repo_root(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git" / "worktrees" / "wt").mkdir(parents=True)
     wt = tmp_path / "elsewhere" / "wt"
     wt.mkdir(parents=True)
     (wt / ".git").write_text(f"gitdir: {repo / '.git' / 'worktrees' / 'wt'}\n")
-    assert trust_provision_target(wt) == wt.resolve()
+    assert trust_provision_target(wt) == repo.resolve()
 
 
 # ── pure helpers ──
