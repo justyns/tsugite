@@ -6,6 +6,7 @@ with a real loop running in a background thread, the way the gateway wires them.
 """
 
 import asyncio
+import threading
 from threading import Thread
 
 import pytest
@@ -22,19 +23,47 @@ class _ControllerStub:
     def __init__(self, problems=None):
         self.problems = problems or []
         self.restarts = 0
+        self.restarted = threading.Event()
 
     def preflight_restart(self):
         return list(self.problems)
 
     def request_restart(self):
         self.restarts += 1
+        self.restarted.set()
 
 
 @pytest.fixture(autouse=True)
-def _clear_backend():
+def _clear_backend(monkeypatch):
+    monkeypatch.setattr(daemon_control, "_approval_pending", threading.Lock())
     set_interaction_backend(None)
     yield
     set_interaction_backend(None)
+
+
+@pytest.fixture
+def approval_done(monkeypatch):
+    """Set once the background approval flow has finished, whatever it decided."""
+    done = threading.Event()
+    flow = daemon_control._approve_then_restart
+
+    def _flow(*args):
+        try:
+            flow(*args)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(daemon_control, "_approve_then_restart", _flow)
+    return done
+
+
+@pytest.fixture
+def notified(monkeypatch):
+    """Messages the flow sends back to the originating session."""
+    sent = []
+    monkeypatch.setattr(daemon_control, "get_current_session_id", lambda: "origin-1")
+    monkeypatch.setattr(daemon_control, "session_reply", lambda msg, session_id: sent.append((session_id, msg)))
+    return sent
 
 
 @pytest.fixture
@@ -56,6 +85,21 @@ def wire():
     loop.close()
 
 
+@pytest.fixture
+def blocked_backend():
+    """An approving backend that holds its prompt open until `release` is set."""
+    release = threading.Event()
+
+    class _BlockedBackend(FakeBackend):
+        def ask_user(self, question, question_type="text", options=None):
+            release.wait(5)
+            return super().ask_user(question, question_type, options)
+
+    backend = _BlockedBackend("Approve")
+    set_interaction_backend(backend)
+    return backend, release
+
+
 class TestApprovalGate:
     def test_approve_requests_the_restart(self, wire):
         controller = wire(_ControllerStub())
@@ -63,33 +107,105 @@ class TestApprovalGate:
         set_interaction_backend(backend)
 
         result = daemon_control.restart_daemon(reason="picked up dashboard.py")
+        assert controller.restarted.wait(2)
 
         assert len(backend.calls) == 1
         assert backend.calls[0][1] == "approval", "must route through request_approval, not a bare ask_user"
         assert "picked up dashboard.py" in backend.calls[0][0]
+        assert result == "Asked the user to approve a restart."
         assert controller.restarts == 1
-        assert result == "Approved. The daemon restarts once this turn finishes."
 
-    def test_deny_does_not_restart(self, wire):
+    def test_returns_while_the_approval_is_pending(self, wire, blocked_backend):
         controller = wire(_ControllerStub())
-        set_interaction_backend(FakeBackend("Deny"))
+        _, release = blocked_backend
 
         result = daemon_control.restart_daemon(reason="new plugin")
 
+        assert result == "Asked the user to approve a restart."
         assert controller.restarts == 0
-        assert result == "Restart not approved."
+        release.set()
+        assert controller.restarted.wait(2)
+
+    def test_second_call_while_pending_does_not_prompt_again(self, wire, blocked_backend):
+        controller = wire(_ControllerStub())
+        backend, release = blocked_backend
+
+        daemon_control.restart_daemon(reason="new plugin")
+        second = daemon_control.restart_daemon(reason="again")
+
+        assert second == "A restart approval is already pending."
+        release.set()
+        assert controller.restarted.wait(2)
+        assert len(backend.calls) == 1
+        assert controller.restarts == 1
+
+    def test_deny_does_not_restart_and_tells_the_session(self, wire, approval_done, notified):
+        controller = wire(_ControllerStub())
+        backend = FakeBackend("Deny")
+        set_interaction_backend(backend)
+
+        result = daemon_control.restart_daemon(reason="new plugin")
+        assert approval_done.wait(2)
+
+        assert result == "Asked the user to approve a restart."
+        assert len(backend.calls) == 1
+        assert controller.restarts == 0
+        assert notified == [("origin-1", "The user denied the daemon restart.")]
+
+    def test_approval_failure_tells_the_session(self, wire, approval_done, notified):
+        wire(_ControllerStub())
+
+        class _BrokenBackend(FakeBackend):
+            def ask_user(self, question, question_type="text", options=None):
+                raise RuntimeError("prompt exploded")
+
+        set_interaction_backend(_BrokenBackend("Approve"))
+
+        daemon_control.restart_daemon(reason="new plugin")
+        assert approval_done.wait(2)
+
+        assert notified == [("origin-1", "The daemon restart failed: prompt exploded")]
+
+    def test_deny_releases_the_lock_even_if_notifying_the_session_fails(self, wire, approval_done, monkeypatch):
+        wire(_ControllerStub())
+        monkeypatch.setattr(daemon_control, "get_current_session_id", lambda: "origin-1")
+
+        def _broken_reply(msg, session_id):
+            raise RuntimeError("session gone")
+
+        monkeypatch.setattr(daemon_control, "session_reply", _broken_reply)
+        set_interaction_backend(FakeBackend("Deny"))
+
+        daemon_control.restart_daemon(reason="new plugin")
+        assert approval_done.wait(2)
+
+        assert daemon_control._approval_pending.acquire(blocking=False)
+
+    def test_approval_keeps_the_lock_so_a_second_call_does_not_prompt(self, wire, approval_done):
+        controller = wire(_ControllerStub())
+        backend = FakeBackend("Approve")
+        set_interaction_backend(backend)
+
+        daemon_control.restart_daemon(reason="new plugin")
+        assert approval_done.wait(2)
+        second = daemon_control.restart_daemon(reason="again")
+
+        assert second == "A restart approval is already pending."
+        assert len(backend.calls) == 1
+        assert controller.restarts == 1
 
     def test_non_interactive_never_prompts_and_never_restarts(self, wire):
         controller = wire(_ControllerStub())
         spy = SpyNonInteractive()
         set_interaction_backend(spy)
 
-        daemon_control.restart_daemon(reason="new plugin")
+        result = daemon_control.restart_daemon(reason="new plugin")
 
+        assert result == "Restart not approved."
         assert spy.calls == []
         assert controller.restarts == 0
 
-    def test_local_plugin_files_are_listed_in_the_prompt(self, wire, xdg_config_file):
+    def test_local_plugin_files_are_listed_in_the_prompt(self, wire, approval_done, xdg_config_file):
         plugin_file = xdg_config_file.parent / "dashboard.py"
         plugin_file.write_text("MARKER = 'loaded'\n")
         xdg_config_file.write_text('{"plugins": {"dashboard": {"path": "dashboard.py"}}}')
@@ -98,6 +214,7 @@ class TestApprovalGate:
         set_interaction_backend(backend)
 
         daemon_control.restart_daemon(reason="new plugin")
+        assert approval_done.wait(2)
 
         assert len(backend.calls) == 1
         assert str(plugin_file) in backend.calls[0][0]
