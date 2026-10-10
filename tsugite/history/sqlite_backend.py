@@ -130,7 +130,8 @@ def _fold_event(conn: sqlite3.Connection, session_id: str, event: Event, now_iso
     )
     if t == "session_start":
         conn.execute(
-            "UPDATE sessions SET agent=?, model=?, workspace=?, parent_session=?, created_at=? WHERE session_id=?",
+            "UPDATE sessions SET agent=COALESCE(?, agent), model=COALESCE(?, model), workspace=COALESCE(?, workspace), "
+            "parent_session=COALESCE(?, parent_session), created_at=MIN(created_at, ?) WHERE session_id=?",
             (
                 d.get("agent"),
                 d.get("model"),

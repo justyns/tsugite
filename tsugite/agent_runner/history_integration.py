@@ -73,7 +73,11 @@ def open_or_create_session(
     backend = get_history_backend()
     if continue_conversation_id:
         if backend.exists(continue_conversation_id):
-            return backend.load(continue_conversation_id)
+            session = backend.load(continue_conversation_id)
+            # Daemon-spawned sessions are created without a model.
+            if session.summary().model is None:
+                session.record("session_start", agent=agent_name, model=model, workspace=workspace)
+            return session
         return backend.create(
             agent_name=agent_name,
             model=model,
@@ -245,8 +249,8 @@ def save_run_to_history(
     agent_already_recorded = last_model_response > last_session_start
 
     if agent_already_recorded:
-        # A continued conversation pins session_start at index 0, so the current
-        # turn starts at its own user_input.
+        # A continued conversation's session_start can sit at index 0 or come from
+        # a backfill. The current turn starts at its own user_input.
         turn_start = max(last_session_start, last_user_input)
         if last_session_end < turn_start:
             record_session_end(storage, status=status, error_message=error_message)
@@ -265,19 +269,20 @@ def save_run_to_history(
                 tools_called=list(getattr(step, "tools_called", []) or []),
             )
 
-    state_delta = provider_state if provider_state else None
-    # Split as the agent loop records it: bare id in `model`, prefix in `provider`.
-    model_provider, _, model_id = model.partition(":")
-    storage.record(
-        "model_response",
-        provider=model_provider if model_id else None,
-        model=model_id or model,
-        raw_content=result or "",
-        usage={"total_tokens": token_count} if token_count else None,
-        cost=cost,
-        duration_ms=duration_ms,
-        state_delta=state_delta,
-    )
+    if status == "success":
+        state_delta = provider_state if provider_state else None
+        # Split as the agent loop records it: bare id in `model`, prefix in `provider`.
+        model_provider, _, model_id = model.partition(":")
+        storage.record(
+            "model_response",
+            provider=model_provider if model_id else None,
+            model=model_id or model,
+            raw_content=result or "",
+            usage={"total_tokens": token_count} if token_count else None,
+            cost=cost,
+            duration_ms=duration_ms,
+            state_delta=state_delta,
+        )
 
     record_session_end(storage, status=status, error_message=error_message)
     return storage.session_id
