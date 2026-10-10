@@ -130,6 +130,9 @@ class JobsOrchestrator:
         # Strong refs to in-flight notify tasks; asyncio only weak-refs scheduled
         # tasks, so without this a notify could be GC'd mid-send.
         self._notify_tasks: set[asyncio.Task] = set()
+        # Terminal wake-ups held back because the parent was mid-turn, keyed by the
+        # parent's live session id and sent one per turn end.
+        self._held_notifies: dict[str, list[Job]] = {}
         # Strong refs to in-flight background tasks (e.g. offloaded worktree
         # prunes). Same GC rationale as _notify_tasks; also lets tests drain them.
         self._bg_tasks: set[asyncio.Task] = set()
@@ -142,6 +145,12 @@ class JobsOrchestrator:
         # (the built-in SessionRunner path); plugins register others here. See the
         # executor contract on register_executor.
         self._executors: dict = {}
+
+    def _finalize_if_workspace_missing(self, job: Job) -> bool:
+        missing = _missing_workspace_anchor(job)
+        if missing:
+            self._finalize(job, JobState.ERRORED, error=f"workspace missing: {missing}")
+        return bool(missing)
 
     def register_executor(self, name: str, executor) -> None:
         """Register a non-agent job executor under `name` (matched against
@@ -944,9 +953,7 @@ class JobsOrchestrator:
             self._finalize(job, JobState.DONE, result={"summary": result_str})
             return
 
-        missing = _missing_workspace_anchor(job)
-        if missing:
-            self._finalize(job, JobState.ERRORED, error=f"workspace missing: {missing}")
+        if self._finalize_if_workspace_missing(job):
             return
 
         # Partition into predicates (mechanically decided) vs prose (sent to LLM).
@@ -988,9 +995,7 @@ class JobsOrchestrator:
                     current.state if current else "deleted",
                 )
                 return
-            missing = _missing_workspace_anchor(job)
-            if missing:
-                self._finalize(job, JobState.ERRORED, error=f"workspace missing: {missing}")
+            if self._finalize_if_workspace_missing(job):
                 return
             # Pre-record predicate verdicts. Even on predicate failure the UI
             # should be able to render them; on the prose-spawn path the
@@ -1434,8 +1439,30 @@ class JobsOrchestrator:
 
     def _schedule_notify(self, job: Job) -> None:
         """Post a one-line wake-up message into the parent session so its agent
-        learns the Job finished. Best-effort: errors are logged, not raised."""
+        learns the Job finished. A parent mid-turn gets it when the turn ends.
+        Best-effort: errors are logged, not raised."""
+        if self._parent_turn_in_flight(job.parent_session_id):
+            self._held_notifies.setdefault(self._runner.live_id(job.parent_session_id), []).append(job)
+            return
         self._schedule_reply(job, _build_notify_message(job), source="job_complete")
+
+    def on_parent_turn_end(self, parent_session_id: str) -> None:
+        """Send the next held wake-up, else close the batch barrier. One wake-up
+        per call: its own turn end comes back here for the rest."""
+        live_id = self._runner.live_id(parent_session_id)
+        held = self._held_notifies.get(live_id)
+        if held and not self._parent_turn_in_flight(parent_session_id):
+            job = held.pop(0)
+            self._schedule_reply(
+                job,
+                _build_notify_message(job),
+                source="job_complete",
+                on_failed=lambda: self.on_parent_turn_end(parent_session_id),
+            )
+            if not held:
+                del self._held_notifies[live_id]
+            return
+        self.close_batch_barrier(parent_session_id)
 
     def close_batch_barrier(self, parent_session_id: str) -> None:
         """Wake the parent once, when the last of its active jobs has finalized.
@@ -1480,12 +1507,14 @@ class JobsOrchestrator:
         source: str,
         metadata: Optional[dict] = None,
         on_delivered: Optional[Callable[[], None]] = None,
+        on_failed: Optional[Callable[[], None]] = None,
     ) -> None:
         """Queue a wake-up for the parent.
 
         `on_delivered` runs once the parent has actually taken the turn, so a
-        caller can record the wake-up only when it landed. Best-effort: errors are
-        logged, not raised.
+        caller can record the wake-up only when it landed. `on_failed` runs when the
+        send raised or the parent had finished, because no turn will end to continue
+        the caller's chain. Best-effort: errors are logged, not raised.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -1504,6 +1533,8 @@ class JobsOrchestrator:
                 )
             except Exception:
                 logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
+                if on_failed:
+                    on_failed()
                 return
             if reply is None:
                 logger.warning(
@@ -1512,6 +1543,8 @@ class JobsOrchestrator:
                     job.id,
                     job.parent_session_id,
                 )
+                if on_failed:
+                    on_failed()
                 return
             if on_delivered:
                 on_delivered()

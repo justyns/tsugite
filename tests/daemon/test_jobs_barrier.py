@@ -315,3 +315,92 @@ async def test_a_delivered_barrier_wake_up_marks_the_batch(store, runner, orches
 
     assert len(sent) == 1
     assert all(store.get(j.id).barrier_notified for j in jobs)
+
+
+# ── terminal notify while the parent is mid-turn ──
+
+
+@pytest.mark.asyncio
+async def test_terminal_notify_waits_for_the_parent_turn_to_end(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    runner.store.sessions["parent-1"].turn_in_flight = True
+    job = _seed_batch(store, orchestrator, 1, notify_when="terminal")[0]
+
+    await _finish(orchestrator, job)
+    assert sent == [], "a parent mid-turn must not get a second concurrent turn"
+
+    runner.store.sessions["parent-1"].turn_in_flight = False
+    orchestrator.on_parent_turn_end("parent-1")
+    await asyncio.sleep(0)
+
+    assert [s["source"] for s in sent] == ["job_complete"]
+    assert job.id in sent[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_held_terminal_notifies_go_out_one_per_turn_end(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    runner.store.sessions["parent-1"].turn_in_flight = True
+    first, second = _seed_batch(store, orchestrator, 2, notify_when="terminal")
+    await _finish(orchestrator, first)
+    await _finish(orchestrator, second)
+
+    runner.store.sessions["parent-1"].turn_in_flight = False
+    orchestrator.on_parent_turn_end("parent-1")
+    await asyncio.sleep(0)
+    assert len(sent) == 1 and first.id in sent[0]["message"]
+
+    orchestrator.on_parent_turn_end("parent-1")
+    await asyncio.sleep(0)
+    assert len(sent) == 2 and second.id in sent[1]["message"]
+
+    orchestrator.on_parent_turn_end("parent-1")
+    await asyncio.sleep(0)
+    assert len(sent) == 2, "a held wake-up is sent once"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["raises", "refused"])
+async def test_a_failed_held_wake_up_falls_through_to_the_next_and_the_barrier(store, runner, orchestrator, failure):
+    attempts = []
+
+    async def fail_first(session_id, message, source="session", metadata=None):
+        attempts.append(source)
+        if len(attempts) == 1:
+            if failure == "raises":
+                raise RuntimeError("boom")
+            return None
+        return "ok"
+
+    runner.reply_to_session = fail_first
+    runner.store.sessions["parent-1"].turn_in_flight = True
+    first, second = _seed_batch(store, orchestrator, 2, notify_when="terminal")
+    await _finish(orchestrator, first)
+    await _finish(orchestrator, second)
+
+    runner.store.sessions["parent-1"].turn_in_flight = False
+    orchestrator.on_parent_turn_end("parent-1")
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    assert attempts == ["job_complete", "job_complete"]
+    assert orchestrator._held_notifies == {}
+
+
+@pytest.mark.asyncio
+async def test_held_wake_ups_drain_when_the_parent_has_finished(store, runner, orchestrator):
+    async def refuse(session_id, message, source="session", metadata=None):
+        return None
+
+    runner.reply_to_session = refuse
+    runner.store.sessions["parent-1"].turn_in_flight = True
+    jobs = _seed_batch(store, orchestrator, 2)
+    for job in jobs:
+        await _finish(orchestrator, job)
+    runner.store.sessions["parent-1"].turn_in_flight = False
+
+    orchestrator.on_parent_turn_end("parent-1")
+    for _ in range(4):
+        await asyncio.sleep(0)
+
+    assert orchestrator._held_notifies == {}

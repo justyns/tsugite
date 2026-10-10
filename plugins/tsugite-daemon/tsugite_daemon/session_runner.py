@@ -508,16 +508,16 @@ class SessionRunner:
 
     def _on_turn_end(self, session_id: str) -> None:
         self._flush_deferred_deliveries(session_id)
-        self._close_job_batch(session_id)
+        self._job_turn_end(session_id)
         self.drain_queued_messages(session_id)
 
     @staticmethod
-    def _close_job_batch(session_id: str) -> None:
+    def _job_turn_end(session_id: str) -> None:
         from tsugite.tools.jobs import get_jobs_orchestrator
 
         orchestrator = get_jobs_orchestrator()
         if orchestrator:
-            orchestrator.close_batch_barrier(session_id)
+            orchestrator.on_parent_turn_end(session_id)
 
     def _flush_deferred_deliveries(self, session_id: str) -> None:
         for event in self._store.take_deferred_deliveries(session_id):
