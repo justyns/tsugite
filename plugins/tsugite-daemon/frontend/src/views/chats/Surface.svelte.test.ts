@@ -374,3 +374,31 @@ test('a turn settling in an unfocused pane leaves the chat unread', async () => 
   expect(post).not.toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed');
   expect(sessions.rows[0]!.unread).toBe(true);
 });
+
+async function openUnread() {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [row('session-open', { title: 'open chat', unread: true })];
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ ok: true } as never);
+  render(Surface, { params: { sessionId: 'session-open' } });
+  await vi.waitFor(() => expect(headerTitle()).toBe('open chat'));
+  return post;
+}
+
+test('focusing the composer of an unread open chat marks it read', async () => {
+  const post = await openUnread();
+  composerTa()!.focus();
+  await vi.waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed'),
+  );
+});
+
+test('clicking the transcript of an unread open chat marks it read', async () => {
+  const post = await openUnread();
+  document
+    .querySelector('.chat-surface')!
+    .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed'),
+  );
+});

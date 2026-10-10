@@ -168,6 +168,10 @@
     void sessions.markViewed(id);
   }
 
+  function markOpenChatRead() {
+    if (selectedId) void sessions.markViewed(selectedId);
+  }
+
   async function afterMutation() {
     await sessions.load();
   }
@@ -278,6 +282,8 @@
 <div
   class="chat-surface"
   bind:this={surfaceEl}
+  onpointerdown={markOpenChatRead}
+  onfocusin={markOpenChatRead}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={onDrop}
