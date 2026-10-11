@@ -173,6 +173,40 @@ def _has_tool_call_markup(content: str) -> bool:
     return bool(content) and _TOOL_CALL_MARKUP.search(_CODE_MARKUP.sub("", content)) is not None
 
 
+# A single response holding this many characters of one whitespace run, or of one
+# short chunk repeated back to back, is a degenerate loop, not output. Real
+# content (long reports, tables, code) never gets near it. Not a length cap.
+_RUNAWAY_MIN_CHARS = 5000
+_RUNAWAY_CHECK_STRIDE = 1000
+_WHITESPACE_RUN = re.compile(rf"\s{{{_RUNAWAY_MIN_CHARS},}}")
+_MAX_CHUNK = 256
+_REPEATED_CHUNK = re.compile(rf"(.{{1,{_MAX_CHUNK}}}?)\1+", re.DOTALL)
+
+
+class RunawayOutputError(Exception):
+    """A streamed response degenerated into a whitespace run or a repeated chunk."""
+
+    def __init__(self, reason: str, content: str):
+        super().__init__(reason)
+        self.reason = reason
+        self.content = content
+
+
+def _find_runaway(content: str) -> Optional[tuple[str, int]]:
+    """Return (reason, start offset) of a degenerate run in the tail of `content`."""
+    window_start = max(0, len(content) - (_RUNAWAY_MIN_CHARS + _MAX_CHUNK + _RUNAWAY_CHECK_STRIDE))
+    window = content[window_start:]
+    if m := _WHITESPACE_RUN.search(window):
+        return f"a whitespace run of at least {_RUNAWAY_MIN_CHARS} characters", window_start + m.start()
+    tail = window[-_MAX_CHUNK:]
+    # Prefilter: skip the regex unless the tail text occurred earlier in the window.
+    if window.find(tail) < len(window) - len(tail):
+        for m in _REPEATED_CHUNK.finditer(window):
+            if len(m.group(0)) >= _RUNAWAY_MIN_CHARS:
+                return f"one chunk repeated for at least {_RUNAWAY_MIN_CHARS} characters", window_start + m.start()
+    return None
+
+
 # Tags the runtime injects into the model's NEXT user message after executing
 # its code (the execution result, multi-block warning, and budget hints). A
 # well-behaved model never writes these itself; one that does is impersonating
@@ -230,6 +264,15 @@ def _build_unexecuted_tool_call_notice_xml() -> str:
         "nothing ran, and any result or count your response reported is not real. "
         "Call the tools from Python instead: re-emit the work as exactly one ```python-exec block."
         "</tsugite_unexecuted_tool_call_notice>"
+    )
+
+
+def _build_runaway_notice_xml(reason: str) -> str:
+    return (
+        "\n<tsugite_runaway_output_notice>"
+        f"Your response was cut off because it contained {reason}. "
+        "Nothing in it ran. Reply again with prose or exactly one ```python-exec block."
+        "</tsugite_runaway_output_notice>"
     )
 
 
@@ -480,7 +523,39 @@ class TsugiteAgent:
 
                 self._record_prompt_snapshot(messages, turn_num)
 
-                turn = await self._provider_turn(messages, turn_num, stream)
+                try:
+                    turn = await self._provider_turn(messages, turn_num, stream)
+                except RunawayOutputError as e:
+                    logger.warning("Aborted runaway response (step %d): %s", turn_num + 1, e.reason)
+                    aborted_text, _ = escape_runtime_injection_tags(e.content)
+                    last_response_text = aborted_text
+                    self._previous_turn_had_error = True
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            WarningEvent(
+                                message=f"Response aborted: it contained {e.reason}.",
+                                category="runaway_output",
+                                step=turn_num + 1,
+                            )
+                        )
+                    self.memory.add_step(
+                        thought="",
+                        code="",
+                        output="",
+                        error=e.reason,
+                        tools_called=[],
+                        raw_content=aborted_text,
+                        xml_observation=_build_runaway_notice_xml(e.reason),
+                    )
+                    self._record_model_response(
+                        turn_num,
+                        raw_content=aborted_text,
+                        parsed=ParsedResponse(thought=aborted_text, code=""),
+                        usage=None,
+                        cost=None,
+                        response=None,
+                    )
+                    continue
                 thought, code = turn.thought, turn.code
                 last_response_text = turn.response.content if turn.response else (thought or "")
 
@@ -855,11 +930,20 @@ class TsugiteAgent:
         chunks = await self._provider.acompletion(
             messages=messages, model=self._model_id, stream=True, **self._model_kwargs
         )
+        checked_len = 0
         async for chunk in chunks:
             if chunk.content:
                 content += chunk.content
                 if self.event_bus:
                     self.event_bus.emit(StreamChunkEvent(chunk=chunk.content))
+                if len(content) - checked_len >= _RUNAWAY_CHECK_STRIDE:
+                    checked_len = len(content)
+                    if runaway := _find_runaway(content):
+                        reason, start = runaway
+                        await chunks.aclose()
+                        if self.event_bus:
+                            self.event_bus.emit(StreamCompleteEvent())
+                        raise RunawayOutputError(reason, content[:start])
             if getattr(chunk, "reasoning_content", ""):
                 reasoning += chunk.reasoning_content
                 if self.event_bus:
