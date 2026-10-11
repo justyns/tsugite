@@ -3,6 +3,7 @@
 import io
 import json
 from contextlib import contextmanager
+from email.message import Message
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
@@ -31,6 +32,20 @@ def stub_daemon(reply=b"{}", error=None):
 
 def sent(urlopen):
     return urlopen.call_args[0][0]
+
+
+@contextmanager
+def stub_chat(body: bytes, content_type="text/event-stream"):
+    resp = io.BytesIO(body)
+    resp.headers = Message()
+    resp.headers["Content-Type"] = content_type
+    with patch("tsugite.daemon_client.urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = resp
+        yield urlopen
+
+
+def sse(*events):
+    return b": keepalive\n\n" + b"".join(f"data: {json.dumps(e)}\n\n".encode() for e in (*events, {"type": "done"}))
 
 
 def test_env_url_and_token_apply_without_arguments(monkeypatch):
@@ -123,6 +138,40 @@ def test_unreachable_daemon_raises_connection_error():
         DaemonClient("127.0.0.1", 1).list_jobs()
     assert "127.0.0.1:1" in str(exc.value)
     assert exc.value.status is None
+
+
+def test_chat_stream_yields_events_until_done():
+    events = [{"type": "init", "agent": "a"}, {"type": "final_result", "result": "hi"}]
+    with stub_chat(sse(*events)) as urlopen:
+        got = list(DaemonClient().chat_stream("hello", session_id="s1"))
+    assert got == events
+    req = sent(urlopen)
+    assert (req.get_method(), req.full_url.endswith("/api/chat")) == ("POST", True)
+    assert json.loads(req.data) == {"message": "hello", "session_id": "s1"}
+
+
+def test_chat_returns_final_result():
+    with stub_chat(sse({"type": "thought", "content": "x"}, {"type": "final_result", "result": "hi"})):
+        assert DaemonClient().chat("hello")["result"] == "hi"
+
+
+def test_chat_raises_on_error_event():
+    with (
+        stub_chat(sse({"type": "error", "error": "model exploded", "step": 1})),
+        pytest.raises(DaemonError, match="model exploded"),
+    ):
+        DaemonClient().chat("hello")
+
+
+def test_chat_raises_without_final_result():
+    with stub_chat(sse({"type": "cancelled"})), pytest.raises(DaemonError, match="without a final result"):
+        DaemonClient().chat("hello")
+
+
+def test_chat_returns_queue_receipt_for_busy_session():
+    receipt = {"status": "queued", "queue_id": "q-1", "position": 1}
+    with stub_chat(json.dumps(receipt).encode(), "application/json"):
+        assert DaemonClient().chat("hello") == receipt
 
 
 def test_cli_reports_daemon_error_and_exits_1():

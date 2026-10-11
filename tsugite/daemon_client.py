@@ -12,7 +12,8 @@ them, the URL comes from TSUGITE_DAEMON_URL and the token from TSUGITE_DAEMON_TO
 
 import json
 import os
-from typing import Any, Optional
+from contextlib import contextmanager
+from typing import Any, Iterator, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
@@ -53,6 +54,19 @@ class DaemonClient:
         timeout: float = 10,
     ) -> Any:
         """Send one request and return the decoded JSON body (None when empty)."""
+        with self._open(method, path, body, query, timeout) as resp:
+            raw = resp.read()
+        return json.loads(raw) if raw else None
+
+    @contextmanager
+    def _open(
+        self,
+        method: str,
+        path: str,
+        body: Optional[dict] = None,
+        query: Optional[dict] = None,
+        timeout: float = 10,
+    ) -> Iterator[Any]:
         url = self.base_url + path
         if query:
             url += "?" + urlencode(query)
@@ -65,16 +79,45 @@ class DaemonClient:
             headers["Content-Type"] = "application/json"
 
         try:
-            with urlopen(
-                Request(url, data=data, headers=headers, method=method),
-                timeout=timeout,
-            ) as resp:
-                raw = resp.read()
+            resp = urlopen(Request(url, data=data, headers=headers, method=method), timeout=timeout)
         except HTTPError as e:
             raise DaemonError(_error_message(e), e.code) from e
         except URLError as e:
             raise DaemonConnectionError(f"Could not connect to daemon at {self.base_url}: {e.reason}") from e
-        return json.loads(raw) if raw else None
+        with resp as r:
+            yield r
+
+    def chat_stream(self, message: str, **fields) -> Iterator[dict]:
+        """Yield the turn's events as they arrive, or the queue receipt when the session is busy.
+
+        Extra fields (session_id, user_id, reasoning_effort, uploaded_files, context_metadata)
+        pass through to POST /api/chat.
+        """
+        with self._open("POST", "/api/chat", {"message": message, **fields}, timeout=60) as resp:
+            if resp.headers.get_content_type() != "text/event-stream":
+                yield json.loads(resp.read())
+                return
+            for line in resp:
+                if not line.startswith(b"data: "):
+                    continue
+                event = json.loads(line[6:])
+                if event["type"] == "done":
+                    return
+                yield event
+
+    def chat(self, message: str, **fields) -> dict:
+        """Run one turn and return its final_result event, or the queue receipt when the session is busy."""
+        final = None
+        for event in self.chat_stream(message, **fields):
+            if event.get("status") == "queued":
+                return event
+            if event["type"] == "error":
+                raise DaemonError(event["error"])
+            if event["type"] == "final_result":
+                final = event
+        if final is None:
+            raise DaemonError("chat stream ended without a final result")
+        return final
 
     def list_chat_sessions(self) -> list[dict]:
         return self.request("GET", "/api/chat/sessions")["sessions"]
