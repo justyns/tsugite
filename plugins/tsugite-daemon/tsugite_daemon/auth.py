@@ -29,18 +29,16 @@ TOKENS_FILENAME = "tokens.json"
 SCOPE_SCRIPT_RUN = "script-run"
 
 # The only (method, path) pairs a scoped token may call. Every other route refuses it.
+# Named groups (schedule, session, job) are checked for ownership by the HTTP server.
 _SCOPE_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
     SCOPE_SCRIPT_RUN: tuple(
         (method, re.compile(pattern))
         for method, pattern in (
-            ("GET", r"/api/jobs/?"),
-            ("POST", r"/api/jobs/?"),
-            ("GET", r"/api/jobs/[^/]+"),
-            ("POST", r"/api/jobs/[^/]+/cancel"),
-            ("GET", r"/api/schedules/?"),
-            ("GET", r"/api/schedules/[^/]+"),
-            ("POST", r"/api/schedules/[^/]+/run"),
-            ("GET", r"/api/sessions(/.*)?"),
+            ("GET", r"/api/schedules/(?P<schedule>[^/]+)"),
+            ("GET", r"/api/schedules/(?P<schedule>[^/]+)/sessions"),
+            ("GET", r"/api/sessions/(?P<session>[^/]+)"),
+            ("GET", r"/api/sessions/(?P<session>[^/]+)/events"),
+            ("GET", r"/api/jobs/(?P<job>[^/]+)"),
         )
     ),
 }
@@ -56,10 +54,12 @@ class Token:
     expires_at: str | None = None  # ISO format, None = never
     scope: str | None = None  # None = full API; else a key of _SCOPE_ROUTES
 
-    def allows(self, method: str, path: str) -> bool:
-        if self.scope is None:
-            return True
-        return any(m == method and pat.fullmatch(path) for m, pat in _SCOPE_ROUTES[self.scope])
+    def route_params(self, method: str, path: str) -> dict[str, str] | None:
+        """Path ids of the scoped route a request hits, or None if the scope refuses it."""
+        for m, pat in _SCOPE_ROUTES[self.scope]:
+            if m == method and (match := pat.fullmatch(path)):
+                return match.groupdict()
+        return None
 
 
 class TokenStore:

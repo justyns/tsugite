@@ -1,5 +1,6 @@
 """Script schedules that opt in get a scoped, per-run daemon token in their env."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,35 +11,55 @@ from tsugite_daemon.auth import SCOPE_SCRIPT_RUN, TokenStore
 from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.scheduler import ScheduleEntry
 from tsugite_daemon.session_runner import SessionRunner
-from tsugite_daemon.session_store import SessionStore
+from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 from tsugite_daemon.webhook_store import WebhookStore
 
+OWN_SCHEDULE = "nightly"
+OWN_SESSION = "sess-own"
+OTHER_SESSION = "sess-other"
+OWN_JOB = "job-own"
+OTHER_JOB = "job-other"
+OTHER_JOB_UNKNOWN_SESSION = "job-orphan"
+
 ALLOWED = [
-    ("GET", "/api/jobs"),
-    ("POST", "/api/jobs"),
-    ("GET", "/api/jobs/job-1"),
-    ("POST", "/api/jobs/job-1/cancel"),
-    ("GET", "/api/schedules"),
-    ("GET", "/api/schedules/nightly"),
-    ("POST", "/api/schedules/nightly/run"),
-    ("GET", "/api/sessions"),
-    ("GET", "/api/sessions/sess-1"),
-    ("GET", "/api/sessions/sess-1/events"),
+    ("GET", f"/api/schedules/{OWN_SCHEDULE}"),
+    ("GET", f"/api/schedules/{OWN_SCHEDULE}/sessions"),
+    ("GET", f"/api/sessions/{OWN_SESSION}"),
+    ("GET", f"/api/sessions/{OWN_SESSION}/events"),
+    ("GET", f"/api/jobs/{OWN_JOB}"),
+]
+
+OTHERS_RECORDS = [
+    ("GET", "/api/schedules/other"),
+    ("GET", "/api/schedules/other/sessions"),
+    ("GET", f"/api/sessions/{OTHER_SESSION}"),
+    ("GET", f"/api/sessions/{OTHER_SESSION}/events"),
+    ("GET", "/api/sessions/no-such-session"),
+    ("GET", f"/api/jobs/{OTHER_JOB}"),
+    ("GET", f"/api/jobs/{OTHER_JOB_UNKNOWN_SESSION}"),
+    ("GET", "/api/jobs/no-such-job"),
 ]
 
 FORBIDDEN = [
+    ("GET", "/api/jobs"),
+    ("POST", "/api/jobs"),
+    ("GET", "/api/schedules"),
     ("POST", "/api/schedules"),
-    ("PATCH", "/api/schedules/nightly"),
-    ("DELETE", "/api/schedules/nightly"),
-    ("POST", "/api/schedules/nightly/enable"),
-    ("POST", "/api/schedules/nightly/disable"),
+    ("POST", f"/api/schedules/{OWN_SCHEDULE}/run"),
+    ("PATCH", f"/api/schedules/{OWN_SCHEDULE}"),
+    ("DELETE", f"/api/schedules/{OWN_SCHEDULE}"),
+    ("POST", f"/api/schedules/{OWN_SCHEDULE}/enable"),
+    ("POST", f"/api/schedules/{OWN_SCHEDULE}/disable"),
     ("POST", "/api/schedules/cleanup"),
-    ("GET", "/api/schedules/nightly/sessions"),
-    ("POST", "/api/jobs/job-1/retry"),
-    ("POST", "/api/jobs/job-1/mark-done"),
+    ("GET", "/api/sessions"),
+    ("GET", f"/api/sessions/{OWN_SESSION}/metadata"),
+    ("GET", f"/api/sessions/{OWN_SESSION}/settings"),
+    ("POST", f"/api/jobs/{OWN_JOB}/cancel"),
+    ("POST", f"/api/jobs/{OWN_JOB}/retry"),
+    ("POST", f"/api/jobs/{OWN_JOB}/mark-done"),
     ("POST", "/api/sessions"),
-    ("PATCH", "/api/sessions/sess-1"),
-    ("POST", "/api/sessions/sess-1/cancel"),
+    ("PATCH", f"/api/sessions/{OWN_SESSION}"),
+    ("POST", f"/api/sessions/{OWN_SESSION}/cancel"),
     ("POST", "/api/daemon/reload-config"),
     ("POST", "/api/secrets/anything"),
     ("GET", "/api/secrets"),
@@ -69,6 +90,19 @@ def client(tmp_path, token_store):
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
         token_store=token_store,
     )
+    store = adapter.session_store
+    for sid, parent in ((OWN_SESSION, OWN_SCHEDULE), (OTHER_SESSION, "other")):
+        store.create_session(Session(id=sid, source=SessionSource.SCHEDULE.value, user_id="u", parent_id=parent))
+    jobs = {
+        job_id: SimpleNamespace(parent_session_id=session_id, to_payload=lambda: {})
+        for job_id, session_id in (
+            (OWN_JOB, OWN_SESSION),
+            (OTHER_JOB, OTHER_SESSION),
+            (OTHER_JOB_UNKNOWN_SESSION, "gone"),
+        )
+    }
+    server.session_runner = SessionRunner(store=store, adapter=None)
+    server.jobs_orchestrator = SimpleNamespace(get_job=jobs.get)
     return TestClient(server.app)
 
 
@@ -77,14 +111,20 @@ def _call(client, method, path, token):
 
 
 @pytest.mark.parametrize("method,path", ALLOWED)
-def test_run_token_reaches_its_scoped_routes(client, token_store, method, path):
-    token = token_store.issue(schedule_id="s", scope=SCOPE_SCRIPT_RUN)
+def test_run_token_reaches_its_own_records(client, token_store, method, path):
+    token = token_store.issue(schedule_id=OWN_SCHEDULE, scope=SCOPE_SCRIPT_RUN)
     assert _call(client, method, path, token).status_code not in (401, 403)
+
+
+@pytest.mark.parametrize("method,path", OTHERS_RECORDS)
+def test_run_token_is_refused_other_schedules_records(client, token_store, method, path):
+    token = token_store.issue(schedule_id=OWN_SCHEDULE, scope=SCOPE_SCRIPT_RUN)
+    assert _call(client, method, path, token).status_code == 403
 
 
 @pytest.mark.parametrize("method,path", FORBIDDEN)
 def test_run_token_is_refused_everywhere_else(client, token_store, method, path):
-    token = token_store.issue(schedule_id="s", scope=SCOPE_SCRIPT_RUN)
+    token = token_store.issue(schedule_id=OWN_SCHEDULE, scope=SCOPE_SCRIPT_RUN)
     assert _call(client, method, path, token).status_code == 403
 
 

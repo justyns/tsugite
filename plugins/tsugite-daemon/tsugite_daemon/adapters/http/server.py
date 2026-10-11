@@ -34,7 +34,9 @@ from tsugite_daemon.adapters.http.terminals import TerminalsMixin
 from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
 from tsugite_daemon.adapters.http.workspace_files import WorkspaceFilesMixin
+from tsugite_daemon.auth import Token
 from tsugite_daemon.config import HTTPConfig
+from tsugite_daemon.session_store import SessionSource
 from tsugite_daemon.webhook_store import WebhookStore
 
 
@@ -134,7 +136,7 @@ class HTTPServer(
 
         if token and self._token_store:
             t = self._token_store.resolve(token)
-            if t and not t.allows(request.method, path):
+            if t and not self._token_permits(t, request.method, path):
                 logger.warning("auth forbidden (%s) %s %s", t.identity, request.method, path)
                 return JSONResponse({"error": "forbidden"}, status_code=403)
             if t:
@@ -146,6 +148,29 @@ class HTTPServer(
         else:
             logger.warning("auth failed (no token) path=%s", path)
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    def _token_permits(self, token: Token, method: str, path: str) -> bool:
+        """Route scope plus ownership: a scoped token reaches only records of its own schedule."""
+        if token.scope is None:
+            return True
+        params = token.route_params(method, path)
+        if params is None:
+            return False
+        schedule_id = token.identity.removeprefix("schedule:")
+        if "schedule" in params:
+            return params["schedule"] == schedule_id
+        if "job" in params:
+            job = self.jobs_orchestrator.get_job(params["job"]) if self.jobs_orchestrator else None
+            if job is None:
+                return False
+            params = {"session": job.parent_session_id}
+        if "session" in params and self.session_runner:
+            try:
+                session = self.session_runner.store.get_session(params["session"])
+            except ValueError:
+                return False
+            return session.source == SessionSource.SCHEDULE.value and session.parent_id == schedule_id
+        return not params
 
     def _get_adapter(self, request: Request) -> tuple[Optional[HTTPAgentAdapter], Optional[JSONResponse]]:
         """Authenticate the request and hand back the daemon's adapter.
