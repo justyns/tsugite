@@ -31,17 +31,15 @@ class TestAdminTokens:
         store = TokenStore(tmp_path / "tokens.json")
         _t, raw = store.create_admin_token(name="valid-test")
 
-        valid, identity = store.validate(raw)
-        assert valid is True
-        assert identity == "admin:valid-test"
+        tok = store.resolve(raw)
+        assert tok.identity == "admin:valid-test"
 
     def test_validate_invalid_token(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
         store.create_admin_token(name="test")
 
-        valid, identity = store.validate("tsu_bogus_token_value")
-        assert valid is False
-        assert identity == ""
+        tok = store.resolve("tsu_bogus_token_value")
+        assert tok is None
 
     def test_list_admin_tokens(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
@@ -58,8 +56,8 @@ class TestAdminTokens:
         _t, raw = store.create_admin_token(name="to-revoke")
 
         assert store.revoke_admin_token("to-revoke") is True
-        valid, _ = store.validate(raw)
-        assert valid is False
+        tok = store.resolve(raw)
+        assert tok is None
         assert len(store.list_admin_tokens()) == 0
 
     def test_revoke_admin_token_by_prefix(self, tmp_path):
@@ -67,8 +65,8 @@ class TestAdminTokens:
         t, raw = store.create_admin_token(name="prefix-test")
 
         assert store.revoke_admin_token(t.prefix) is True
-        valid, _ = store.validate(raw)
-        assert valid is False
+        tok = store.resolve(raw)
+        assert tok is None
 
     def test_revoke_nonexistent(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
@@ -96,9 +94,8 @@ class TestAdminTokens:
         t, raw = store.create_admin_token()
 
         assert t.identity == "admin:"
-        valid, identity = store.validate(raw)
-        assert valid is True
-        assert identity == "admin:"
+        tok = store.resolve(raw)
+        assert tok.identity == "admin:"
 
 
 class TestTempTokens:
@@ -107,31 +104,30 @@ class TestTempTokens:
         raw = store.issue(schedule_id="daily-report")
 
         assert raw.startswith("tsu_")
-        valid, identity = store.validate(raw)
-        assert valid is True
-        assert identity == "schedule:daily-report"
+        tok = store.resolve(raw)
+        assert tok.identity == "schedule:daily-report"
 
     def test_revoke_temp_token(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
         raw = store.issue(schedule_id="sched")
 
         store.revoke(raw)
-        valid, _ = store.validate(raw)
-        assert valid is False
+        tok = store.resolve(raw)
+        assert tok is None
 
     def test_temp_token_expiry(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
         raw = store.issue(schedule_id="sched", ttl=1)
 
-        valid, _ = store.validate(raw)
-        assert valid is True
+        tok = store.resolve(raw)
+        assert tok.identity == "schedule:sched"
 
         expired_time = datetime.now(timezone.utc) + timedelta(seconds=2)
         with patch("tsugite_daemon.auth.datetime") as mock_dt:
             mock_dt.now.return_value = expired_time
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            valid, _ = store.validate(raw)
-            assert valid is False
+            tok = store.resolve(raw)
+            assert tok is None
 
     def test_cleanup_expired(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
@@ -174,28 +170,27 @@ class TestCrossProcessVisibility:
         path = tmp_path / "tokens.json"
         daemon = TokenStore(path)
         _t, raw = daemon.create_admin_token(name="existing")
-        assert daemon.validate(raw)[0] is True
+        assert daemon.resolve(raw) is not None
 
         # Simulate `tsugite daemon token create` in another process
         cli = TokenStore(path)
         _t2, new_raw = cli.create_admin_token(name="fresh")
 
         # Daemon's running TokenStore picks up the new token on next validate
-        valid, identity = daemon.validate(new_raw)
-        assert valid is True
-        assert identity == "admin:fresh"
+        tok = daemon.resolve(new_raw)
+        assert tok.identity == "admin:fresh"
 
     def test_revoked_token_rejected_without_restart(self, tmp_path):
         path = tmp_path / "tokens.json"
         daemon = TokenStore(path)
         _t, raw = daemon.create_admin_token(name="doomed")
-        assert daemon.validate(raw)[0] is True
+        assert daemon.resolve(raw) is not None
 
         cli = TokenStore(path)
         cli.revoke_admin_token("doomed")
 
-        valid, _ = daemon.validate(raw)
-        assert valid is False
+        tok = daemon.resolve(raw)
+        assert tok is None
 
     def test_reload_preserves_in_memory_temp_tokens(self, tmp_path):
         path = tmp_path / "tokens.json"
@@ -205,10 +200,9 @@ class TestCrossProcessVisibility:
         cli = TokenStore(path)
         cli.create_admin_token(name="new-admin")
 
-        daemon.validate("unknown-token")
-        valid, identity = daemon.validate(temp_raw)
-        assert valid is True
-        assert identity == "schedule:sched"
+        daemon.resolve("unknown-token")
+        tok = daemon.resolve(temp_raw)
+        assert tok.identity == "schedule:sched"
 
 
 class TestMixedValidation:
@@ -217,13 +211,11 @@ class TestMixedValidation:
         _t, admin_raw = store.create_admin_token(name="admin")
         temp_raw = store.issue(schedule_id="sched")
 
-        valid, identity = store.validate(admin_raw)
-        assert valid is True
-        assert identity == "admin:admin"
+        tok = store.resolve(admin_raw)
+        assert tok.identity == "admin:admin"
 
-        valid, identity = store.validate(temp_raw)
-        assert valid is True
-        assert identity == "schedule:sched"
+        tok = store.resolve(temp_raw)
+        assert tok.identity == "schedule:sched"
 
     def test_revoked_admin_doesnt_affect_temp(self, tmp_path):
         store = TokenStore(tmp_path / "tokens.json")
@@ -232,12 +224,11 @@ class TestMixedValidation:
 
         store.revoke_admin_token("admin")
 
-        valid, _ = store.validate(admin_raw)
-        assert valid is False
+        tok = store.resolve(admin_raw)
+        assert tok is None
 
-        valid, identity = store.validate(temp_raw)
-        assert valid is True
-        assert identity == "schedule:sched"
+        tok = store.resolve(temp_raw)
+        assert tok.identity == "schedule:sched"
 
 
 class TestSqliteTokenStorage:
@@ -270,12 +261,12 @@ class TestSqliteTokenStorage:
         original = path.read_text()
 
         store = TokenStore(path)
-        valid, identity = store.validate("tsu_legacyraw")
-        assert valid is True and identity == "admin:old"
+        tok = store.resolve("tsu_legacyraw")
+        assert tok is not None and tok.identity == "admin:old"
 
         store.revoke_admin_token("old")
         assert path.read_text() == original, "legacy file stays as an untouched backup"
-        assert TokenStore(path).validate("tsu_legacyraw")[0] is False, "the db, not the stale JSON, is the authority"
+        assert TokenStore(path).resolve("tsu_legacyraw") is None, "the db, not the stale JSON, is the authority"
 
 
 class TestCliTokensPathResolution:
@@ -308,7 +299,7 @@ class TestConcurrentValidation:
         requests from many threads at once. The shared connection is not
         internally synchronized (see SqliteCollectionStorage), so an unguarded
         read can raise `sqlite3.InterfaceError: bad parameter or other API
-        misuse` mid-query; validate() then reports a perfectly good token as
+        misuse` mid-query; resolve() then reports a perfectly good token as
         invalid and the caller gets a spurious 401.
         """
         import concurrent.futures
@@ -317,10 +308,11 @@ class TestConcurrentValidation:
         _t, raw = store.create_admin_token(name="concurrent")
 
         def check(_):
-            return store.validate(raw)
+            t = store.resolve(raw)
+            return t and t.identity
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
             results = list(pool.map(check, range(400)))
 
-        bad = [r for r in results if r != (True, "admin:concurrent")]
+        bad = [r for r in results if r != "admin:concurrent"]
         assert not bad, f"{len(bad)} of {len(results)} concurrent validations rejected a valid token: {bad[:3]}"

@@ -177,11 +177,6 @@ class TokenStore:
 
     # --- Validation ---
 
-    def validate(self, token: str) -> tuple[bool, str]:
-        """Validate a token. Returns (valid, identity)."""
-        t = self.resolve(token)
-        return (True, t.identity) if t else (False, "")
-
     def resolve(self, token: str) -> Token | None:
         """Return the live Token for a raw value, or None if unknown or expired."""
         h = self._hash(token)
