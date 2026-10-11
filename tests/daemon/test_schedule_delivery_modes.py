@@ -433,6 +433,126 @@ class TestRepeatedFailureDelivery:
         assert [e for e in store.read_events(target.id) if e["type"] == "delivery"] == []
 
 
+class TestFailureCardRouting:
+    """The failure card can route apart from the routine output."""
+
+    @pytest.mark.asyncio
+    async def test_on_error_target_receives_the_card_while_routine_output_stays_silent(self, sched_adapter, store):
+        ops = store.create_session(Session(id="ops", source=SessionSource.INTERACTIVE.value, user_id=""))
+        entry = _entry(
+            target_session="none",
+            target_session_on_error=ops.id,
+            notify_on_failure=2,
+            consecutive_failures=2,
+        )
+
+        await sched_adapter._run_agent(entry)
+        assert _deliveries(store, ops.id) == []
+
+        sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
+        await _drain_tasks()
+
+        assert [c["kind"] for c in _deliveries(store, ops.id)] == ["needs_ack"]
+
+    @pytest.mark.asyncio
+    async def test_on_error_mode_opens_an_incident_for_the_card_only(self, sched_adapter, store):
+        chat = _chat(store)
+        entry = _entry(
+            originating_session_id=chat.id,
+            delivery_mode_on_error="new_session",
+            notify_on_failure=2,
+            consecutive_failures=2,
+        )
+
+        await sched_adapter._run_agent(entry)
+        assert len(_deliveries(store, chat.id)) == 1
+        assert _incident_sessions(store) == []
+
+        sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
+        await _drain_tasks()
+
+        incidents = _incident_sessions(store)
+        assert len(incidents) == 1
+        assert [c["kind"] for c in _deliveries(store, incidents[0].id)] == ["needs_ack"]
+        assert len(_deliveries(store, chat.id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_unset_on_error_fields_use_the_normal_ones(self, sched_adapter, store):
+        chat = _chat(store)
+        entry = _entry(originating_session_id=chat.id, notify_on_failure=2, consecutive_failures=2)
+
+        sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
+        await _drain_tasks()
+
+        assert [c["kind"] for c in _deliveries(store, chat.id)] == ["needs_ack"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sched_adapter",
+        [{"hook": NotificationChannelConfig(type="webhook", url="https://example.invalid/hook")}],
+        indirect=True,
+    )
+    async def test_failure_card_falls_back_to_notify_channels_without_a_session(self, sched_adapter, monkeypatch):
+        sent = []
+        monkeypatch.setattr(
+            "tsugite_daemon.adapters.scheduler_adapter.send_notification",
+            lambda message, channels, **kw: sent.append((message, [name for name, _ in channels])),
+        )
+        entry = _entry(target_session="none", notify=["hook"], notify_on_failure=2, consecutive_failures=2)
+
+        sched_adapter.scheduler._maybe_notify_repeated_failure(entry)
+        await _drain_tasks()
+
+        assert len(sent) == 1
+        assert "backup-watch" in sent[0][0]
+        assert sent[0][1] == ["hook"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "sched_adapter",
+        [{"hook": NotificationChannelConfig(type="webhook", url="https://example.invalid/hook")}],
+        indirect=True,
+    )
+    async def test_routine_output_without_a_session_does_not_notify(self, sched_adapter, monkeypatch):
+        sent = []
+        monkeypatch.setattr(
+            "tsugite_daemon.adapters.scheduler_adapter.send_notification", lambda *a, **k: sent.append(a)
+        )
+        entry = _entry(target_session="none", notify=["hook"])
+
+        await sched_adapter._deliver_result(
+            sched_adapter._adapter, entry, "ok", sched_adapter._resolve_channels(entry.notify)
+        )
+
+        assert sent == []
+
+    def test_on_error_fields_roundtrip_and_validate(self):
+        entry = _entry(target_session_on_error="primary", delivery_mode_on_error="auto")
+        restored = ScheduleEntry(**entry_to_dict(entry))
+        assert restored.target_session_on_error == "primary"
+        assert restored.delivery_mode_on_error == "auto"
+        with pytest.raises(ValueError, match="delivery_mode_on_error"):
+            _entry(delivery_mode_on_error="telepathy")
+
+    def test_tools_pass_and_clear_the_on_error_fields(self, mock_scheduler):
+        from tsugite.tools.schedule import schedule_create, schedule_update
+
+        result = schedule_create(
+            id="t1",
+            prompt="hi",
+            cron="0 9 * * *",
+            target_session_on_error="primary",
+            delivery_mode_on_error="new_session",
+        )
+        assert result["target_session_on_error"] == "primary"
+        assert result["delivery_mode_on_error"] == "new_session"
+
+        schedule_update(id="t1", target_session_on_error="", delivery_mode_on_error="auto")
+        kwargs = mock_scheduler.update.call_args.kwargs
+        assert kwargs["target_session_on_error"] is None
+        assert kwargs["delivery_mode_on_error"] == "auto"
+
+
 class TestScheduleTargetsTheCallingChat:
     """An agent in a chat can point a schedule at that chat without knowing its id."""
 

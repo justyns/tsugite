@@ -1120,6 +1120,34 @@ class TestSchedulesEndpoint:
         assert body["delivery_kind"] == "needs_ack"
         assert body["incident_key"] == "disk-2"
 
+    def test_update_accepts_on_error_delivery_fields(self, scheduler_client, test_token):
+        resp = scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"target_session_on_error": "primary", "delivery_mode_on_error": "new_session"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["target_session_on_error"] == "primary"
+        assert body["delivery_mode_on_error"] == "new_session"
+
+    def test_update_clears_on_error_fields_with_an_empty_string(self, scheduler_client, test_token):
+        headers = {"Authorization": f"Bearer {test_token}"}
+        scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"target_session_on_error": "primary", "delivery_mode_on_error": "new_session"},
+            headers=headers,
+        )
+        resp = scheduler_client.patch(
+            "/api/schedules/job1",
+            json={"target_session_on_error": "", "delivery_mode_on_error": ""},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["target_session_on_error"] is None
+        assert body["delivery_mode_on_error"] is None
+
     def test_create_does_not_require_a_daemon_agent(self, scheduler_client, test_token):
         """ScheduleEntry has no `agent` field, so demanding one only blocks the caller."""
         resp = scheduler_client.post(

@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -190,10 +191,15 @@ class SchedulerAdapter:
             f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n"
             f"{entry.last_error or 'No error was recorded.'}"
         )
+        routed = replace(
+            entry,
+            target_session=entry.target_session_on_error or entry.target_session,
+            delivery_mode=entry.delivery_mode_on_error or entry.delivery_mode,
+        )
         task = asyncio.create_task(
             self._deliver_result(
                 adapter,
-                entry,
+                routed,
                 message,
                 self._resolve_channels(entry.notify) if entry.notify else [],
                 source="schedule_failure",
@@ -614,13 +620,15 @@ class SchedulerAdapter:
         kind: str | None = None,
         title: str | None = None,
     ) -> None:
-        if not self._session_runner:
-            logger.debug("Schedule '%s' has no session runner; skipping delivery", entry.id)
-            return
-        recipients = self._delivery_recipients(adapter, entry, resolved_channels)
-        sessions = resolve_delivery_sessions(entry, recipients, adapter.session_store, adapter.event_bus)
+        sessions = []
+        if self._session_runner:
+            recipients = self._delivery_recipients(adapter, entry, resolved_channels)
+            sessions = resolve_delivery_sessions(entry, recipients, adapter.session_store, adapter.event_bus)
         if not sessions:
-            logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
+            if source == "schedule_failure" and resolved_channels:
+                await asyncio.to_thread(send_notification, f"**{title}**\n\n{truncated_result}", resolved_channels)
+            else:
+                logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
             return
         for session in sessions:
             try:

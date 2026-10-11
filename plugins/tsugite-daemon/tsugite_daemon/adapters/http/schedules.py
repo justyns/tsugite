@@ -113,10 +113,15 @@ class SchedulesMixin:
             "target_session",
             "delivery_mode",
             "delivery_kind",
+            "target_session_on_error",
+            "delivery_mode_on_error",
             "incident_key",
             "incident_title",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
+        for key in ("target_session", "target_session_on_error", "delivery_mode_on_error"):
+            if fields.get(key) == "":
+                fields[key] = None
         if "agent" in fields:
             fields["agent_file"] = fields.pop("agent")
         if not fields:

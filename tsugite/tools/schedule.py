@@ -95,6 +95,8 @@ def schedule_create(
     target_session: Optional[str] = None,
     delivery_mode: str = "existing_session",
     delivery_kind: str = "fyi",
+    target_session_on_error: Optional[str] = None,
+    delivery_mode_on_error: Optional[str] = None,
     incident_key: Optional[str] = None,
     incident_title: Optional[str] = None,
 ) -> dict:
@@ -136,6 +138,9 @@ def schedule_create(
             session, "auto" picks existing_session for fyi and new_session for needs_ack.
         delivery_kind: "fyi" (default) or "needs_ack". A needs_ack delivery flags the session as needing a reply
             and pings the configured notification channels.
+        target_session_on_error: target_session for the repeated-failure card (default: use target_session).
+            When no session resolves, the failure card goes to the notify channels.
+        delivery_mode_on_error: delivery_mode for the repeated-failure card (default: use delivery_mode).
         incident_key: Dedupe key so repeat firings of this schedule share one incident session instead of opening
             a new one each run.
         incident_title: Title for the incident session (default: "Incident: <id>").
@@ -188,6 +193,8 @@ def schedule_create(
         chain_depth=chain_depth,
         delivery_mode=delivery_mode,
         delivery_kind=delivery_kind,
+        target_session_on_error=target_session_on_error,
+        delivery_mode_on_error=delivery_mode_on_error,
         incident_key=incident_key,
         incident_title=incident_title,
     )
@@ -283,6 +290,8 @@ def schedule_update(
     target_session: Optional[str] = None,
     delivery_mode: Optional[str] = None,
     delivery_kind: Optional[str] = None,
+    target_session_on_error: Optional[str] = None,
+    delivery_mode_on_error: Optional[str] = None,
     incident_key: Optional[str] = None,
     incident_title: Optional[str] = None,
 ) -> dict:
@@ -308,6 +317,8 @@ def schedule_update(
         target_session: Routing target for the delivered result (optional). See schedule_create for legal forms. Set to empty string to clear (reverts to fallback chain).
         delivery_mode: New delivery mode (optional). See schedule_create for legal values.
         delivery_kind: New delivery kind (optional). See schedule_create for legal values.
+        target_session_on_error: New failure-card target (optional). Set to empty string to clear.
+        delivery_mode_on_error: New failure-card delivery mode (optional). Set to empty string to clear.
         incident_key: New incident dedupe key (optional). Set to empty string to clear.
         incident_title: New incident session title (optional). Set to empty string to clear.
 
@@ -347,6 +358,8 @@ def schedule_update(
         ("expires_at", expires_at),
         ("session_id", session_id),
         ("target_session", target_session),
+        ("target_session_on_error", target_session_on_error),
+        ("delivery_mode_on_error", delivery_mode_on_error),
         ("incident_key", incident_key),
         ("incident_title", incident_title),
     ]:

@@ -38,9 +38,13 @@ DELIVERY_MODE_AUTO = "auto"
 DELIVERY_MODES = (DELIVERY_MODE_EXISTING, DELIVERY_MODE_PARENT, DELIVERY_MODE_NEW, DELIVERY_MODE_AUTO)
 
 
-def validate_delivery(delivery_mode: str, delivery_kind: str) -> None:
-    if delivery_mode not in DELIVERY_MODES:
-        raise ValueError(f"delivery_mode must be one of {', '.join(DELIVERY_MODES)}, got '{delivery_mode}'")
+def validate_delivery(delivery_mode: str, delivery_kind: str, delivery_mode_on_error: str | None = None) -> None:
+    modes = (("delivery_mode", delivery_mode),)
+    if delivery_mode_on_error is not None:
+        modes += (("delivery_mode_on_error", delivery_mode_on_error),)
+    for field_name, value in modes:
+        if value not in DELIVERY_MODES:
+            raise ValueError(f"{field_name} must be one of {', '.join(DELIVERY_MODES)}, got '{value}'")
     if delivery_kind not in DELIVERY_KINDS:
         raise ValueError(f"delivery_kind must be one of {', '.join(DELIVERY_KINDS)}, got '{delivery_kind}'")
 
@@ -103,6 +107,9 @@ class ScheduleEntry:
     #   "auto"             -> existing_session for fyi, new_session for needs_ack
     delivery_mode: str = DELIVERY_MODE_EXISTING
     delivery_kind: str = DELIVERY_KIND_FYI
+    # Overrides for the repeated-failure card; None uses target_session / delivery_mode.
+    target_session_on_error: str | None = None
+    delivery_mode_on_error: str | None = None
     # Dedupe key so repeat firings of one monitor share a single incident session.
     incident_key: str | None = None
     incident_title: str | None = None
@@ -134,7 +141,7 @@ class ScheduleEntry:
             raise ValueError("prompt required for session_message execution type")
         if self.execution_type == EXECUTION_SESSION_MESSAGE and self.target_session in (None, TARGET_SESSION_NONE):
             raise ValueError("target_session required for session_message execution type")
-        validate_delivery(self.delivery_mode, self.delivery_kind)
+        validate_delivery(self.delivery_mode, self.delivery_kind, self.delivery_mode_on_error)
 
 
 _PERSISTED_FIELDS = frozenset(f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True))
@@ -517,7 +524,7 @@ class Scheduler:
                 raise ValueError(f"Invalid expires_at '{entry.expires_at}': {e}") from e
         if not isinstance(entry.daemon_token, bool):
             raise ValueError(f"daemon_token must be a boolean, got {entry.daemon_token!r}")
-        validate_delivery(entry.delivery_mode, entry.delivery_kind)
+        validate_delivery(entry.delivery_mode, entry.delivery_kind, entry.delivery_mode_on_error)
         if entry.agent_file and self._validate_agent_file:
             self._validate_agent_file(entry.agent_file)
         next_run = self._compute_next_run_iso(entry)  # raises ValueError on bad timezone
