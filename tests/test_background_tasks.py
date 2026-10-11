@@ -263,6 +263,19 @@ def _make_discord_channel(user_id="123456789", bot="my-bot") -> NotificationChan
     return NotificationChannelConfig(type="discord", user_id=user_id, bot=bot)
 
 
+_tmp_dir: Path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_schedules_dir(tmp_path):
+    global _tmp_dir
+    _tmp_dir = tmp_path
+
+
+def _schedules_path() -> Path:
+    return _tmp_dir / "schedules.json"
+
+
 def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tuple[SchedulerAdapter, MagicMock]:
     mock_adapter = MagicMock()
     mock_adapter.agent_name = "bot"
@@ -270,7 +283,7 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
     return (
         SchedulerAdapter(
             adapter=mock_adapter,
-            schedules_path=Path("/tmp/test-schedules.json"),
+            schedules_path=_schedules_path(),
             notification_channels=notification_channels or {},
             identity_map=identity_map or {},
         ),

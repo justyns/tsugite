@@ -27,20 +27,22 @@ class TestBuildCommand:
         idx = cmd.index("--bind")
         assert cmd[idx + 1] == "/home/user/project"
 
-    def test_network_unshare(self):
+    def test_network_unshare(self, tmp_path):
         config = SandboxConfig()
         sandbox = BubblewrapSandbox(
             config=config,
             proxy_socket=Path("/tmp/proxy.sock"),
+            state_dir=tmp_path,
         )
         cmd = sandbox.build_command(["python3", "harness.py"])
         assert "--unshare-net" in cmd
 
-    def test_proxy_socket_binding(self):
+    def test_proxy_socket_binding(self, tmp_path):
         config = SandboxConfig()
         sandbox = BubblewrapSandbox(
             config=config,
             proxy_socket=Path("/tmp/proxy.sock"),
+            state_dir=tmp_path,
         )
         cmd = sandbox.build_command(["python3", "harness.py"])
         # Proxy socket should be bound to /run/proxy.sock
@@ -52,11 +54,12 @@ class TestBuildCommand:
         )
         assert proxy_bound
 
-    def test_proxy_env_vars(self):
+    def test_proxy_env_vars(self, tmp_path):
         config = SandboxConfig()
         sandbox = BubblewrapSandbox(
             config=config,
             proxy_socket=Path("/tmp/proxy.sock"),
+            state_dir=tmp_path,
         )
         cmd = sandbox.build_command(["python3", "harness.py"])
         setenv_indices = [i for i, v in enumerate(cmd) if v == "--setenv"]
@@ -64,6 +67,16 @@ class TestBuildCommand:
         https_proxy_set = any(cmd[i + 1] == "HTTPS_PROXY" for i in setenv_indices if i + 1 < len(cmd))
         assert http_proxy_set
         assert https_proxy_set
+
+    def test_proxy_scripts_written_to_state_dir(self, tmp_path):
+        sandbox = BubblewrapSandbox(
+            config=SandboxConfig(),
+            proxy_socket=Path("/tmp/proxy.sock"),
+            state_dir=tmp_path,
+        )
+        sandbox.build_command(["python3", "harness.py"])
+        assert (tmp_path / "_bridge.py").exists()
+        assert (tmp_path / "_ssh_proxy.py").exists()
 
     def test_ssh_proxy_command(self):
         with tempfile.TemporaryDirectory() as tmpdir:

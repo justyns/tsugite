@@ -40,6 +40,19 @@ def mock_session_runner(session_store):
     return runner
 
 
+_tmp_dir: Path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_schedules_dir(tmp_path):
+    global _tmp_dir
+    _tmp_dir = tmp_path
+
+
+def _schedules_path() -> Path:
+    return _tmp_dir / "schedules.json"
+
+
 def _make_sa(session_runner=None) -> tuple[SchedulerAdapter, MagicMock]:
     mock_adapter = MagicMock()
     mock_adapter.agent_name = "bot"
@@ -47,7 +60,7 @@ def _make_sa(session_runner=None) -> tuple[SchedulerAdapter, MagicMock]:
     mock_adapter.resolve_model = MagicMock(return_value="test-model")
     sa = SchedulerAdapter(
         adapter=mock_adapter,
-        schedules_path=Path("/tmp/test-schedules.json"),
+        schedules_path=_schedules_path(),
     )
     if session_runner:
         sa.set_session_runner(session_runner)

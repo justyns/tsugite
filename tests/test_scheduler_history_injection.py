@@ -46,6 +46,19 @@ class TestInjectHistoryField:
         assert entry.inject_history is True
 
 
+_tmp_dir: Path
+
+
+@pytest.fixture(autouse=True)
+def _isolated_schedules_dir(tmp_path):
+    global _tmp_dir
+    _tmp_dir = tmp_path
+
+
+def _schedules_path() -> Path:
+    return _tmp_dir / "schedules.json"
+
+
 def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tuple[SchedulerAdapter, MagicMock]:
     """Create a SchedulerAdapter with a mock agent adapter."""
     mock_adapter = MagicMock()
@@ -53,12 +66,18 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
     return (
         SchedulerAdapter(
             adapter=mock_adapter,
-            schedules_path=Path("/tmp/test-schedules.json"),
+            schedules_path=_schedules_path(),
             notification_channels=notification_channels or {},
             identity_map=identity_map or {},
         ),
         mock_adapter,
     )
+
+
+class TestStoreLocation:
+    def test_store_opens_next_to_schedules_path(self, tmp_path):
+        _make_scheduler_adapter()
+        assert (tmp_path / "daemon.db").exists()
 
 
 class TestResultDelivery:
