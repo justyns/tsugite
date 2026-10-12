@@ -35,10 +35,12 @@ def sent(urlopen):
 
 
 @contextmanager
-def stub_chat(body: bytes, content_type="text/event-stream"):
+def stub_chat(body: bytes, content_type="text/event-stream", session_id=None):
     resp = io.BytesIO(body)
     resp.headers = Message()
     resp.headers["Content-Type"] = content_type
+    if session_id:
+        resp.headers["X-Session-Id"] = session_id
     with patch("tsugite.daemon_client.urlopen") as urlopen:
         urlopen.return_value.__enter__.return_value = resp
         yield urlopen
@@ -84,7 +86,8 @@ def test_create_job_posts_json():
     with stub_daemon(b'{"id": "job-1"}') as urlopen:
         job = DaemonClient().create_job("me", "do it", repo="r")
     req = sent(urlopen)
-    assert (req.get_method(), req.full_url.endswith("/api/jobs")) == ("POST", True)
+    assert req.get_method() == "POST"
+    assert req.full_url.endswith("/api/jobs")
     assert json.loads(req.data) == {"user_id": "me", "task": "do it", "repo": "r"}
     assert req.get_header("Content-type") == "application/json"
     assert job == {"id": "job-1"}
@@ -146,8 +149,20 @@ def test_chat_stream_yields_events_until_done():
         got = list(DaemonClient().chat_stream("hello", session_id="s1"))
     assert got == events
     req = sent(urlopen)
-    assert (req.get_method(), req.full_url.endswith("/api/chat")) == ("POST", True)
+    assert req.get_method() == "POST"
+    assert req.full_url.endswith("/api/chat")
     assert json.loads(req.data) == {"message": "hello", "session_id": "s1"}
+
+
+def test_chat_stream_starts_with_the_session_id():
+    with stub_chat(sse({"type": "final_result", "result": "hi"}), session_id="s-new"):
+        got = list(DaemonClient().chat_stream("hello"))
+    assert got[0] == {"type": "session", "session_id": "s-new"}
+
+
+def test_chat_result_carries_the_session_id():
+    with stub_chat(sse({"type": "final_result", "result": "hi"}), session_id="s-new"):
+        assert DaemonClient().chat("hello") == {"type": "final_result", "result": "hi", "session_id": "s-new"}
 
 
 def test_chat_returns_final_result():

@@ -90,6 +90,7 @@ class DaemonClient:
     def chat_stream(self, message: str, **fields) -> Iterator[dict]:
         """Yield the turn's events as they arrive, or the queue receipt when the session is busy.
 
+        A streamed turn starts with a `session` event carrying the session id the daemon ran it in.
         Extra fields (session_id, user_id, reasoning_effort, uploaded_files, context_metadata)
         pass through to POST /api/chat.
         """
@@ -97,6 +98,9 @@ class DaemonClient:
             if resp.headers.get_content_type() != "text/event-stream":
                 yield json.loads(resp.read())
                 return
+            session_id = resp.headers.get("X-Session-Id")
+            if session_id:
+                yield {"type": "session", "session_id": session_id}
             for line in resp:
                 if not line.startswith(b"data: "):
                     continue
@@ -106,18 +110,21 @@ class DaemonClient:
                 yield event
 
     def chat(self, message: str, **fields) -> dict:
-        """Run one turn and return its final_result event, or the queue receipt when the session is busy."""
-        final = None
+        """Run one turn and return its final_result event with `session_id` added, or the queue
+        receipt when the session is busy."""
+        final, session_id = None, None
         for event in self.chat_stream(message, **fields):
             if event.get("status") == "queued":
                 return event
-            if event["type"] == "error":
+            if event["type"] == "session":
+                session_id = event["session_id"]
+            elif event["type"] == "error":
                 raise DaemonError(event["error"])
             if event["type"] == "final_result":
                 final = event
         if final is None:
             raise DaemonError("chat stream ended without a final result")
-        return final
+        return {**final, "session_id": session_id} if session_id else final
 
     def list_chat_sessions(self) -> list[dict]:
         return self.request("GET", "/api/chat/sessions")["sessions"]
