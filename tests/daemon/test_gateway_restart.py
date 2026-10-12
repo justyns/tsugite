@@ -116,6 +116,16 @@ class TestDrain:
         assert gateway.restart_requested
 
     @pytest.mark.asyncio
+    async def test_a_second_request_starts_no_second_drain(self, gateway):
+        gateway._http_server._active_chats["chat-1"] = object()
+        before = asyncio.all_tasks()
+
+        gateway.request_restart()
+        gateway.request_restart()
+
+        assert len(asyncio.all_tasks() - before) == 1
+
+    @pytest.mark.asyncio
     async def test_deadline_forces_the_shutdown(self, gateway):
         gateway._drain_deadline = 0
         gateway._http_server._active_chats["chat-1"] = object()

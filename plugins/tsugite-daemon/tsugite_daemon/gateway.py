@@ -516,6 +516,8 @@ class Gateway:
         `_active_chats` and only pops once its tool call returns, so awaiting the
         drain here would deadlock.
         """
+        if self.restart_requested:
+            return
         self.restart_requested = True
         logger.info("Restart requested; draining in-flight turns")
         asyncio.create_task(self._drain_then_shutdown())
