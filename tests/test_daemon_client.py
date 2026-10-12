@@ -160,14 +160,10 @@ def test_chat_stream_starts_with_the_session_id():
     assert got[0] == {"type": "session", "session_id": "s-new"}
 
 
-def test_chat_result_carries_the_session_id():
-    with stub_chat(sse({"type": "final_result", "result": "hi"}), session_id="s-new"):
+def test_chat_returns_final_result_with_the_session_id():
+    events = sse({"type": "thought", "content": "x"}, {"type": "final_result", "result": "hi"})
+    with stub_chat(events, session_id="s-new"):
         assert DaemonClient().chat("hello") == {"type": "final_result", "result": "hi", "session_id": "s-new"}
-
-
-def test_chat_returns_final_result():
-    with stub_chat(sse({"type": "thought", "content": "x"}, {"type": "final_result", "result": "hi"})):
-        assert DaemonClient().chat("hello")["result"] == "hi"
 
 
 def test_chat_raises_on_error_event():
