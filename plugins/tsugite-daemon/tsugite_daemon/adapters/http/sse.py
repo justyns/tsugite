@@ -254,6 +254,7 @@ class HTTPInteractionBackend:
         try:
             self._progress._emit("ask_user", payload)
             if not self._event.wait(timeout=self.TIMEOUT):
+                self._emit_answered("")
                 raise RuntimeError("Timed out waiting for user response (HTTP)")
             return self._response or ""
         finally:
@@ -270,11 +271,12 @@ class HTTPInteractionBackend:
             self._session_runner.clear_attention_ref(SOURCE_ASK, ask_id)
 
     def submit_response(self, response: str) -> None:
-        # Emit a durable ask_answered before releasing the blocked ask_user: a
-        # persisted ask_user with no matching ask_answered is what the UI
-        # re-renders as still-pending, so this is what clears it on reload.
         self._response = response
-        if self._ask_id is not None:
-            self._progress._emit("ask_answered", {"ask_id": self._ask_id, "answer": response})
-            self._ask_id = None
+        self._emit_answered(response)
         self._event.set()
+
+    def _emit_answered(self, answer: str) -> None:
+        # The UI re-renders a persisted ask_user with no matching ask_answered as pending.
+        if self._ask_id is not None:
+            self._progress._emit("ask_answered", {"ask_id": self._ask_id, "answer": answer})
+            self._ask_id = None

@@ -216,6 +216,22 @@ class TestHTTPInteractionBackend:
         with pytest.raises(RuntimeError, match="Timed out"):
             backend.ask_user("Quick?", "text")
 
+    def test_timeout_emits_ask_answered(self):
+        """A timed-out ask clears its prompt in the UI instead of leaving it answerable."""
+        from tsugite_daemon.adapters.http import HTTPInteractionBackend, SSEProgressHandler
+
+        progress = MagicMock(spec=SSEProgressHandler)
+        backend = HTTPInteractionBackend(progress)
+        backend.TIMEOUT = 0.05
+
+        with pytest.raises(RuntimeError, match="Timed out"):
+            backend.ask_user("Quick?", "text")
+
+        asked = next(c for c in progress._emit.call_args_list if c.args[0] == "ask_user")
+        answered = [c for c in progress._emit.call_args_list if c.args[0] == "ask_answered"]
+        assert len(answered) == 1
+        assert answered[0].args[1]["ask_id"] == asked.args[1]["ask_id"]
+
     def test_timeout_pops_from_pending_registry(self):
         """A timed-out ask must not leak an entry in the pending registry."""
         from tsugite_daemon.adapters.http.sse import _PENDING_ASKS, HTTPInteractionBackend, SSEProgressHandler
