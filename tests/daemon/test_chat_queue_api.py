@@ -453,3 +453,36 @@ class TestAQueuedTurnRunsLikeADirectSend:
 
         assert adapter.handle_message.await_count == 0
         assert [e["text"] for e in adapter.session_store.get_session(sid).queued_messages] == ["after the restart"]
+
+
+@pytest.mark.asyncio
+class TestSendingToAFinishedSession:
+    def _finished(self, adapter, sid, *, source, status, resumable):
+        adapter.session_store.create_session(
+            Session(id=sid, source=source, user_id="u1", status=status, resumable=resumable)
+        )
+        return sid
+
+    async def test_a_completed_resumable_background_session_takes_the_send(self, adapter, client):
+        sid = self._finished(adapter, "s-bg", source=SessionSource.BACKGROUND.value, status="completed", resumable=True)
+
+        resp = await _send(client, sid, "one more thing")
+
+        assert resp.status_code == 200
+        await _wait_until(lambda: "one more thing" in _sent_messages(adapter))
+
+    async def test_a_completed_session_that_is_not_resumable_is_rejected(self, adapter, client):
+        sid = self._finished(adapter, "s-web", source=SessionSource.WEB.value, status="completed", resumable=False)
+
+        resp = await _send(client, sid, "one more thing")
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "session_finished"
+
+    async def test_a_failed_resumable_session_is_rejected(self, adapter, client):
+        sid = self._finished(adapter, "s-bad", source=SessionSource.BACKGROUND.value, status="failed", resumable=True)
+
+        resp = await _send(client, sid, "one more thing")
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "session_finished"

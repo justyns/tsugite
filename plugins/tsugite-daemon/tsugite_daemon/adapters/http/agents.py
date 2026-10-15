@@ -1059,7 +1059,7 @@ class AgentsMixin:
 
         context_metadata = body.get("context_metadata")
 
-        from tsugite_daemon.session_store import FINISHED_STATUSES, SessionSource
+        from tsugite_daemon.session_store import SessionSource
 
         target_session = None
         if session_id:
@@ -1067,9 +1067,9 @@ class AgentsMixin:
                 target_session = adapter.session_store.get_session(session_id)
             except ValueError:
                 target_session = None
-            if target_session is not None and target_session.status in FINISHED_STATUSES:
+            if target_session is not None and not target_session.is_reachable:
                 successor = adapter.session_store.resolve_compacted_successor(session_id)
-                if successor is not None and successor.status not in FINISHED_STATUSES:
+                if successor is not None and successor.is_reachable:
                     target_session = successor
                 else:
                     return JSONResponse(
