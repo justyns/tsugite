@@ -738,6 +738,27 @@ class TestSpecResolution:
         assert len(warning_events) == 1
         assert str(missing) in warning_events[0].message
 
+    def test_optional_spec_attachment_missing_is_silent(self, tmp_path, warning_events):
+        present = tmp_path / "present.md"
+        present.write_text("here")
+        missing = tmp_path / "gone.md"
+
+        atts, _ = resolve_agent_config_attachments(
+            [AttachmentSpec(path=str(present), optional=True), AttachmentSpec(path=str(missing), optional=True)]
+        )
+
+        assert [a.content for a in atts] == ["here"]
+        assert warning_events == []
+
+    def test_builtin_default_agent_attachments_are_silent_in_an_empty_workspace(self, tmp_path, warning_events):
+        config = parse_agent_file(Path(__file__).parent.parent / "tsugite" / "builtin_agents" / "default.md").config
+        template_vars = {"WORKSPACE_DIR": str(tmp_path)}
+
+        atts, _ = resolve_agent_config_attachments(config.attachments, tmp_path, template_vars)
+
+        assert atts == []
+        assert warning_events == []
+
     def test_missing_string_attachment_warns(self, tmp_path, warning_events):
         present = tmp_path / "present.md"
         present.write_text("here")

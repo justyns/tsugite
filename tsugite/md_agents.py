@@ -57,6 +57,7 @@ class AttachmentSpec(BaseModel):
     name: Optional[str] = None
     assign: Optional[str] = None
     attach: bool = True
+    optional: bool = False  # a missing file is skipped without a warning
     index_format: Literal["path_only", "first_line", "first_heading", "frontmatter"] = "first_heading"
     max_entries: int = 50
     # Cache tier this attachment belongs to (0 = first/most-stable block). Set by

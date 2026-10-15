@@ -46,6 +46,11 @@
           "title": "Attach",
           "type": "boolean"
         },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
         "index_format": {
           "default": "first_heading",
           "enum": [
@@ -60,6 +65,11 @@
         "max_entries": {
           "default": 50,
           "title": "Max Entries",
+          "type": "integer"
+        },
+        "tier": {
+          "default": 0,
+          "title": "Tier",
           "type": "integer"
         }
       },

@@ -6,9 +6,17 @@ extends: none
 # volatile memory last, so a change to today's memory / now.md doesn't invalidate
 # the identity files' cache. A flat list would be one block; these are three.
 attachments:
-  - [PERSONA.md, SOUL.md, USER.md, IDENTITY.md, AGENTS.md]
-  - [MEMORY.md, "memory/{{ yesterday() }}.md", "memory/{{ date_format(now(), '%Y-%m') }}.md"]
-  - ["memory/{{ today() }}.md", notes/context/now.md, NOW.md]
+  - - {path: PERSONA.md, optional: true}
+    - {path: SOUL.md, optional: true}
+    - {path: USER.md, optional: true}
+    - {path: IDENTITY.md, optional: true}
+    - {path: AGENTS.md, optional: true}
+  - - {path: MEMORY.md, optional: true}
+    - {path: "memory/{{ yesterday() }}.md", optional: true}
+    - {path: "memory/{{ date_format(now(), '%Y-%m') }}.md", optional: true}
+  - - {path: "memory/{{ today() }}.md", optional: true}
+    - {path: notes/context/now.md, optional: true}
+    - {path: NOW.md, optional: true}
 max_turns: 10
 tools:
   - spawn_agent

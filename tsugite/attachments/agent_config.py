@@ -181,7 +181,7 @@ def _resolve_spec(
     if not resolved.exists():
         if spec.assign:
             bindings[spec.assign] = None
-        else:
+        elif not spec.optional:
             _warn_skipped(spec.path, f"not found: {resolved}")
         return
 
