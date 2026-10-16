@@ -662,7 +662,8 @@
             {#if href}
               <a class="t-origin" {href} data-testid={TESTID.chatTurnOrigin}>
                 <Icon name={ORIGIN_ICON[turn.origin.kind]} size={11} />
-                from {originLabel(turn.origin)}
+                {turn.origin.checkin ? 'progress note from' : 'from'}
+                {originLabel(turn.origin)}
               </a>
             {:else}
               <span class="t-origin" data-testid={TESTID.chatTurnOrigin}>

@@ -170,6 +170,7 @@ export interface TurnAttachment {
 export interface TurnOrigin {
   kind: 'session' | 'job' | 'schedule';
   id: string;
+  checkin?: true;
 }
 
 export interface Turn {
@@ -355,7 +356,8 @@ function parseOrigin(v: unknown): TurnOrigin | undefined {
   const from = str(channel.from_session);
   if (from) return { kind: 'session', id: from };
   const job = str(channel.job_id);
-  if (job) return { kind: 'job', id: job };
+  if (job)
+    return { kind: 'job', id: job, ...(channel.source === 'job_checkin' ? { checkin: true } : {}) };
   const schedule = str(channel.schedule_id);
   if (schedule) return { kind: 'schedule', id: schedule };
   return undefined;

@@ -139,6 +139,7 @@ class JobsMixin:
                 timeout_minutes=body.get("timeout_minutes") or 30,
                 max_attempts=body.get("max_attempts"),
                 notify_when=body.get("notify_when") or None,
+                notify_after_minutes=body.get("notify_after_minutes"),
                 spawned_by="user-slash",
                 executor=(body.get("executor") or "agent").strip() or "agent",
                 effort=body.get("effort") or None,

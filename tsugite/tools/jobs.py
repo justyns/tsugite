@@ -38,6 +38,7 @@ def spawn_job(
     agent: Optional[str] = None,
     max_attempts: Optional[int] = None,
     notify_when: Optional[str] = None,
+    notify_after_minutes: Optional[int] = None,
     executor: str = "agent",
     effort: Optional[str] = None,
     files: Optional[list[str]] = None,
@@ -88,6 +89,11 @@ def spawn_job(
             each notification adds a turn to the parent conversation. "all_done"
             replaces the per-job wake-up with one aggregate message, sent when the
             last of this session's active jobs finishes.
+        notify_after_minutes: Soft check-in. If the Job is not terminal this many
+            minutes after it first starts, you get one message with its state and
+            last activity; the Job keeps running. Independent of `notify_when` and
+            `timeout_minutes`. Use it instead of polling `get_job` on a long Job.
+            Must be at least 1.
         executor: Which registered executor produces the work. "agent" (default)
             spawns a tsugite worker session; a plugin may register others (e.g. a
             PTY-driven CLI). An unknown name is rejected.
@@ -161,6 +167,7 @@ def spawn_job(
             spawned_by="agent-tool",
             max_attempts=max_attempts,
             notify_when=notify_when,
+            notify_after_minutes=notify_after_minutes,
             sandbox_override=sandbox_override,
             executor=executor,
             effort=effort,

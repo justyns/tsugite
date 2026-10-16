@@ -157,6 +157,7 @@ class TestCreateJobHappyPath:
                     "notify_when": "done",
                     "model_ladder": "gpt|opus",
                     "timeout_minutes": 90,
+                    "notify_after_minutes": 20,
                     "setup": "make up",
                     "teardown": "make down",
                     "teardown_when": "on_failure",
@@ -171,6 +172,7 @@ class TestCreateJobHappyPath:
         assert call["notify_when"] == "done"
         assert call["model_ladder"] == ["gpt", "opus"]
         assert call["timeout_minutes"] == 90
+        assert call["notify_after_minutes"] == 20
 
     def test_minimal_body_defaults(self, client, test_token, server):
         with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
@@ -190,6 +192,7 @@ class TestCreateJobHappyPath:
         assert call["model_ladder"] is None
         assert call["effort"] is None
         assert call["notify_when"] is None
+        assert call["notify_after_minutes"] is None
 
 
 class TestCreateJobValidation:
@@ -214,3 +217,17 @@ class TestCreateJobValidation:
             )
         assert resp.status_code == 400
         assert "executor" in resp.json()["error"]
+
+    def test_zero_notify_after_minutes_is_400(self, server, test_token):
+        fake = _FakeOrchestrator(raise_exc=ValueError("notify_after_minutes must be at least 1, got 0"))
+        server.jobs_orchestrator = fake
+        c = TestClient(server.app)
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
+            resp = c.post(
+                "/api/jobs",
+                headers=_auth(test_token),
+                json={"agent": "test-agent", "user_id": "u1", "task": "x", "notify_after_minutes": 0},
+            )
+        assert resp.status_code == 400
+        assert "notify_after_minutes" in resp.json()["error"]
+        assert fake.calls[0]["notify_after_minutes"] == 0

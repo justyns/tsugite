@@ -1779,6 +1779,11 @@ describe('machine-origin user turns', () => {
     expect(t.turns[0]!.origin).toEqual({ kind: 'job', id: 'job-3f22' });
   });
 
+  it('marks a job check-in as a progress note', () => {
+    const t = buildTimeline(inbound({ source: 'job_checkin', job_id: 'job-3f22' }));
+    expect(t.turns[0]!.origin).toEqual({ kind: 'job', id: 'job-3f22', checkin: true });
+  });
+
   it('names the schedule behind a scheduled turn', () => {
     const t = buildTimeline(inbound({ source: 'scheduler', schedule_id: 'nightly' }));
     expect(t.turns[0]!.origin).toEqual({ kind: 'schedule', id: 'nightly' });

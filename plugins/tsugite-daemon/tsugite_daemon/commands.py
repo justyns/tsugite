@@ -176,6 +176,12 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None, se
             required=False,
         ),
         CommandParam(
+            "notify_after_minutes",
+            int,
+            "Wake the parent once if the job is still running after this many minutes",
+            required=False,
+        ),
+        CommandParam(
             "executor",
             str,
             "Which registered executor runs the job (default agent)",
@@ -202,6 +208,7 @@ async def cmd_job(
     agent: str | None = None,
     max_attempts: int | None = None,
     notify_when: str | None = None,
+    notify_after_minutes: int | None = None,
     executor: str | None = None,
     effort: str | None = None,
 ) -> str:
@@ -244,6 +251,7 @@ async def cmd_job(
             spawned_by="user-slash",
             max_attempts=max_attempts,
             notify_when=notify_when,
+            notify_after_minutes=notify_after_minutes,
             executor=executor or "agent",
             effort=effort,
         )

@@ -32,6 +32,7 @@ from tsugite_daemon.job_predicates import (
 )
 from tsugite_daemon.job_prompts import (
     _build_barrier_message,
+    _build_checkin_message,
     _build_followup_prompt,
     _build_hint_prompt,
     _build_notify_message,
@@ -134,13 +135,14 @@ class JobsOrchestrator:
         # xterm without a separate /api/terminals probe per tile.
         self._terminal_store = terminal_store
         self._timeout_handles: dict[str, asyncio.TimerHandle] = {}
+        self._checkin_handles: dict[str, asyncio.TimerHandle] = {}
         self._wrap_up_handles: dict[str, asyncio.TimerHandle] = {}
         # Strong refs to in-flight notify tasks; asyncio only weak-refs scheduled
         # tasks, so without this a notify could be GC'd mid-send.
         self._notify_tasks: set[asyncio.Task] = set()
-        # Terminal wake-ups held back because the owner was mid-turn, keyed by the
-        # owner's live session id and sent one per turn end.
-        self._held_notifies: dict[str, list[Job]] = {}
+        # Wake-ups held back because the owner was mid-turn, keyed by the owner's
+        # live session id and sent one per turn end. The bool marks a check-in.
+        self._held_notifies: dict[str, list[tuple[Job, bool]]] = {}
         # Strong refs to in-flight background tasks (e.g. offloaded worktree
         # prunes). Same GC rationale as _notify_tasks; also lets tests drain them.
         self._bg_tasks: set[asyncio.Task] = set()
@@ -230,7 +232,7 @@ class JobsOrchestrator:
     def shutdown(self) -> None:
         """Cancel pending timers and in-flight background tasks at daemon shutdown
         so they don't die with 'Task was destroyed but it is pending'."""
-        for handles in (self._timeout_handles, self._wrap_up_handles):
+        for handles in (self._timeout_handles, self._wrap_up_handles, self._checkin_handles):
             for handle in handles.values():
                 handle.cancel()
             handles.clear()
@@ -284,6 +286,7 @@ class JobsOrchestrator:
         spawned_by: str = "user-slash",
         max_attempts: Optional[int] = None,
         notify_when: Optional[str] = None,
+        notify_after_minutes: Optional[int] = None,
         sandbox_override: Optional[dict] = None,
         executor: str = "agent",
         effort: Optional[str] = None,
@@ -307,6 +310,9 @@ class JobsOrchestrator:
         notify_when: one of "done", "stuck", "errored", "terminal", "all_done",
             "never" (default). "all_done" replaces the per-job wake-up with a single
             aggregate one, fired when the owner session's last active job finalizes.
+        notify_after_minutes: delay from the first worker start to a single parent message,
+            sent only if the job is not terminal by then. Work continues after the
+            message, and a daemon restart drops the in-memory timer.
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
@@ -354,6 +360,12 @@ class JobsOrchestrator:
                 logger.warning("Unknown notify_when '%s'; coercing to 'never'", notify_when)
                 notify_when = "never"
             job_kwargs["notify_when"] = notify_when
+        if notify_after_minutes is not None:
+            if isinstance(notify_after_minutes, bool) or not isinstance(notify_after_minutes, int):
+                raise ValueError(f"notify_after_minutes must be an integer, got {notify_after_minutes!r}")
+            if notify_after_minutes < 1:
+                raise ValueError(f"notify_after_minutes must be at least 1, got {notify_after_minutes}")
+            job_kwargs["notify_after_minutes"] = notify_after_minutes
 
         # The parent's workspace root: relative --repo paths resolve against it,
         # and non-repo jobs persist it as their workspace anchor (see
@@ -622,6 +634,7 @@ class JobsOrchestrator:
         self._jobs.update_state(job_id, JobState.RUNNING.value)
         self._emit_job_event(self._jobs.get(job_id))
         self._schedule_timeout(job_id, timeout_minutes)
+        self._schedule_checkin(job_id)
 
     # ── Tile actions (called from HTTP /api/jobs/<id>/{cancel,mark-done,retry}) ──
 
@@ -1492,15 +1505,22 @@ class JobsOrchestrator:
         if task is not None:
             await asyncio.wait([task])
 
-    def _schedule_notify(self, job: Job) -> None:
+    def _schedule_notify(self, job: Job, checkin: bool = False) -> None:
         """Post a one-line wake-up message into the owner session so its agent
-        learns the Job finished. An owner mid-turn gets it when the turn ends.
+        learns the Job finished, or with `checkin` that it is still going. An owner
+        mid-turn gets it when the turn ends.
         Best-effort: errors are logged, not raised."""
         owner_id = self._owner_session_id(job)
         if self._turn_in_flight(owner_id):
-            self._held_notifies.setdefault(self._runner.live_id(owner_id), []).append(job)
+            self._held_notifies.setdefault(self._runner.live_id(owner_id), []).append((job, checkin))
             return
-        self._schedule_reply(job, _build_notify_message(job), source="job_complete")
+        self._send_notify(job, checkin)
+
+    def _send_notify(self, job: Job, checkin: bool, on_failed: Optional[Callable[[], None]] = None) -> None:
+        if checkin:
+            self._schedule_reply(job, _build_checkin_message(job), source="job_checkin", on_failed=on_failed)
+        else:
+            self._schedule_reply(job, _build_notify_message(job), source="job_complete", on_failed=on_failed)
 
     def on_turn_end(self, session_id: str) -> None:
         """Send the next held wake-up, else close the batch barriers the ending
@@ -1509,15 +1529,15 @@ class JobsOrchestrator:
         live_id = live(session_id)
         held = self._held_notifies.get(live_id)
         if held and not self._turn_in_flight(session_id):
-            job = held.pop(0)
-            self._schedule_reply(
-                job,
-                _build_notify_message(job),
-                source="job_complete",
-                on_failed=lambda: self.on_turn_end(session_id),
-            )
+            job, checkin = held.pop(0)
             if not held:
                 del self._held_notifies[live_id]
+            if checkin:
+                job = self._jobs.get(job.id)
+                if job.state in _TERMINAL_STATES:
+                    self.on_turn_end(session_id)
+                    return
+            self._send_notify(job, checkin, on_failed=lambda: self.on_turn_end(session_id))
             return
         self.close_batch_barrier(session_id)
         pending = [j for j in self._jobs.list_all() if j.notify_when == "all_done" and not j.barrier_notified]
@@ -1664,6 +1684,25 @@ class JobsOrchestrator:
         lead = self._wrap_up_lead(job_id, minutes)
         if lead:
             self._wrap_up_handles[job_id] = loop.call_later((minutes - lead) * 60, self._on_wrap_up, job_id, lead)
+
+    def _schedule_checkin(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if not job.notify_after_minutes:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("No running loop; skipping check-in schedule for job '%s'", job_id)
+            return
+        self._checkin_handles[job_id] = loop.call_later(job.notify_after_minutes * 60, self._on_checkin, job_id)
+
+    def _on_checkin(self, job_id: str) -> None:
+        """Wake the parent once with a still-running message. The job is untouched."""
+        self._checkin_handles.pop(job_id, None)
+        job = self._jobs.get(job_id)
+        if job.state in _TERMINAL_STATES:
+            return
+        self._schedule_notify(job, checkin=True)
 
     def _wrap_up_lead(self, job_id: str, timeout_minutes: int) -> int:
         """Minutes before the deadline this job's executor wants to be nudged to wrap

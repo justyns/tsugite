@@ -375,6 +375,18 @@ def test_spawn_job_passes_setup_and_teardown(monkeypatch, wire, real_store):
     assert (kw["setup"], kw["teardown"], kw["teardown_when"]) == ("make up", "make down", "on_success")
 
 
+def test_spawn_job_forwards_notify_after_minutes(monkeypatch, wire, real_store):
+    monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "p1")
+    job = _add(real_store, parent="p1", prompt="do x")
+    calls = []
+    monkeypatch.setattr(jobs_tool, "_call", lambda fn, **kw: calls.append(kw) or (job, Session(id="worker-1")))
+
+    jobs_tool.spawn_job(prompt="do x", notify_after_minutes=15)
+    jobs_tool.spawn_job(prompt="do x")
+
+    assert [kw["notify_after_minutes"] for kw in calls] == [15, None]
+
+
 def test_spawn_job_reports_the_job_state(monkeypatch, wire, real_store):
     """A job with setup stays queued, with no worker, until setup finishes."""
     monkeypatch.setattr("tsugite_daemon.session_runner.get_current_session_id", lambda: "p1")

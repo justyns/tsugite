@@ -129,6 +129,14 @@ def _build_notify_message(job: Job) -> str:
     return base
 
 
+def _build_checkin_message(job: Job) -> str:
+    status = "is waiting for input" if job.state == JobState.AWAITING_INPUT.value else "is still running"
+    base = f"Job {job.id} {status} after {job.notify_after_minutes} minutes: {_short_prompt(job.prompt)}"
+    if job.last_activity_at:
+        base += f" - last activity {job.last_activity_at}"
+    return base + f". Use get_job('{job.id}') for details."
+
+
 def _build_barrier_message(jobs: list[Job]) -> str:
     counts = Counter(job.state for job in jobs)
     breakdown = ", ".join(f"{n} {state}" for state, n in sorted(counts.items()))

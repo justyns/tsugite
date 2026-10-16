@@ -3068,3 +3068,165 @@ async def test_no_nudge_when_the_lead_is_disabled_or_covers_the_whole_phase(
 
     assert [t.delay for t in timers] == [30 * 60]
     assert job.id not in orchestrator._wrap_up_handles
+
+
+def _capture_replies(runner):
+    sent = []
+
+    async def fake_reply(session_id, message, source="session", metadata=None):
+        sent.append((session_id, message, source))
+        return "ok"
+
+    runner.reply_to_session = fake_reply
+    return sent
+
+
+def _seed_checkin_job(store, orchestrator, **fields):
+    job = store.add(Job(id="", parent_session_id="parent-1", prompt="long task", notify_after_minutes=15, **fields))
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    return store.get(job.id)
+
+
+@pytest.mark.asyncio
+async def test_checkin_is_armed_when_the_worker_starts(store, orchestrator):
+    job = _seed_checkin_job(store, orchestrator)
+    assert job.id in orchestrator._checkin_handles
+
+
+@pytest.mark.asyncio
+async def test_no_checkin_is_armed_without_notify_after_minutes(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner)
+    assert job.id not in orchestrator._checkin_handles
+
+
+@pytest.mark.asyncio
+async def test_checkin_wakes_the_parent_once_and_leaves_the_job_running(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    job = _seed_checkin_job(store, orchestrator, notify_when="never", last_activity_at="2026-01-01T00:00:00+00:00")
+
+    orchestrator._on_checkin(job.id)
+    await asyncio.sleep(0)
+
+    assert job.id not in orchestrator._checkin_handles
+    assert len(sent) == 1
+    session_id, message, source = sent[0]
+    assert session_id == "parent-1"
+    assert source == "job_checkin"
+    assert job.id in message and "is still running" in message and "15 minutes" in message
+    assert "2026-01-01T00:00:00" in message
+    assert "get_job" in message
+    after = store.get(job.id)
+    assert after.state == JobState.RUNNING.value
+    assert "worker-1" not in runner.cancelled
+
+
+@pytest.mark.asyncio
+async def test_checkin_fires_once_from_first_start_across_retries(store, runner, orchestrator, monkeypatch):
+    sent = _capture_replies(runner)
+    timers = _capture_timers(monkeypatch)
+    job = _seed_checkin_job(store, orchestrator, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "w1")
+    fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
+    orchestrator._finalize(store.get(job.id), JobState.STUCK, error="boom")
+    await orchestrator.retry_with_hint(job.id, hint="try Y")
+
+    checkins = [t for t in timers if t.callback == orchestrator._on_checkin]
+    assert len(checkins) == 1
+    assert checkins[0].delay == 15 * 60
+    assert not checkins[0].handle.cancel.called
+
+    checkins[0].callback(*checkins[0].args)
+    await asyncio.sleep(0)
+
+    assert [source for _, _, source in sent] == ["job_checkin"]
+
+
+@pytest.mark.asyncio
+async def test_checkin_says_an_awaiting_input_job_is_waiting(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    job = _seed_checkin_job(store, orchestrator)
+    store.update_state(job.id, JobState.AWAITING_INPUT.value)
+
+    orchestrator._on_checkin(job.id)
+    await asyncio.sleep(0)
+
+    message = sent[0][1]
+    assert "is waiting for input" in message
+    assert "running" not in message
+
+
+@pytest.mark.asyncio
+async def test_checkin_does_not_fire_after_the_job_finished(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    job = _seed_checkin_job(store, orchestrator)
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+
+    orchestrator._on_checkin(job.id)
+    await asyncio.sleep(0)
+
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_checkin_during_a_parent_turn_is_held_until_the_turn_ends(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    job = _seed_checkin_job(store, orchestrator)
+    runner.store.sessions["parent-1"].turn_in_flight = True
+
+    orchestrator._on_checkin(job.id)
+    await asyncio.sleep(0)
+    assert sent == []
+
+    runner.store.sessions["parent-1"].turn_in_flight = False
+    orchestrator.on_turn_end("parent-1")
+    await asyncio.sleep(0)
+
+    assert len(sent) == 1
+    _, message, source = sent[0]
+    assert "is still running" in message
+    assert source == "job_checkin"
+    assert orchestrator._held_notifies == {}
+
+
+@pytest.mark.asyncio
+async def test_held_checkin_is_dropped_when_the_job_finished_meanwhile(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    job = _seed_checkin_job(store, orchestrator)
+    runner.store.sessions["parent-1"].turn_in_flight = True
+    orchestrator._on_checkin(job.id)
+    await orchestrator.on_session_complete(_worker_session(job), "all done")
+
+    runner.store.sessions["parent-1"].turn_in_flight = False
+    orchestrator.on_turn_end("parent-1")
+    await asyncio.sleep(0)
+
+    assert sent == []
+    assert orchestrator._held_notifies == {}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_pending_checkins(store, orchestrator):
+    job = _seed_checkin_job(store, orchestrator)
+    handle = orchestrator._checkin_handles[job.id]
+
+    orchestrator.shutdown()
+
+    assert handle.cancelled()
+    assert orchestrator._checkin_handles == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes", ["5", 2.5, True])
+async def test_create_and_start_job_rejects_a_non_integer_notify_after_minutes(store, orchestrator, minutes):
+    with pytest.raises(ValueError, match="notify_after_minutes must be an integer"):
+        await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="x", notify_after_minutes=minutes)
+    assert store.list_active() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes", [0, -5])
+async def test_create_and_start_job_rejects_a_non_positive_notify_after_minutes(store, orchestrator, minutes):
+    with pytest.raises(ValueError, match="notify_after_minutes"):
+        await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="x", notify_after_minutes=minutes)
+    assert store.list_active() == []

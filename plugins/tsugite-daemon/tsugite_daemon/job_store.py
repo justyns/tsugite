@@ -156,6 +156,7 @@ class Job:
     # loader migrates legacy `notify=True` records to "terminal" before
     # construction.
     notify_when: Optional[str] = None
+    notify_after_minutes: Optional[int] = None
     # Maximum verifier rounds before the Job goes stuck. Overridable per-job via
     # /job --max-attempts or the spawn_job() tool.
     max_attempts: int = 3
@@ -237,6 +238,7 @@ class Job:
             "verify_attempts": self.verify_attempts,
             "max_attempts": self.max_attempts,
             "notify_when": self.notify_when,
+            "notify_after_minutes": self.notify_after_minutes,
             "error": self.error,
             "error_detail": self.error_detail,
             "pending_question": self.pending_question,
