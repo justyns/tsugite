@@ -213,6 +213,80 @@ async def test_barrier_reports_each_job_only_once(store, runner, orchestrator):
     assert first.id not in sent[1]["message"]
 
 
+@pytest.mark.asyncio
+async def test_barrier_does_not_refire_when_the_wakeup_turn_ends(store, runner, orchestrator):
+    """The reply returns only after the turn, and the turn's end re-closes the barrier."""
+    sent = []
+
+    async def reply_that_ends_its_turn(session_id, message, source="session", metadata=None):
+        sent.append(message)
+        orchestrator.close_batch_barrier(session_id)
+        await asyncio.sleep(0)
+        return "ok"
+
+    runner.reply_to_session = reply_that_ends_its_turn
+    job = _seed_batch(store, orchestrator, 1)[0]
+
+    await _finish(orchestrator, job)
+    await asyncio.sleep(0)
+
+    assert len(sent) == 1, "one batch must wake the parent once"
+    assert store.get(job.id).barrier_notified is True
+
+
+@pytest.mark.asyncio
+async def test_barrier_retries_a_wakeup_the_parent_never_took(store, runner, orchestrator):
+    results = iter([None, "ok"])
+    sent = []
+
+    async def reply(session_id, message, source="session", metadata=None):
+        sent.append(message)
+        return next(results)
+
+    runner.reply_to_session = reply
+    job = _seed_batch(store, orchestrator, 1)[0]
+
+    await _finish(orchestrator, job)
+    await asyncio.sleep(0)
+    assert store.get(job.id).barrier_notified is False, "a dropped wake-up must leave the batch unmarked"
+
+    orchestrator.close_batch_barrier("parent-1")
+    await asyncio.sleep(0)
+    assert len(sent) == 2
+    assert store.get(job.id).barrier_notified is True
+
+
+@pytest.mark.asyncio
+async def test_barrier_stays_unmarked_without_a_running_loop(store, runner, orchestrator, monkeypatch):
+    sent = _capture_replies(runner)
+    job = _seed_batch(store, orchestrator, 1)[0]
+    store.update_state(job.id, JobState.STUCK.value)
+
+    def no_loop():
+        raise RuntimeError("no running event loop")
+
+    monkeypatch.setattr(asyncio, "get_running_loop", no_loop)
+    orchestrator.close_batch_barrier("parent-1")
+
+    assert sent == []
+    assert store.get(job.id).barrier_notified is False
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_stuck_job_after_the_barrier_fired_sends_nothing_more(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    done, stuck = _seed_batch(store, orchestrator, 2)
+    await _finish(orchestrator, done)
+    store.update_state(stuck.id, JobState.STUCK.value)
+    orchestrator.close_batch_barrier("parent-1")
+    await asyncio.sleep(0)
+    assert len(sent) == 1
+
+    await orchestrator.cancel_job(stuck.id)
+    await asyncio.sleep(0)
+    assert len(sent) == 1, "cancelling a job the barrier already reported must not wake the parent again"
+
+
 # ── per-job notify_when is untouched ──
 
 
@@ -404,3 +478,28 @@ async def test_held_wake_ups_drain_when_the_parent_has_finished(store, runner, o
         await asyncio.sleep(0)
 
     assert orchestrator._held_notifies == {}
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_barrier_wake_up_unmarks_the_batch(store, runner, orchestrator):
+    started = asyncio.Event()
+
+    async def hang(session_id, message, source="session", metadata=None):
+        started.set()
+        await asyncio.Event().wait()
+
+    runner.reply_to_session = hang
+    jobs = _seed_batch(store, orchestrator, 2)
+
+    for job in jobs:
+        await _finish(orchestrator, job)
+    await started.wait()
+    assert all(store.get(j.id).barrier_notified for j in jobs)
+
+    tasks = list(orchestrator._notify_tasks)
+    for task in tasks:
+        task.cancel()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert all(isinstance(r, asyncio.CancelledError) for r in results)
+    assert [store.get(j.id).barrier_notified for j in jobs] == [False, False]

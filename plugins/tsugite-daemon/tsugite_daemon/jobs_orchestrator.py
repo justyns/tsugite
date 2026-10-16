@@ -1483,16 +1483,18 @@ class JobsOrchestrator:
             return
         batch.sort(key=lambda j: j.created_at or "")
 
-        def mark_batch_notified() -> None:
+        def unmark_batch() -> None:
             for member in batch:
-                self._jobs.update(member.id, barrier_notified=True)
+                self._jobs.update(member.id, barrier_notified=False)
 
+        for member in batch:
+            self._jobs.update(member.id, barrier_notified=True)
         self._schedule_reply(
             batch[-1],
             _build_barrier_message(batch),
             source="jobs_all_complete",
             metadata={"kind": "jobs_barrier"},
-            on_delivered=mark_batch_notified,
+            on_failed=unmark_batch,
         )
 
     def _parent_turn_in_flight(self, parent_session_id: str) -> bool:
@@ -1506,20 +1508,24 @@ class JobsOrchestrator:
         *,
         source: str,
         metadata: Optional[dict] = None,
-        on_delivered: Optional[Callable[[], None]] = None,
         on_failed: Optional[Callable[[], None]] = None,
     ) -> None:
         """Queue a wake-up for the parent.
 
-        `on_delivered` runs once the parent has actually taken the turn, so a
-        caller can record the wake-up only when it landed. `on_failed` runs when the
-        send raised or the parent had finished, because no turn will end to continue
-        the caller's chain. Best-effort: errors are logged, not raised.
+        `on_failed` runs when the wake-up did not land. Delivery cannot be awaited
+        because the reply returns after the whole turn, which can re-close the barrier first.
+        Best-effort: errors are logged, not raised.
         """
+
+        def fail() -> None:
+            if on_failed:
+                on_failed()
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             logger.debug("No running loop; skipping %s wake-up for job '%s'", source, job.id)
+            fail()
             return
         metadata = metadata or {"job_id": job.id, "kind": "job_notify"}
 
@@ -1531,10 +1537,12 @@ class JobsOrchestrator:
                     source=source,
                     metadata=metadata,
                 )
+            except asyncio.CancelledError:
+                fail()
+                raise
             except Exception:
                 logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
-                if on_failed:
-                    on_failed()
+                fail()
                 return
             if reply is None:
                 logger.warning(
@@ -1543,11 +1551,7 @@ class JobsOrchestrator:
                     job.id,
                     job.parent_session_id,
                 )
-                if on_failed:
-                    on_failed()
-                return
-            if on_delivered:
-                on_delivered()
+                fail()
 
         task = loop.create_task(_send())
         self._notify_tasks.add(task)
