@@ -13,7 +13,7 @@ attachments:
     - {path: AGENTS.md, optional: true}
   - - {path: MEMORY.md, optional: true}
     - {path: "memory/{{ yesterday() }}.md", optional: true}
-    - {path: "memory/{{ date_format(now(), '%Y-%m') }}.md", optional: true}
+    - {path: "memory/{{ date_format(datetime.now().replace(day=1) - timedelta(days=1), '%Y-%m') }}.md", optional: true}
   - - {path: "memory/{{ today() }}.md", optional: true}
     - {path: notes/context/now.md, optional: true}
     - {path: NOW.md, optional: true}

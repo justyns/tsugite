@@ -759,6 +759,25 @@ class TestSpecResolution:
         assert atts == []
         assert warning_events == []
 
+    def test_builtin_default_agent_attaches_last_months_summary(self, tmp_path):
+        from datetime import datetime
+
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 10, 16, 12, tzinfo=tz)
+
+        memory = tmp_path / "memory"
+        memory.mkdir()
+        (memory / "2026-09.md").write_text("september summary")
+        (memory / "2026-10.md").write_text("october summary")
+        config = parse_agent_file(Path(__file__).parent.parent / "tsugite" / "builtin_agents" / "default.md").config
+
+        with patch("tsugite.renderer.datetime", FrozenDatetime):
+            atts, _ = resolve_agent_config_attachments(config.attachments, tmp_path, {"WORKSPACE_DIR": str(tmp_path)})
+
+        assert [a.content for a in atts] == ["september summary"]
+
     def test_missing_string_attachment_warns(self, tmp_path, warning_events):
         present = tmp_path / "present.md"
         present.write_text("here")
