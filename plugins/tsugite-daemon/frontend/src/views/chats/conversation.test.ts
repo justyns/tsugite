@@ -250,6 +250,38 @@ test('an unanswered ask_user stays put while the turn is parked on the user', as
   expect(ctrl.ask?.answered).toBe(false);
 });
 
+test('an unanswered ask_user survives the turn that raised it ending with a final result', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('restart the daemon');
+  chat.handlers!.onEvent?.({
+    type: 'ask_user',
+    ask_id: 'ask-bg',
+    question: 'Restart the daemon?',
+    question_type: 'approval',
+    options: ['Approve', 'Deny'],
+  });
+  chat.handlers!.onEvent?.({ type: 'final_result', result: 'restarting' });
+  chat.handlers!.onDone?.();
+  expect(ctrl.ask?.askId).toBe('ask-bg');
+  expect(ctrl.ask?.answered).toBe(false);
+});
+
+test('an ask the backend closed on timeout clears on ask_answered before the final result', async () => {
+  const ctrl = controller([]);
+  await ctrl.send('restart the daemon');
+  chat.handlers!.onEvent?.({
+    type: 'ask_user',
+    ask_id: 'ask-bg',
+    question: 'Restart the daemon?',
+    question_type: 'approval',
+    options: ['Approve', 'Deny'],
+  });
+  chat.handlers!.onEvent?.({ type: 'ask_answered', ask_id: 'ask-bg', answer: '' });
+  chat.handlers!.onEvent?.({ type: 'final_result', result: 'timed out' });
+  chat.handlers!.onDone?.();
+  expect(ctrl.ask).toBeNull();
+});
+
 /** A pending ask state as the resync loader / live frame would set it. */
 function pendingAsk(askId = 'ask-1'): NonNullable<ConversationController['ask']> {
   return {

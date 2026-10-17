@@ -45,7 +45,7 @@ function sameAsk(a: string | undefined, b: string | undefined): boolean {
   return a == null || b == null || a === b;
 }
 
-const ASK_ORDER = ['session_complete', 'session_end', 'final_result'];
+const ASK_ORDER = ['session_complete', 'session_end'];
 
 /** Events fetched per page: the tail window on open and each "load earlier"
  *  chunk. Large enough that most conversations load whole (no affordance shown),
@@ -397,6 +397,12 @@ export class ConversationController {
       };
       return;
     }
+    if (
+      frame.type === 'ask_answered' &&
+      sameAsk(this.ask?.askId, frame.ask_id as string | undefined)
+    ) {
+      this.ask = null;
+    }
     if (frame.type === 'user_context') {
       // Live-only hint: fold the sending turn's server context split (attached +
       // detected items) into the in-flight optimistic bubble so its gutter shows
@@ -423,8 +429,8 @@ export class ConversationController {
     // the next frame the turn produces: an approval whose turn ends in an error, a
     // cancel, or a lost mobile stream never emits a final_result, so keying only off
     // ASK_ORDER left it stuck at the bottom forever. An UNANSWERED prompt clears only
-    // when the turn itself ends (session_end / final_result), never on a stray frame,
-    // since the turn is genuinely parked on the user.
+    // when the session ends: the turn is parked on the user, and a background ask
+    // (restart_daemon's approval) outlives its final_result.
     if (this.ask?.answered || ASK_ORDER.includes(frame.type)) this.ask = null;
     this.events = [...this.events, frame as Event];
   }
