@@ -35,13 +35,13 @@ _ACP_MODELS: dict[str, ModelInfo] = {
 
 _ALIASES: dict[str, str] = {
     "fable": "claude-fable-5-1",
-    "opus": "claude-opus-4-8",
+    "opus": "claude-opus-5-5",
     "opus-5-5": "claude-opus-5-5",
     "opus-5": "claude-opus-5",
     "opus-4-8": "claude-opus-4-8",
     "opus-4-7": "claude-opus-4-7",
     "opus-4-6": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-6",
+    "sonnet": "claude-sonnet-5-5",
     "sonnet-5-5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "haiku": "claude-haiku-5-5",

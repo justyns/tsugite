@@ -40,16 +40,12 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
 # --- END GENERATED MODELS (claude_code) --- #
 
 # Bare tier aliases track the newest model in that tier; version-pinned aliases
-# stay for reproducible configs. Exception: opus stays on 4-8. Opus 5's replies
-# through Claude Code's resume path can leave an empty assistant block that wedges
-# the sidecar transcript (400 "text content blocks must be non-empty"), and the
-# fresh-session fallback only covers the first send, so opus-5 and opus-5-5 are
-# opt-in via their pinned aliases until a mid-conversation poison recovers cleanly.
+# stay for reproducible configs.
 _ALIASES = {
     "fable": "claude-fable-5-1",
     "fable-5-1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",
-    "opus": "claude-opus-4-8",
+    "opus": "claude-opus-5-5",
     "opus-5-5": "claude-opus-5-5",
     "opus-5": "claude-opus-5",
     "opus-4-8": "claude-opus-4-8",
@@ -57,7 +53,7 @@ _ALIASES = {
     "opus-4-6": "claude-opus-4-6",
     "opus-4-5": "claude-opus-4-5",
     "opus-4-5-20251101": "claude-opus-4-5-20251101",
-    "sonnet": "claude-sonnet-5",
+    "sonnet": "claude-sonnet-5-5",
     "sonnet-5-5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "sonnet-4-6": "claude-sonnet-4-6",

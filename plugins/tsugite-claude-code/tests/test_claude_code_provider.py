@@ -27,8 +27,8 @@ class TestClaudeCodeModelParams:
         assert model == "claude-sonnet-4-6"
 
     def test_model_id_maps_short_names(self):
-        assert get_model_id("claude_code:sonnet") == "claude-sonnet-5"
-        assert get_model_id("claude_code:opus") == "claude-opus-4-8"
+        assert get_model_id("claude_code:sonnet") == "claude-sonnet-5-5"
+        assert get_model_id("claude_code:opus") == "claude-opus-5-5"
         assert get_model_id("claude_code:haiku") == "claude-haiku-5-5"
         assert get_model_id("claude_code:fable") == "claude-fable-5-1"
 

@@ -80,7 +80,7 @@ async def test_cmd_model_malformed_rejected_with_hint(tmp_path):
 
 @pytest.mark.asyncio
 async def test_cmd_model_set_alias_stored_raw_like_picker(tmp_path):
-    """A provider:alias form (opus -> claude-opus-4-8) is accepted and stored
+    """A provider:alias form (opus -> claude-opus-5-5) is accepted and stored
     VERBATIM, exactly as the picker's PATCH stores it, so downstream alias
     resolution stays identical (the command must not pre-resolve before storing)."""
     from tsugite.models import get_provider_and_model
@@ -90,7 +90,7 @@ async def test_cmd_model_set_alias_stored_raw_like_picker(tmp_path):
     await cmd_model(adapter=adapter, user_id="user-1", session_id="sess-open-chat", message="claude_code:opus")
     stored = store.get_model_override("sess-open-chat")
     assert stored == "claude_code:opus"  # raw alias kept, not the resolved id
-    assert get_provider_and_model(stored)[2] == "claude-opus-4-8"  # yet still resolvable
+    assert get_provider_and_model(stored)[2] == "claude-opus-5-5"  # yet still resolvable
 
 
 @pytest.mark.asyncio
