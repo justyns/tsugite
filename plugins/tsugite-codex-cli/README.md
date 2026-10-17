@@ -48,9 +48,9 @@ uv run tsu run examples/simple_variable_injection.md "say hi" --model codex_cli:
 ```
 
 Available models: `codex_cli:gpt-5.6-sol`, `codex_cli:gpt-5.6-terra`,
-`codex_cli:gpt-5.6-luna`, `codex_cli:gpt-5.5`, and `codex_cli:gpt-6-astra`.
-The 5.6 models add a `max` reasoning effort, and sol/terra and
-`gpt-6-astra` also accept `ultra`. Use `provider.list_models()` to discover what
+`codex_cli:gpt-5.6-luna`, `codex_cli:gpt-6-sol`, `codex_cli:gpt-6-luna`,
+`codex_cli:gpt-6-astra`, and `codex_cli:gpt-6.1-sol`. All accept a `max`
+reasoning effort, and the sol, terra and astra models also accept `ultra`. Use `provider.list_models()` to discover what
 your ChatGPT plan currently exposes; the plugin queries the Codex `/models`
 endpoint and falls back to the list above if that call fails.
 

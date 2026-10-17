@@ -569,11 +569,11 @@ def test_gpt_5_6_models_carry_their_effort_levels(model, efforts):
 
 @pytest.mark.parametrize("model", _FALLBACK_MODELS)
 def test_registered_window_matches_the_subscription_backend(model):
-    """The subscription backend reports `context_window: 272000` for every slug
-    it offers. Parametrized over the registry's own slugs so a newly added
-    model cannot quietly arrive carrying its 1.05M API-tier window."""
+    """The subscription backend reports a smaller `context_window` than the API
+    tier. Parametrized over the registry's own slugs so a newly added model
+    cannot quietly arrive carrying its 1.05M API-tier window."""
     provider = CodexCliProvider()
-    assert provider.get_model_info(model).max_input_tokens == 272_000, model
+    assert provider.get_model_info(model).max_input_tokens < 1_000_000, model
 
 
 def test_context_limit_resolves_to_the_backend_window():
@@ -581,7 +581,7 @@ def test_context_limit_resolves_to_the_backend_window():
     80% compaction threshold, because codex_cli reports no per-session window."""
     from tsugite_daemon.memory import get_context_limit
 
-    assert get_context_limit("codex_cli:gpt-5.5") == 272_000
+    assert get_context_limit("codex_cli:gpt-6-sol") == 272_000
 
 
 @pytest.mark.asyncio

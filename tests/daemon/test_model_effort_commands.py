@@ -201,7 +201,7 @@ async def test_cmd_effort_levels_are_model_dependent(tmp_path):
     validation, not the agent default (haiku, which does support 'max')."""
     adapter, store = _adapter(tmp_path)
     _session(store)
-    store.set_model_override("sess-open-chat", "codex_cli:gpt-5.5")
+    store.set_model_override("sess-open-chat", "openai:gpt-5.5")
     out = await cmd_effort(adapter=adapter, user_id="user-1", session_id="sess-open-chat")
     assert "xhigh" in out
     assert "max" not in out
