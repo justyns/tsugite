@@ -9,6 +9,7 @@ import KeepAliveHost from './__fixtures__/KeepAliveHost.svelte';
 import StoreDrivenHost from './__fixtures__/StoreDrivenHost.svelte';
 import { paramRuns } from './__fixtures__/ParamsProbe.svelte';
 import SizedMux from './__fixtures__/SizedMux.svelte';
+import CountedMux from './__fixtures__/CountedMux.svelte';
 import { mountCounts } from './__fixtures__/MountCounter.svelte';
 import PluginSurface from '$lib/components/plugins/PluginSurface.svelte';
 import { pluginsMeta, type PluginSurface as SurfaceDef } from '$lib/stores/pluginsMeta.svelte';
@@ -507,6 +508,37 @@ test('focusing a pane hands no surface a new params object', async () => {
     .toHaveAttribute('data-focused', 'true');
 
   expect(new Map(paramRuns)).toEqual(before);
+});
+
+// ── tree-shape changes vs remount ──
+
+test('closing the second pane of a split does not remount the surviving pane', async () => {
+  mountCounts.clear();
+  const base = seeded({ kind: 'chat', params: { id: 'chat' } });
+  const split = splitPane(base, base.root.id, 'row', { kind: 'artifact', params: { id: 'art' } });
+  const [chat, art] = collectLeaves(split.root);
+  const chatTab = chat!.tabs[0]!.id;
+  const screen = await render(CountedMux, { layout: split });
+  expect(mountCounts.get(chatTab)).toBe(1);
+
+  const closed = closeTab(split, art!.id, art!.tabs[0]!.id);
+  expect(closed.root.type).toBe('leaf');
+  await screen.rerender({ layout: closed });
+  await expect.poll(() => screen.container.querySelectorAll('[data-mounted]').length).toBe(1);
+  expect(mountCounts.get(chatTab)).toBe(1);
+});
+
+test('splitting beside a lone pane does not remount it', async () => {
+  mountCounts.clear();
+  const base = seeded({ kind: 'chat', params: { id: 'chat' } });
+  const chatTab = (base.root as LeafNode).tabs[0]!.id;
+  const screen = await render(CountedMux, { layout: base });
+  expect(mountCounts.get(chatTab)).toBe(1);
+
+  const split = splitPane(base, base.root.id, 'row', { kind: 'artifact', params: { id: 'art' } });
+  await screen.rerender({ layout: split });
+  await expect.poll(() => screen.container.querySelectorAll('[data-mounted]').length).toBe(2);
+  expect(mountCounts.get(chatTab)).toBe(1);
 });
 
 // ── dense panes ──

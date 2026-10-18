@@ -19,6 +19,9 @@
     content?: MuxContent;
   } & MuxHandlers = $props();
 
+  const split = $derived(node.type === 'split' ? node : null);
+  const children = $derived(split ? split.children : [node]);
+
   /** First pane's share of a divider's pair, as a whole percent for aria-valuenow. */
   function pairPct(sizes: number[], i: number): number {
     const a = sizes[i] ?? 0;
@@ -28,26 +31,39 @@
   }
 </script>
 
-{#if node.type === 'leaf'}
-  <PaneView pane={node} focused={node.id === focusedPaneId} {multiPane} {content} {...handlers} />
-{:else}
-  <div class="mux-split" class:is-col={node.dir === 'col'} role="group" aria-label="Split panes">
-    {#each node.children as child, i (child.id)}
-      <div class="mux-cell" style="--fr:{node.sizes[i]}">
-        <MuxNode node={child} {focusedPaneId} {multiPane} {content} {...handlers} />
-      </div>
-      {#if i < node.children.length - 1}
-        <Divider
-          dir={node.dir}
-          splitId={node.id}
-          index={i}
-          valueNow={pairPct(node.sizes, i)}
-          onResize={handlers.onResize}
+<!-- A lone leaf renders through the split wrapper so one keyed each keeps the pane's
+     component instance when the root flips between leaf and split. -->
+<div
+  class="mux-split"
+  class:is-col={split?.dir === 'col'}
+  role={split ? 'group' : undefined}
+  aria-label={split ? 'Split panes' : undefined}
+>
+  {#each children as child, i (child.id)}
+    <div class="mux-cell" style="--fr:{split ? split.sizes[i] : 1}">
+      {#if child.type === 'leaf'}
+        <PaneView
+          pane={child}
+          focused={child.id === focusedPaneId}
+          {multiPane}
+          {content}
+          {...handlers}
         />
+      {:else}
+        <MuxNode node={child} {focusedPaneId} {multiPane} {content} {...handlers} />
       {/if}
-    {/each}
-  </div>
-{/if}
+    </div>
+    {#if split && i < children.length - 1}
+      <Divider
+        dir={split.dir}
+        splitId={split.id}
+        index={i}
+        valueNow={pairPct(split.sizes, i)}
+        onResize={handlers.onResize}
+      />
+    {/if}
+  {/each}
+</div>
 
 <style>
   .mux-split {
