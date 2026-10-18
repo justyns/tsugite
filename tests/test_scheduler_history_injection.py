@@ -1,13 +1,15 @@
 """Tests for how a scheduled task's result reaches the user's sessions."""
 
+import asyncio
 from dataclasses import asdict
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
 from tsugite_daemon.config import NotificationChannelConfig
 from tsugite_daemon.scheduler import ScheduleEntry
+
+from tsugite.tools.notify import notify_user
 
 
 @pytest.fixture(autouse=True)
@@ -46,27 +48,16 @@ class TestInjectHistoryField:
         assert entry.inject_history is True
 
 
-_tmp_dir: Path
-
-
-@pytest.fixture(autouse=True)
-def _isolated_schedules_dir(tmp_path):
-    global _tmp_dir
-    _tmp_dir = tmp_path
-
-
-def _schedules_path() -> Path:
-    return _tmp_dir / "schedules.json"
-
-
-def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tuple[SchedulerAdapter, MagicMock]:
+def _make_scheduler_adapter(
+    tmp_path, identity_map=None, notification_channels=None
+) -> tuple[SchedulerAdapter, MagicMock]:
     """Create a SchedulerAdapter with a mock agent adapter."""
     mock_adapter = MagicMock()
     mock_adapter.agent_name = "bot"
     return (
         SchedulerAdapter(
             adapter=mock_adapter,
-            schedules_path=_schedules_path(),
+            schedules_path=tmp_path / "schedules.json",
             notification_channels=notification_channels or {},
             identity_map=identity_map or {},
         ),
@@ -76,20 +67,20 @@ def _make_scheduler_adapter(identity_map=None, notification_channels=None) -> tu
 
 class TestStoreLocation:
     def test_store_opens_next_to_schedules_path(self, tmp_path):
-        _make_scheduler_adapter()
+        _make_scheduler_adapter(tmp_path)
         assert (tmp_path / "daemon.db").exists()
 
 
 class TestResultDelivery:
-    def test_resolves_discord_identity(self):
-        sa, mock_adapter = _make_scheduler_adapter(identity_map={"discord:123456789": "alice"})
+    def test_resolves_discord_identity(self, tmp_path):
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path, identity_map={"discord:123456789": "alice"})
 
         recipients = sa._delivery_recipients(mock_adapter, _make_entry(), [("dm", _make_discord_channel())])
 
         assert recipients == ["alice"]
 
-    def test_falls_back_to_raw_id(self):
-        sa, mock_adapter = _make_scheduler_adapter()
+    def test_falls_back_to_raw_id(self, tmp_path):
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path)
 
         recipients = sa._delivery_recipients(
             mock_adapter, _make_entry(), [("dm", _make_discord_channel(user_id="999"))]
@@ -98,9 +89,9 @@ class TestResultDelivery:
         assert recipients == ["999"]
 
     @pytest.mark.asyncio
-    async def test_webhook_channel_routes_without_a_user(self):
+    async def test_webhook_channel_routes_without_a_user(self, tmp_path):
         """A webhook channel names no user, and neither does this schedule, so the target resolves with no user."""
-        sa, mock_adapter = _make_scheduler_adapter()
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path)
         sa.set_session_runner(MagicMock())
         target = MagicMock(id="routed-session")
 
@@ -114,9 +105,10 @@ class TestResultDelivery:
         assert sa._session_runner.deliver_to_session.call_args[0][0] == "routed-session"
 
     @pytest.mark.asyncio
-    async def test_inject_history_false_guard_in_run_agent(self):
+    async def test_inject_history_false_guard_in_run_agent(self, tmp_path):
         """inject_history=False delivers nothing."""
         sa, mock_adapter = _make_scheduler_adapter(
+            tmp_path,
             notification_channels={"dm": _make_discord_channel()},
             identity_map={"discord:123456789": "alice"},
         )
@@ -299,3 +291,95 @@ class TestResolveTargetSession:
         self._add_session(store, "orig-id")
         entry = _make_entry(target_session="primary", originating_session_id="orig-id")
         assert resolve_target_session(entry, "alice", store) is None
+
+
+class TestNotifyUserCard:
+    @pytest.mark.asyncio
+    async def test_notify_user_posts_an_fyi_card_in_the_delivery_session(self, tmp_path):
+        """notify_user in a scheduled run also lands a card in the schedule's session, not only on its channels."""
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path, notification_channels={"dm": _make_discord_channel()})
+        sa.set_session_runner(MagicMock())
+        target = MagicMock(id="routed-session")
+
+        async def handle_message(**_):
+            await asyncio.to_thread(notify_user, "found something")
+            return "done"
+
+        mock_adapter.handle_message = handle_message
+        entry = _make_entry(notify=["dm"], notify_tool=True, inject_history=False)
+
+        with (
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
+            patch("tsugite.tools.notify.send_notification", return_value={"dm": {"status": "sent"}}) as channel_send,
+            patch("tsugite_daemon.adapters.scheduler_adapter.resolve_delivery_sessions", return_value=[target]),
+            patch.object(sa, "_create_run_session", return_value=("run-1", False)),
+            patch.object(sa, "_update_run_session"),
+            patch.object(sa, "_handle_on_complete", new=AsyncMock()),
+            patch("tsugite_daemon.adapters.scheduler_adapter._recorded_run_outcome", return_value=("success", None)),
+        ):
+            await sa._run_agent(entry)
+
+        assert channel_send.call_args[0][0] == "found something"
+        deliver = sa._session_runner.deliver_to_session
+        deliver.assert_called_once()
+        assert deliver.call_args[0] == ("routed-session", "found something")
+        assert deliver.call_args[1]["kind"] == "fyi"
+        assert deliver.call_args[1]["source"] == "notify_user"
+
+    @pytest.mark.asyncio
+    async def test_notify_user_reports_failed_when_the_card_delivery_raises(self, tmp_path):
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path, notification_channels={"dm": _make_discord_channel()})
+        sa.set_session_runner(MagicMock())
+        sa._session_runner.deliver_to_session.side_effect = RuntimeError("bus down")
+        results = []
+
+        async def handle_message(**_):
+            results.append(await asyncio.to_thread(notify_user, "found something"))
+            return "done"
+
+        mock_adapter.handle_message = handle_message
+        entry = _make_entry(notify=["dm"], notify_tool=True, inject_history=False)
+
+        with (
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
+            patch("tsugite.tools.notify.send_notification", return_value={"dm": {"status": "sent"}}),
+            patch(
+                "tsugite_daemon.adapters.scheduler_adapter.resolve_delivery_sessions",
+                return_value=[MagicMock(id="routed-session")],
+            ),
+            patch.object(sa, "_create_run_session", return_value=("run-1", False)),
+            patch.object(sa, "_update_run_session"),
+            patch.object(sa, "_handle_on_complete", new=AsyncMock()),
+            patch("tsugite_daemon.adapters.scheduler_adapter._recorded_run_outcome", return_value=("success", None)),
+        ):
+            await sa._run_agent(entry)
+
+        assert results[0]["session"] == {"status": "failed", "error": "bus down"}
+
+    @pytest.mark.asyncio
+    async def test_notify_user_reports_only_the_session_when_the_run_has_no_channels(self, tmp_path):
+        sa, mock_adapter = _make_scheduler_adapter(tmp_path)
+        sa.set_session_runner(MagicMock())
+        results = []
+
+        async def handle_message(**_):
+            results.append(await asyncio.to_thread(notify_user, "found something"))
+            return "done"
+
+        mock_adapter.handle_message = handle_message
+        entry = _make_entry(notify=[], notify_tool=True, inject_history=False)
+
+        with (
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification"),
+            patch(
+                "tsugite_daemon.adapters.scheduler_adapter.resolve_delivery_sessions",
+                return_value=[MagicMock(id="routed-session")],
+            ),
+            patch.object(sa, "_create_run_session", return_value=("run-1", False)),
+            patch.object(sa, "_update_run_session"),
+            patch.object(sa, "_handle_on_complete", new=AsyncMock()),
+            patch("tsugite_daemon.adapters.scheduler_adapter._recorded_run_outcome", return_value=("success", None)),
+        ):
+            await sa._run_agent(entry)
+
+        assert results == [{"session": {"status": "sent"}}]

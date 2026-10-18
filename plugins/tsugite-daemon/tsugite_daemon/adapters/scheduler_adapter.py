@@ -456,7 +456,22 @@ class SchedulerAdapter:
 
         set_interaction_backend(NonInteractiveBackend())
 
-        ctx = notify_context(resolved_channels) if (entry.notify_tool and resolved_channels) else nullcontext()
+        ctx = (
+            notify_context(
+                resolved_channels,
+                on_notify=lambda message: self._deliver_to_sessions(
+                    adapter,
+                    entry,
+                    message,
+                    resolved_channels,
+                    source="notify_user",
+                    kind=DELIVERY_KIND_FYI,
+                    raise_errors=True,
+                ),
+            )
+            if entry.notify_tool
+            else nullcontext()
+        )
         try:
             with ctx:
                 result = await adapter.handle_message(
@@ -620,30 +635,60 @@ class SchedulerAdapter:
         kind: str | None = None,
         title: str | None = None,
     ) -> None:
+        delivered = await asyncio.to_thread(
+            self._deliver_to_sessions,
+            adapter,
+            entry,
+            truncated_result,
+            resolved_channels,
+            source=source,
+            kind=kind or entry.delivery_kind,
+            title=title or entry.incident_title,
+        )
+        if not delivered and source == "schedule_failure" and resolved_channels:
+            await asyncio.to_thread(send_notification, f"**{title}**\n\n{truncated_result}", resolved_channels)
+
+    def _deliver_to_sessions(
+        self,
+        adapter: BaseAdapter,
+        entry: ScheduleEntry,
+        message: str,
+        resolved_channels: list[tuple[str, NotificationChannelConfig]],
+        *,
+        source: str,
+        kind: str,
+        title: str | None = None,
+        raise_errors: bool = False,
+    ) -> bool:
+        """Sync, for a worker thread. Returns False when no session is targeted or every delivery failed.
+
+        A failed delivery is logged and skipped, or re-raised when `raise_errors` is set.
+        """
         sessions = []
         if self._session_runner:
             recipients = self._delivery_recipients(adapter, entry, resolved_channels)
             sessions = resolve_delivery_sessions(entry, recipients, adapter.session_store, adapter.event_bus)
         if not sessions:
-            if source == "schedule_failure" and resolved_channels:
-                await asyncio.to_thread(send_notification, f"**{title}**\n\n{truncated_result}", resolved_channels)
-            else:
-                logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
-            return
+            logger.debug("Schedule '%s' has no delivery target; skipping delivery", entry.id)
+            return False
+        delivered = False
         for session in sessions:
             try:
-                await asyncio.to_thread(
-                    self._session_runner.deliver_to_session,
+                self._session_runner.deliver_to_session(
                     session.id,
-                    truncated_result,
+                    message,
                     source=source,
-                    kind=kind or entry.delivery_kind,
-                    title=title or entry.incident_title,
+                    kind=kind,
+                    title=title,
                     metadata={"schedule_id": entry.id},
                     notify_channels=resolved_channels,
                 )
+                delivered = True
             except Exception as e:
+                if raise_errors:
+                    raise
                 logger.error("Delivery for schedule '%s' to session '%s' failed: %s", entry.id, session.id, e)
+        return delivered
 
     async def _handle_on_complete(self, entry: ScheduleEntry, result: str, run_session_id: str | None = None) -> None:
         """Handle on_complete callback after a background task finishes.

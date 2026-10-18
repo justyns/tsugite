@@ -65,3 +65,34 @@ def test_two_concurrent_runs_do_not_see_each_others_channels():
 
     assert seen["alice"] == [("alice-ntfy", None)], f"alice saw another run's channels: {seen['alice']}"
     assert seen["bob"] == [("bob-slack", None)], f"bob saw another run's channels: {seen['bob']}"
+
+
+def test_on_notify_runs_with_the_message_and_without_channels():
+    seen = []
+
+    with notify_context([], on_notify=lambda message: seen.append(message) or True):
+        result = _run_in_worker(lambda: notify_user("card only"))
+
+    assert seen == ["card only"]
+    assert result == {"session": {"status": "sent"}}
+
+
+def test_on_notify_without_a_target_reports_skipped():
+    with notify_context([], on_notify=lambda message: False):
+        result = _run_in_worker(lambda: notify_user("nobody home"))
+
+    assert result == {"session": {"status": "skipped"}}
+
+
+def test_on_notify_failure_still_sends_to_channels(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify_module, "send_notification", lambda msg, chans: sent.append(msg) or {"ok": True})
+
+    def broken_card(message):
+        raise RuntimeError("store down")
+
+    with notify_context([("discord", object())], on_notify=broken_card):
+        result = _run_in_worker(lambda: notify_user("disk is full"))
+
+    assert sent == ["disk is full"]
+    assert result == {"ok": True, "session": {"status": "failed", "error": "store down"}}

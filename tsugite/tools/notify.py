@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import logging
+from collections.abc import Callable
 from contextlib import contextmanager
 
 from . import tool
@@ -29,20 +30,25 @@ def set_notifier(callback, loop=None):
 # tool calls on a worker thread via copy_context().run(), which carries a
 # ContextVar across but leaves a threading.local behind.
 _channels: contextvars.ContextVar[list | None] = contextvars.ContextVar("notify_channels", default=None)
+_on_notify: contextvars.ContextVar[Callable[[str], bool] | None] = contextvars.ContextVar("on_notify", default=None)
 
 
 @contextmanager
-def notify_context(channel_configs):
+def notify_context(channel_configs, on_notify=None):
     """Set notification channels for the current agent run.
 
     Args:
         channel_configs: List of (name, NotificationChannelConfig) tuples
+        on_notify: Sync function(message) -> bool called for each notify_user call, in addition to the channels.
+            True means the session card was sent.
     """
-    token = _channels.set(channel_configs)
+    channels_token = _channels.set(channel_configs)
+    on_notify_token = _on_notify.set(on_notify)
     try:
         yield
     finally:
-        _channels.reset(token)
+        _on_notify.reset(on_notify_token)
+        _channels.reset(channels_token)
 
 
 def send_notification(message: str, channel_configs: list, url: str | None = None) -> dict:
@@ -88,10 +94,19 @@ def notify_user(message: str) -> dict:
         message: The notification message to send
 
     Returns:
-        Dict with delivery status per channel
+        Dict with delivery status per channel, plus a "session" status (sent, skipped or failed)
+        when the run also posts a session card
     """
     channels = _channels.get()
-    if not channels:
+    on_notify = _on_notify.get()
+    if not channels and not on_notify:
         return {"error": "No notification channels configured for this run"}
 
-    return send_notification(message, channels)
+    result = send_notification(message, channels) if channels else {}
+    if on_notify:
+        try:
+            result["session"] = {"status": "sent" if on_notify(message) else "skipped"}
+        except Exception as e:
+            logger.exception("notify_user session card failed")
+            result["session"] = {"status": "failed", "error": str(e)}
+    return result
