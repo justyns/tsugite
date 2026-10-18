@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { type Snippet, createRawSnippet, mount, unmount } from 'svelte';
 import Mux from './Mux.svelte';
 import { KEEP_ALIVE_MAX } from './PaneView.svelte';
+import { MIN_PANE_PX } from './place';
 import KeepAliveHost from './__fixtures__/KeepAliveHost.svelte';
 import StoreDrivenHost from './__fixtures__/StoreDrivenHost.svelte';
 import { paramRuns } from './__fixtures__/ParamsProbe.svelte';
@@ -143,7 +144,7 @@ test('keyboard resize on a divider shifts the split ratio (aria-valuenow)', asyn
 test('an empty pane offers a real open-a-surface action, not the impossible drag hint', async () => {
   const layout = defaultLayout();
   const onNewTab = vi.fn();
-  const { container } = await render(Mux, { layout, narrow: false, onNewTab });
+  const { container } = await render(SizedMux, { layout, onNewTab });
   // The old copy told the user to "drag a row onto a pane", but the app ships no
   // drag source, so that instruction was impossible to act on.
   expect(container.textContent).not.toMatch(/drag a row onto a pane/i);
@@ -539,6 +540,57 @@ test('splitting beside a lone pane does not remount it', async () => {
   await screen.rerender({ layout: split });
   await expect.poll(() => screen.container.querySelectorAll('[data-mounted]').length).toBe(2);
   expect(mountCounts.get(chatTab)).toBe(1);
+});
+
+test('closing a pane beside a nested pane does not remount the nested pane', async () => {
+  mountCounts.clear();
+  const base = seeded({ kind: 'chat', params: { id: 'a' } });
+  const row = splitPane(base, base.root.id, 'row', { kind: 'artifact', params: { id: 'b' } });
+  const [, b] = collectLeaves(row.root);
+  const nested = splitPane(row, b!.id, 'col', { kind: 'terminal', params: { id: 'c' } });
+  const [a, bb, c] = collectLeaves(nested.root);
+  const screen = await render(CountedMux, { layout: nested });
+  expect(screen.container.querySelectorAll('[data-mounted]').length).toBe(3);
+
+  const closed = closeTab(nested, c!.id, c!.tabs[0]!.id);
+  await screen.rerender({ layout: closed });
+  await expect.poll(() => screen.container.querySelectorAll('[data-mounted]').length).toBe(2);
+  expect(mountCounts.get(a!.tabs[0]!.id)).toBe(1);
+  expect(mountCounts.get(bb!.tabs[0]!.id)).toBe(1);
+});
+
+test('splitting a pane on the other axis does not remount it', async () => {
+  mountCounts.clear();
+  const base = seeded({ kind: 'chat', params: { id: 'a' } });
+  const row = splitPane(base, base.root.id, 'row', { kind: 'artifact', params: { id: 'b' } });
+  const [a, b] = collectLeaves(row.root);
+  const screen = await render(CountedMux, { layout: row });
+  expect(screen.container.querySelectorAll('[data-mounted]').length).toBe(2);
+
+  const nested = splitPane(row, b!.id, 'col', { kind: 'terminal', params: { id: 'c' } });
+  await screen.rerender({ layout: nested });
+  await expect.poll(() => screen.container.querySelectorAll('[data-mounted]').length).toBe(3);
+  expect(mountCounts.get(a!.tabs[0]!.id)).toBe(1);
+  expect(mountCounts.get(b!.tabs[0]!.id)).toBe(1);
+});
+
+test('a nested split draws one divider per adjacent pane pair', async () => {
+  const base = seeded({ kind: 'chat' });
+  const row = splitPane(base, base.root.id, 'row', { kind: 'artifact' });
+  const [, b] = collectLeaves(row.root);
+  const nested = splitPane(row, b!.id, 'col', { kind: 'terminal' });
+  const screen = await render(CountedMux, { layout: nested });
+  await expect.poll(() => screen.container.querySelectorAll('[role="separator"]').length).toBe(2);
+});
+
+test('a pane resized to the floor keeps the minimum pane width', async () => {
+  const base = seeded({ kind: 'chat' });
+  const split = splitPane(base, base.root.id, 'row', { kind: 'terminal' });
+  const squeezed = resizeSplit(split, split.root.id, 0, 0.9);
+  const screen = await render(SizedMux, { layout: squeezed });
+  await expect.element(page.getByRole('group', { name: 'Split panes' })).toBeInTheDocument();
+  const narrow = screen.container.querySelectorAll<HTMLElement>('[data-testid="mux-pane"]')[1]!;
+  expect(narrow.getBoundingClientRect().width).toBeGreaterThanOrEqual(MIN_PANE_PX - 1);
 });
 
 // ── dense panes ──

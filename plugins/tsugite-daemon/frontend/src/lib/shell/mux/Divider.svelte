@@ -8,6 +8,8 @@
     valueNow,
     onResize,
     label = 'Resize panes',
+    span = 1,
+    style,
   }: {
     /** Orientation of the split this divider sits in. */
     dir: SplitDir;
@@ -18,6 +20,9 @@
     valueNow: number;
     onResize?: (splitId: string, dividerIndex: number, deltaFraction: number) => void;
     label?: string;
+    /** The split's share of the parent's size along its axis. */
+    span?: number;
+    style?: string;
   } = $props();
 
   // Keyboard nudges the boundary; the layout reducer clamps at the extremes.
@@ -50,11 +55,11 @@
     if (rafId !== 0) cancelAnimationFrame(rafId);
   });
 
-  // Axis size of the parent split, to convert a pixel drag into a fraction.
+  // Axis size of the split, to convert a pixel drag into a fraction.
   function axisSize(): number {
     const parent = handle?.parentElement;
     if (!parent) return 0;
-    return dir === 'row' ? parent.clientWidth : parent.clientHeight;
+    return (dir === 'row' ? parent.clientWidth : parent.clientHeight) * span;
   }
 
   function onpointerdown(e: PointerEvent) {
@@ -118,6 +123,7 @@
   aria-valuemin={VALUE_MIN}
   aria-valuemax={VALUE_MAX}
   aria-valuenow={ariaValueNow}
+  {style}
   {onpointerdown}
   {onpointermove}
   onpointerup={endDrag}

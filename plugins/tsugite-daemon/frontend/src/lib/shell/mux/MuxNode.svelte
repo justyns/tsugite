@@ -1,8 +1,8 @@
 <script lang="ts">
   import Divider from './Divider.svelte';
   import PaneView from './PaneView.svelte';
-  import MuxNode from './MuxNode.svelte';
   import type { LayoutNode } from './layout';
+  import { MIN_PANE_PX, placeTree } from './place';
   import type { MuxContent, MuxHandlers } from './types';
 
   let {
@@ -19,69 +19,62 @@
     content?: MuxContent;
   } & MuxHandlers = $props();
 
-  const split = $derived(node.type === 'split' ? node : null);
-  const children = $derived(split ? split.children : [node]);
+  const placement = $derived(placeTree(node));
 
-  /** First pane's share of a divider's pair, as a whole percent for aria-valuenow. */
-  function pairPct(sizes: number[], i: number): number {
-    const a = sizes[i] ?? 0;
-    const b = sizes[i + 1] ?? 0;
-    const total = a + b;
-    return total > 0 ? Math.round((a / total) * 100) : 50;
+  const minWidth = $derived(Math.max(...placement.panes.map((p) => MIN_PANE_PX / p.w)));
+
+  const pct = (f: number) => `${f * 100}%`;
+
+  function dividerStyle(d: (typeof placement.dividers)[number]): string {
+    return d.dir === 'row'
+      ? `position:absolute;left:${pct(d.at)};top:${pct(d.cross.y)};height:${pct(d.cross.h)};width:1px;margin-left:-0.5px`
+      : `position:absolute;top:${pct(d.at)};left:${pct(d.cross.x)};width:${pct(d.cross.w)};height:1px;margin-top:-0.5px`;
   }
 </script>
 
-<!-- A lone leaf renders through the split wrapper so one keyed each keeps the pane's
-     component instance when the root flips between leaf and split. -->
+<!-- Every pane renders once in this flat list, keyed by leaf id, and is placed from the
+     layout tree. A component instance cannot move between nested blocks, so nesting
+     the panes by tree depth would remount them when a split forms or collapses. -->
 <div
   class="mux-split"
-  class:is-col={split?.dir === 'col'}
-  role={split ? 'group' : undefined}
-  aria-label={split ? 'Split panes' : undefined}
+  style="min-width:{minWidth}px"
+  role={node.type === 'split' ? 'group' : undefined}
+  aria-label={node.type === 'split' ? 'Split panes' : undefined}
 >
-  {#each children as child, i (child.id)}
-    <div class="mux-cell" style="--fr:{split ? split.sizes[i] : 1}">
-      {#if child.type === 'leaf'}
-        <PaneView
-          pane={child}
-          focused={child.id === focusedPaneId}
-          {multiPane}
-          {content}
-          {...handlers}
-        />
-      {:else}
-        <MuxNode node={child} {focusedPaneId} {multiPane} {content} {...handlers} />
-      {/if}
-    </div>
-    {#if split && i < children.length - 1}
-      <Divider
-        dir={split.dir}
-        splitId={split.id}
-        index={i}
-        valueNow={pairPct(split.sizes, i)}
-        onResize={handlers.onResize}
+  {#each placement.panes as r (r.leaf.id)}
+    <div class="mux-cell" style="left:{pct(r.x)};top:{pct(r.y)};width:{pct(r.w)};height:{pct(r.h)}">
+      <PaneView
+        pane={r.leaf}
+        focused={r.leaf.id === focusedPaneId}
+        {multiPane}
+        {content}
+        {...handlers}
       />
-    {/if}
+    </div>
+  {/each}
+  {#each placement.dividers as d (`${d.splitId}:${d.index}`)}
+    <Divider
+      dir={d.dir}
+      splitId={d.splitId}
+      index={d.index}
+      valueNow={d.pct}
+      span={d.span}
+      style={dividerStyle(d)}
+      onResize={handlers.onResize}
+    />
   {/each}
 </div>
 
 <style>
   .mux-split {
-    display: flex;
-    flex-direction: row;
+    position: relative;
     flex: 1;
-    min-width: 0;
     min-height: 0;
   }
-  .mux-split.is-col {
-    flex-direction: column;
-  }
   .mux-cell {
+    position: absolute;
     display: flex;
-    flex: var(--fr, 1) 1 0;
-    /* A pane never shrinks below readability; when splits outgrow the frame,
-       the pane area scrolls (.mux-panes has overflow-x auto). */
-    min-width: 260px;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
   }

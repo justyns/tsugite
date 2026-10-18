@@ -1,6 +1,6 @@
 /**
  * Shared prop contracts for the mux component tree. The handler bag is threaded
- * unchanged from `Mux` down through the recursive `MuxNode` to each `PaneView`,
+ * unchanged from `Mux` through `MuxNode` to each `PaneView`,
  * so a single spread forwards every callback instead of re-listing them.
  */
 import type { Snippet } from 'svelte';
