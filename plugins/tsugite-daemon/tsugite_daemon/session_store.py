@@ -382,13 +382,11 @@ class Session:
     def has_live_work(self) -> bool:
         """Whether this session currently has work running.
 
-        Two signals, because the two kinds of run are marked differently:
-        interactive turns set `turn_in_flight` for the turn's duration, while
-        scheduled and background runs are created with status RUNNING and never
-        begin a turn at all.
+        Two signals: `turn_in_flight` covers each turn, and scheduled and
+        background runs also hold status RUNNING for the whole run.
 
         The durable half of "is this session busy". The HTTP layer's
-        `_session_busy` builds on this, adding the live chat task that only it
+        `session_busy` builds on this, adding the live chat task that only it
         can see. Anything that needs to know whether a session is working
         should ask this rather than infer it from progress fields - a progress
         label reports the last event, not what is happening now.
@@ -1292,6 +1290,30 @@ class SessionStore:
 
     MAX_QUEUED_MESSAGES = 20
 
+    @staticmethod
+    def queue_entry(
+        text: str,
+        *,
+        user_id: str,
+        source: str = "http",
+        reasoning_effort: Optional[str] = None,
+        uploaded_files: Optional[list] = None,
+        context_metadata=None,
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        """`metadata` is merged into the queued turn's channel metadata."""
+        return {
+            "id": f"q-{uuid4().hex[:8]}",
+            "text": text,
+            "user_id": user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "reasoning_effort": reasoning_effort,
+            "uploaded_files": uploaded_files or [],
+            "context_metadata": context_metadata,
+            "source": source,
+            "metadata": metadata or {},
+        }
+
     def queue_message(self, session_id: str, entry: dict) -> int:
         """Returns the message's 1-based position in the queue."""
         with self._lock:
@@ -1637,7 +1659,7 @@ class SessionStore:
         *current* status only while the log ends on a terminator. A log can end
         mid-turn with nothing running after a crash or a truncated write. Callers
         rendering the label must therefore gate it on `has_live_work` (or the HTTP
-        layer's broader `_session_busy`), or an idle session displays a stale
+        layer's broader `session_busy`), or an idle session displays a stale
         "Waiting on LLM..." forever. This
         stays a pure derivation from events; liveness is not an event.
 

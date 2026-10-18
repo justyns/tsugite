@@ -153,6 +153,12 @@ NotifyCallback = Callable[[Session, str], Coroutine[Any, Any, None]]
 QueuedMessageSender = Callable[[str, dict], Coroutine[Any, Any, bool]]
 
 
+def broadcast_queue(event_bus, session: Session) -> list[dict]:
+    queued = session.queued_message_rows
+    event_bus.emit("session_update", {"action": "queued", "id": session.id, "queued": queued})
+    return queued
+
+
 class SessionRunner:
     """Manages async agent session execution."""
 
@@ -177,6 +183,7 @@ class SessionRunner:
         self._cancel_events: dict[str, threading.Event] = {}
         self._completion_listeners: list[NotifyCallback] = []
         self._queued_message_sender: Optional[QueuedMessageSender] = None
+        self._session_busy: Callable[[Session], bool] = lambda session: session.has_live_work
         self._queue_drain_tasks: dict[str, asyncio.Task] = {}
         if notify_callback:
             self._completion_listeners.append(notify_callback)
@@ -190,8 +197,13 @@ class SessionRunner:
         for session_id in self._store.sessions_holding_deliveries():
             self._flush_deferred_deliveries(session_id)
 
-    def set_queued_message_sender(self, sender: QueuedMessageSender) -> None:
+    def set_queued_message_sender(
+        self, sender: QueuedMessageSender, session_busy: Callable[[Session], bool] | None = None
+    ) -> None:
+        """`session_busy` widens the busy test beyond the store's `has_live_work`."""
         self._queued_message_sender = sender
+        if session_busy:
+            self._session_busy = session_busy
 
     def drain_queued_messages(self, session_id: str) -> None:
         sender = self._queued_message_sender
@@ -406,6 +418,9 @@ class SessionRunner:
             logger.error("Session '%s' failed: %s", session.id, e)
             await self._dispatch_completion(updated, f"FAILED: {str(e)[:500]}")
             await self._notify_finished(session, SessionStatus.FAILED.value, str(e)[:500])
+        finally:
+            # A reply queued mid-run waits on a turn end this run may never reach.
+            self.drain_queued_messages(session.id)
 
     async def _notify_finished(self, session: Session, status: str, summary: str) -> None:
         listed = ([session.parent_id] if session.parent_id else []) + session.notify_sessions
@@ -703,20 +718,37 @@ class SessionRunner:
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
     async def reply_or_defer(self, session_id: str, message: str, *, metadata: dict | None = None) -> dict:
-        """Run a turn with `message`, or hold it for the next one when the session
-        is already working. Returns `status` ("delivered" or "queued") and the
-        turn's reply when one ran.
+        """Queue `message` as the session's next turn when it is already working, else run a turn now.
+
+        Without a queued-message sender (no HTTP server) a busy session gets it as a delivery card instead.
+
+        Returns `status` ("delivered" or "queued") and the turn's reply when one ran.
         """
         session_id = self.live_id(session_id)
-        if self._store.get_session(session_id).has_live_work:
-            # tsugite/history/reconstruction.py reads `addressed` to frame the card as a steer.
-            await asyncio.to_thread(
-                self.deliver_to_session,
-                session_id,
+        target = self._store.get_session(session_id)
+        if self._session_busy(target):
+            if self._queued_message_sender is None:
+                # tsugite/history/reconstruction.py reads `addressed` to frame the card as a steer.
+                await asyncio.to_thread(
+                    self.deliver_to_session,
+                    session_id,
+                    message,
+                    source="session",
+                    metadata={**(metadata or {}), "addressed": True},
+                )
+                return {"status": "queued", "response": None}
+            entry = SessionStore.queue_entry(
                 message,
+                user_id=f"session:{session_id}",
                 source="session",
-                metadata={**(metadata or {}), "addressed": True},
+                metadata={"session_id": session_id, **(metadata or {})},
             )
+            self._store.queue_message(session_id, entry)
+            queued = self._store.get_session(session_id)
+            if self._event_bus:
+                broadcast_queue(self._event_bus, queued)
+            if not self._session_busy(queued):
+                self.drain_queued_messages(session_id)
             return {"status": "queued", "response": None}
         reply = await self.reply_to_session(session_id, message, metadata=metadata, revive=True)
         return {"status": "delivered", "response": reply}

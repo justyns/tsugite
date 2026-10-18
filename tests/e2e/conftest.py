@@ -171,7 +171,7 @@ def session_runner_backend(e2e_server, e2e_session_store, e2e_adapter):
     _url, server = e2e_server
     runner = SessionRunner(e2e_session_store, e2e_adapter, event_bus=server.event_bus)
     server.session_runner = runner
-    runner.set_queued_message_sender(server.run_queued_message)
+    runner.set_queued_message_sender(server.run_queued_message, server.session_busy)
     yield runner
     server.session_runner = None
 

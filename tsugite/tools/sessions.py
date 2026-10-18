@@ -61,9 +61,8 @@ def _resolve_session_arg(session_id: Optional[str]) -> str:
 def session_reply(message: str, session_id: Optional[str] = None) -> dict:
     """Send a follow-up message to an existing session, continuing its conversation.
 
-    A session that is already working has the message held until its next turn.
-    A one-shot run that ends without another turn never reads it. The call
-    returns straight away.
+    A session that is already working has the message queued as its next turn,
+    and the call returns straight away.
 
     Args:
         message: Message to send to the session.
@@ -72,14 +71,19 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
 
     Returns:
         Dict with session_id, `status` ("delivered" or "queued"), and the agent's
-        response when a turn ran.
+        response when a turn ran, or `error` when the session's queue is full.
     """
+    from tsugite_daemon.session_store import QueueFullError
+
     session_id = _resolve_session_arg(session_id)
     # `_call` hops to the daemon loop with a fresh context and `reply_to_session`
     # rebinds the current session to the target, so this read has to happen first.
     origin = get_current_session_id()
     metadata = {"from_session": origin} if origin and origin != session_id else None
-    result = _call(_session_runner.reply_or_defer, session_id, message, metadata=metadata, timeout=120)
+    try:
+        result = _call(_session_runner.reply_or_defer, session_id, message, metadata=metadata, timeout=120)
+    except QueueFullError as e:
+        return {"session_id": session_id, "error": str(e)}
     reply = result["response"]
     return {
         "session_id": session_id,

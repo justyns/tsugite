@@ -2,7 +2,8 @@
 
 A parent steering a long-running child would otherwise start a second concurrent
 turn on a child that is inside one, polling its own job. The message is held as a
-delivery and the turn-end flush delivers it to the next turn.
+queued message and the turn-end drain runs it as the session's next turn. Without a
+queue drain (no HTTP server) it is held as a delivery for the next turn instead.
 """
 
 import asyncio
@@ -67,7 +68,7 @@ class TestABusySession:
         assert result["status"] == "queued"
         assert result["response"] is None
 
-    def test_the_queued_message_reaches_the_session_when_the_turn_ends(self, store, runner):
+    def test_without_a_queue_drain_the_message_reaches_the_session_when_the_turn_ends(self, store, runner):
         child = _child(store)
         store.begin_turn(child.id)
         session_tools.session_reply(message="stop, the worktree is wrong", session_id=child.id)
@@ -77,26 +78,9 @@ class TestABusySession:
         store.end_turn(child.id)
 
         assert [d["message"] for d in _deliveries(store, child.id)] == ["stop, the worktree is wrong"]
+        assert store.get_session(child.id).queued_messages == []
 
-    def test_the_next_turn_sees_the_queued_message(self, store, runner):
-        from tsugite.history import get_history_backend
-        from tsugite.history.reconstruction import events_to_messages
-
-        child = _child(store)
-        store.begin_turn(child.id)
-        session_tools.session_reply(message="stop, the worktree is wrong", session_id=child.id)
-        store.end_turn(child.id)
-
-        backend = get_history_backend()
-        assert backend.exists(child.id), "nothing was delivered, so there is no history to reconstruct"
-        messages = events_to_messages(backend.load(child.id).iter_events())
-
-        card = next(m for m in messages if "stop, the worktree is wrong" in m["content"])
-        assert card["role"] == "user"
-        assert "It is addressed to you" in card["content"]
-        assert "only act on it if the user refers to it" not in card["content"].lower()
-
-    def test_the_queued_message_records_the_session_it_came_from(self, store, runner):
+    def test_without_a_queue_drain_the_message_records_the_session_it_came_from(self, store, runner):
         caller = _child(store, "caller")
         child = _child(store)
         store.begin_turn(child.id)
@@ -106,6 +90,29 @@ class TestABusySession:
         store.end_turn(child.id)
 
         assert _deliveries(store, child.id)[0]["from_session"] == caller.id
+
+    def test_with_a_queue_drain_the_message_is_held_in_the_session_queue(self, store, runner):
+        runner.set_queued_message_sender(AsyncMock(return_value=True))
+        child = _child(store)
+        store.begin_turn(child.id)
+
+        session_tools.session_reply(message="stop, the worktree is wrong", session_id=child.id)
+
+        assert [e["text"] for e in store.get_session(child.id).queued_messages] == ["stop, the worktree is wrong"]
+        assert _deliveries(store, child.id) == []
+
+    def test_a_full_queue_comes_back_as_a_tool_error(self, store, runner, monkeypatch):
+        monkeypatch.setattr(store, "MAX_QUEUED_MESSAGES", 1)
+        runner.set_queued_message_sender(AsyncMock(return_value=True))
+        child = _child(store)
+        store.begin_turn(child.id)
+        session_tools.session_reply(message="m0", session_id=child.id)
+
+        result = session_tools.session_reply(message="one too many", session_id=child.id)
+
+        assert result["session_id"] == child.id
+        assert "queued messages" in result["error"]
+        assert len(store.get_session(child.id).queued_messages) == store.MAX_QUEUED_MESSAGES
 
     def test_a_background_run_that_never_begins_a_turn_still_queues(self, store, runner, adapter):
         """Scheduled and background runs have status RUNNING and never call

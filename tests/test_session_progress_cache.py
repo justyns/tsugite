@@ -148,7 +148,7 @@ def test_progress_summary_stays_a_pure_fold_when_idle(store, history_dir):
 
 
 class TestSessionHasLiveWork:
-    """The durable half of "is this session busy"; `_session_busy` builds on it."""
+    """The durable half of "is this session busy"; `session_busy` builds on it."""
 
     def _session(self, **kw):
         from tsugite_daemon.session_store import Session

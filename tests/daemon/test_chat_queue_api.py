@@ -58,7 +58,7 @@ def server(adapter, token_store):
     )
     runner = SessionRunner(store=adapter.session_store, adapter=adapter, event_bus=server.event_bus)
     server.session_runner = runner
-    runner.set_queued_message_sender(server.run_queued_message)
+    runner.set_queued_message_sender(server.run_queued_message, server.session_busy)
     return server
 
 
@@ -109,18 +109,8 @@ def _session_events(broadcasts, event_type):
 
 
 def _seed_queue(adapter, sid, queue_id, text):
-    adapter.session_store.queue_message(
-        sid,
-        {
-            "id": queue_id,
-            "text": text,
-            "user_id": "u1",
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "reasoning_effort": None,
-            "uploaded_files": [],
-            "context_metadata": None,
-        },
-    )
+    entry = SessionStore.queue_entry(text, user_id="u1")
+    adapter.session_store.queue_message(sid, {**entry, "id": queue_id})
 
 
 def _hold(adapter, text: str) -> asyncio.Event:
@@ -331,6 +321,19 @@ class TestSendingWithEntriesAlreadyParked:
         assert _sent_messages(adapter) == ["first", "second"]
         assert adapter.session_store.get_session(sid).queued_messages == []
 
+    async def test_an_entry_parked_without_source_or_metadata_still_drains(self, adapter, client):
+        sid = _session(adapter, "s-old-entry")
+        entry = SessionStore.queue_entry("parked earlier", user_id="u1")
+        del entry["source"], entry["metadata"]
+        adapter.session_store.queue_message(sid, entry)
+
+        resp = await _send(client, sid, "second")
+
+        assert resp.status_code == 202
+        assert await _wait_until(lambda: adapter.handle_message.await_count == 2)
+        assert _sent_messages(adapter) == ["parked earlier", "second"]
+        assert adapter.session_store.get_session(sid).queued_messages == []
+
     async def test_the_cap_rejects_a_send_with_a_clear_error(self, adapter, client):
         sid = _busy_session(adapter)
         for i in range(adapter.session_store.MAX_QUEUED_MESSAGES):
@@ -486,3 +489,83 @@ class TestSendingToAFinishedSession:
 
         assert resp.status_code == 409
         assert resp.json()["code"] == "session_finished"
+
+
+@pytest.mark.asyncio
+async def test_a_session_reply_sent_mid_turn_runs_as_the_next_turn_with_its_text(server, adapter):
+    sid = _busy_session(adapter)
+
+    result = await server.session_runner.reply_or_defer(sid, "Stuck jobs need a look.")
+
+    assert result == {"status": "queued", "response": None}
+    assert _sent_messages(adapter) == []
+
+    adapter.session_store.end_turn(sid)
+
+    assert await _wait_until(lambda: _sent_messages(adapter) == ["Stuck jobs need a look."])
+    assert adapter.session_store.get_session(sid).queued_messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_reply_sent_mid_turn_keeps_the_session_it_came_from(server, adapter):
+    sid = _busy_session(adapter)
+
+    await server.session_runner.reply_or_defer(sid, "Stuck jobs need a look.", metadata={"from_session": "lead"})
+    adapter.session_store.end_turn(sid)
+
+    assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+    channel = adapter.handle_message.await_args.kwargs["channel_context"].to_dict()
+    assert channel["source"] == "session"
+    assert channel["from_session"] == "lead"
+
+
+@pytest.mark.asyncio
+async def test_a_session_reply_to_a_background_session_runs_as_the_session_itself(server, adapter):
+    adapter.session_store.create_session(Session(id="bg", source=SessionSource.BACKGROUND.value))
+    adapter.session_store.begin_turn("bg")
+
+    await server.session_runner.reply_or_defer("bg", "steer")
+    adapter.session_store.end_turn("bg")
+
+    assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
+    kwargs = adapter.handle_message.await_args.kwargs
+    assert kwargs["user_id"] == "session:bg"
+    assert kwargs["channel_context"].reply_to == "session:bg"
+    assert kwargs["channel_context"].metadata["session_id"] == "bg"
+
+
+@pytest.mark.asyncio
+async def test_a_reply_queued_to_a_run_that_never_ends_a_turn_runs_when_the_run_finishes(server, adapter):
+    release = asyncio.Event()
+    sent = []
+
+    async def handle(**kwargs):
+        sent.append(kwargs["message"])
+        if len(sent) == 1:
+            await release.wait()
+        return "done"
+
+    adapter.handle_message.side_effect = handle
+    server.session_runner.start_session(Session(id="bg", prompt="work", source=SessionSource.BACKGROUND.value))
+    assert await _wait_until(lambda: sent == ["work"])
+
+    await server.session_runner.reply_or_defer("bg", "steer")
+    assert sent == ["work"]
+    release.set()
+
+    assert await _wait_until(lambda: sent == ["work", "steer"])
+    assert adapter.session_store.get_session("bg").queued_messages == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_reply_waits_while_a_chat_task_is_starting(server, adapter):
+    sid = _session(adapter)
+    starting = asyncio.create_task(asyncio.Event().wait())
+    server._active_chats[("u1", sid)] = SimpleNamespace(task=starting)
+
+    await server.session_runner.reply_or_defer(sid, "steer")
+    await asyncio.sleep(0.05)
+    starting.cancel()
+
+    assert adapter.handle_message.await_count == 0
+    assert [e["text"] for e in adapter.session_store.get_session(sid).queued_messages] == ["steer"]

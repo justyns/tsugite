@@ -1,11 +1,9 @@
 """AgentsMixin: agents HTTP handlers for HTTPServer."""
 
 import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
-from uuid import uuid4
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -33,6 +31,7 @@ from tsugite_daemon.adapters.http.sse import (
     resolve_pending_ask,
 )
 from tsugite_daemon.attention_store import SOURCE_ERROR
+from tsugite_daemon.session_store import QueueFullError, SessionStore
 
 
 def _session_or_default(adapter: HTTPAgentAdapter, session_id: Optional[str], user_id: str):
@@ -211,7 +210,7 @@ class AgentsMixin:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"result": result})
 
-    def _session_busy(self, session) -> bool:
+    def session_busy(self, session) -> bool:
         """The one definition of busy, shared by the sessions payload, /status,
         and the /chat busy check - the server must never report a session idle
         while it has durable live work. True when the store reports durable
@@ -299,7 +298,7 @@ class AgentsMixin:
                 "alias": s.alias,
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.
-                "busy": self._session_busy(s),
+                "busy": self.session_busy(s),
                 # Same contract for compaction: the pill reads this flag (kept
                 # live by the compaction_started/finished broadcasts), never a
                 # progress label that happens to mention compaction.
@@ -390,7 +389,7 @@ class AgentsMixin:
                 "message_count": message_count,
                 "compacting": adapter.session_store.is_compacting(user_id, session_id=session.id if session else None),
                 "metadata": session_metadata,
-                "busy": bool(session and self._session_busy(session)),
+                "busy": bool(session and self.session_busy(session)),
                 "pending_message": backend.pending_message if backend else None,
                 "attachments": attachments,
             }
@@ -860,9 +859,9 @@ class AgentsMixin:
         return JSONResponse({"files": results})
 
     def _broadcast_queue(self, session_id: str) -> list[dict]:
-        queued = self.adapter.session_store.get_session(session_id).queued_message_rows
-        self.event_bus.emit("session_update", {"action": "queued", "id": session_id, "queued": queued})
-        return queued
+        from tsugite_daemon.session_runner import broadcast_queue
+
+        return broadcast_queue(self.event_bus, self.adapter.session_store.get_session(session_id))
 
     async def _dequeue_message(self, request: Request) -> JSONResponse:
         adapter, err = self._get_adapter(request)
@@ -885,17 +884,13 @@ class AgentsMixin:
         """Park a send that must wait for the queue to drain - the target session
         is busy, or idle with an earlier entry already parked - holding the raw
         request body fields."""
-        entry = {
-            "id": f"q-{uuid4().hex[:8]}",
-            "text": message,
-            "user_id": user_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "reasoning_effort": reasoning_effort,
-            "uploaded_files": uploaded_files,
-            "context_metadata": context_metadata,
-        }
-        from tsugite_daemon.session_store import QueueFullError
-
+        entry = SessionStore.queue_entry(
+            message,
+            user_id=user_id,
+            reasoning_effort=reasoning_effort,
+            uploaded_files=uploaded_files,
+            context_metadata=context_metadata,
+        )
         try:
             position = self.adapter.session_store.queue_message(session.id, entry)
         except QueueFullError as e:
@@ -904,7 +899,7 @@ class AgentsMixin:
         # The queue drains at turn end. After a restart no turn is running to end,
         # and `_chat` parks every later send behind the queue, so without this the
         # session never runs anything again. Parking while idle drains now.
-        if self.session_runner and not self._session_busy(session):
+        if self.session_runner and not self.session_busy(session):
             self.session_runner.drain_queued_messages(session.id)
         return JSONResponse(
             {"status": "queued", "queue_id": entry["id"], "position": position},
@@ -920,10 +915,12 @@ class AgentsMixin:
         message: str,
         metadata: dict,
         progress: JSONLUIHandler,
+        source: str,
+        reply_to: str,
     ) -> ActiveChat:
         """Run one user turn for `session_id` as its own task.
 
-        The chat registers in `_active_chats` before the task starts. `_session_busy`
+        The chat registers in `_active_chats` before the task starts. `session_busy`
         stays true during the window before begin_turn, and /api/chat/cancel can
         cancel this turn.
         """
@@ -936,10 +933,10 @@ class AgentsMixin:
         backend_key = (user_id, session_id)
         self._active_chats[backend_key] = chat_state
         channel_context = ChannelContext(
-            source="http",
+            source=source,
             channel_id=None,
             user_id=raw_user_id,
-            reply_to=f"http:{raw_user_id}",
+            reply_to=reply_to,
             metadata=metadata,
         )
 
@@ -998,7 +995,7 @@ class AgentsMixin:
         return chat_state
 
     async def run_queued_message(self, session_id: str, entry: dict) -> bool:
-        """Run a queued message as a normal user turn, logged to the session and
+        """Run a queued message as the session's next turn, logged to the session and
         broadcast to every watching client.
 
         Returns False and leaves the entry queued while the daemon is restarting.
@@ -1018,14 +1015,21 @@ class AgentsMixin:
             entry["context_metadata"],
         )
         metadata["conv_id_override"] = session_id
+        # Entries persisted by an older release have no `source` or `metadata`.
+        metadata.update(entry.get("metadata", {}))
+        source = entry.get("source", "http")
 
+        # A session-source turn runs as the session itself, like `reply_to_session`.
+        from_session = source == "session"
         chat_state = self._start_turn(
-            user_id=adapter.resolve_http_user(raw_user_id),
+            user_id=raw_user_id if from_session else adapter.resolve_http_user(raw_user_id),
             raw_user_id=raw_user_id,
             session_id=session_id,
             message=message,
             metadata=metadata,
             progress=LoggingProgressHandler(adapter.session_store, session_id, broadcaster=self.event_bus),
+            source=source,
+            reply_to=raw_user_id if from_session else f"http:{raw_user_id}",
         )
         self._broadcast_queue(session_id)
         # asyncio.wait does not re-raise the task's CancelledError.
@@ -1102,7 +1106,7 @@ class AgentsMixin:
         if err_resp:
             return err_resp
 
-        if self._session_busy(target_session) or target_session.queued_messages:
+        if self.session_busy(target_session) or target_session.queued_messages:
             return self._queue_chat(
                 target_session, message, raw_user_id, reasoning_effort, uploaded_files, context_metadata
             )
@@ -1126,6 +1130,8 @@ class AgentsMixin:
             message=message,
             metadata=metadata,
             progress=progress,
+            source="http",
+            reply_to=f"http:{raw_user_id}",
         )
         chat_state.task.add_done_callback(lambda _task: progress.signal_done())
 
