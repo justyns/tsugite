@@ -552,7 +552,7 @@ class SessionRunner:
 
         orchestrator = get_jobs_orchestrator()
         if orchestrator:
-            orchestrator.on_parent_turn_end(session_id)
+            orchestrator.on_turn_end(session_id)
 
     def _flush_deferred_deliveries(self, session_id: str) -> None:
         for event in self._store.take_deferred_deliveries(session_id):

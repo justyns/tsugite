@@ -30,6 +30,7 @@ from tsugite_daemon.scheduler import (
 from tsugite_daemon.session_runner import DELIVERY_KIND_FYI, DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
 from tsugite_daemon.session_store import (
     METADATA_INCIDENT_KEY,
+    METADATA_ORIGINATING_SESSION,
     Session,
     SessionSource,
     SessionStatus,
@@ -247,6 +248,9 @@ class SchedulerAdapter:
             conv_id = f"sched_{safe_id}_{ts}"
 
         adapter = self._adapter
+        metadata = {}
+        if entry.originating_session_id:
+            metadata[METADATA_ORIGINATING_SESSION] = entry.originating_session_id
         sched_session = Session(
             id=conv_id,
             source=SessionSource.SCHEDULE.value,
@@ -254,6 +258,7 @@ class SchedulerAdapter:
             parent_id=entry.id,
             prompt=entry.prompt or entry.command or "",
             title=entry.id,
+            metadata=metadata,
         )
         try:
             adapter.session_store.create_session(sched_session)

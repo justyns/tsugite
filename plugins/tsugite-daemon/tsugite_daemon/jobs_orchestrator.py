@@ -52,7 +52,14 @@ from tsugite_daemon.job_verdicts import (
     _sanitize_output_excerpt,
 )
 from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
-from tsugite_daemon.session_store import FINISHED_STATUSES, METADATA_JOB_HOST, Session, SessionSource, SessionStatus
+from tsugite_daemon.session_store import (
+    FINISHED_STATUSES,
+    METADATA_JOB_HOST,
+    METADATA_ORIGINATING_SESSION,
+    Session,
+    SessionSource,
+    SessionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +137,8 @@ class JobsOrchestrator:
         # Strong refs to in-flight notify tasks; asyncio only weak-refs scheduled
         # tasks, so without this a notify could be GC'd mid-send.
         self._notify_tasks: set[asyncio.Task] = set()
-        # Terminal wake-ups held back because the parent was mid-turn, keyed by the
-        # parent's live session id and sent one per turn end.
+        # Terminal wake-ups held back because the owner was mid-turn, keyed by the
+        # owner's live session id and sent one per turn end.
         self._held_notifies: dict[str, list[Job]] = {}
         # Strong refs to in-flight background tasks (e.g. offloaded worktree
         # prunes). Same GC rationale as _notify_tasks; also lets tests drain them.
@@ -298,7 +305,7 @@ class JobsOrchestrator:
             before any Job record is created.
         notify_when: one of "done", "stuck", "errored", "terminal", "all_done",
             "never" (default). "all_done" replaces the per-job wake-up with a single
-            aggregate one, fired when the parent's last active job finalizes.
+            aggregate one, fired when the owner session's last active job finalizes.
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
@@ -337,7 +344,7 @@ class JobsOrchestrator:
             job_kwargs["ladder_index"] = 0
             model = ladder[0]
         elif model is None and executor == "agent":
-            parent = self._get_parent_session(parent_session_id)
+            parent = self._get_session(parent_session_id)
             model = parent.model_override if parent else None
         if max_attempts is not None:
             job_kwargs["max_attempts"] = max_attempts
@@ -1342,8 +1349,8 @@ class JobsOrchestrator:
 
         Worktrees are pruned on DONE/CANCELLED (clean exit, no inspection value),
         kept on STUCK/ERRORED so the user can see what the worker did wrong.
-        Also wakes the parent when `notify_when` matches, and closes the batch
-        barrier when this was the parent's last active job.
+        Also wakes the owner session when `notify_when` matches, and closes the batch
+        barrier when this was the owner's last active job.
         """
         self._cancel_timeout(job.id)
         # Transition FIRST: if the Job is already terminal this raises and we
@@ -1443,48 +1450,54 @@ class JobsOrchestrator:
             await asyncio.wait([task])
 
     def _schedule_notify(self, job: Job) -> None:
-        """Post a one-line wake-up message into the parent session so its agent
-        learns the Job finished. A parent mid-turn gets it when the turn ends.
+        """Post a one-line wake-up message into the owner session so its agent
+        learns the Job finished. An owner mid-turn gets it when the turn ends.
         Best-effort: errors are logged, not raised."""
-        if self._parent_turn_in_flight(job.parent_session_id):
-            self._held_notifies.setdefault(self._runner.live_id(job.parent_session_id), []).append(job)
+        owner_id = self._owner_session_id(job)
+        if self._turn_in_flight(owner_id):
+            self._held_notifies.setdefault(self._runner.live_id(owner_id), []).append(job)
             return
         self._schedule_reply(job, _build_notify_message(job), source="job_complete")
 
-    def on_parent_turn_end(self, parent_session_id: str) -> None:
-        """Send the next held wake-up, else close the batch barrier. One wake-up
-        per call: its own turn end comes back here for the rest."""
-        live_id = self._runner.live_id(parent_session_id)
+    def on_turn_end(self, session_id: str) -> None:
+        """Send the next held wake-up, else close the batch barriers the ending
+        session owns. One wake-up per call: its own turn end comes back here for the rest."""
+        live = self._runner.live_id
+        live_id = live(session_id)
         held = self._held_notifies.get(live_id)
-        if held and not self._parent_turn_in_flight(parent_session_id):
+        if held and not self._turn_in_flight(session_id):
             job = held.pop(0)
             self._schedule_reply(
                 job,
                 _build_notify_message(job),
                 source="job_complete",
-                on_failed=lambda: self.on_parent_turn_end(parent_session_id),
+                on_failed=lambda: self.on_turn_end(session_id),
             )
             if not held:
                 del self._held_notifies[live_id]
             return
-        self.close_batch_barrier(parent_session_id)
+        self.close_batch_barrier(session_id)
+        pending = [j for j in self._jobs.list_all() if j.notify_when == "all_done" and not j.barrier_notified]
+        runs = {j.parent_session_id for j in pending if live(self._owner_session_id(j)) == live_id}
+        for run_id in runs - {session_id}:
+            self.close_batch_barrier(run_id)
 
     def close_batch_barrier(self, parent_session_id: str) -> None:
-        """Wake the parent once, when the last of its active jobs has finalized.
+        """Wake the owner session once, when the last of its active jobs has finalized.
 
         Call this in the same synchronous region as the transition that produced
         the terminal state; the remaining-active count means nothing if another
         job can move in between. Only notify_when="all_done" jobs are summarised,
-        and a parent still mid-turn may spawn more of the batch, so the barrier
-        waits for the turn to end.
+        and the barrier waits while the parent or the owner session is mid-turn.
+        The owner's turn end re-checks the parents it owns.
         """
         jobs = self.jobs_for_parent(parent_session_id)
         if any(j.state not in self._jobs.terminal_states for j in jobs):
             return
-        if self._parent_turn_in_flight(parent_session_id):
-            return
         batch = [j for j in jobs if j.notify_when == "all_done" and not j.barrier_notified]
         if not batch:
+            return
+        if self._turn_in_flight(parent_session_id) or self._turn_in_flight(self._owner_session_id(batch[0])):
             return
         batch.sort(key=lambda j: j.created_at or "")
 
@@ -1502,9 +1515,9 @@ class JobsOrchestrator:
             on_failed=unmark_batch,
         )
 
-    def _parent_turn_in_flight(self, parent_session_id: str) -> bool:
-        parent = self._get_parent_session(parent_session_id)
-        return bool(parent and parent.turn_in_flight)
+    def _turn_in_flight(self, session_id: str) -> bool:
+        session = self._get_session(session_id)
+        return bool(session and session.turn_in_flight)
 
     def _schedule_reply(
         self,
@@ -1515,7 +1528,7 @@ class JobsOrchestrator:
         metadata: Optional[dict] = None,
         on_failed: Optional[Callable[[], None]] = None,
     ) -> None:
-        """Queue a wake-up for the parent.
+        """Queue a wake-up for the owner session.
 
         `on_failed` runs when the wake-up did not land. Delivery cannot be awaited
         because the reply returns after the whole turn, which can re-close the barrier first.
@@ -1533,11 +1546,12 @@ class JobsOrchestrator:
             fail()
             return
         metadata = metadata or {"job_id": job.id, "kind": "job_notify"}
+        owner_id = self._owner_session_id(job)
 
         async def _send():
             try:
                 reply = await self._runner.reply_to_session(
-                    job.parent_session_id,
+                    owner_id,
                     message,
                     source=source,
                     metadata=metadata,
@@ -1546,15 +1560,15 @@ class JobsOrchestrator:
                 fail()
                 raise
             except Exception:
-                logger.exception("Failed to wake parent of job '%s' (%s)", job.id, source)
+                logger.exception("Failed to wake owner of job '%s' (%s)", job.id, source)
                 fail()
                 return
             if reply is None:
                 logger.warning(
-                    "Dropped the %s wake-up for job '%s': parent session '%s' has finished",
+                    "Dropped the %s wake-up for job '%s': session '%s' has finished",
                     source,
                     job.id,
-                    job.parent_session_id,
+                    owner_id,
                 )
                 fail()
 
@@ -1683,7 +1697,7 @@ class JobsOrchestrator:
         target = live(session_id)
         return [j for j in self._jobs.list_all() if live(j.parent_session_id) == target]
 
-    def _get_parent_session(self, parent_session_id: str) -> Optional[Session]:
+    def _get_session(self, session_id: str) -> Optional[Session]:
         """Fetch a session, tolerating both the FakeStore None-on-miss contract and a
         real SessionStore raising ValueError/KeyError. Returns None if the runner has
         no store or the session is gone."""
@@ -1691,7 +1705,7 @@ class JobsOrchestrator:
         if store is None or not hasattr(store, "get_session"):
             return None
         try:
-            return store.get_session(self._runner.live_id(parent_session_id))
+            return store.get_session(self._runner.live_id(session_id))
         except (ValueError, KeyError):
             return None
 
@@ -1705,7 +1719,7 @@ class JobsOrchestrator:
         carrying the job_host marker, so a /job typed inside a real conversation never
         closes the user's chat. Returns True if it reconciled a session.
         """
-        parent = self._get_parent_session(job.parent_session_id)
+        parent = self._get_session(job.parent_session_id)
         if parent is None or not parent.metadata.get(METADATA_JOB_HOST) or parent.status in FINISHED_STATUSES:
             return False
         store = getattr(self._runner, "store", None)
@@ -1760,7 +1774,7 @@ class JobsOrchestrator:
         store = getattr(self._runner, "store", None)
         if store is None or not hasattr(store, "agents"):
             return None
-        return store.agents.working_dir(self._get_parent_session(parent_session_id))
+        return store.agents.working_dir(self._get_session(parent_session_id))
 
     def _emit_job_event(self, job: Optional[Job], *, recovered: bool = False) -> None:
         if job is None:
@@ -1778,10 +1792,10 @@ class JobsOrchestrator:
                     payload["worker_terminal_id"] = terms[0].id
             except Exception:
                 logger.debug("Worker-terminal lookup failed for job '%s'", job.id)
-        # Persist into parent session JSONL so a page reload re-renders the tile.
+        # Persist into owner session JSONL so a page reload re-renders the tile.
         try:
             self._runner.store.append_event(
-                self._runner.live_id(job.parent_session_id), {"type": "job_status", **payload}
+                self._runner.live_id(self._owner_session_id(job)), {"type": "job_status", **payload}
             )
         except Exception:
             logger.exception("Failed to persist job_status event for job '%s'", job.id)
@@ -1807,11 +1821,17 @@ class JobsOrchestrator:
         for job in jobs:
             self._sync_attention(job)
 
+    def _owner_session_id(self, job: Job) -> str:
+        """The session that hears about `job`: its parent, or the originating session
+        when the parent is a scheduled run, which has usually finished by now."""
+        parent = self._get_session(job.parent_session_id)
+        return (parent and parent.metadata.get(METADATA_ORIGINATING_SESSION)) or job.parent_session_id
+
     def _sync_attention(self, job: Job) -> None:
-        """Match the parent session's record for this job to the job's state."""
+        """Match the owner session's record for this job to the job's state."""
         if job.state in _PARKED_STATES:
             self._runner.open_attention(
-                job.parent_session_id,
+                self._owner_session_id(job),
                 source=SOURCE_JOB,
                 ref_id=job.id,
                 kind=job.state,
@@ -1821,12 +1841,12 @@ class JobsOrchestrator:
 
 
 def _should_notify(job: Job, terminal: JobState) -> bool:
-    """Decide whether to wake the parent based on Job.notify_when.
+    """Decide whether to wake the owner session based on Job.notify_when.
 
     Recognised values: "done", "stuck", "errored", "terminal" (any terminal state),
     "never" (no-op), and "all_done" (no per-job wake-up; the job is reported by the
     batch barrier instead). Anything else is treated as "never" (defensive - a typo
-    on disk shouldn't spam the parent agent).
+    on disk shouldn't spam the owner session).
     """
     # Job.__post_init__ already maps legacy `notify=True` → notify_when="terminal"
     # and normalises a missing value to "never", so this is a plain attribute read.

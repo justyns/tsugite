@@ -7,16 +7,27 @@ records outlive a daemon restart; an ask cannot, because the blocked call it
 belonged to is gone.
 """
 
+import asyncio
 import threading
 import time
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend, SSEProgressHandler
+from tsugite_daemon.adapters.scheduler_adapter import SchedulerAdapter
 from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ASK, SOURCE_DELIVERY, SOURCE_ERROR, SOURCE_JOB
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
+from tsugite_daemon.scheduler import ScheduleEntry
 from tsugite_daemon.session_runner import SessionRunner
-from tsugite_daemon.session_store import Session, SessionSource, SessionStatus, SessionStore, attention_fields
+from tsugite_daemon.session_store import (
+    METADATA_ORIGINATING_SESSION,
+    Session,
+    SessionSource,
+    SessionStatus,
+    SessionStore,
+    attention_fields,
+)
 
 from tsugite.history.models import Event
 from tsugite.history.reconstruction import events_to_messages
@@ -285,6 +296,164 @@ class TestJobSource:
         orchestrator._emit_job_event(jobs.get(job.id))
 
         assert store.attention.open_records("s1") == []
+
+
+class TestScheduledParent:
+    """A Job spawned by a scheduled run reports to the schedule's originating session."""
+
+    @pytest.fixture
+    def jobs(self, tmp_path):
+        return JobStore(tmp_path / "jobs.json")
+
+    def _scheduled_job(self, jobs, store, originating="origin", notify_when="stuck") -> Job:
+        _session(store, "origin")
+        store.create_session(
+            Session(
+                id="sched_run",
+                source=SessionSource.SCHEDULE.value,
+                parent_id="nightly",
+                status=SessionStatus.COMPLETED.value,
+                metadata={METADATA_ORIGINATING_SESSION: originating} if originating else {},
+            )
+        )
+        return jobs.add(
+            Job(id="job-1", parent_session_id="sched_run", prompt="ship it", state="stuck", notify_when=notify_when)
+        )
+
+    def test_attention_goes_to_the_originating_session(self, jobs, store, runner, bus):
+        job = self._scheduled_job(jobs, store)
+
+        JobsOrchestrator(jobs, runner, event_bus=bus)._emit_job_event(job)
+
+        assert [r.source for r in store.attention.open_records("origin")] == [SOURCE_JOB]
+        assert store.attention.open_records("sched_run") == []
+
+    def test_attention_falls_back_to_the_run_without_an_originating_session(self, jobs, store, runner, bus):
+        job = self._scheduled_job(jobs, store, originating=None)
+
+        JobsOrchestrator(jobs, runner, event_bus=bus)._emit_job_event(job)
+
+        assert [r.source for r in store.attention.open_records("sched_run")] == [SOURCE_JOB]
+        assert store.attention.open_records("origin") == []
+
+    @pytest.mark.asyncio
+    async def test_the_notify_wake_up_goes_to_the_originating_session(self, jobs, store, runner, bus):
+        job = self._scheduled_job(jobs, store)
+        sent = []
+
+        async def fake_reply(session_id, message, source="session", metadata=None):
+            sent.append(session_id)
+            return "ok"
+
+        runner.reply_to_session = fake_reply
+        orchestrator = JobsOrchestrator(jobs, runner, event_bus=bus)
+        orchestrator._schedule_notify(job)
+        await asyncio.gather(*orchestrator._notify_tasks)
+
+        assert sent == ["origin"]
+
+    def test_the_job_tile_event_goes_to_the_originating_session(self, jobs, store, runner, bus):
+        job = self._scheduled_job(jobs, store)
+
+        JobsOrchestrator(jobs, runner, event_bus=bus)._emit_job_event(job)
+
+        assert [e["type"] for e in store.read_events("origin")] == ["job_status"]
+        assert store.read_events("sched_run") == []
+
+    def _barrier_orchestrator(self, jobs, store, runner, bus, sent):
+        async def fake_reply(session_id, message, source="session", metadata=None):
+            sent.append((session_id, source))
+            return "ok"
+
+        runner.reply_to_session = fake_reply
+        job = self._scheduled_job(jobs, store, notify_when="all_done")
+        jobs.update(job.id, state=JobState.DONE.value)
+        return JobsOrchestrator(jobs, runner, event_bus=bus)
+
+    @pytest.mark.asyncio
+    async def test_the_batch_barrier_waits_on_the_run_session_turn(self, jobs, store, runner, bus):
+        sent = []
+        orchestrator = self._barrier_orchestrator(jobs, store, runner, bus, sent)
+        store.update_session("sched_run", turn_in_flight=True)
+        orchestrator.close_batch_barrier("sched_run")
+        assert not orchestrator._notify_tasks
+
+        jobs.add(
+            Job(id="job-2", parent_session_id="sched_run", prompt="and this", state="done", notify_when="all_done")
+        )
+        orchestrator.close_batch_barrier("sched_run")
+        assert not orchestrator._notify_tasks
+
+        store.update_session("sched_run", turn_in_flight=False)
+        orchestrator.on_turn_end("sched_run")
+        await asyncio.gather(*orchestrator._notify_tasks)
+
+        assert sent == [("origin", "jobs_all_complete")]
+        assert all(j.barrier_notified for j in jobs.list_all())
+
+    @pytest.mark.asyncio
+    async def test_the_origin_turn_end_sends_the_runs_held_batch_once(self, jobs, store, runner, bus):
+        sent = []
+        orchestrator = self._barrier_orchestrator(jobs, store, runner, bus, sent)
+        store.update_session("origin", turn_in_flight=True)
+        orchestrator.close_batch_barrier("sched_run")
+        assert not orchestrator._notify_tasks
+
+        store.update_session("origin", turn_in_flight=False)
+        orchestrator.on_turn_end("origin")
+        orchestrator.on_turn_end("origin")
+        await asyncio.gather(*orchestrator._notify_tasks)
+
+        assert sent == [("origin", "jobs_all_complete")]
+
+    @pytest.mark.asyncio
+    async def test_a_compacted_origin_turn_end_sends_the_runs_held_batch(self, jobs, store, runner, bus):
+        sent = []
+        orchestrator = self._barrier_orchestrator(jobs, store, runner, bus, sent)
+        _session(store, "origin2")
+        store.update_session("origin", turn_in_flight=True)
+        orchestrator.close_batch_barrier("sched_run")
+        store.update_session("origin", turn_in_flight=False, superseded_by="origin2")
+        orchestrator.on_turn_end("origin2")
+        await asyncio.gather(*orchestrator._notify_tasks)
+
+        assert [source for _, source in sent] == ["jobs_all_complete"]
+
+    def test_a_pruned_run_session_falls_back_to_the_job_parent(self, jobs, store, runner, bus):
+        job = self._scheduled_job(jobs, store)
+        store.delete_session("sched_run")
+
+        JobsOrchestrator(jobs, runner, event_bus=bus)._emit_job_event(job)
+
+        assert [r.source for r in store.attention.open_records("sched_run")] == [SOURCE_JOB]
+        assert store.attention.open_records("origin") == []
+
+    @pytest.mark.asyncio
+    async def test_a_finished_one_off_schedule_still_reports_to_its_origin(self, jobs, store, runner, bus, tmp_path):
+        _session(store, "origin")
+        app = MagicMock(agent_name="bot", session_store=store)
+        app.resolve_model.return_value = "test-model"
+        app.handle_message = AsyncMock(return_value="done")
+        sched = SchedulerAdapter(adapter=app, schedules_path=tmp_path / "schedules.json")
+        sched.set_session_runner(runner)
+        entry = sched.scheduler.add(
+            ScheduleEntry(
+                id="once",
+                prompt="p",
+                schedule_type="once",
+                run_at="2099-01-01T00:00:00Z",
+                originating_session_id="origin",
+            )
+        )
+        await sched.scheduler._fire_schedule(entry)
+        run_id = entry.run_history[-1]["session_id"]
+        job = jobs.add(Job(id="job-1", parent_session_id=run_id, prompt="ship it", state="stuck"))
+
+        JobsOrchestrator(jobs, runner, event_bus=bus)._emit_job_event(job)
+
+        assert sched.scheduler.list() == []
+        assert [r.source for r in store.attention.open_records("origin")] == [SOURCE_JOB]
+        assert store.attention.open_records(run_id) == []
 
 
 class TestBootRecovery:

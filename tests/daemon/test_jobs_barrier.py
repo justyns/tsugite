@@ -404,7 +404,7 @@ async def test_terminal_notify_waits_for_the_parent_turn_to_end(store, runner, o
     assert sent == [], "a parent mid-turn must not get a second concurrent turn"
 
     runner.store.sessions["parent-1"].turn_in_flight = False
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     await asyncio.sleep(0)
 
     assert [s["source"] for s in sent] == ["job_complete"]
@@ -420,15 +420,15 @@ async def test_held_terminal_notifies_go_out_one_per_turn_end(store, runner, orc
     await _finish(orchestrator, second)
 
     runner.store.sessions["parent-1"].turn_in_flight = False
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     await asyncio.sleep(0)
     assert len(sent) == 1 and first.id in sent[0]["message"]
 
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     await asyncio.sleep(0)
     assert len(sent) == 2 and second.id in sent[1]["message"]
 
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     await asyncio.sleep(0)
     assert len(sent) == 2, "a held wake-up is sent once"
 
@@ -453,7 +453,7 @@ async def test_a_failed_held_wake_up_falls_through_to_the_next_and_the_barrier(s
     await _finish(orchestrator, second)
 
     runner.store.sessions["parent-1"].turn_in_flight = False
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     for _ in range(3):
         await asyncio.sleep(0)
 
@@ -473,7 +473,7 @@ async def test_held_wake_ups_drain_when_the_parent_has_finished(store, runner, o
         await _finish(orchestrator, job)
     runner.store.sessions["parent-1"].turn_in_flight = False
 
-    orchestrator.on_parent_turn_end("parent-1")
+    orchestrator.on_turn_end("parent-1")
     for _ in range(4):
         await asyncio.sleep(0)
 

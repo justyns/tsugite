@@ -145,6 +145,8 @@ def _progress_from_events(events: list[dict]) -> dict:
     return progress
 
 
+METADATA_ORIGINATING_SESSION = "originating_session_id"
+
 READ_ONLY_METADATA_KEYS = frozenset(
     {
         "source",
@@ -173,6 +175,8 @@ READ_ONLY_METADATA_KEYS = frozenset(
         "dm_route",
         # The room a participant session belongs to. Stamped on sessions the room creates.
         "room_id",
+        # The session that created a scheduled run's schedule. Stamped on the run session.
+        METADATA_ORIGINATING_SESSION,
     }
 )
 
