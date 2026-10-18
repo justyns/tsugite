@@ -10,13 +10,17 @@ from tsugite.context import get_context_provider, reset_context_providers
 
 class _FakePerms:
     """Stand-in for tsugite.permissions.Permissions: in-memory allow/deny lists
-    that record every host persisted via ``web_fetch_allow`` / ``web_fetch_deny``."""
+    that record every host persisted via ``web_fetch_allow`` / ``web_preview_deny``."""
 
-    def __init__(self, allowed: set[str] | None = None, denied: set[str] | None = None):
+    def __init__(
+        self, allowed: set[str] | None = None, denied: set[str] | None = None, preview_denied: set[str] | None = None
+    ):
         self.allowed = set(allowed or ())
         self.denied = set(denied or ())
+        self.preview_denied = set(preview_denied or ())
         self.allow_calls: list[str] = []
         self.deny_calls: list[str] = []
+        self.preview_deny_calls: list[str] = []
 
     def web_fetch_allowed(self, host: str) -> bool:
         return host in self.allowed
@@ -31,6 +35,13 @@ class _FakePerms:
     def web_fetch_deny(self, host: str) -> None:
         self.deny_calls.append(host)
         self.denied.add(host)
+
+    def web_preview_denied(self, host: str) -> bool:
+        return host in self.preview_denied
+
+    def web_preview_deny(self, host: str) -> None:
+        self.preview_deny_calls.append(host)
+        self.preview_denied.add(host)
 
 
 @pytest.fixture(autouse=True)
@@ -219,6 +230,7 @@ def test_unknown_host_prompts_and_fetches_on_approve():
     assert "a.example" in prompt[0]
     assert kwargs.get("allow_always") is True
     assert kwargs.get("allow_never") is True
+    assert kwargs.get("extra_options") == {"Block agent fetches": "block"}
     assert perms.allow_calls == []
     assert perms.deny_calls == []
 
@@ -236,7 +248,7 @@ def test_always_persists_host_then_fetches():
     assert perms.allow_calls == ["a.example"]
 
 
-def test_never_persists_host_then_skips_fetch():
+def test_never_persists_host_to_preview_denylist_then_skips_fetch():
     perms = _FakePerms()
     with (
         patch.object(web_ctx, "get_permissions", return_value=perms),
@@ -247,11 +259,26 @@ def test_never_persists_host_then_skips_fetch():
 
     assert items == []
     fetch.assert_not_called()
-    assert perms.deny_calls == ["a.example"]
+    assert perms.preview_deny_calls == ["a.example"]
+    assert perms.deny_calls == []
 
 
 def test_denylisted_host_is_skipped_without_prompting():
     perms = _FakePerms(denied={"a.example"})
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=perms),
+        patch.object(web_ctx, "request_approval") as ask,
+        patch.object(web_ctx, "fetch_text") as fetch,
+    ):
+        items = web_ctx.detect_urls("https://a.example/x", {})
+
+    assert items == []
+    ask.assert_not_called()
+    fetch.assert_not_called()
+
+
+def test_preview_denylisted_host_is_skipped_without_prompting():
+    perms = _FakePerms(allowed={"a.example"}, preview_denied={"a.example"})
     with (
         patch.object(web_ctx, "get_permissions", return_value=perms),
         patch.object(web_ctx, "request_approval") as ask,
@@ -362,8 +389,10 @@ def _clean_session_denies():
     from tsugite import permissions
 
     permissions._session_denied_hosts.clear()
+    permissions._session_preview_denied_hosts.clear()
     yield permissions
     permissions._session_denied_hosts.clear()
+    permissions._session_preview_denied_hosts.clear()
 
 
 def _answer_deny_as(backend, perms=None):
@@ -378,30 +407,90 @@ def _answer_deny_as(backend, perms=None):
         set_interaction_backend(None)
 
 
-def test_one_time_deny_blocks_host_in_memory_only(_clean_session_denies):
+def test_one_time_deny_suppresses_previews_without_blocking_agent_fetches(_clean_session_denies):
     from tests.interaction_doubles import FakeBackend
 
     perms = _FakePerms()
     assert _answer_deny_as(FakeBackend("Deny"), perms) is False
-    assert _clean_session_denies.web_fetch_blocked("a.example", None)
+    assert _clean_session_denies.web_preview_denied_in_session("a.example")
+    assert not _clean_session_denies.web_fetch_blocked("a.example", None)
     assert perms.denied == set()
+    assert perms.preview_denied == set()
 
 
 def test_unprompted_deny_is_not_recorded(_clean_session_denies):
     from tests.interaction_doubles import SpyNonInteractive
 
     assert _answer_deny_as(SpyNonInteractive()) is False
+    assert not _clean_session_denies.web_preview_denied_in_session("a.example")
     assert not _clean_session_denies.web_fetch_blocked("a.example", None)
 
 
-def test_session_denied_host_is_skipped_without_prompting(_clean_session_denies):
-    _clean_session_denies.deny_web_fetch_for_session("a.example")
+def test_session_preview_denied_host_is_skipped_without_prompting(_clean_session_denies):
+    _clean_session_denies.deny_web_preview_for_session("a.example")
     with (
         patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
         patch.object(web_ctx, "request_approval") as ask,
     ):
         assert web_ctx._may_fetch("https://a.example/x") is False
     ask.assert_not_called()
+
+
+def test_block_agent_fetches_blocks_the_session_and_skips_the_preview(_clean_session_denies):
+    perms = _FakePerms()
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=perms),
+        patch.object(web_ctx, "request_approval", return_value="block"),
+    ):
+        assert web_ctx._may_fetch("https://a.example/x") is False
+    assert _clean_session_denies.web_fetch_blocked("a.example", None)
+    assert perms.denied == perms.preview_denied == set()
+
+
+@pytest.mark.parametrize("answer", ["approve", "always"])
+def test_approval_reprompt_lifts_a_session_fetch_block(_clean_session_denies, answer):
+    _clean_session_denies.deny_web_fetch_for_session("a.example")
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
+        patch.object(web_ctx, "request_approval", return_value=answer) as ask,
+    ):
+        assert web_ctx._may_fetch("https://a.example/x") is True
+    ask.assert_called_once()
+    assert not _clean_session_denies.web_fetch_blocked("a.example", None)
+
+
+@pytest.mark.parametrize("answer", ["approve", "always"])
+def test_approval_reprompt_also_lifts_a_session_preview_deny(_clean_session_denies, answer):
+    _clean_session_denies.deny_web_preview_for_session("a.example")
+    _clean_session_denies.deny_web_fetch_for_session("a.example")
+    with (
+        patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
+        patch.object(web_ctx, "request_approval", return_value=answer),
+    ):
+        assert web_ctx._may_fetch("https://a.example/x") is True
+    assert not _clean_session_denies.web_preview_denied_in_session("a.example")
+
+
+@pytest.mark.parametrize("declined", ["deny", "never"])
+def test_declined_reprompt_keeps_the_block_and_prompts_again(_clean_session_denies, declined):
+    from tests.interaction_doubles import FakeBackend
+    from tsugite.interaction import set_interaction_backend
+
+    _clean_session_denies.deny_web_fetch_for_session("a.example")
+    set_interaction_backend(FakeBackend(None))
+    try:
+        with (
+            patch.object(web_ctx, "get_permissions", return_value=_FakePerms()),
+            patch.object(web_ctx, "request_approval", side_effect=[declined, "approve"]) as ask,
+        ):
+            assert web_ctx._may_fetch("https://a.example/x") is False
+            assert _clean_session_denies.web_fetch_blocked("a.example", None)
+
+            assert web_ctx._may_fetch("https://a.example/y") is True
+            assert not _clean_session_denies.web_fetch_blocked("a.example", None)
+    finally:
+        set_interaction_backend(None)
+    assert ask.call_count == 2
 
 
 def test_deny_in_one_session_still_prompts_in_another(_clean_session_denies):

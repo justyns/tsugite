@@ -3,7 +3,8 @@
 Merges two YAML sources, the same way hooks does:
 
 1. ``runtime_path``: a mutable ``permissions.yaml`` next to ``daemon.yaml``.
-   "Always allow" and "Always deny" decisions append here, so they survive a restart.
+   "Always allow" appends to ``web.fetch_allowlist`` and "Always deny" to
+   ``web.preview_denylist``, so they survive a restart.
 2. ``workspace_dir``: an optional, read-only ``<workspace_dir>/.tsugite/permissions.yaml``,
    hand-authored per agent (exactly like ``.tsugite/hooks.yaml``). The store never
    writes it.
@@ -18,6 +19,8 @@ The file groups lists by section, e.g.::
         - example.com
       fetch_denylist:
         - ads.example.com
+      preview_denylist:
+        - news.example.com
 
 The generic ``is_listed(section, key)`` / ``add(section, key)`` address a list by
 dotted path (``"web.fetch_allowlist"``). The ``web_fetch_*`` wrappers hide that
@@ -36,6 +39,7 @@ from tsugite.utils import atomic_write_text
 
 WEB_FETCH_ALLOWLIST = "web.fetch_allowlist"
 WEB_FETCH_DENYLIST = "web.fetch_denylist"
+WEB_PREVIEW_DENYLIST = "web.preview_denylist"
 
 
 def _load_yaml_mapping(path: Optional[Path]) -> dict:
@@ -125,28 +129,53 @@ class Permissions:
         """Persist ``domain`` to the runtime web fetch denylist."""
         self.add(WEB_FETCH_DENYLIST, domain.lower())
 
+    def web_preview_denied(self, domain: str) -> bool:
+        """True if link previews of ``domain`` are suppressed (either source). Agent fetches ignore this list."""
+        return self.is_listed(WEB_PREVIEW_DENYLIST, domain.lower())
+
+    def web_preview_deny(self, domain: str) -> None:
+        """Persist ``domain`` to the runtime preview denylist."""
+        self.add(WEB_PREVIEW_DENYLIST, domain.lower())
+
 
 _session_denied_hosts: dict[Optional[str], set[str]] = {}
+_session_preview_denied_hosts: dict[Optional[str], set[str]] = {}
 
 
 def deny_web_fetch_for_session(host: str) -> None:
-    """Block ``host`` for the current session only. Never written to ``permissions.yaml``."""
+    """Block the agent's fetches of ``host`` for the current session only. Never written to ``permissions.yaml``."""
     _session_denied_hosts.setdefault(current_session_id(), set()).add(host.lower())
 
 
-def _denied_in_session() -> set[str]:
+def allow_web_for_session(host: str) -> None:
+    """Lift the session fetch block and preview deny for ``host``."""
+    sid = current_session_id()
+    _session_denied_hosts.get(sid, set()).discard(host.lower())
+    _session_preview_denied_hosts.get(sid, set()).discard(host.lower())
+
+
+def deny_web_preview_for_session(host: str) -> None:
+    """Suppress link previews of ``host`` for the current session only."""
+    _session_preview_denied_hosts.setdefault(current_session_id(), set()).add(host.lower())
+
+
+def web_preview_denied_in_session(host: str) -> bool:
+    return host.lower() in _session_preview_denied_hosts.get(current_session_id(), set())
+
+
+def session_blocked_hosts() -> set[str]:
     return _session_denied_hosts.get(current_session_id(), set())
 
 
 def web_fetch_blocked(host: str, perms: Optional[Permissions]) -> bool:
     """True if ``host`` is denied for the current session or on ``perms``' denylist."""
-    return host.lower() in _denied_in_session() or bool(perms and perms.web_fetch_denied(host))
+    return host.lower() in session_blocked_hosts() or bool(perms and perms.web_fetch_denied(host))
 
 
 def web_fetch_blocked_hosts(perms: Optional[Permissions]) -> list[str]:
     """Every host ``web_fetch_blocked`` refuses, for seeding a subprocess executor's child."""
     persisted = perms.listed(WEB_FETCH_DENYLIST) if perms else []
-    return sorted(_denied_in_session() | {h for h in persisted if isinstance(h, str)})
+    return sorted(session_blocked_hosts() | {h for h in persisted if isinstance(h, str)})
 
 
 _permissions_var: contextvars.ContextVar[Optional[Permissions]] = contextvars.ContextVar("permissions", default=None)

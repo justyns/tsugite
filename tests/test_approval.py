@@ -46,6 +46,12 @@ class TestDecisionMapping:
         set_interaction_backend(FakeBackend("Always deny"))
         assert request_approval("Fetch x?", allow_never=True) == "never"
 
+    def test_extra_option(self):
+        backend = FakeBackend("Block it")
+        set_interaction_backend(backend)
+        assert request_approval("Fetch x?", extra_options={"Block it": "block"}) == "block"
+        assert backend.calls[0][2] == ["Approve", "Deny", "Block it"]
+
     def test_options_include_never_when_allowed(self):
         backend = FakeBackend("Deny")
         set_interaction_backend(backend)

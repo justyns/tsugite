@@ -31,23 +31,28 @@ _LABEL_TO_DECISION = {
 
 
 def request_approval(
-    prompt: str, *, allow_always: bool = False, allow_never: bool = False, detail: Optional[str] = None
+    prompt: str,
+    *,
+    allow_always: bool = False,
+    allow_never: bool = False,
+    extra_options: Optional[dict[str, str]] = None,
+    detail: Optional[str] = None,
 ) -> str:
     """Ask the user to approve an action, returning an :data:`ApprovalDecision`.
 
-    Builds ``Approve``/``Deny`` options (plus ``Always allow`` when ``allow_always``
-    and ``Always deny`` when ``allow_never``) and routes them through the active
-    interaction backend as an ``"approval"`` question, then maps the chosen label
-    back to a decision.
+    Offers ``Approve``/``Deny`` plus the optional choices below as an
+    ``"approval"`` question on the active interaction backend, and maps the
+    chosen label back to a decision.
 
     Args:
         prompt: The action to approve, phrased as a question.
         allow_always: Offer an "Always allow" option (a persistent allow).
         allow_never: Offer an "Always deny" option (a persistent deny).
+        extra_options: Caller-specific choices, as ``{label: decision}``.
         detail: Extra context appended below the prompt for the user to read.
 
     Returns:
-        One of ``"approve"``, ``"deny"``, ``"always"``, or ``"never"``.
+        One of ``"approve"``, ``"deny"``, ``"always"``, ``"never"``, or a value of ``extra_options``.
 
     Fail-closed: returns ``"deny"`` WITHOUT prompting when there is no backend or
     the backend is non-interactive, and for any unrecognized reply.
@@ -61,7 +66,9 @@ def request_approval(
         options.append(ALWAYS_LABEL)
     if allow_never:
         options.append(NEVER_LABEL)
+    decisions = _LABEL_TO_DECISION | (extra_options or {})
+    options.extend(extra_options or ())
 
     question = f"{prompt}\n\n{detail}" if detail else prompt
     answer = backend.ask_user(question, "approval", options)
-    return _LABEL_TO_DECISION.get(answer, "deny")
+    return decisions.get(answer, "deny")

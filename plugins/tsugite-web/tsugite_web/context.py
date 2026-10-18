@@ -5,9 +5,7 @@ outgoing message contains http(s) URLs, this detector fetches each page's
 readable article text server-side and attaches it as a ``<client_context>``
 item, so the agent sees the page contents without a manual fetch tool call.
 
-Each fetch is gated on a human approval unless the URL's host is already on the
-permissions allowlist or denylist; "Always allow" and "Always deny" add the host
-to one of them so it is never asked about again (see ``_may_fetch``).
+Each fetch is gated on the permissions lists or a human approval (see ``_may_fetch``).
 """
 
 from __future__ import annotations
@@ -21,10 +19,19 @@ from tsugite.attachments import get_specific_handler
 from tsugite.attachments.base import Attachment
 from tsugite.context import ContextProvider, register_context_provider
 from tsugite.interaction import NonInteractiveBackend, get_interaction_backend
-from tsugite.permissions import deny_web_fetch_for_session, get_permissions, web_fetch_blocked
+from tsugite.permissions import (
+    allow_web_for_session,
+    deny_web_fetch_for_session,
+    deny_web_preview_for_session,
+    get_permissions,
+    session_blocked_hosts,
+    web_preview_denied_in_session,
+)
 from tsugite.tools.http import fetch_text
 
 logger = logging.getLogger(__name__)
+
+BLOCK_LABEL = "Block agent fetches"
 
 # http(s) URLs. `\S+` grabs the whole run; trailing sentence punctuation and
 # wrapping brackets/quotes are stripped afterwards so "(see https://x.com)." and
@@ -59,39 +66,41 @@ def _host_of(url: str) -> str | None:
 
 
 def _may_fetch(url: str) -> bool:
-    """Whether the page at ``url`` may be fetched.
+    """Whether the page at ``url`` may be previewed.
 
-    The denylist is read first, so a host on both lists is never fetched. A host
-    on the allowlist fetches silently; any other host - including when there is no
-    store at all - is gated on a human approval, and "Always allow" / "Always
-    deny" persist the host to the matching list. A "Deny" answer from an
-    interactive user also blocks the host for the rest of the session. A URL with
-    no hostname is never fetched.
-
-    The detector runs on a worker thread, so the blocking approval prompt here
-    pauses the send until the user answers.
+    May block on an approval prompt; the detector runs on a worker thread, so the
+    send waits for the answer.
     """
     host = _host_of(url)
     if not host:
         return False
     perms = get_permissions()
-    if web_fetch_blocked(host, perms):
+    if perms and perms.web_fetch_denied(host):
         return False
-    if perms and perms.web_fetch_allowed(host):
-        return True
-    decision = request_approval(f"Fetch content from {host}?", allow_always=True, allow_never=True)
-    if decision == "always":
-        if perms:
+    if host.lower() not in session_blocked_hosts():
+        if web_preview_denied_in_session(host) or (perms and perms.web_preview_denied(host)):
+            return False
+        if perms and perms.web_fetch_allowed(host):
+            return True
+    decision = request_approval(
+        f"Fetch content from {host}?",
+        allow_always=True,
+        allow_never=True,
+        extra_options={BLOCK_LABEL: "block"},
+    )
+    if decision in ("approve", "always"):
+        allow_web_for_session(host)
+        if decision == "always" and perms:
             perms.web_fetch_allow(host)
         return True
-    if decision == "never":
-        if perms:
-            perms.web_fetch_deny(host)
-        return False
-    if decision == "deny" and not isinstance(get_interaction_backend(), (NonInteractiveBackend, type(None))):
-        # With no interactive backend request_approval denies without asking, which is not a user decision.
+    if decision == "never" and perms:
+        perms.web_preview_deny(host)
+    elif decision == "block":
         deny_web_fetch_for_session(host)
-    return decision == "approve"
+    elif decision == "deny" and not isinstance(get_interaction_backend(), (NonInteractiveBackend, type(None))):
+        # request_approval returns "deny" unasked when no interactive backend is set.
+        deny_web_preview_for_session(host)
+    return False
 
 
 def _fetch_url_text(url: str) -> str:

@@ -71,7 +71,10 @@ class HttpResponse:
 def _refuse_denied_host(url: str) -> None:
     host = (urlsplit(url).hostname or "").lower()
     if host and web_fetch_blocked(host, get_permissions()):
-        raise RuntimeError(f"Request refused: the user denied fetching {host}. Do not fetch it; tell the user instead.")
+        raise RuntimeError(
+            f"Request refused: the user denied fetching {host}. "
+            "Do not fetch it; ask the user to unblock it if you need it."
+        )
 
 
 def _refuse_denied_request(request: httpx.Request) -> None:

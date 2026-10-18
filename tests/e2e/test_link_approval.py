@@ -50,7 +50,13 @@ def test_always_deny_persists_the_host_and_silences_later_pastes(chat_page, link
 
     page.wait_for_selector(ASK_APPROVAL, timeout=15000)
     expect(page.locator(f"{ASK_APPROVAL} button")).to_have_text(
-        [re.compile(r"Approve$"), re.compile(r"Deny$"), re.compile(r"Always allow$"), re.compile(r"Always deny$")]
+        [
+            re.compile(r"Approve$"),
+            re.compile(r"Deny$"),
+            re.compile(r"Always allow$"),
+            re.compile(r"Always deny$"),
+            re.compile(r"Block agent fetches$"),
+        ]
     )
 
     page.locator(ASK_APPROVAL).get_by_role("button", name="Always deny").click()
@@ -60,7 +66,8 @@ def test_always_deny_persists_the_host_and_silences_later_pastes(chat_page, link
     assert link_detector_chat["items"] == []
 
     stored = yaml.safe_load(get_xdg_write_path("permissions.yaml").read_text())
-    assert stored["web"]["fetch_denylist"] == ["blocked.example"]
+    assert stored["web"]["preview_denylist"] == ["blocked.example"]
+    assert "fetch_denylist" not in stored["web"]
 
     _send(page, "and https://blocked.example/other too")
 

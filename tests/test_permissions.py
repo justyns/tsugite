@@ -174,6 +174,16 @@ class TestDenylist:
         assert yaml.safe_load(rt.read_text()) == {"web": {"fetch_denylist": ["bad.test"]}}
 
 
+class TestPreviewDenylist:
+    def test_preview_deny_persists_to_its_own_list(self, tmp_path):
+        rt = tmp_path / "permissions.yaml"
+        perms = Permissions(rt)
+        perms.web_preview_deny("Pre.TEST")
+        assert perms.web_preview_denied("pre.test")
+        assert not perms.web_fetch_denied("pre.test")
+        assert yaml.safe_load(rt.read_text()) == {"web": {"preview_denylist": ["pre.test"]}}
+
+
 class TestAtomicWrite:
     def test_no_temp_litter(self, tmp_path):
         rt = tmp_path / "permissions.yaml"

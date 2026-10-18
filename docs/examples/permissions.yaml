@@ -13,6 +13,11 @@ web:
   # Domains the webpage detector may fetch without asking for approval.
   fetch_allowlist:
     - example.com
-  # Domains it never fetches and never asks about. Checked before the allowlist.
+  # Domains it never previews and never asks about, and that the agent's own
+  # fetch_text / http_request refuse. Checked before the allowlist.
   fetch_denylist:
     - ads.example.com
+  # Domains it never previews or asks about. The agent's own fetches still work.
+  # "Always deny" appends here.
+  preview_denylist:
+    - intranet.example.com

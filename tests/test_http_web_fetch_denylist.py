@@ -25,9 +25,11 @@ def in_session(session_id):
 def _clean_state():
     set_permissions(None)
     permissions._session_denied_hosts.clear()
+    permissions._session_preview_denied_hosts.clear()
     yield
     set_permissions(None)
     permissions._session_denied_hosts.clear()
+    permissions._session_preview_denied_hosts.clear()
 
 
 @pytest.fixture
@@ -82,6 +84,21 @@ def test_download_file_refuses_denylisted_host(client, perms, tmp_path):
         download_file("https://bad.test/f", str(target))
     client.stream.assert_not_called()
     assert not target.exists()
+
+
+def test_preview_denied_host_is_still_fetchable(client, perms):
+    perms.web_preview_deny("ok.test")
+    permissions.deny_web_preview_for_session("ok.test")
+    assert fetch_text("https://ok.test/page") == "fetched"
+    assert http_request("https://ok.test/api").status_code == 200
+
+
+def test_refusal_tells_the_agent_to_ask_and_approval_lifts_it(client):
+    deny_web_fetch_for_session("once.test")
+    with pytest.raises(RuntimeError, match="ask the user to unblock"):
+        fetch_text("https://once.test/x")
+    permissions.allow_web_for_session("once.test")
+    fetch_text("https://once.test/x")
 
 
 def test_one_time_deny_blocks_later_fetch_text_without_persisting(client, perms):
