@@ -10,7 +10,7 @@ from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
-from tsugite.core.agent import TsugiteAgent  # noqa: E402
+from tsugite.core.agent import NO_ACTION_MESSAGE, AgentResult, TsugiteAgent  # noqa: E402
 from tsugite.core.executor_registry import get_executor_class  # noqa: E402
 from tsugite.core.proxy import _parse_pattern  # noqa: E402
 from tsugite.core.state import session_state_path  # noqa: E402
@@ -401,6 +401,7 @@ async def _execute_agent_with_prompt(
     user_input_for_history: Optional[str] = None,
     channel_metadata: Optional[Dict[str, Any]] = None,
     usage_sink: Optional[Dict[str, Any]] = None,
+    requires_action: bool = False,
 ) -> str | AgentExecutionResult:
     """Execute agent with a prepared agent.
 
@@ -409,6 +410,9 @@ async def _execute_agent_with_prompt(
     `usage_sink`, when given, receives this call's token and cost counters. It is
     how a multi-step run collects accounting from steps that return plain
     strings.
+
+    `requires_action` makes a run that ends without executing any code raise, so a
+    step whose result feeds later steps cannot pass on a prose answer.
     """
     if exec_options is None:
         exec_options = ExecutionOptions()
@@ -615,7 +619,7 @@ async def _execute_agent_with_prompt(
             hook_vars=hook_vars,
             storage=session_storage,
             pre_llm_call=pre_llm_call_cb,
-            expects_action=(channel_metadata or {}).get("source") == "scheduler",
+            expects_action=requires_action or (channel_metadata or {}).get("source") == "scheduler",
         )
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)
@@ -666,10 +670,18 @@ async def _execute_agent_with_prompt(
         except Exception as e:
             logger.debug("Failed to record usage: %s", e)
 
+        if requires_action and agent.ended_no_action:
+            steps = result.steps if isinstance(result, AgentResult) and result.steps else []
+            raise AgentExecutionError(
+                NO_ACTION_MESSAGE,
+                execution_steps=steps,
+                token_usage=agent.total_tokens,
+                cost=agent.reported_cost,
+                step_count=len(steps),
+            )
+
         # Return appropriate format
         if exec_options.return_token_usage:
-            from tsugite.core.agent import AgentResult
-
             if isinstance(result, AgentResult):
                 step_count = len(result.steps) if result.steps else 0
                 steps_list = result.steps if result.steps else []
@@ -712,8 +724,6 @@ async def _execute_agent_with_prompt(
                     session_id=session_storage.session_id if session_storage else None,
                 )
         else:
-            from tsugite.core.agent import AgentResult
-
             if isinstance(result, AgentResult):
                 return str(result.output)
             else:
@@ -872,6 +882,7 @@ class _RunSetup:
     resume_after_compaction: bool = False
     resume_cost_baseline: float = 0.0
     conversation_id: Optional[str] = None
+    requires_action: bool = False
 
 
 def _prepare_step(agent: Any, prompt: str, context: Dict[str, Any], setup: "_RunSetup") -> "PreparedAgent":
@@ -955,6 +966,7 @@ async def _run_unit(
         model_kwargs=model_kwargs,
         injectable_vars=injectable_vars,
         usage_sink=usage_sink,
+        requires_action=setup.requires_action,
     )
 
     try:

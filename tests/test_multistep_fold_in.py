@@ -552,3 +552,55 @@ Poll again.
     assert result.token_count == 300, "only some iterations of the looping step were counted"
     # None, not 0.0: nothing reported a cost, which is not the same as free.
     assert result.cost is None
+
+
+def _provider_replying(monkeypatch, replies: list[str]):
+    from unittest.mock import AsyncMock
+
+    from tsugite.providers.base import CompletionResponse, Usage
+
+    provider = MagicMock()
+    provider.acompletion = AsyncMock(
+        side_effect=[CompletionResponse(content=r, usage=Usage(total_tokens=10), cost=0.0) for r in replies]
+    )
+    provider.stop = AsyncMock()
+    provider.get_state = MagicMock(return_value=None)
+    provider.set_context = MagicMock()
+    monkeypatch.setattr("tsugite.models.get_provider_and_model", lambda _: ("test", provider, "test-model"))
+    return provider
+
+
+@pytest.mark.asyncio
+async def test_assigned_step_that_answers_in_prose_fails(tmp_path, monkeypatch):
+    from tsugite.agent_runner import runner
+
+    provider = _provider_replying(monkeypatch, ["I could not do that."])
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+
+    raised = []
+    real = runner._execute_agent_with_prompt
+
+    async def recording(*args, **kwargs):
+        try:
+            return await real(*args, **kwargs)
+        except Exception as e:
+            raised.append(e)
+            raise
+
+    monkeypatch.setattr(runner, "_execute_agent_with_prompt", recording)
+
+    with pytest.raises(RuntimeError, match="without executing any code"):
+        await runner.run_agent_async(agent_file, "test prompt")
+
+    assert provider.acompletion.await_count == 1
+    assert raised[0].token_usage == 10
+
+
+@pytest.mark.asyncio
+async def test_unassigned_step_may_answer_in_prose(tmp_path, monkeypatch):
+    from tsugite.agent_runner import runner
+
+    _provider_replying(monkeypatch, ['```python-exec\nreturn_value("found")\n```', "All done."])
+    agent_file = _write(tmp_path, TWO_STEP_AGENT)
+
+    assert await runner.run_agent_async(agent_file, "test prompt") == "All done."

@@ -252,6 +252,7 @@ async def _execute_step_with_retries(
         resume_session=None,
         resume_after_compaction=False,
         resume_cost_baseline=0.0,
+        requires_action=bool(step.assign_var),
     )
     errors = []
     step_start_time = time.time()

@@ -72,6 +72,7 @@ def _usage_dump(usage) -> Optional[Dict[str, Any]]:
 
 
 CONTEXT_ACK = "Context loaded."
+NO_ACTION_MESSAGE = "run ended without executing any code or calling return_value()"
 
 
 def estimate_content_tokens(content) -> int:
@@ -369,8 +370,8 @@ class TsugiteAgent:
             skills: List of Skill objects for loaded skills
             previous_messages: List of previous conversation messages (user/assistant pairs)
             hook_vars: Dict of pre_message hook captured outputs (e.g. rag_context)
-            expects_action: The run exists to do work (a scheduled run). One that ends
-                without executing any code is recorded as ``no_action``, not ``success``.
+            expects_action: Set for a scheduled run or a step with ``assign=``. Ending
+                without executing any code records ``no_action`` instead of ``success``.
         """
         from tsugite.models import get_model_kwargs, get_provider_and_model
 
@@ -392,6 +393,7 @@ class TsugiteAgent:
         self.hook_vars = hook_vars or {}
         self._pre_llm_call = pre_llm_call
         self.expects_action = expects_action
+        self.ended_no_action = False
         self._resume_session = resume_session
         self._resume_after_compaction = resume_after_compaction
 
@@ -662,7 +664,8 @@ class TsugiteAgent:
                     self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             elif self.expects_action and not executed_code:
                 status = "no_action"
-                error_message = "run ended without executing any code or calling return_value()"
+                self.ended_no_action = True
+                error_message = NO_ACTION_MESSAGE
                 if self.event_bus:
                     self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
             else:

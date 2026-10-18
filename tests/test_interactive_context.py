@@ -21,6 +21,7 @@ def mock_agent_runner():
 
         mock_instance = MagicMock()
         mock_instance.run = MagicMock(side_effect=mock_run)
+        mock_instance.ended_no_action = False
         return mock_instance, captured_prompts
 
     return create_mock
