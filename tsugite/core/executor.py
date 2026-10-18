@@ -11,8 +11,10 @@ import ast
 import asyncio
 import contextlib
 import io
+import json
 import os
 import pprint
+import re
 import sys
 import threading
 import time
@@ -103,6 +105,27 @@ NAME_ERROR_NOTE = (
     " <content> blocks do not carry over, so re-import or recompute them, or keep"
     " values in state['key'])"
 )
+
+
+_UNDEFINED_NAME = re.compile(r"^NameError: name '(\w+)' is not defined")
+
+
+class BlockNameOrigins:
+    """Remembers which code block last assigned each top-level name, for the NameError hint."""
+
+    def __init__(self) -> None:
+        self._block = 0
+        self._defined_in: Dict[str, int] = {}
+
+    def record(self, error: Optional[str], variables_set: Dict[str, str]) -> Optional[str]:
+        """Count this block, then return `error` with the defining block appended when it names one."""
+        self._block += 1
+        match = _UNDEFINED_NAME.match(error or "")
+        if match and match[1] in self._defined_in:
+            name = match[1]
+            error += f" ('{name}' was defined in block {self._defined_in[name]} earlier in this run, not in this block)"
+        self._defined_in.update(dict.fromkeys(variables_set, self._block))
+        return error
 
 
 def truncate_observation(text: str, max_output_kb: int = MAX_EXECUTION_OUTPUT_KB) -> tuple[str, bool]:
@@ -354,7 +377,8 @@ class LocalExecutor:
 
     WARNING: This is NOT secure! Only use for development.
 
-    Each call to ``execute()`` runs in a fresh namespace. Use the injected
+    Each call to ``execute()`` runs in a fresh namespace holding only ``re``,
+    ``json`` and ``os`` pre-imported. Use the injected
     ``state`` dict to persist values across turns; all other bindings are
     discarded when the turn ends.
 
@@ -403,6 +427,7 @@ class LocalExecutor:
         self._tool_functions: Dict[str, Callable[..., Any]] = {}
         self._sticky_injections: Dict[str, Any] = {}
         self._content_blocks: Dict[str, str] = {}
+        self._name_origins = BlockNameOrigins()
 
         target = workspace_dir
         if target is None and path_context is not None:
@@ -413,7 +438,7 @@ class LocalExecutor:
 
     def _build_turn_namespace(self) -> Dict[str, Any]:
         """Construct a fresh namespace populated with built-ins, tools, state, and sticky injections."""
-        ns: Dict[str, Any] = {}
+        ns: Dict[str, Any] = {"re": re, "json": json, "os": os}
 
         def return_value(*args, **kwargs):
             if args:
@@ -610,6 +635,7 @@ class LocalExecutor:
             self._state = rebound
 
         variables_set = self._get_new_variables(namespace_before)
+        exec_error = self._name_origins.record(exec_error, variables_set)
         state_keys = self._summarize_state_keys()
         save_error = self._save_state()
 

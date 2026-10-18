@@ -61,6 +61,37 @@ async def test_turn_namespace_is_fresh():
 
 
 @pytest.mark.asyncio
+async def test_common_modules_preimported_each_block():
+    executor = LocalExecutor()
+    result = await executor.execute("print(re.sub('a', 'b', 'aa'), json.dumps([1]), os.sep)")
+    assert result.error is None
+    assert result.output.split() == ["bb", "[1]", "/"]
+    assert "re" not in result.variables_set
+
+
+@pytest.mark.asyncio
+async def test_name_error_names_defining_block():
+    executor = LocalExecutor()
+    await executor.execute("BASE = 1")
+    await executor.execute("other = 2")
+    result = await executor.execute("print(BASE)")
+    assert "'BASE' was defined in block 1" in result.error
+    assert "earlier in this run" in result.error
+    unknown = await executor.execute("print(nope)")
+    assert "was defined in block" not in unknown.error
+
+
+@pytest.mark.asyncio
+async def test_name_error_uses_latest_defining_block():
+    executor = LocalExecutor()
+    await executor.execute("x = 1")
+    await executor.execute("x = 2")
+    await executor.execute("x = 3")
+    result = await executor.execute("print(x)")
+    assert "defined in block 3" in result.error
+
+
+@pytest.mark.asyncio
 async def test_state_persists_across_turns():
     """Values assigned to `state` persist across turns."""
     executor = LocalExecutor()

@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from tsugite.permissions import get_permissions, web_fetch_blocked_hosts
 
-from .executor import EXECUTOR_BUILTIN_TOOLS, ExecutionResult, LocalExecutor
+from .executor import EXECUTOR_BUILTIN_TOOLS, BlockNameOrigins, ExecutionResult, LocalExecutor
 from .state import load_state, save_state
 
 logger = logging.getLogger(__name__)
@@ -359,6 +359,7 @@ class SubprocessExecutor:
         self._tools_called: List[str] = []
         self._loaded_skills_for_turn: Dict[str, str] = {}
         self._unloaded_skills_for_turn: List[str] = []
+        self._name_origins = BlockNameOrigins()
 
         self._tmpdir = tempfile.mkdtemp(prefix="tsugite_sub_")
         self._proxy = None
@@ -471,7 +472,7 @@ RESULT_PATH = {json.dumps(result_path)}
 {"".join(tool_stubs)}
 {seed_denied_hosts}
 
-namespace = {{}}
+namespace = {{"re": re, "json": json, "os": os}}
 namespace["return_value"] = return_value
 namespace["final_answer"] = return_value  # backward-compat alias
 namespace["send_message"] = send_message
@@ -762,10 +763,11 @@ with open(RESULT_PATH, "w") as f:
                     pass
             return ExecutionResult(
                 output="",
-                error=(
+                error=self._name_origins.record(
                     f"tsu:exec exceeded its {self._exec_timeout}s wall-clock timeout and was terminated - "
                     "a tool call or loop hung. Break long work into smaller blocks, add your own timeouts "
-                    "around blocking calls, or raise TSUGITE_EXEC_TIMEOUT."
+                    "around blocking calls, or raise TSUGITE_EXEC_TIMEOUT.",
+                    {},
                 ),
                 stdout="",
                 stderr="",
@@ -793,16 +795,17 @@ with open(RESULT_PATH, "w") as f:
             except Exception as e:
                 logger.warning("Failed to reload state from subprocess: %s", e)
 
+            variables_set = result_data.get("variables_set", {})
             return ExecutionResult(
                 output=result_data.get("output", ""),
-                error=result_data.get("error"),
+                error=self._name_origins.record(result_data.get("error"), variables_set),
                 stdout=result_data.get("stdout", ""),
                 stderr=result_data.get("stderr", ""),
                 return_value=result_data.get("return_value"),
                 tools_called=result_data.get("tools_called", []),
                 tool_calls=result_data.get("tool_calls", []),
                 groups=result_data.get("groups", []),
-                variables_set=result_data.get("variables_set", {}),
+                variables_set=variables_set,
                 state_keys=result_data.get("state_keys", {}),
                 loaded_skills=self._loaded_skills_for_turn.copy(),
                 unloaded_skills=list(self._unloaded_skills_for_turn),
@@ -817,7 +820,7 @@ with open(RESULT_PATH, "w") as f:
                 pass
             return ExecutionResult(
                 output="",
-                error=f"Subprocess exited with code {proc.returncode}",
+                error=self._name_origins.record(f"Subprocess exited with code {proc.returncode}", {}),
                 stdout="",
                 stderr=stderr_output,
                 return_value=None,
