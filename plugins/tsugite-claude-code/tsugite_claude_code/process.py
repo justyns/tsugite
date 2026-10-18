@@ -366,6 +366,7 @@ class ClaudeCodeProcess:
                     "context_window": context_window,
                     "is_error": bool(event.get("is_error")),
                     "subtype": event.get("subtype"),
+                    "errors": event.get("errors") or [],
                 }
                 return
 

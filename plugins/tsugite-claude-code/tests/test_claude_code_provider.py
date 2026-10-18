@@ -195,6 +195,29 @@ class TestClaudeCodeProcess:
         assert process.session_id == "captured-session"
 
     @pytest.mark.asyncio
+    async def test_error_result_includes_errors_list(self, process):
+        """Real CLI output for --resume of a deleted transcript: no `result` key, message in `errors`."""
+        events = [
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "error_during_execution",
+                    "is_error": True,
+                    "session_id": "00000000-0000-0000-0000-000000000000",
+                    "usage": {},
+                    "errors": ["No conversation found with session ID: 00000000-0000-0000-0000-000000000000"],
+                }
+            ),
+        ]
+        process._process = self._mock_proc(events)
+
+        collected = [e async for e in process.send_message("hello")]
+
+        result = collected[-1]
+        assert result["is_error"] is True
+        assert result["errors"] == ["No conversation found with session ID: 00000000-0000-0000-0000-000000000000"]
+
+    @pytest.mark.asyncio
     async def test_send_message_parses_assistant_event(self, process):
         """Test parsing the real claude CLI format: assistant event with full text."""
         events = [

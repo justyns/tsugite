@@ -66,14 +66,6 @@ _ALIASES = {
 }
 
 
-def _is_unresumable_history_error(exc: BaseException) -> bool:
-    """A 400 on a resume replay means the sidecar transcript itself is malformed
-    (e.g. an empty text content block) — retrying the same resume can never
-    succeed. Anything else (prompt too long, 429/529, execution errors) must
-    keep surfacing so the daemon's existing retry paths handle it."""
-    return "API Error: 400" in str(exc)
-
-
 def _raise_if_error(result_event: dict) -> None:
     """Translate a Claude CLI error result into AgentExecutionError.
 
@@ -84,7 +76,11 @@ def _raise_if_error(result_event: dict) -> None:
     """
     if not result_event.get("is_error"):
         return
-    text = result_event.get("text") or "Claude Code returned an error result"
+    text = (
+        result_event.get("text")
+        or "; ".join(result_event.get("errors") or [])
+        or "Claude Code returned an error result"
+    )
     subtype = result_event.get("subtype") or "error"
     if "Failed to authenticate" in text:
         text = f"{text.rstrip('.')}. Run `claude /login` on the daemon host to sign in again."
@@ -202,14 +198,20 @@ class ClaudeCodeProvider:
             return await self._collect(retry_content)
 
     def _should_fallback_to_fresh_session(self, first_turn: bool, err: BaseException) -> bool:
-        """Only a first-send 400 on a live resume is a poisoned transcript we can recover from."""
-        return bool(first_turn and self._resume_session and _is_unresumable_history_error(err))
+        """A first-send 400 on a resume means the sidecar transcript itself is malformed
+        (e.g. an empty text content block), and a missing transcript was deleted by the
+        CLI. Retrying the same resume can never succeed. Anything else (prompt too long,
+        429/529, other execution errors) must keep surfacing so the daemon's retry paths
+        handle it."""
+        if not (first_turn and self._resume_session):
+            return False
+        message = str(err)
+        return "API Error: 400" in message or "No conversation found with session ID" in message
 
     async def _fallback_to_fresh_session(self, err: BaseException) -> str:
-        """Sever a poisoned resume: replace the subprocess with a fresh session
-        seeded from tsugite's serialized history, and return the rebuilt first
-        message. The serializer renders "Role: content" lines, so a turn whose
-        raw content was empty survives as a non-empty block."""
+        """Sever an unresumable resume (poisoned or deleted transcript): replace the
+        subprocess with a fresh session seeded from tsugite's serialized history,
+        and return the rebuilt first message."""
         from tsugite_claude_code.process import ClaudeCodeProcess
 
         logger.warning(

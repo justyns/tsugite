@@ -1,11 +1,12 @@
-"""Recovery from a poisoned Claude Code resume transcript.
+"""Recovery from an unresumable Claude Code resume transcript.
 
 A resumed sidecar transcript containing an empty text content block makes the
 Anthropic API reject every request with `400 ... text content blocks must be
-non-empty`. Since the resume UUID is re-selected on every send, that used to
-wedge the conversation permanently. The provider must fall back to a fresh
-session seeded from tsugite's serialized history, and must never send an
-empty message that could poison a transcript in the first place.
+non-empty`. A deleted transcript makes the CLI fail with `No conversation found
+with session ID`. Both wedge the conversation, since the resume UUID is
+re-selected on every send. The provider falls back to a fresh session seeded
+from tsugite's serialized history, and never sends an empty message that could
+poison a transcript.
 """
 
 from unittest.mock import patch
@@ -53,10 +54,17 @@ class FakeProcess:
             "text": "recovered",
             "is_error": False,
             "subtype": "success",
+            "session_id": "new-session",
             "cost_usd": 0.01,
             "input_tokens": 10,
             "output_tokens": 5,
         }
+
+
+class AlwaysError(FakeProcess):
+    def send_message(self, content):
+        self.sent.append(content)
+        return self._events_error()
 
 
 @pytest.fixture(autouse=True)
@@ -122,11 +130,6 @@ async def test_poisoned_resume_fallback_streaming():
 @pytest.mark.asyncio
 async def test_400_without_resume_still_raises():
     """A malformed-history 400 on a fresh session has no resume to sever — no retry loop."""
-
-    class AlwaysError(FakeProcess):
-        def send_message(self, content):
-            self.sent.append(content)
-            return self._events_error()
 
     with patch("tsugite_claude_code.process.ClaudeCodeProcess", AlwaysError):
         provider = ClaudeCodeProvider()
@@ -202,3 +205,55 @@ async def test_fresh_session_costs_start_from_zero_again():
     )
 
     assert response.cost == pytest.approx(0.01)
+
+
+MISSING_TRANSCRIPT = "No conversation found with session ID: c3dc320d-ee27-45bc-b245-89d85ef9cbec"
+
+
+class MissingTranscriptProcess(FakeProcess):
+    """Result event as the real CLI emits it for a deleted transcript: empty text, message in `errors`."""
+
+    async def _events_error(self):
+        yield {
+            "type": "result",
+            "text": "",
+            "errors": [MISSING_TRANSCRIPT],
+            "is_error": True,
+            "subtype": "error_during_execution",
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_missing_transcript_falls_back_to_fresh_session(stream):
+    provider = _resumed_provider()
+
+    with patch("tsugite_claude_code.process.ClaudeCodeProcess", MissingTranscriptProcess):
+        result = await provider.acompletion(
+            messages=[{"role": "system", "content": "sys"}, {"role": "user", "content": "new prompt"}],
+            model="opus",
+            stream=stream,
+        )
+        content = "".join([chunk.content async for chunk in result]) if stream else result.content
+
+    assert content == "recovered"
+    dead, fresh = FakeProcess.instances
+    assert dead.stopped
+    assert fresh.start_kwargs["resume_session"] is None
+    assert "<conversation_history>" in fresh.sent[0]
+    # The next turn records the new session id, not the dead one.
+    assert provider.get_state()["session_id"] == "new-session"
+
+
+@pytest.mark.asyncio
+async def test_error_result_surfaces_cli_errors_when_text_is_empty():
+    class AlwaysMissingError(AlwaysError, MissingTranscriptProcess):
+        pass
+
+    provider = ClaudeCodeProvider()
+    with (
+        patch("tsugite_claude_code.process.ClaudeCodeProcess", AlwaysMissingError),
+        pytest.raises(AgentExecutionError, match="No conversation found with session ID") as exc,
+    ):
+        await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="opus")
+    assert "subtype=error_during_execution" in str(exc.value)
