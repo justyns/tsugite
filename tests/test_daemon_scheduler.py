@@ -911,6 +911,44 @@ class TestRepeatedFailureNotification:
         assert notified == []
         assert sched.get("job1").consecutive_failures == 5
 
+    @pytest.mark.asyncio
+    async def test_auth_failure_notifies_on_first_failure_and_keeps_firing(self, schedules_path):
+        notified = []
+        cb = AsyncMock(
+            side_effect=RuntimeError("Failed to authenticate: OAuth session expired and could not be refreshed")
+        )
+        sched = Scheduler(schedules_path, cb, on_repeated_failure=lambda e: notified.append(e.id))
+        sched.add(self._entry(notify_on_failure=3))
+
+        await sched._fire_schedule(sched.get("job1"))
+        assert notified == ["job1"]
+        assert sched.get("job1").enabled
+
+        # The alert is sent once, and later fires still run the callback.
+        await sched._fire_schedule(sched.get("job1"))
+        assert notified == ["job1"]
+        assert cb.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_non_auth_failure_waits_for_threshold(self, schedules_path):
+        notified = []
+        cb = AsyncMock(side_effect=RuntimeError("429 rate limit exceeded"))
+        sched = Scheduler(schedules_path, cb, on_repeated_failure=lambda e: notified.append(e.id))
+        sched.add(self._entry(notify_on_failure=3))
+
+        await sched._fire_schedule(sched.get("job1"))
+        assert notified == []
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_respects_notify_on_failure_zero(self, schedules_path):
+        notified = []
+        cb = AsyncMock(side_effect=RuntimeError("Failed to authenticate: expired"))
+        sched = Scheduler(schedules_path, cb, on_repeated_failure=lambda e: notified.append(e.id))
+        sched.add(self._entry(notify_on_failure=0))
+
+        await sched._fire_schedule(sched.get("job1"))
+        assert notified == []
+
 
 @pytest.mark.asyncio
 async def test_overlapping_fire_does_not_corrupt_drift_metadata(scheduler):

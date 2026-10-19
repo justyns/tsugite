@@ -26,6 +26,7 @@ from tsugite_daemon.scheduler import (
     RunResult,
     ScheduleEntry,
     Scheduler,
+    is_auth_failure,
 )
 from tsugite_daemon.session_runner import DELIVERY_KIND_FYI, DELIVERY_KIND_NEEDS_ACK, MAX_CHAIN_DEPTH, chain_depth_scope
 from tsugite_daemon.session_store import (
@@ -188,10 +189,18 @@ class SchedulerAdapter:
 
     def _on_repeated_failure(self, entry: ScheduleEntry) -> None:
         adapter = self._adapter
-        message = (
-            f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n"
-            f"{entry.last_error or 'No error was recorded.'}"
-        )
+        error = entry.last_error or "No error was recorded."
+        if is_auth_failure(entry):
+            provider = entry.model.split(":")[0] if entry.model else None
+            title = f"Login expired: {provider or entry.id}"
+            target = provider or "the model provider"
+            message = (
+                f"Schedule `{entry.id}` could not authenticate with {target}. "
+                f"Log in to {target} again; scheduled runs keep failing until you do.\n\n{error}"
+            )
+        else:
+            title = f"Schedule failing: {entry.id}"
+            message = f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n{error}"
         routed = replace(
             entry,
             target_session=entry.target_session_on_error or entry.target_session,
@@ -205,7 +214,7 @@ class SchedulerAdapter:
                 self._resolve_channels(entry.notify) if entry.notify else [],
                 source="schedule_failure",
                 kind=DELIVERY_KIND_NEEDS_ACK,
-                title=f"Schedule failing: {entry.id}",
+                title=title,
             )
         )
         self._failure_tasks.add(task)

@@ -31,6 +31,8 @@ EXECUTION_SCRIPT = "script"
 EXECUTION_SESSION_MESSAGE = "session_message"
 EXECUTION_TYPES = (EXECUTION_AGENT, EXECUTION_SCRIPT, EXECUTION_SESSION_MESSAGE)
 
+AUTH_FAILURE_MARKER = "Failed to authenticate"
+
 DELIVERY_MODE_EXISTING = "existing_session"
 DELIVERY_MODE_PARENT = "parent_session"
 DELIVERY_MODE_NEW = "new_session"
@@ -47,6 +49,10 @@ def validate_delivery(delivery_mode: str, delivery_kind: str, delivery_mode_on_e
             raise ValueError(f"{field_name} must be one of {', '.join(DELIVERY_MODES)}, got '{value}'")
     if delivery_kind not in DELIVERY_KINDS:
         raise ValueError(f"delivery_kind must be one of {', '.join(DELIVERY_KINDS)}, got '{delivery_kind}'")
+
+
+def is_auth_failure(entry: "ScheduleEntry") -> bool:
+    return AUTH_FAILURE_MARKER in (entry.last_error or "")
 
 
 @dataclass
@@ -432,12 +438,15 @@ class Scheduler:
         """Surface a schedule that keeps failing instead of letting it die silently.
 
         Fires once when the consecutive-failure count first reaches
-        notify_on_failure, then stays quiet until a success re-arms it (so a
-        permanently-broken schedule doesn't notify on every run). Always logs at
-        ERROR; the optional hook adds Discord/notify delivery on top.
+        notify_on_failure, or on the first failure when the provider rejected
+        the login (retrying cannot fix that). Stays quiet until a success
+        re-arms it. Always logs at ERROR; the optional hook adds
+        Discord/notify delivery on top.
         """
         threshold = entry.notify_on_failure
-        if threshold <= 0 or entry.consecutive_failures < threshold or entry.failure_notified:
+        if threshold <= 0 or entry.failure_notified:
+            return
+        if entry.consecutive_failures < threshold and not is_auth_failure(entry):
             return
         entry.failure_notified = True
         logger.error(

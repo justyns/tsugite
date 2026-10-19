@@ -773,3 +773,45 @@ class TestRecordedRunOutcome:
 
         assert _recorded_run_outcome(None) == ("success", None)
         assert _recorded_run_outcome("no-such-session") == ("success", None)
+
+
+class TestRepeatedFailureCard:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "model, error, title, in_body",
+        [
+            (
+                "claude_code:sonnet",
+                "Failed to authenticate: OAuth session expired",
+                "Login expired: claude_code",
+                "Log in to claude_code",
+            ),
+            (
+                None,
+                "Failed to authenticate: OAuth session expired",
+                "Login expired: cron-job",
+                "Log in to the model provider again",
+            ),
+            ("claude_code:sonnet", "429 rate limit exceeded", "Schedule failing: cron-job", "failed 3 runs in a row"),
+        ],
+    )
+    async def test_card_names_provider_for_auth_failures(self, model, error, title, in_body):
+        sa, _ = _make_scheduler_adapter()
+        entry = ScheduleEntry(
+            id="cron-job",
+            prompt="test",
+            schedule_type="cron",
+            cron_expr="0 9 * * *",
+            model=model,
+            consecutive_failures=3,
+            last_error=error,
+        )
+
+        with patch.object(sa, "_deliver_result", new_callable=AsyncMock) as mock_deliver:
+            sa._on_repeated_failure(entry)
+            await asyncio.gather(*sa._failure_tasks)
+
+        args, kwargs = mock_deliver.call_args
+        assert kwargs["title"] == title
+        assert kwargs["kind"] == "needs_ack"
+        assert in_body in args[2]
