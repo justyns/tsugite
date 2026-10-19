@@ -86,6 +86,8 @@ def _raise_if_error(result_event: dict) -> None:
         return
     text = result_event.get("text") or "Claude Code returned an error result"
     subtype = result_event.get("subtype") or "error"
+    if "Failed to authenticate" in text:
+        text = f"{text.rstrip('.')}. Run `claude /login` on the daemon host to sign in again."
     raise AgentExecutionError(f"{text} (subtype={subtype})")
 
 

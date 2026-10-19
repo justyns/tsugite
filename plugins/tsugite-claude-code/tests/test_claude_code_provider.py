@@ -1302,6 +1302,23 @@ class TestClaudeCodeErrorResult:
             await provider.acompletion(messages=[{"role": "user", "content": "hi"}], model="opus")
         assert "prompt is too long" in str(excinfo.value).lower()
 
+    def test_expired_login_error_says_how_to_log_in_again(self):
+        """An expired OAuth login tells the user to run `claude /login`."""
+        from tsugite_claude_code.provider import _raise_if_error
+
+        from tsugite.exceptions import AgentExecutionError
+
+        event = {
+            "is_error": True,
+            "text": "Failed to authenticate: OAuth session expired and could not be refreshed.",
+            "subtype": "success",
+        }
+        with pytest.raises(AgentExecutionError) as excinfo:
+            _raise_if_error(event)
+        message = str(excinfo.value)
+        assert "OAuth session expired" in message
+        assert "refreshed. Run `claude /login`" in message
+
     @pytest.mark.asyncio
     async def test_provider_collect_passes_through_normal_result(self):
         """Sanity: non-error results still return CompletionResponse normally."""
