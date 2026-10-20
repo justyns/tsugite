@@ -75,6 +75,7 @@ def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] =
     target.parent.mkdir(parents=True, exist_ok=True)
     # git worktree add must stay the last fallible statement in this function.
     _exclude_worktree_subdir(repo_path)
+    # --lock: `git worktree remove --force` from outside the daemon refuses a locked tree.
     # --detach: don't create a branch; the job can branch later if it wants.
     # HEAD: start from the repo's current commit.
     # LC_ALL=C pins git's error messages to English so log scrapes are deterministic.
@@ -82,7 +83,7 @@ def _provision_worktree(repo: str, job_id: str, workspace_root: Optional[Path] =
     env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}
     try:
         subprocess.run(
-            ["git", "worktree", "add", "--detach", str(target), "HEAD"],
+            ["git", "worktree", "add", "--lock", "--detach", str(target), "HEAD"],
             cwd=repo_path,
             check=True,
             capture_output=True,
@@ -125,6 +126,8 @@ def _prune_worktree(worktree_path: str, *, force: bool = False) -> bool:
         return False
     if repo_root:
         _keep_head_reachable(wt, repo_root, wt.name)
+        # Fails harmlessly on a worktree that is not locked.
+        _git(["worktree", "unlock", str(wt)], repo_root)
     try:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(wt)],

@@ -1015,6 +1015,38 @@ def test_create_job_with_repo_provisions_worktree(store, runner, orchestrator, t
     assert started.workspace_override == fresh.worktree_path
 
 
+def test_provisioned_worktree_is_locked_against_external_removal(tmp_path):
+    repo = tmp_path / "repo"
+    _make_git_repo(repo)
+    wt = _provision_worktree(str(repo), "job-lock")
+
+    result = subprocess.run(["git", "worktree", "remove", "--force", wt], cwd=repo, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert Path(wt).exists()
+
+
+def test_prune_removes_a_locked_worktree_and_leaves_it_unregistered(tmp_path):
+    repo = tmp_path / "repo"
+    _make_git_repo(repo)
+    wt = _provision_worktree(str(repo), "job-unlock")
+
+    assert _prune_worktree(wt)
+    assert not Path(wt).exists()
+    listed = subprocess.run(["git", "worktree", "list"], cwd=repo, capture_output=True, text=True).stdout
+    assert "job-unlock" not in listed
+
+
+def test_prune_keeps_a_dirty_worktree_locked(tmp_path):
+    repo = tmp_path / "repo"
+    _make_git_repo(repo)
+    wt = _provision_worktree(str(repo), "job-dirty")
+    (Path(wt) / "scratch.txt").write_text("unsaved\n")
+
+    assert not _prune_worktree(wt)
+    listed = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
+    assert "locked" in listed.split("job-dirty", 1)[1]
+
+
 def _exclude_file(repo):
     done = subprocess.run(
         ["git", "rev-parse", "--git-path", "info/exclude"],
