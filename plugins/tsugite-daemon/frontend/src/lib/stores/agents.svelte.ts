@@ -40,6 +40,12 @@ export class AgentsStore {
     }
   }
 
+  /** The agent's main chat session id, created on first open. */
+  async openMain(id: string): Promise<string> {
+    const res = await api.post<{ id: string }>(`/api/agents/${encodeURIComponent(id)}/main`);
+    return res.id;
+  }
+
   /** Refetches when a session names an agent the list lacks, until one fetch
    *  succeeds without it. */
   async resolve(ids: Iterable<string>): Promise<void> {

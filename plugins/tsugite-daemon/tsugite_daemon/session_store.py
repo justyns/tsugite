@@ -703,10 +703,20 @@ class SessionStore:
     def _latest(sessions) -> Optional[Session]:
         return max(sessions, key=lambda s: s.last_active, default=None)
 
+    def _agent_key(self, agent_id: Optional[str]) -> Optional[str]:
+        """`agent_id`, with the default agent's id folded into None."""
+        default = self.agents.find_default()
+        return None if default and agent_id == default.id else agent_id
+
+    def _is_primary_for(self, session: Session, agent_id: Optional[str]) -> bool:
+        return session.is_primary and self._agent_key(session.agent_id) == self._agent_key(agent_id)
+
     def default_primary_ids(self) -> dict:
-        """Return {user_id: session_id} for all primary sessions."""
+        """Return {user_id: session_id} for the default agent's primary sessions."""
         with self._lock:
-            return {s.user_id: s.id for s in self._live_sessions_locked() if s.user_id and s.is_primary}
+            return {
+                s.user_id: s.id for s in self._live_sessions_locked() if s.user_id and self._is_primary_for(s, None)
+            }
 
     def _find_named_session_locked(self, name: str) -> Optional[Session]:
         return self._latest(s for s in self._live_sessions_locked() if s.metadata.get(METADATA_SESSION_NAME) == name)
@@ -758,25 +768,23 @@ class SessionStore:
                 s for s in self._live_sessions_locked(user_id) if s.metadata.get(METADATA_INCIDENT_KEY) == incident_key
             )
 
-    def _find_primary_session_locked(self, user_id: str) -> Optional[Session]:
-        """Lock-held variant of find_primary_session. Caller must hold self._lock."""
-        return self._latest(s for s in self._live_sessions_locked(user_id) if s.is_primary)
-
-    def find_primary_session(self, user_id: str) -> Optional[Session]:
-        """Return the user's primary session, or None."""
+    def find_primary_session(self, user_id: str, agent_id: Optional[str] = None) -> Optional[Session]:
+        """Return the user's primary session for the agent (default agent when None), or None."""
         with self._lock:
-            return self._find_primary_session_locked(user_id)
+            return self._latest(s for s in self._live_sessions_locked(user_id) if self._is_primary_for(s, agent_id))
 
     def find_default_session(self, user_id: str) -> Optional[Session]:
         """Canonical lookup for where a default request should land."""
         return self.find_primary_session(user_id)
 
-    def _demote_primaries_locked(self, user_id: str, *, except_id: Optional[str] = None) -> Optional[Session]:
-        """Clear primary flag from all of the user's sessions except `except_id`. Returns the last one cleared.
+    def _demote_primaries_locked(
+        self, user_id: str, agent_id: Optional[str], *, except_id: Optional[str] = None
+    ) -> Optional[Session]:
+        """Clear primary flag from the user's sessions of the agent except `except_id`. Returns the last one cleared.
         Persists every demoted session itself, so callers only persist their own target."""
         cleared: Optional[Session] = None
         for s in self._sessions.values():
-            if s.user_id == user_id and s.id != except_id and s.is_primary:
+            if s.user_id == user_id and s.id != except_id and self._is_primary_for(s, agent_id):
                 s.metadata.pop(METADATA_PRIMARY_FLAG, None)
                 self._persist(s)
                 cleared = s
@@ -788,24 +796,26 @@ class SessionStore:
         *,
         title: Optional[str] = None,
         source: str = SessionSource.INTERACTIVE.value,
+        agent_id: Optional[str] = None,
     ) -> Session:
-        """Create a fresh interactive session and mark it primary."""
+        """Create a fresh interactive session and mark it the agent's primary."""
         with self._lock:
             conv_id = generate_session_id(SESSION_ID_LABEL)
-            self._demote_primaries_locked(user_id)
+            self._demote_primaries_locked(user_id, agent_id)
             session = Session(
                 id=conv_id,
                 source=source,
                 user_id=user_id,
                 title=title,
                 metadata={METADATA_PRIMARY_FLAG: True},
+                agent_id=agent_id,
             )
             self._sessions[conv_id] = session
             self._persist(session)
             return session
 
     def set_primary_session(self, session_id: str) -> Session:
-        """Mark `session_id` as primary, demoting any prior primary for the same user."""
+        """Mark `session_id` as primary, demoting any prior primary for the same user and agent."""
         with self._lock:
             if session_id not in self._sessions:
                 raise ValueError(f"Session '{session_id}' not found")
@@ -814,15 +824,15 @@ class SessionStore:
                 raise ValueError(f"Cannot promote finished session '{session_id}' to primary")
             if target.superseded_by:
                 raise ValueError(f"Cannot promote superseded session '{session_id}' to primary")
-            self._demote_primaries_locked(target.user_id, except_id=target.id)
+            self._demote_primaries_locked(target.user_id, target.agent_id, except_id=target.id)
             target.metadata[METADATA_PRIMARY_FLAG] = True
             self._persist(target)
             return target
 
     def clear_primary_session(self, user_id: str) -> Optional[Session]:
-        """Remove the primary flag from any of the user's sessions. Returns the cleared session, if any."""
+        """Remove the primary flag from the user's default-agent sessions. Returns the cleared session, if any."""
         with self._lock:
-            return self._demote_primaries_locked(user_id)
+            return self._demote_primaries_locked(user_id, None)
 
     def claim_aliased_session(
         self, alias: str, user_id: Optional[str] = None, source: str = SessionSource.INTERACTIVE.value
@@ -955,7 +965,7 @@ class SessionStore:
             copy_state(session_id, new_id)
 
             # Compaction preserves is_primary metadata, so the new session automatically
-            # becomes the user's default if the predecessor was. The named-route lookup
+            # becomes its agent's primary if the predecessor was. The named-route lookup
             # indexes must follow the successor too, otherwise the next thread/channel
             # message finds the now-completed predecessor and forks a fresh empty session,
             # abandoning the compacted history.
@@ -1741,6 +1751,7 @@ class SessionStore:
             if (
                 session.source == SessionSource.INTERACTIVE.value
                 and session.user_id
+                and self._agent_key(session.agent_id) is None
                 and session.superseded_by is None
                 and session.status not in FINISHED_STATUSES
             ):

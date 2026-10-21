@@ -175,6 +175,7 @@ FULL_ROUTE_TABLE = [
     ("/api/agents/", ("POST",), "_api_create_agent"),
     ("/api/agents/{agent_id}", ("GET",), "_api_get_agent"),
     ("/api/agents/{agent_id}", ("PATCH",), "_api_update_agent"),
+    ("/api/agents/{agent_id}/main", ("POST",), "_api_open_main_chat"),
     ("/api/agents", ("GET",), "_api_list_agents"),
     ("/api/agents", ("POST",), "_api_create_agent"),
     ("/api/workspace", ("GET",), "_list_workspace_files"),

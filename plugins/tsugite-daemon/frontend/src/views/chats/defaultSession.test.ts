@@ -34,7 +34,7 @@ function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
 
 describe('resolveDefaultSession', () => {
   it('never defaults to a superseded session - the live successor wins', () => {
-    const rows = [row('old', { superseded_by: 'live', is_primary: true }), row('live')];
+    const rows = [row('old', { superseded_by: 'live', is_default: true }), row('live')];
     expect(resolveDefaultSession(rows)).toBe('live');
   });
 
@@ -45,14 +45,22 @@ describe('resolveDefaultSession', () => {
 
   it('prefers primary, then pinned, then the first row', () => {
     expect(
-      resolveDefaultSession([row('a'), row('b', { pinned: true }), row('c', { is_primary: true })]),
+      resolveDefaultSession([row('a'), row('b', { pinned: true }), row('c', { is_default: true })]),
     ).toBe('c');
     expect(resolveDefaultSession([row('a'), row('b', { pinned: true })])).toBe('b');
     expect(resolveDefaultSession([row('a'), row('b')])).toBe('a');
   });
 
+  it("prefers the default agent's main chat over another agent's", () => {
+    const rows = [
+      row('ops', { agent_id: 'ops', is_primary: true }),
+      row('main', { is_primary: true, is_default: true }),
+    ];
+    expect(resolveDefaultSession(rows)).toBe('main');
+  });
+
   it('never defaults to a finished session - a live row wins even over a finished primary', () => {
-    const rows = [row('done', { status: 'completed', is_primary: true }), row('live')];
+    const rows = [row('done', { status: 'completed', is_default: true }), row('live')];
     expect(resolveDefaultSession(rows)).toBe('live');
   });
 
@@ -86,12 +94,12 @@ describe('resolveDefaultSession', () => {
     // The PWA restores the last-selected conversation id on cold start. When that
     // session no longer exists, the id must not be returned verbatim - it falls
     // through to the normal live default instead of selecting a ghost row.
-    const rows = [row('live', { is_primary: true }), row('other')];
+    const rows = [row('live', { is_default: true }), row('other')];
     expect(resolveDefaultSession(rows, 'ghost-that-was-deleted')).toBe('live');
   });
 
   it('honors a persisted preferId that still resolves to a live row (PWA cold start, session present)', () => {
-    const rows = [row('live', { is_primary: true }), row('restored')];
+    const rows = [row('live', { is_default: true }), row('restored')];
     expect(resolveDefaultSession(rows, 'restored')).toBe('restored');
   });
 });

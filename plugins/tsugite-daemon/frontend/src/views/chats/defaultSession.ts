@@ -7,7 +7,7 @@
 import type { SessionRow } from '$lib/stores/sessions.svelte';
 import { isFinishedSession } from './sessionModel';
 
-/** Priority: an explicit/deep-linked id (if present), then the primary session,
+/** Priority: an explicit/deep-linked id (if present), then the default agent's primary session,
  *  then the first pinned, then the newest row. Null when the list is empty.
  *  Superseded sessions (compaction "view source") and finished ones are valid
  *  explicit targets but never the bare default - a live session is; when none is
@@ -17,6 +17,6 @@ export function resolveDefaultSession(rows: SessionRow[], preferId?: string | nu
   if (preferId && rows.some((r) => r.id === preferId)) return preferId;
   const live = rows.filter((r) => !r.superseded_by && !isFinishedSession(r));
   return (
-    live.find((r) => r.is_primary)?.id ?? live.find((r) => r.pinned)?.id ?? live[0]?.id ?? null
+    live.find((r) => r.is_default)?.id ?? live.find((r) => r.pinned)?.id ?? live[0]?.id ?? null
   );
 }

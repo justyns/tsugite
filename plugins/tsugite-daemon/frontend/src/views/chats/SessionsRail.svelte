@@ -56,6 +56,7 @@
     loading = false,
     onSelect,
     onNew,
+    onOpenAgent,
     onServerSearch,
     onOpenSchedule,
   }: {
@@ -70,6 +71,7 @@
     loading?: boolean;
     onSelect: (id: string) => void;
     onNew: () => void;
+    onOpenAgent?: (agentId: string) => void;
     /** Free-text portion of the query, for the store's server-merge search. */
     onServerSearch: (q: string) => void;
     /** Opens the Schedules view with this schedule's drawer open. */
@@ -202,11 +204,14 @@
   const agentGroups = $derived(agents.length > 1 ? groupByAgent(agents, rows, attn) : null);
   const agentById = $derived(new Map(agents.map((a) => [a.id, a])));
   const filteredIds = $derived(new Set(filtered.map((r) => r.id)));
+  const hiddenMainCount = $derived(
+    agentGroups?.filter((g) => g.main && !g.main.pinned).length ?? 0,
+  );
 
   const selectedRowId = $derived(collapsed.rowOf.get(selectedId ?? '') ?? selectedId);
   const selectedGroupId = $derived.by(() => {
     const row = rows.find((r) => r.id === selectedRowId);
-    if (!row || row.pinned) return null;
+    if (!row || row.pinned || agentGroups?.some((g) => g.main === row)) return null;
     return agentById.has(row.agent_id) ? row.agent_id : UNKNOWN_AGENT.id;
   });
   // Opening a session expands its agent until the user collapses it, without
@@ -308,7 +313,7 @@
       class:is-active={quick === 'all'}
       onclick={() => (quick = 'all')}
     >
-      all <span class="n">{rows.length}</span>
+      all <span class="n">{rows.length - hiddenMainCount}</span>
     </button>
     <button
       type="button"
@@ -427,25 +432,38 @@
           {/each}
         {/if}
         {#each agentGroups as group (group.agent.id)}
-          {@const shown = group.rows.filter((r) => !r.pinned && filteredIds.has(r.id))}
-          {#if shown.length > 0 || !isActiveFilter(filter)}
+          {@const shown = group.rows.filter(
+            (r) => !r.pinned && r !== group.main && filteredIds.has(r.id),
+          )}
+          {@const mainShown = group.main !== undefined && filteredIds.has(group.main.id)}
+          {#if shown.length > 0 || mainShown || !isActiveFilter(filter)}
             {@const open = agentOpen(group.agent)}
-            <button
-              type="button"
-              class="agent-hd"
-              class:is-open={open}
-              aria-expanded={open}
-              aria-label={agentLabel(group.agent.name, group.busy, group.needsYou)}
-              onclick={() => toggleAgent(group.agent)}
-            >
-              <span class="chev"><Icon name="chev-r" size={10} /></span>
-              <AgentDot color={group.agent.color} />
-              <span class="agent-name">{group.agent.name}</span>
-              {#if group.busy}<Spin color={sessionStateMeta('running').color} />{/if}
-              {#if group.needsYou > 0}
-                <span class="agent-attn">{group.needsYou}</span>
-              {/if}
-            </button>
+            {@const active = group.main !== undefined && group.main.id === selectedRowId}
+            <div class="agent-hd" class:is-open={open} class:is-active={active}>
+              <button
+                type="button"
+                class="agent-toggle"
+                aria-expanded={open}
+                aria-label={agentLabel(group.agent.name, group.busy, group.needsYou)}
+                onclick={() => toggleAgent(group.agent)}
+              >
+                <span class="chev"><Icon name="chev-r" size={10} /></span>
+              </button>
+              <button
+                type="button"
+                class="agent-open"
+                aria-label="Open {group.agent.name} main chat"
+                aria-current={active ? 'true' : undefined}
+                onclick={() => onOpenAgent?.(group.agent.id)}
+              >
+                <AgentDot color={group.agent.color} />
+                <span class="agent-name">{group.agent.name}</span>
+                {#if group.busy}<Spin color={sessionStateMeta('running').color} />{/if}
+                {#if group.needsYou > 0}
+                  <span class="agent-attn">{group.needsYou}</span>
+                {/if}
+              </button>
+            </div>
             {#if open}
               {@const list = agentSessionList(shown, attn)}
               {@const cap =
@@ -606,20 +624,44 @@
   }
   .agent-hd {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
+    align-items: stretch;
     min-width: 0;
+    border-top: 1px solid var(--bd0);
+    border-left: 2px solid transparent;
+  }
+  .agent-hd.is-active {
+    background: var(--bg2);
+    border-left-color: var(--acc);
+  }
+  .agent-toggle,
+  .agent-open {
+    display: flex;
+    align-items: center;
     background: none;
     border: 0;
-    border-top: 1px solid var(--bd0);
     cursor: pointer;
-    font: 600 var(--fs-sm) / 1.3 var(--font-ui);
     color: var(--tx1);
-    padding: 8px 12px;
   }
-  .agent-hd:hover {
+  .agent-toggle {
+    flex: none;
+    padding: 8px 4px 8px 10px;
+    border-radius: var(--r-sm);
+  }
+  .agent-toggle:hover {
+    background: var(--bg3);
+  }
+  .agent-open:hover {
     background: var(--bg2);
+  }
+  .agent-open:hover .agent-name {
+    text-decoration: underline;
+  }
+  .agent-open {
+    flex: 1;
+    min-width: 0;
+    gap: 6px;
+    font: 600 var(--fs-sm) / 1.3 var(--font-ui);
+    padding: 8px 12px 8px 2px;
   }
   .agent-name {
     flex: 1;

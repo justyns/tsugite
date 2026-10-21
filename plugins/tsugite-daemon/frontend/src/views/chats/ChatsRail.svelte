@@ -7,6 +7,7 @@
   import { sessions } from '$lib/stores/sessions.svelte';
   import { agents } from '$lib/stores/agents.svelte';
   import { navigate } from '$lib/router.svelte';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
   import { jobTallyBySession } from '$lib/stores/jobsFilter';
   import SessionsRail from './SessionsRail.svelte';
@@ -46,6 +47,18 @@
     onOpenChat(id);
   }
 
+  async function openAgent(agentId: string) {
+    try {
+      const id = await agents.openMain(agentId);
+      await sessions.load();
+      select(id);
+    } catch (err) {
+      toasts.push('err', 'Could not open main chat', {
+        body: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // The surface marks read only on a selection change, which re-picking the chat
   // already on screen never makes.
   function select(id: string) {
@@ -69,6 +82,7 @@
   loading={sessions.loading}
   onSelect={select}
   onNew={newSession}
+  onOpenAgent={openAgent}
   onServerSearch={serverSearch}
   onOpenSchedule={(id) => navigate('schedules', { id })}
 />

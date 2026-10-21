@@ -219,6 +219,20 @@ test('two agents nest the sessions under agent headers', async () => {
   await expect.element(page.getByRole('button', { name: /^homelab/ })).toBeInTheDocument();
 });
 
+test('clicking an agent opens its main chat', async () => {
+  agents.list = [agent('main', 'atlas', { is_default: true }), agent('ops', 'homelab')];
+  sessions.rows = [row('s1', { title: 'deploy pipeline' })];
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ id: 'ops-main' } as never);
+  vi.spyOn(sessions, 'load').mockResolvedValue();
+  const onOpenChat = vi.fn();
+  await render(ChatsRail, { ...base, onOpenChat });
+
+  await page.getByRole('button', { name: 'Open homelab main chat' }).click();
+
+  expect(post).toHaveBeenCalledWith('/api/agents/ops/main');
+  await expect.poll(() => onOpenChat.mock.calls).toEqual([['ops-main']]);
+});
+
 test('a session of an agent the list lacks refetches the agents', async () => {
   agents.list = [agent('main', 'atlas', { is_default: true }), agent('ops', 'homelab')];
   sessions.rows = [row('s1', { title: 'deploy pipeline', agent_id: 'coding' })];

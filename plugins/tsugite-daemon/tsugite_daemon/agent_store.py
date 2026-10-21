@@ -61,12 +61,12 @@ class AgentStore:
         with self._lock:
             return self._agents.get(agent_id)
 
-    def _find_default(self) -> Optional[Agent]:
+    def find_default(self) -> Optional[Agent]:
         with self._lock:
             return next((a for a in self._agents.values() if a.is_default), None)
 
     def default(self) -> Agent:
-        agent = self._find_default()
+        agent = self.find_default()
         if agent is None:
             raise RuntimeError("No default agent: ensure_default has not run")
         return agent
@@ -115,7 +115,7 @@ class AgentStore:
 
     def ensure_default(self, workspace: Path, template: str) -> None:
         """Create the default agent from the runtime workspace and agent file, or update it to match them."""
-        default = self._find_default()
+        default = self.find_default()
         if default is None:
             agent_id = slugify(workspace.name)
             if not AGENT_ID_PATTERN.fullmatch(agent_id):

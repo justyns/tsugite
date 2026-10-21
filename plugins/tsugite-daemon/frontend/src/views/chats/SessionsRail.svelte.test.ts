@@ -208,13 +208,13 @@ test('agents list default first with only the default expanded', async () => {
     ...base,
     agents: twoAgents,
     rows: [
-      row('m1', { title: 'main chat', agent_id: 'main' }),
+      row('m1', { title: 'deploy pipeline', agent_id: 'main' }),
       row('o1', { title: 'nas scrub', agent_id: 'ops' }),
     ],
   });
   const names = [...document.querySelectorAll('.agent-hd .agent-name')].map((n) => n.textContent);
   expect(names).toEqual(['atlas', 'homelab']);
-  await expect.element(page.getByRole('button', { name: /main chat/ })).toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: /deploy pipeline/ })).toBeInTheDocument();
   await expect.element(page.getByText('nas scrub')).not.toBeInTheDocument();
 });
 
@@ -367,6 +367,130 @@ test('the agent owning the open session expands without storing a choice', async
 
   await page.getByRole('button', { name: /^homelab/ }).click();
   await expect.element(page.getByText('nas scrub')).not.toBeInTheDocument();
+});
+
+test('clicking an agent name opens its main chat while the chevron only toggles', async () => {
+  const onOpenAgent = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    onOpenAgent,
+    agents: twoAgents,
+    rows: [row('o1', { title: 'nas scrub', agent_id: 'ops' })],
+  });
+  const toggle = page.getByRole('button', { name: /^homelab/ });
+
+  await page.getByRole('button', { name: 'Open homelab main chat' }).click();
+  expect(onOpenAgent).toHaveBeenCalledWith('ops');
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  await toggle.click();
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(onOpenAgent).toHaveBeenCalledTimes(1);
+});
+
+test('an agent lists its main chat only as the agent row', async () => {
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    rows: [
+      row('o0', { title: 'ops main', agent_id: 'ops', is_primary: true }),
+      row('o1', { title: 'nas scrub', agent_id: 'ops' }),
+    ],
+  });
+  await page.getByRole('button', { name: /^homelab/ }).click();
+  await expect.element(page.getByRole('button', { name: /nas scrub/ })).toBeInTheDocument();
+  await expect.element(page.getByText('ops main')).not.toBeInTheDocument();
+});
+
+test('a pinned main chat stays in the pinned section', async () => {
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    rows: [row('o0', { title: 'ops main', agent_id: 'ops', is_primary: true, pinned: true })],
+  });
+  await expect.element(page.getByRole('button', { name: /ops main/ })).toBeInTheDocument();
+});
+
+test('an open main chat marks its agent row active and leaves it collapsed', async () => {
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    selectedId: 'o0',
+    rows: [
+      row('o0', { title: 'ops main', agent_id: 'ops', is_primary: true }),
+      row('o1', { title: 'nas scrub', agent_id: 'ops' }),
+    ],
+  });
+  const open = page.getByRole('button', { name: 'Open homelab main chat' });
+  await expect.element(open).toHaveAttribute('aria-current', 'true');
+  await expect
+    .element(page.getByRole('button', { name: 'Open atlas main chat' }))
+    .not.toHaveAttribute('aria-current');
+  await expect
+    .element(page.getByRole('button', { name: /^homelab/ }))
+    .toHaveAttribute('aria-expanded', 'false');
+});
+
+test('the chevron and the agent name each show their own hover', async () => {
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    rows: [row('o1', { title: 'nas scrub', agent_id: 'ops' })],
+  });
+  const toggle = document.querySelector<HTMLElement>('[aria-label^="homelab"]')!;
+  const open = document.querySelector<HTMLElement>('[aria-label="Open homelab main chat"]')!;
+  const name = open.querySelector<HTMLElement>('.agent-name')!;
+
+  await userEvent.hover(toggle);
+  const toggleHover = getComputedStyle(toggle).backgroundColor;
+  expect(getComputedStyle(name).textDecorationLine).toBe('none');
+
+  await userEvent.hover(open);
+  expect(getComputedStyle(name).textDecorationLine).toBe('underline');
+  expect(getComputedStyle(toggle).backgroundColor).not.toBe(toggleHover);
+});
+
+test('the all count leaves out main chats the tree shows only as agent rows', async () => {
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    rows: [
+      row('m0', { agent_id: 'main', is_primary: true }),
+      row('o0', { agent_id: 'ops', is_primary: true, pinned: true }),
+      row('o1', { agent_id: 'ops' }),
+    ],
+  });
+  await expect.element(page.getByRole('button', { name: 'all 2' })).toBeInTheDocument();
+});
+
+const opsMain = [
+  row('o0', { title: 'ops main', agent_id: 'ops', is_primary: true }),
+  row('o1', { title: 'nas scrub', agent_id: 'ops' }),
+];
+
+test('the needs-you filter keeps the agent row of a waiting main chat', async () => {
+  render(SessionsRail, { ...base, agents: twoAgents, attn: new Set(['o0']), rows: opsMain });
+  await page.getByRole('button', { name: 'needs you 1' }).click();
+  await expect
+    .element(page.getByRole('button', { name: 'Open homelab main chat' }))
+    .toBeInTheDocument();
+});
+
+test('a search matching a main chat keeps its agent row', async () => {
+  render(SessionsRail, { ...base, agents: twoAgents, rows: opsMain });
+  await page.getByLabelText('Filter sessions').fill('ops main');
+  await expect
+    .element(page.getByRole('button', { name: 'Open homelab main chat' }))
+    .toBeInTheDocument();
+  await expect.element(page.getByText('nas scrub')).not.toBeInTheDocument();
+});
+
+test('the flat rail counts the main chat', async () => {
+  render(SessionsRail, {
+    ...base,
+    rows: [row('m0', { is_primary: true }), row('m1')],
+  });
+  await expect.element(page.getByRole('button', { name: 'all 2' })).toBeInTheDocument();
 });
 
 const pinRows = [

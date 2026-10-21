@@ -201,6 +201,8 @@ export function collapseScheduleRuns(rows: SessionRow[], attn: Set<string>): Sch
 export interface AgentGroup {
   agent: Agent;
   rows: SessionRow[];
+  /** The agent's live primary session, which the agent row opens. */
+  main: SessionRow | undefined;
   busy: boolean;
   needsYou: number;
 }
@@ -234,6 +236,7 @@ export function groupByAgent(agents: Agent[], rows: SessionRow[], attn: Set<stri
     return {
       agent,
       rows: own,
+      main: live.find((row) => row.is_primary),
       busy: live.some((row) => row.busy),
       needsYou: live.filter((row) => attn.has(row.id)).length,
     };

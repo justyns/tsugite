@@ -10,6 +10,7 @@ from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 from tsugite_daemon.agent_store import EDITABLE_FIELDS, Agent
+from tsugite_daemon.session_store import SessionSource
 
 NULLABLE_FIELDS = frozenset({"model", "reasoning_effort", "color"})
 
@@ -24,6 +25,7 @@ class AgentsApiMixin:
                 Route("/", self._api_create_agent, methods=["POST"]),
                 Route("/{agent_id}", self._api_get_agent, methods=["GET"]),
                 Route("/{agent_id}", self._api_update_agent, methods=["PATCH"]),
+                Route("/{agent_id}/main", self._api_open_main_chat, methods=["POST"]),
             ],
         )
 
@@ -92,3 +94,21 @@ class AgentsApiMixin:
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse(asdict(agent))
+
+    async def _api_open_main_chat(self, request: Request) -> JSONResponse:
+        """The agent's main chat for the user, created on first open."""
+        if err := self._check_auth(request):
+            return err
+        store = self.adapter.session_store
+        agent = store.agents.get(request.path_params["agent_id"])
+        if agent is None:
+            return JSONResponse({"error": "unknown agent"}, status_code=404)
+        body = await self._optional_json_body(request)
+        user_id = self.adapter.resolve_http_user(body.get("user_id", "web-anonymous"))
+        session = store.find_primary_session(user_id, agent.id)
+        if session is None:
+            session = store.create_default_session(
+                user_id, title=agent.name, source=SessionSource.WEB.value, agent_id=agent.id
+            )
+            self.event_bus.emit("session_update", {"action": "created", "id": session.id})
+        return JSONResponse(store.session_detail(session.id))

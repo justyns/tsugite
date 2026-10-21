@@ -16,9 +16,10 @@ import { contextAttach } from './contextAttach.svelte';
 export type RecordKind = 'session' | 'job' | 'terminal';
 
 /** The chat a captured record attaches to: the focused chat if one is open, else
- *  the primary session, else the most-recent still-open chat. Null when there is
- *  no chat to attach to. A focused chat the sessions store hasn't loaded a row for
- *  (a deep-linked other-agent chat) still resolves by its id. */
+ *  the default agent's primary session, else the most-recent still-open chat.
+ *  Null when there is no chat to attach to. A focused chat the sessions store
+ *  hasn't loaded a row for (a deep-linked other-agent chat) still resolves by
+ *  its id. */
 function resolveTargetChat(): { id: string; title: string } | null {
   const focused = router.view === 'chats' ? (router.params.sessionId ?? null) : null;
   const rows = sessions.ordered;
@@ -26,7 +27,7 @@ function resolveTargetChat(): { id: string; title: string } | null {
   // A focused chat wins even when the store hasn't loaded a row for it (a
   // deep-linked other-agent chat); the title just falls back to a generic one.
   if (focused) return { id: focused, title: title(rows.find((r) => r.id === focused)) };
-  const row = rows.find((r) => r.is_primary) ?? rows.find((r) => !isFinishedSession(r));
+  const row = rows.find((r) => r.is_default) ?? rows.find((r) => !isFinishedSession(r));
   return row ? { id: row.id, title: title(row) } : null;
 }
 

@@ -442,6 +442,7 @@ class TestAgentsApi:
             ("POST", "/api/agents"),
             ("GET", "/api/agents/homelab"),
             ("PATCH", "/api/agents/homelab"),
+            ("POST", "/api/agents/homelab/main"),
         ],
     )
     def test_requires_auth(self, client, method, path):
@@ -585,6 +586,76 @@ class TestAgentsApi:
         rows = client.get("/api/chat/sessions", headers=auth).json()["sessions"]
         assert next(r for r in rows if r["id"] == session.id)["agent_id"] == "main"
         assert client.get(f"/api/sessions/{session.id}", headers=auth).json()["agent_id"] == "main"
+
+
+def _chat(store, agent_id=None, user_id="web-anonymous"):
+    return store.create_session(
+        Session(id="", source=SessionSource.INTERACTIVE.value, user_id=user_id, agent_id=agent_id)
+    )
+
+
+class TestMainChat:
+    """Each agent's primary session is its main chat, one per (user, agent)."""
+
+    def test_primaries_are_per_agent(self, store):
+        default = _chat(store)
+        homelab = _chat(store, "homelab")
+        store.set_primary_session(default.id)
+        store.set_primary_session(homelab.id)
+
+        assert store.find_primary_session("web-anonymous").id == default.id
+        assert store.find_primary_session("web-anonymous", "main").id == default.id
+        assert store.find_primary_session("web-anonymous", "homelab").id == homelab.id
+        assert store.default_primary_ids() == {"web-anonymous": default.id}
+
+    def test_setting_a_primary_demotes_only_the_same_agent(self, store):
+        default = _chat(store)
+        old = _chat(store, "homelab")
+        new = _chat(store, "homelab")
+        for session in (default, old, new):
+            store.set_primary_session(session.id)
+
+        assert store.get_session(default.id).is_primary
+        assert not store.get_session(old.id).is_primary
+        assert store.find_primary_session("web-anonymous", "homelab").id == new.id
+
+    def test_primary_follows_compaction_per_agent(self, store):
+        default = _chat(store)
+        homelab = _chat(store, "homelab")
+        store.set_primary_session(default.id)
+        store.set_primary_session(homelab.id)
+
+        successor = store.compact_session(homelab.id)
+
+        assert store.find_primary_session("web-anonymous", "homelab").id == successor.id
+        assert store.find_primary_session("web-anonymous").id == default.id
+
+    def test_reload_stamps_only_a_default_agent_session_as_primary(self, store, tmp_path):
+        _chat(store, "homelab")
+
+        reloaded = SessionStore(tmp_path / "state" / "store.json")
+
+        assert reloaded.find_primary_session("web-anonymous") is None
+
+    def test_open_creates_then_reuses_the_main_chat(self, client, auth, store):
+        first = client.post("/api/agents/homelab/main", headers=auth)
+        second = client.post("/api/agents/homelab/main", headers=auth)
+
+        assert first.status_code == 200
+        assert first.json()["agent_id"] == "homelab"
+        assert first.json()["is_primary"] is True
+        assert first.json()["title"] == "Homelab"
+        assert second.json()["id"] == first.json()["id"]
+        assert store.find_default_session("web-anonymous") is None
+
+    def test_open_on_the_default_agent_returns_the_user_primary(self, client, auth, store):
+        primary = _chat(store)
+        store.set_primary_session(primary.id)
+
+        assert client.post("/api/agents/main/main", headers=auth).json()["id"] == primary.id
+
+    def test_open_unknown_agent_is_404(self, client, auth):
+        assert client.post("/api/agents/nope/main", headers=auth).status_code == 404
 
 
 class TestOrphanSessionDisplay:
