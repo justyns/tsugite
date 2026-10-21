@@ -56,6 +56,7 @@ export interface SessionRow extends SessionRowLike {
   result: string | null;
   title: string | null;
   is_default: boolean;
+  agent_id: string;
   metadata: Record<string, unknown>;
   pinned: boolean;
   pin_position: number | null;

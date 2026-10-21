@@ -4,18 +4,25 @@ import { render } from 'vitest-browser-svelte';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ChatsRail from './ChatsRail.svelte';
 import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
-import { sessionRow as row, attentionRecord as rec } from './__fixtures__/sessionRow';
+import { agent, sessionRow as row, attentionRecord as rec } from './__fixtures__/sessionRow';
 import { jobs, type Job } from '$lib/stores/jobs.svelte';
 import { chatsNavBadge } from '$lib/shell/navBadges';
 import { chatsNeedingAnswer } from './sessionModel';
 import { TESTID } from '$lib/testids';
 import { api } from '$lib/api/client';
+import { agents } from '$lib/stores/agents.svelte';
 
 // The ended section persists its open/closed choice across tests.
-beforeEach(() => localStorage.removeItem('tsugite_rail_ended_open'));
+beforeEach(() => {
+  localStorage.removeItem('tsugite_rail_ended_open');
+  vi.spyOn(agents, 'load').mockResolvedValue();
+});
 
 afterEach(() => {
   sessions.rows = [];
+  agents.list = [];
+  agents.error = null;
+  agents['missed'].clear();
   jobs.jobs = [];
   vi.restoreAllMocks();
 });
@@ -202,4 +209,29 @@ test('a new run arriving over the live feed updates the existing row', async () 
 
   await expect.element(page.getByLabelText('2 runs')).toBeInTheDocument();
   expect(container.querySelectorAll('.t-srow')).toHaveLength(1);
+});
+
+test('two agents nest the sessions under agent headers', async () => {
+  agents.list = [agent('main', 'atlas', { is_default: true }), agent('ops', 'homelab')];
+  sessions.rows = [row('s1', { title: 'deploy pipeline' })];
+  await render(ChatsRail, base);
+  await expect.element(page.getByRole('button', { name: /^atlas/ })).toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: /^homelab/ })).toBeInTheDocument();
+});
+
+test('a session of an agent the list lacks refetches the agents', async () => {
+  agents.list = [agent('main', 'atlas', { is_default: true }), agent('ops', 'homelab')];
+  sessions.rows = [row('s1', { title: 'deploy pipeline', agent_id: 'coding' })];
+  await render(ChatsRail, base);
+  await expect.poll(() => vi.mocked(agents.load).mock.calls.length).toBe(2);
+});
+
+test('a failed agent list shows a note whose Retry reloads it', async () => {
+  agents.error = 'daemon down';
+  sessions.rows = [row('s1', { title: 'deploy pipeline' })];
+  await render(ChatsRail, base);
+  await expect.element(page.getByText("Couldn't load agents")).toBeInTheDocument();
+  const calls = vi.mocked(agents.load).mock.calls.length;
+  await page.getByRole('button', { name: 'Retry' }).click();
+  expect(vi.mocked(agents.load).mock.calls.length).toBe(calls + 1);
 });

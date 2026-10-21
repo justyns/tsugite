@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '$lib/components/icon/Icon.svelte';
   import Spin from '$lib/components/feedback/Spin.svelte';
+  import AgentDot from './AgentDot.svelte';
   import { TESTID } from '$lib/testids';
   import {
     buildSessionRowAriaLabel,
@@ -24,6 +25,7 @@
     activeJobCount = 0,
     waitingOnCount = 0,
     runCount = 0,
+    agent,
     onSelect,
     onOpenSchedule,
     onOpenNewTab,
@@ -41,6 +43,8 @@
     waitingOnCount?: number;
     /** Runs a collapsed schedule row stands for; 0 for an ordinary session. */
     runCount?: number;
+    /** Owning agent, shown as a color dot among the markers. */
+    agent?: { name: string; color: string | null };
     onSelect?: () => void;
     onOpenNewTab?: () => void;
     onOpenSchedule?: () => void;
@@ -50,9 +54,11 @@
   // Only a quiet row with nothing pending has no glyph to protect, so unread can
   // take the slot.
   const showUnreadDot = $derived(isUnread && !needsYou && (state === 'idle' || state === 'done'));
-  const ariaLabel = $derived(buildSessionRowAriaLabel({ title, state, needsYou, isUnread }));
+  const ariaLabel = $derived(
+    buildSessionRowAriaLabel({ title, agent: agent?.name, state, needsYou, isUnread }),
+  );
   const hasMarkers = $derived(
-    needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned || runCount > 0,
+    needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned || runCount > 0 || !!agent,
   );
   const isEnded = $derived(state === 'done' || state === 'failed');
 
@@ -130,6 +136,9 @@
           >
             <Icon name="sched" size={10} />
           </button>
+        {/if}
+        {#if agent}
+          <AgentDot color={agent.color} name={agent.name} />
         {/if}
         {#if isPinned}
           <Icon name="pin" size={10} />

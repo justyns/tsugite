@@ -5,6 +5,7 @@
  * fast unit vitest project and the rail stays a thin render of these.
  */
 import type { AttentionRecord, SessionRow } from '$lib/stores/sessions.svelte';
+import type { Agent } from '$lib/stores/agents.svelte';
 import type { SessionSourceType, SessionState } from '$lib/components/rows/rowState';
 
 /** metadata.type carries the semantic category badge (code/ops/res/chat). The
@@ -35,6 +36,11 @@ export function isFinishedSession(row: SessionRow): boolean {
  *  read - a resumable row is still finished for auto-select and attention. */
 export function isResumableSession(row: SessionRow): boolean {
   return row.resumable === true && row.status === 'completed';
+}
+
+/** A finished session that cannot take another turn; the rail tucks it under "ended". */
+export function isEndedSession(row: SessionRow): boolean {
+  return isFinishedSession(row) && !isResumableSession(row);
 }
 
 /** A busy session is "thinking" while the daemon reports it waiting on the LLM,
@@ -139,7 +145,7 @@ export function groupSessions(rows: SessionRow[], hints: GroupHints): SessionGro
   const ended: SessionRow[] = [];
   for (const row of rows) {
     if (row.pinned) pinned.push(row);
-    else if (isFinishedSession(row) && !isResumableSession(row)) ended.push(row);
+    else if (isEndedSession(row)) ended.push(row);
     else if (row.busy || hints.attn.has(row.id)) active.push(row);
     else recent.push(row);
   }
@@ -190,6 +196,62 @@ export function collapseScheduleRuns(rows: SessionRow[], attn: Set<string>): Sch
     replacement.has(row.id) ? (replacement.get(row.id) ?? []) : [row],
   );
   return { rows: out, runs, rowOf };
+}
+
+export interface AgentGroup {
+  agent: Agent;
+  rows: SessionRow[];
+  busy: boolean;
+  needsYou: number;
+}
+
+/** Stands in for the agent of sessions whose agent_id is not in the agent list. */
+export const UNKNOWN_AGENT: Agent = {
+  id: '',
+  name: 'unknown agent',
+  workspace: '',
+  template: '',
+  model: null,
+  reasoning_effort: null,
+  color: null,
+  created_at: '',
+  is_default: false,
+};
+
+/** Default agent first, then by name, then UNKNOWN_AGENT when any session needs it.
+ *  busy and needsYou count only unfinished sessions. */
+export function groupByAgent(agents: Agent[], rows: SessionRow[], attn: Set<string>): AgentGroup[] {
+  const sorted = [...agents].sort(
+    (a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name),
+  );
+  const known = new Set(agents.map((a) => a.id));
+  if (rows.some((row) => !known.has(row.agent_id))) sorted.push(UNKNOWN_AGENT);
+  return sorted.map((agent) => {
+    const own = rows.filter((row) =>
+      agent === UNKNOWN_AGENT ? !known.has(row.agent_id) : row.agent_id === agent.id,
+    );
+    const live = own.filter((row) => !isFinishedSession(row));
+    return {
+      agent,
+      rows: own,
+      busy: live.some((row) => row.busy),
+      needsYou: live.filter((row) => attn.has(row.id)).length,
+    };
+  });
+}
+
+/** Orders one agent's unpinned sessions: needs-you, then busy, then the rest, each
+ *  newest first. Returns ended sessions separately. */
+export function agentSessionList(
+  rows: SessionRow[],
+  attn: Set<string>,
+): { live: SessionRow[]; ended: SessionRow[] } {
+  const rank = (row: SessionRow) =>
+    attn.has(row.id) && !isFinishedSession(row) ? 0 : row.busy ? 1 : 2;
+  const live = rows
+    .filter((row) => !isEndedSession(row))
+    .sort((a, b) => rank(a) - rank(b) || lastTouched(b) - lastTouched(a));
+  return { live, ended: rows.filter(isEndedSession) };
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];

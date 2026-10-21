@@ -50,7 +50,7 @@ export const views: ViewDef[] = [
   },
   {
     id: 'agents',
-    label: 'Agents',
+    label: 'Templates',
     load: () => import('./agents/View.svelte'),
     icon: 'agent',
     mode: 'full',

@@ -116,6 +116,8 @@ test('switching to the Markdown tab shows the editable source; Save is disabled 
   await vi.waitFor(() => expect(ta).not.toBeNull());
   expect(ta!.value).toContain('name: hollis');
   expect(ta!.readOnly).toBe(false);
+  expect(ta!.getAttribute('aria-label')).toBe('Template definition source');
+  expect(container.querySelector('.wk-crumb')!.textContent).toBe('templates / hollis.md');
 
   const save = page.getByTestId('agent-save');
   await expect.element(save).toBeDisabled();
@@ -133,7 +135,7 @@ test('a builtin file is read-only: the editor blocks edits and Save stays disabl
   await page.getByTestId('agent-row-default').click();
   await page.getByRole('button', { name: 'markdown' }).click();
 
-  await expect.element(page.getByText(/This is a builtin agent/)).toBeInTheDocument();
+  await expect.element(page.getByText(/This is a builtin template/)).toBeInTheDocument();
   const ta = container.querySelector<HTMLTextAreaElement>('.agent-src');
   await vi.waitFor(() => expect(ta?.value).toContain('name: default'));
   expect(ta!.readOnly).toBe(true);
@@ -174,8 +176,9 @@ test('Run opens the launcher, whose Start is gated on a non-empty prompt and doc
 test('the roster filter narrows the list by name', async () => {
   render(View);
   await expect.element(page.getByTestId('agent-row-hollis')).toBeInTheDocument();
+  await expect.element(page.getByText('Templates', { exact: true })).toBeInTheDocument();
 
-  await page.getByRole('searchbox', { name: 'Filter agents' }).fill('ops');
+  await page.getByRole('searchbox', { name: 'Filter templates' }).fill('ops');
   await expect.element(page.getByTestId('agent-row-ops-runner')).toBeInTheDocument();
   expect(page.getByTestId('agent-row-hollis').elements()).toHaveLength(0);
 });

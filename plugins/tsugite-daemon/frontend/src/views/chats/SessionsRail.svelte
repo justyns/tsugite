@@ -8,7 +8,9 @@
   import Select from '$lib/components/inputs/Select.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
+  import Spin from '$lib/components/feedback/Spin.svelte';
   import SessionRow from '$lib/components/rows/SessionRow.svelte';
+  import AgentDot from '$lib/components/rows/AgentDot.svelte';
   import ContextMenu, { type ContextMenuItem } from '$lib/components/overlays/ContextMenu.svelte';
   import { sessions } from '$lib/stores/sessions.svelte';
   import { spaces } from '$lib/stores/spaces.svelte';
@@ -18,6 +20,7 @@
   import { ReorderDrag } from '$lib/reorderDrag.svelte';
   import { readLocal, writeLocal } from '$lib/storage';
   import type { SessionRow as Row } from '$lib/stores/sessions.svelte';
+  import type { Agent } from '$lib/stores/agents.svelte';
   import type { SessionJobTally } from '$lib/stores/jobsFilter';
   import { TESTID } from '$lib/testids';
   import {
@@ -29,17 +32,24 @@
   } from './sessionFilter';
   import {
     collapseScheduleRuns,
+    groupByAgent,
     groupSessions,
+    agentSessionList,
+    UNKNOWN_AGENT,
     sessionSourceType,
     sessionRowState,
     isFinishedSession,
     formatWhen,
     sessionTopic,
   } from './sessionModel';
+  import { sessionStateMeta } from '$lib/components/rows/rowState';
   import { attachRecordToChat, copyReference } from './attachRecord';
 
   let {
     rows: loadedRows,
+    agents = [],
+    agentsError = null,
+    onRetryAgents,
     selectedId,
     attn,
     jobCounts = new Map(),
@@ -50,6 +60,10 @@
     onOpenSchedule,
   }: {
     rows: Row[];
+    /** More than one agent nests the sessions under their agent. */
+    agents?: Agent[];
+    agentsError?: string | null;
+    onRetryAgents?: () => void;
     selectedId: string | null;
     attn: Set<string>;
     jobCounts?: Map<string, SessionJobTally>;
@@ -168,16 +182,60 @@
     groups.pinned.length + groups.active.length + groups.recent.length + groups.ended.length > 0,
   );
 
-  // Ended section collapse: default-closed, choice persisted like other rail
-  // state. An active filter force-opens it so a status: search reaches its rows.
+  // Ended sections and agent groups persist their open/closed choice like other
+  // rail state. An active filter force-opens both.
   const ENDED_OPEN_KEY = 'tsugite_rail_ended_open';
-  let endedExpanded = $state(readLocal(ENDED_OPEN_KEY) === '1');
-  const endedOpen = $derived(endedExpanded || isActiveFilter(filter));
-  function toggleEnded() {
-    // Toggle against the visible state so the click always does the opposite of
-    // what's shown (under a filter the section is force-open and stays so).
-    endedExpanded = !endedOpen;
-    writeLocal(ENDED_OPEN_KEY, endedExpanded ? '1' : '0');
+  const AGENT_OPEN_KEY = 'tsugite_rail_agent_open';
+  let railChoice = $state<Record<string, string>>({});
+  function storedChoice(key: string): string | null {
+    return railChoice[key] ?? readLocal(key);
+  }
+  function storeChoice(key: string, open: boolean) {
+    railChoice[key] = open ? '1' : '0';
+    writeLocal(key, railChoice[key]);
+  }
+
+  function endedOpen(key: string): boolean {
+    return isActiveFilter(filter) || storedChoice(key) === '1';
+  }
+
+  const agentGroups = $derived(agents.length > 1 ? groupByAgent(agents, rows, attn) : null);
+  const agentById = $derived(new Map(agents.map((a) => [a.id, a])));
+  const filteredIds = $derived(new Set(filtered.map((r) => r.id)));
+
+  const selectedRowId = $derived(collapsed.rowOf.get(selectedId ?? '') ?? selectedId);
+  const selectedGroupId = $derived.by(() => {
+    const row = rows.find((r) => r.id === selectedRowId);
+    if (!row || row.pinned) return null;
+    return agentById.has(row.agent_id) ? row.agent_id : UNKNOWN_AGENT.id;
+  });
+  // Opening a session expands its agent until the user collapses it, without
+  // writing the stored choice.
+  let autoOpenAgent = $derived(selectedId === null ? null : selectedGroupId);
+  // Likewise the open ended session expands its agent's ended row.
+  let autoOpenEnded = $derived(selectedRowId);
+
+  const AGENT_ROW_CAP = 5;
+  let agentShowAll = $state<Record<string, boolean>>({});
+
+  function agentOpen(agent: Agent): boolean {
+    if (isActiveFilter(filter) || autoOpenAgent === agent.id) return true;
+    const stored = storedChoice(`${AGENT_OPEN_KEY}:${agent.id}`);
+    return stored === null ? agent.is_default : stored === '1';
+  }
+  function toggleAgent(agent: Agent) {
+    const open = agentOpen(agent);
+    if (autoOpenAgent === agent.id) autoOpenAgent = null;
+    storeChoice(`${AGENT_OPEN_KEY}:${agent.id}`, !open);
+  }
+  function toggleEnded(key: string, isOpen: boolean) {
+    autoOpenEnded = null;
+    storeChoice(key, !isOpen);
+  }
+  function agentLabel(name: string, busy: boolean, needsYou: number): string {
+    return [name, busy && 'working', needsYou > 0 && `${needsYou} needs you`]
+      .filter(Boolean)
+      .join(', ');
   }
 
   // Hand the free-text half to the server so a query reaches the full store, not
@@ -272,8 +330,9 @@
     </button>
   </div>
 
-  {#snippet rowItem(row: Row, index = 0)}
+  {#snippet rowItem(row: Row)}
     {@const display = sessionRowState(row, { needsYou: rowNeedsYou(row) })}
+    {@const index = pinnedIds.indexOf(row.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="srow-drag"
@@ -296,12 +355,15 @@
         state={display.state}
         needsYou={display.needsYou}
         sourceType={sessionSourceType(row)}
-        isActive={row.id === (collapsed.rowOf.get(selectedId ?? '') ?? selectedId)}
+        isActive={row.id === selectedRowId}
         isPinned={row.pinned}
         isUnread={row.unread}
         activeJobCount={jobCounts.get(row.id)?.open ?? 0}
         waitingOnCount={row.waiting_on?.length ?? 0}
         runCount={collapsed.runs.get(row.id) ?? 0}
+        agent={agentGroups && row.pinned
+          ? (agentById.get(row.agent_id) ?? UNKNOWN_AGENT)
+          : undefined}
         onSelect={() => onSelect(row.id)}
         onOpenSchedule={() => onOpenSchedule(row.parent_id!)}
         onOpenNewTab={() => openInNewTab(row)}
@@ -309,7 +371,47 @@
     </div>
   {/snippet}
 
+  {#snippet endedSection(ended: Row[], key: string, nested = false)}
+    {@const isOpen = endedOpen(key) || (nested && ended.some((r) => r.id === autoOpenEnded))}
+    {#if ended.length > 0 && nested}
+      <button
+        type="button"
+        class="agent-more"
+        class:is-open={isOpen}
+        aria-expanded={isOpen}
+        onclick={() => toggleEnded(key, isOpen)}
+      >
+        <span class="chev"><Icon name="chev-r" size={10} /></span>
+        {ended.length} ended
+      </button>
+    {:else if ended.length > 0}
+      <div class="sb-ended">
+        <button
+          type="button"
+          class="sb-ended-hd"
+          class:is-open={isOpen}
+          aria-expanded={isOpen}
+          onclick={() => storeChoice(key, !isOpen)}
+        >
+          <span class="chev"><Icon name="chev-r" size={10} /></span>
+          ended <span class="n">{ended.length}</span>
+        </button>
+      </div>
+    {/if}
+    {#if ended.length > 0 && isOpen}
+      {#each ended as row (row.id)}
+        {@render rowItem(row)}
+      {/each}
+    {/if}
+  {/snippet}
+
   <div class="rail-scroll">
+    {#if agentsError}
+      <p class="rail-note">
+        Couldn't load agents
+        <Button size="sm" onclick={onRetryAgents}>Retry</Button>
+      </p>
+    {/if}
     {#if loading && rows.length === 0}
       <p class="rail-note">loading sessions…</p>
     {:else if rows.length === 0}
@@ -317,33 +419,66 @@
     {:else if !anyResults}
       <p class="rail-note">No sessions match this filter.</p>
     {:else}
-      {#each GROUP_LABELS as [key, label] (key)}
-        {#if groups[key].length > 0}
-          <div class="sb-group">{label}</div>
-          {#each groups[key] as row, i (row.id)}
-            {@render rowItem(row, i)}
+      {#if agentGroups}
+        {#if groups.pinned.length > 0}
+          <div class="sb-group">pinned</div>
+          {#each groups.pinned as row (row.id)}
+            {@render rowItem(row)}
           {/each}
         {/if}
-      {/each}
-
-      {#if groups.ended.length > 0}
-        <div class="sb-ended">
-          <button
-            type="button"
-            class="sb-ended-hd"
-            class:is-open={endedOpen}
-            aria-expanded={endedOpen}
-            onclick={toggleEnded}
-          >
-            <span class="chev"><Icon name="chev-r" size={10} /></span>
-            ended <span class="n">{groups.ended.length}</span>
-          </button>
-          {#if endedOpen}
-            {#each groups.ended as row (row.id)}
+        {#each agentGroups as group (group.agent.id)}
+          {@const shown = group.rows.filter((r) => !r.pinned && filteredIds.has(r.id))}
+          {#if shown.length > 0 || !isActiveFilter(filter)}
+            {@const open = agentOpen(group.agent)}
+            <button
+              type="button"
+              class="agent-hd"
+              class:is-open={open}
+              aria-expanded={open}
+              aria-label={agentLabel(group.agent.name, group.busy, group.needsYou)}
+              onclick={() => toggleAgent(group.agent)}
+            >
+              <span class="chev"><Icon name="chev-r" size={10} /></span>
+              <AgentDot color={group.agent.color} />
+              <span class="agent-name">{group.agent.name}</span>
+              {#if group.busy}<Spin color={sessionStateMeta('running').color} />{/if}
+              {#if group.needsYou > 0}
+                <span class="agent-attn">{group.needsYou}</span>
+              {/if}
+            </button>
+            {#if open}
+              {@const list = agentSessionList(shown, attn)}
+              {@const cap =
+                isActiveFilter(filter) || agentShowAll[group.agent.id]
+                  ? list.live.length
+                  : AGENT_ROW_CAP}
+              {@const visible = list.live.filter((r, i) => i < cap || r.id === selectedRowId)}
+              {#each visible as row (row.id)}
+                {@render rowItem(row)}
+              {/each}
+              {#if list.live.length > visible.length}
+                <button
+                  type="button"
+                  class="agent-more"
+                  onclick={() => (agentShowAll[group.agent.id] = true)}
+                >
+                  show {list.live.length - visible.length} more
+                </button>
+              {/if}
+              {@render endedSection(list.ended, `${ENDED_OPEN_KEY}:${group.agent.id}`, true)}
+            {/if}
+          {/if}
+        {/each}
+      {:else}
+        {#each GROUP_LABELS as [key, label] (key)}
+          {#if groups[key].length > 0}
+            <div class="sb-group">{label}</div>
+            {#each groups[key] as row (row.id)}
               {@render rowItem(row)}
             {/each}
           {/if}
-        </div>
+        {/each}
+        {@render endedSection(groups.ended, ENDED_OPEN_KEY)}
       {/if}
     {/if}
   </div>
@@ -458,12 +593,66 @@
   .sb-ended-hd:hover {
     color: var(--tx2);
   }
-  .sb-ended-hd .chev {
+  .sb-ended-hd .chev,
+  .agent-hd .chev,
+  .agent-more .chev {
     display: inline-flex;
     transition: rotate var(--t-2) var(--ease);
   }
-  .sb-ended-hd.is-open .chev {
+  .sb-ended-hd.is-open .chev,
+  .agent-hd.is-open .chev,
+  .agent-more.is-open .chev {
     rotate: 90deg;
+  }
+  .agent-hd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--bd0);
+    cursor: pointer;
+    font: 600 var(--fs-sm) / 1.3 var(--font-ui);
+    color: var(--tx1);
+    padding: 8px 12px;
+  }
+  .agent-hd:hover {
+    background: var(--bg2);
+  }
+  .agent-name {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .agent-more {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+    font: 500 var(--fs-xs) / 1.3 var(--font-ui);
+    color: var(--tx2);
+    padding: 4px 12px 6px 34px;
+  }
+  .agent-more:hover {
+    color: var(--tx1);
+  }
+  .agent-attn {
+    font: 600 var(--fs-2xs) / 1 var(--font-mono);
+    color: var(--tx0);
+    padding: 1px 5px;
+    border: 1px solid var(--st-warn);
+    border-radius: var(--r-full);
+    background: color-mix(in oklab, var(--st-warn) 18%, var(--bg1));
+    flex: none;
   }
   .sb-ended-hd .n {
     color: var(--tx3);

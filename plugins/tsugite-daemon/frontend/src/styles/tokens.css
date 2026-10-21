@@ -53,6 +53,10 @@ body {
   --st-info: #89dceb;
   --st-queue: #b4befe;
   --st-mute: #6c7086;
+  /* agent colors with no semantic-state twin */
+  --hue-purple: #cba6f7;
+  --hue-yellow: #f9e2af;
+  --hue-pink: #f5c2e7;
   /* elevation */
   --sh-1: 0 1px 2px rgba(11, 12, 20, 0.35);
   --sh-2: 0 4px 14px rgba(11, 12, 20, 0.4);
@@ -111,6 +115,9 @@ body {
   --st-info: #91d7e3;
   --st-queue: #b7bdf8;
   --st-mute: #6e738d;
+  --hue-purple: #c6a0f6;
+  --hue-yellow: #eed49f;
+  --hue-pink: #f5bde6;
 }
 
 :root[data-theme='frappe'] {
@@ -136,6 +143,9 @@ body {
   --st-info: #99d1db;
   --st-queue: #babbf1;
   --st-mute: #737994;
+  --hue-purple: #ca9ee6;
+  --hue-yellow: #e5c890;
+  --hue-pink: #f4b8e4;
 }
 
 :root[data-theme='latte'] {
@@ -162,6 +172,9 @@ body {
   --st-info: #04a5e5;
   --st-queue: #7287fd;
   --st-mute: #9ca0b0;
+  --hue-purple: #8839ef;
+  --hue-yellow: #df8e1d;
+  --hue-pink: #ea76cb;
   --sh-1: 0 1px 2px rgba(76, 79, 105, 0.14);
   --sh-2: 0 4px 14px rgba(76, 79, 105, 0.16);
   --sh-3: 0 14px 40px rgba(76, 79, 105, 0.22);
@@ -190,6 +203,9 @@ body {
   --st-info: #83a598;
   --st-queue: #d3869b;
   --st-mute: #928374;
+  --hue-purple: #b16286;
+  --hue-yellow: #fabd2f;
+  --hue-pink: #d3869b;
 }
 
 /* ---------- Global element rules (re-scoped from .ts) ---------- */

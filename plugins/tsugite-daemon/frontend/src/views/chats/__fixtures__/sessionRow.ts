@@ -1,5 +1,6 @@
 /** A backend session row with every field filled in, for the chats rail tests. */
 import type { AttentionRecord, SessionRow } from '$lib/stores/sessions.svelte';
+import type { Agent } from '$lib/stores/agents.svelte';
 
 export function attentionRecord(
   source: string,
@@ -34,6 +35,7 @@ export function sessionRow(id: string, extra: Partial<SessionRow> = {}): Session
     result: null,
     title: id,
     is_default: false,
+    agent_id: 'main',
     metadata: {},
     pinned: false,
     pin_position: null,
@@ -43,6 +45,21 @@ export function sessionRow(id: string, extra: Partial<SessionRow> = {}): Session
     is_primary: false,
     busy: false,
     attention: [],
+    ...extra,
+  };
+}
+
+export function agent(id: string, name: string, extra: Partial<Agent> = {}): Agent {
+  return {
+    id,
+    name,
+    workspace: `/ws/${id}`,
+    template: 'default',
+    model: null,
+    reasoning_effort: null,
+    color: null,
+    created_at: '2026-10-01T00:00:00Z',
+    is_default: false,
     ...extra,
   };
 }

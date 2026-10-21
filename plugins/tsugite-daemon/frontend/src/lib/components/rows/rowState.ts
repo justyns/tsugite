@@ -51,11 +51,14 @@ export function sourceTypeLabel(type: SessionSourceType): string {
  * per the state-language rule that nothing may rely on color alone. */
 export function buildSessionRowAriaLabel(opts: {
   title: string;
+  agent?: string;
   state: SessionState;
   needsYou?: boolean;
   isUnread?: boolean;
 }): string {
-  const parts = [opts.title, SESSION_STATE_META[opts.state].label];
+  const parts = [opts.title];
+  if (opts.agent) parts.push(opts.agent);
+  parts.push(SESSION_STATE_META[opts.state].label);
   if (opts.needsYou) parts.push(NEEDS_YOU_META.label);
   if (opts.isUnread) parts.push('unread');
   return parts.join(', ');

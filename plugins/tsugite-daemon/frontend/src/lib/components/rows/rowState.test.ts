@@ -64,6 +64,12 @@ describe('buildSessionRowAriaLabel', () => {
     ).toBe('research: local whisper models, idle, unread');
   });
 
+  it('reads the owning agent after the title', () => {
+    expect(buildSessionRowAriaLabel({ title: 'nas scrub', agent: 'homelab', state: 'idle' })).toBe(
+      'nas scrub, homelab, idle',
+    );
+  });
+
   it('omits the unread suffix by default', () => {
     expect(buildSessionRowAriaLabel({ title: 'chat: naming things', state: 'idle' })).toBe(
       'chat: naming things, idle',

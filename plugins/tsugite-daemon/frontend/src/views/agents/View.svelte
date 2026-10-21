@@ -180,18 +180,22 @@
 <section class="agents-shell" data-testid={TESTID.view('agents')}>
   <div class="agents-list" data-testid={TESTID.agentsRoster}>
     <div class="sidebar-hd">
-      <strong class="hd-title">Agents</strong>
+      <strong class="hd-title">Templates</strong>
       <span class="cnt">{visibleFiles.length}</span>
     </div>
     <div class="sidebar-search">
-      <SearchInput bind:value={query} ariaLabel="Filter agents" placeholder="filter agents…" />
+      <SearchInput
+        bind:value={query}
+        ariaLabel="Filter templates"
+        placeholder="filter templates…"
+      />
     </div>
 
     {#if agentsMeta.loading && agentsMeta.agentFiles.length === 0}
       <div class="pad"><PaneState kind="loading" lines={6} /></div>
     {:else if agentsMeta.error}
       <div class="pad">
-        <PaneState kind="error" title="Couldn't load agents">
+        <PaneState kind="error" title="Couldn't load templates">
           {#snippet hint()}<span>{agentsMeta.error}</span>{/snippet}
           {#snippet actions()}
             <Button size="sm" onclick={() => void agentsMeta.loadAgentFiles()}>Retry</Button>
@@ -200,18 +204,18 @@
       </div>
     {:else if visibleFiles.length === 0}
       <div class="pad">
-        <PaneState kind="empty" title={query ? 'No matches' : 'No agents'}>
+        <PaneState kind="empty" title={query ? 'No matches' : 'No templates'}>
           {#snippet hint()}
             <span
               >{query
-                ? 'No agent file matches your filter.'
-                : 'No agent files were discovered.'}</span
+                ? 'No template matches your filter.'
+                : 'No template files were discovered.'}</span
             >
           {/snippet}
         </PaneState>
       </div>
     {:else}
-      <div class="roster" role="listbox" aria-label="Agents" tabindex="-1">
+      <div class="roster" role="listbox" aria-label="Templates" tabindex="-1">
         {#each visibleFiles as f, i (f.path)}
           {@const isSel = f.path === selectedPath}
           {@const live = f.name === runningAgentFile}
@@ -231,7 +235,7 @@
             <span class="ag-dot"><Dot color={live ? 'ok' : 'mute'} ring={!live} /></span>
             <span class="ag-main">
               <span class="ag-name">{f.name}<span class="ag-ext">.md</span></span>
-              <span class="ag-sub">{f.description || `${f.source} agent`}</span>
+              <span class="ag-sub">{f.description || `${f.source} template`}</span>
             </span>
             <span class="ag-marks">
               {#if running > 0}<Badge variant="action" label={`${running} running`}>{running}</Badge
@@ -247,14 +251,15 @@
   <div class="agents-ed" data-testid={TESTID.agentEditor}>
     {#if !selectedFile}
       <div class="pad">
-        <PaneState kind="empty" title="Select an agent">
-          {#snippet hint()}<span>Pick an agent from the list to view and edit its definition.</span
+        <PaneState kind="empty" title="Select a template">
+          {#snippet hint()}<span
+              >Pick a template from the list to view and edit its definition.</span
             >{/snippet}
         </PaneState>
       </div>
     {:else}
       <div class="wk-toolbar">
-        <span class="wk-crumb">agents / <b>{selectedFile.name}.md</b></span>
+        <span class="wk-crumb">templates / <b>{selectedFile.name}.md</b></span>
         <span class="ed-meta mono">{metaFor()}</span>
         {#if runningTasks > 0}
           <span class="ed-running"><Dot color="info" pulse />{runningTasks} running</span>
@@ -292,7 +297,7 @@
         <div class="pad"><PaneState kind="loading" lines={8} /></div>
       {:else if contentError}
         <div class="pad">
-          <PaneState kind="error" title="Couldn't load this agent">
+          <PaneState kind="error" title="Couldn't load this template">
             {#snippet hint()}<span>{contentError}</span>{/snippet}
             {#snippet actions()}
               <Button size="sm" onclick={() => selectedPath && void loadContent(selectedPath)}
@@ -310,14 +315,14 @@
           {#if readonly}
             <div class="md-note">
               <Icon name="lock" size={12} />
-              This is a {sourceLabel} agent and is read-only. Copy it into your workspace to customise
+              This is a {sourceLabel} template and is read-only. Copy it into your workspace to customise
               it.
             </div>
           {/if}
           <textarea
             class="mono agent-src"
             spellcheck="false"
-            aria-label="Agent definition source"
+            aria-label="Template definition source"
             bind:value={content}
             {readonly}
             onkeydown={onEditorKeydown}></textarea>

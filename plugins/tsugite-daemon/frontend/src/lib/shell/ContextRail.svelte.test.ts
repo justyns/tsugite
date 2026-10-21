@@ -1,8 +1,12 @@
 /// <reference types="@vitest/browser/context" />
 import { page } from '@vitest/browser/context';
 import { render } from 'vitest-browser-svelte';
-import { expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import ContextRail from './ContextRail.svelte';
+import { agents } from '$lib/stores/agents.svelte';
+
+beforeEach(() => vi.spyOn(agents, 'load').mockResolvedValue());
+afterEach(() => vi.restoreAllMocks());
 
 function props(over: Record<string, unknown> = {}) {
   return {

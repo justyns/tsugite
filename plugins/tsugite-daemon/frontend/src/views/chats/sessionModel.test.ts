@@ -15,8 +15,10 @@ import {
   attentionSessions,
   isSupersessionOf,
   liveSessionId,
+  groupByAgent,
+  agentSessionList,
 } from './sessionModel';
-import { attentionRecord as rec } from './__fixtures__/sessionRow';
+import { agent, attentionRecord as rec } from './__fixtures__/sessionRow';
 
 const base = (over: Partial<SessionRow> = {}): SessionRow =>
   ({
@@ -35,6 +37,7 @@ const base = (over: Partial<SessionRow> = {}): SessionRow =>
     result: null,
     title: 'refactor sse',
     is_default: false,
+    agent_id: 'main',
     metadata: {},
     pinned: false,
     pin_position: null,
@@ -380,5 +383,68 @@ describe('collapseScheduleRuns', () => {
     expect(out.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
     expect(out.rows[0]!.title).not.toBe('dev-land');
     expect(out.runs.has('r1')).toBe(false);
+  });
+});
+
+describe('groupByAgent', () => {
+  const agents = [
+    agent('zed', 'zed'),
+    agent('ops', 'homelab'),
+    agent('main', 'atlas', { is_default: true }),
+  ];
+
+  it('puts the default agent first, then the rest by name', () => {
+    const groups = groupByAgent(agents, [], new Set());
+    expect(groups.map((g) => g.agent.id)).toEqual(['main', 'ops', 'zed']);
+  });
+
+  it('marks an agent busy when one of its live sessions is busy', () => {
+    const rows = [
+      base({ id: 'a', agent_id: 'ops', busy: true }),
+      base({ id: 'b', agent_id: 'zed', busy: true, status: 'completed' }),
+    ];
+    const groups = groupByAgent(agents, rows, new Set());
+    expect(groups.map((g) => g.busy)).toEqual([false, true, false]);
+  });
+
+  it('counts the unfinished sessions waiting on the user', () => {
+    const rows = [
+      base({ id: 'a', agent_id: 'ops' }),
+      base({ id: 'b', agent_id: 'ops' }),
+      base({ id: 'c', agent_id: 'ops', status: 'failed' }),
+      base({ id: 'd', agent_id: 'main' }),
+    ];
+    const groups = groupByAgent(agents, rows, new Set(['a', 'b', 'c']));
+    expect(groups.map((g) => g.needsYou)).toEqual([0, 2, 0]);
+  });
+
+  it('gathers sessions of an unknown agent into a trailing group', () => {
+    const rows = [base({ id: 'a', agent_id: 'gone' }), base({ id: 'b', agent_id: 'ops' })];
+    const groups = groupByAgent(agents, rows, new Set());
+    expect(groups.map((g) => g.agent.id)).toEqual(['main', 'ops', 'zed', '']);
+    expect(groups.map((g) => g.rows.map((r) => r.id))).toEqual([[], ['b'], [], ['a']]);
+  });
+});
+
+describe('agentSessionList', () => {
+  it('orders needs-you, then busy, then the rest, each newest first, with ended apart', () => {
+    const at = (h: number) => `2026-10-01T${String(h).padStart(2, '0')}:00:00Z`;
+    const rows = [
+      base({ id: 'idle-old', last_active: at(1) }),
+      base({ id: 'busy', busy: true, last_active: at(2) }),
+      base({ id: 'idle-new', last_active: at(5) }),
+      base({ id: 'ask-old', last_active: at(3) }),
+      base({ id: 'ask-new', last_active: at(4) }),
+      base({ id: 'done', status: 'completed', last_active: at(6) }),
+    ];
+    const out = agentSessionList(rows, new Set(['ask-old', 'ask-new', 'done']));
+    expect(out.live.map((r) => r.id)).toEqual([
+      'ask-new',
+      'ask-old',
+      'busy',
+      'idle-new',
+      'idle-old',
+    ]);
+    expect(out.ended.map((r) => r.id)).toEqual(['done']);
   });
 });

@@ -5,6 +5,7 @@
   // session the focused chat surface is currently showing (its explicit param, or
   // the resolved default when the paramless default chat is focused).
   import { sessions } from '$lib/stores/sessions.svelte';
+  import { agents } from '$lib/stores/agents.svelte';
   import { navigate } from '$lib/router.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
   import { jobTallyBySession } from '$lib/stores/jobsFilter';
@@ -33,6 +34,10 @@
 
   $effect(() => {
     void sessions.load();
+    void agents.load();
+  });
+  $effect(() => {
+    void agents.resolve(sessions.rows.map((r) => r.agent_id));
   });
 
   async function newSession() {
@@ -55,6 +60,9 @@
 
 <SessionsRail
   {rows}
+  agents={agents.list}
+  agentsError={agents.error}
+  onRetryAgents={() => void agents.load()}
   {selectedId}
   {attn}
   {jobCounts}

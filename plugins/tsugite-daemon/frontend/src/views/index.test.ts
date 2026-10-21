@@ -17,3 +17,7 @@ test('the five rows the phone rail keeps', () => {
     'schedules',
   ]);
 });
+
+test('the agent-template editor is labelled Templates under its stored id', () => {
+  expect(viewById('agents').label).toBe('Templates');
+});

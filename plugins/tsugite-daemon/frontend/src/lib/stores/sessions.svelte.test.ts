@@ -21,6 +21,7 @@ function row(id: string, extra: Partial<SessionRow> = {}): SessionRow {
     result: null,
     title: id,
     is_default: false,
+    agent_id: 'main',
     metadata: {},
     pinned: false,
     pin_position: null,
