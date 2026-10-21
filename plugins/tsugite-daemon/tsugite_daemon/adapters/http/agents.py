@@ -24,6 +24,7 @@ from tsugite_daemon.adapters.http.helpers import (
     _format_upload_message_suffix,
     _resolve_full_model_id,
     _sanitize_filename,
+    agent_id_error,
     build_session_event_persister,
     logger,
 )
@@ -297,6 +298,7 @@ class AgentsMixin:
                 **attention_fields(attention_by_owner.get(s.id, [])),
                 "waiting_on": waiting_on.get(s.id, []),
                 "is_primary": s.is_primary,
+                "agent_id": adapter.session_store.agents.effective_id(s.agent_id),
                 "alias": s.alias,
                 # Authoritative busy flag. The UI must render busy state from
                 # this, never infer it from cached progress labels.
@@ -333,6 +335,10 @@ class AgentsMixin:
         if title is not None and not isinstance(title, str):
             return JSONResponse({"error": "title must be a string"}, status_code=400)
 
+        agent_id = body.get("agent_id")
+        if err := agent_id_error(adapter.session_store.agents, agent_id):
+            return err
+
         from tsugite_daemon.session_store import SessionSource, create_interactive_session
 
         session_id = create_interactive_session(
@@ -341,6 +347,7 @@ class AgentsMixin:
             title=title,
             event_bus=self.event_bus,
             source=SessionSource.WEB.value,
+            agent_id=agent_id,
         )
         return JSONResponse({"id": session_id}, status_code=201)
 

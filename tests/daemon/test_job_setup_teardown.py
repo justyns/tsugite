@@ -40,9 +40,9 @@ def test_setup_runs_in_the_worktree_before_the_worker_starts(orchestrator, runne
     seen_at_spawn = []
     start = runner.start_session
 
-    def start_session(session):
+    def start_session(session, **kw):
         seen_at_spawn.append((Path(session.workspace_override) / "setup_ran").exists())
-        return start(session)
+        return start(session, **kw)
 
     runner.start_session = start_session
 

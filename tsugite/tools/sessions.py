@@ -127,7 +127,7 @@ def start_session(
         notify_sessions=notify_sessions or [],
         metadata=metadata,
     )
-    result = _call(_session_runner.start_session, session)
+    result = _call(_session_runner.start_session, session, inherit_from=get_current_session_id())
     return asdict(result)
 
 

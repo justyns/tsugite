@@ -249,7 +249,10 @@ class SessionRunner:
         task = self._active_tasks.get(session_id)
         return task is not None and not task.done()
 
-    def start_session(self, session: Session) -> Session:
+    def start_session(self, session: Session, inherit_from: Optional[str] = None) -> Session:
+        """Create and run `session`. With `inherit_from`, it runs under that session's agent."""
+        if inherit_from:
+            session.agent_id = self._store.get_session(inherit_from).agent_id
         session.status = SessionStatus.RUNNING.value
         if not session.source:
             session.source = SessionSource.BACKGROUND.value
@@ -292,8 +295,6 @@ class SessionRunner:
             "conv_id_override": session.id,
             "model_override": session.model,
         }
-        if session.workspace_override:
-            metadata["workspace_override"] = session.workspace_override
         # Carry an inherited sandbox policy (stamped by a sandboxed spawner) into
         # the chokepoint so the spawned run stays sandboxed.
         if session.metadata and session.metadata.get("sandbox_override"):

@@ -4,7 +4,7 @@ import asyncio
 import contextvars
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol
@@ -13,11 +13,14 @@ from zoneinfo import ZoneInfo
 from tsugite.agent_inheritance import find_agent_file
 from tsugite.agent_runner import run_agent
 from tsugite.agent_runner.models import AgentSkippedError
+from tsugite.attachments.base import Attachment
+from tsugite.attachments.file import FileHandler
 from tsugite.context import collect_detected_items
 from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
+from tsugite_daemon.agent_store import Agent, UnknownAgentError
 from tsugite_daemon.config import RuntimeDefaults, SandboxSettings
 from tsugite_daemon.session_store import (
     METADATA_PRIMARY_FLAG,
@@ -240,6 +243,25 @@ class CompositeUIHandler:
                 logger.debug("composite ui_handler sub-handler error: %s", e)
 
 
+def _working_dir_context_files(working_dir: Path) -> list[Attachment]:
+    """The working dir's `auto_context_files`, named by full path. Unreadable files are skipped."""
+    from tsugite.config import load_config
+
+    config = load_config()
+    if not config.auto_context_enabled:
+        return []
+    attachments = []
+    for name in config.auto_context_files:
+        path = working_dir / name
+        if not path.is_file():
+            continue
+        try:
+            attachments.append(replace(FileHandler().fetch(str(path)), name=str(path)))
+        except ValueError as e:
+            logger.warning("Skipping working-directory context file %s: %s", path, e)
+    return attachments
+
+
 def resolve_agent_path(agent_file: str, workspace_dir: Path, workspace: Any = None) -> Optional[Path]:
     """Resolve agent file reference to absolute path.
 
@@ -388,23 +410,34 @@ class BaseAdapter(ABC):
 
         return deduped
 
-    def _resolve_agent_path(self, agent_file: Optional[str] = None) -> Optional[Path]:
+    def _resolve_agent_path(
+        self, agent_file: Optional[str] = None, workspace_dir: Optional[Path] = None
+    ) -> Optional[Path]:
         """Resolve an agent file to an absolute path.
 
         Args:
             agent_file: Agent file to resolve. Defaults to the configured agent_file.
+            workspace_dir: Workspace to search first. Defaults to the runtime workspace.
         """
-        return resolve_agent_path(
-            agent_file or self.runtime.agent_file,
-            self.runtime.workspace_dir,
-            self._workspace,
-        )
+        from tsugite.workspace import Workspace
 
-    def _session_agent_file(self, session_id: str) -> Optional[str]:
+        workspace_dir = workspace_dir or self.runtime.workspace_dir
+        workspace = (
+            self._workspace if workspace_dir == self.runtime.workspace_dir else Workspace.try_load(workspace_dir)
+        )
+        return resolve_agent_path(agent_file or self.runtime.agent_file, workspace_dir, workspace)
+
+    def _session_and_agent(self, session_id: Optional[str]) -> tuple[Optional[Session], Agent]:
         try:
-            return self.session_store.get_session(session_id).agent_file
+            session = self.session_store.get_session(session_id) if session_id else None
         except ValueError:
-            return None
+            session = None
+        return session, self.session_store.agents.for_session(session)
+
+    def _session_agent_path(self, session: Optional[Session], agent: Agent) -> Optional[Path]:
+        """The session's own agent file, else its agent's template, resolved in the agent's workspace."""
+        agent_file = (session.agent_file if session else None) or agent.template
+        return self._resolve_agent_path(agent_file, Path(agent.workspace))
 
     def resolve_model(self, agent_path: Optional[Path] = None) -> str:
         """Resolve the effective model name, returning 'unknown' on failure.
@@ -435,8 +468,8 @@ class BaseAdapter(ABC):
     ) -> str:
         """Resolve the model one turn runs under.
 
-        Checks: per-run model_override -> session /model override -> the turn's own
-        agent file -> the agent/daemon default (:meth:`resolve_model`).
+        Checks: per-run model_override -> session /model override -> the session
+        agent's model -> the turn's agent file -> the daemon default.
         """
         meta = metadata or {}
         override = meta.get("model_override")
@@ -444,7 +477,10 @@ class BaseAdapter(ABC):
             override = self.session_store.get_model_override(session_id)
         if override:
             return override
-        return self.resolve_model(agent_path)
+        session, agent = self._session_and_agent(session_id)
+        if agent.model:
+            return agent.model
+        return self.resolve_model(agent_path or self._session_agent_path(session, agent))
 
     def resolve_session_model(self, session_id: Optional[str]) -> str:
         """Resolve the effective model for a session, honoring a per-session override.
@@ -452,8 +488,12 @@ class BaseAdapter(ABC):
         Falls back to the agent/daemon default (:meth:`resolve_model`) when no
         session is given or the session has no model override. This is the canonical
         resolution shared by adapter commands (e.g. /status) and the HTTP layer.
+        A session whose agent is gone shows "unknown".
         """
-        return self.resolve_turn_model(session_id)
+        try:
+            return self.resolve_turn_model(session_id)
+        except UnknownAgentError:
+            return "unknown"
 
     def session_effort_levels(self, session_id: Optional[str]) -> Optional[list[str]]:
         """Reasoning-effort levels supported by the session's resolved model, or
@@ -673,10 +713,7 @@ class BaseAdapter(ABC):
         except Exception:
             tokens_used = 0
 
-        # workspace_override beats runtime.workspace_dir so the rendered cwd
-        # matches what set_workspace_dir actually puts the agent in (per-session
-        # override used by the Jobs feature for its git worktree).
-        cwd_for_render = (channel_context.metadata or {}).get("workspace_override") or self.runtime.workspace_dir
+        cwd_for_render = self.session_store.agents.working_dir(session)
 
         # Jobs anchored on this session - surface active + last 3 terminal so the
         # LLM can answer "what's happening with my job?" without dumping the full
@@ -840,24 +877,19 @@ class BaseAdapter(ABC):
 
         metadata = channel_context.to_dict()
 
+        session, agent = self._session_and_agent(conv_id)
         override = (channel_context.metadata or {}).get("agent_file_override")
         if override and Path(override).exists():
             agent_path = Path(override)
         else:
-            agent_file = self._session_agent_file(conv_id)
-            agent_path = self._resolve_agent_path(agent_file)
+            agent_path = self._session_agent_path(session, agent)
             if not agent_path:
-                raise ValueError(f"Agent not found: {agent_file or self.runtime.agent_file}")
+                raise ValueError(f"Agent not found for session {conv_id}")
 
         enriched_prompt = self._build_message_context(message, channel_context, user_id)
 
-        # workspace_override lets a single session run inside a different working
-        # directory than the adapter's default - used by the Jobs feature so a
-        # worker session lives in its provisioned git worktree, not the parent
-        # adapter's workspace. Resolved here because both the detector ctx and the
-        # agent's PathContext (below) need it.
-        workspace_override = (channel_context.metadata or {}).get("workspace_override")
-        workspace_dir = Path(workspace_override) if workspace_override else self.runtime.workspace_dir
+        identity_dir = self.session_store.agents.identity_dir(session)
+        workspace_dir = self.session_store.agents.working_dir(session)
 
         # Client-supplied context and server-detected mentions both fold into a
         # <client_context> block that prepends to what the agent sees. The recorded
@@ -940,10 +972,10 @@ class BaseAdapter(ABC):
 
         from tsugite.cli.helpers import PathContext, set_workspace_dir
 
-        # workspace_dir (respecting workspace_override) was resolved above.
+        # Identity, memory and skills load from identity_dir. Code and file tools run in workspace_dir.
         path_context = PathContext(
             invoked_from=workspace_dir,
-            workspace_dir=workspace_dir,
+            workspace_dir=identity_dir,
             effective_cwd=workspace_dir,
         )
 
@@ -956,9 +988,15 @@ class BaseAdapter(ABC):
             # (the enriched prompt already promises their content).
             if channel_context.metadata and channel_context.metadata.get("uploaded_attachments"):
                 attachments.extend(channel_context.metadata.get("uploaded_attachments"))
+            if workspace_dir != identity_dir:
+                attachments.extend(_working_dir_context_files(workspace_dir))
 
             meta = channel_context.metadata or {}
-            effort_override = meta.get("reasoning_effort_override") or self.session_store.get_reasoning_effort(conv_id)
+            effort_override = (
+                meta.get("reasoning_effort_override")
+                or self.session_store.get_reasoning_effort(conv_id)
+                or agent.reasoning_effort
+            )
             # "unknown" is resolve_model's display sentinel, not a model string.
             model_override = None if turn_model == "unknown" else turn_model
             return run_agent(

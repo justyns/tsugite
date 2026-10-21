@@ -20,6 +20,7 @@ from tsugite.core.record_store import SqliteCollectionStorage
 from tsugite.core.state import copy_state
 from tsugite.history import event_to_ui_dict, generate_session_id, get_history_backend
 from tsugite.renderer import parse_iso_utc as _parse_ts
+from tsugite_daemon.agent_store import AgentStore
 from tsugite_daemon.attention_store import (
     ACKNOWLEDGEABLE_SOURCES,
     OWNER_SESSION,
@@ -280,6 +281,8 @@ class Session:
     result: Optional[str] = None
     model: Optional[str] = None
     agent_file: Optional[str] = None
+    # Fixed at creation. None runs under the default agent.
+    agent_id: Optional[str] = None
     notify: list[str] = field(default_factory=list)
     # `waiting_on` is the reverse view of this.
     notify_sessions: list[str] = field(default_factory=list)
@@ -429,6 +432,7 @@ class SessionStore:
         self._path = store_path  # legacy JSON location; one-time migration source
         self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
         self.attention = AttentionStore(store_path)
+        self.agents = AgentStore(store_path)
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
@@ -882,6 +886,7 @@ class SessionStore:
             reasoning_effort = source.reasoning_effort
             workspace_override = source.workspace_override
             agent_file = source.agent_file
+            agent_id = source.agent_id
             context_limit = source.context_limit
 
         new_id = get_history_backend().create_branch(session_id, at_event_id=at_event_id)
@@ -896,6 +901,7 @@ class SessionStore:
             reasoning_effort=reasoning_effort,
             workspace_override=workspace_override,
             agent_file=agent_file,
+            agent_id=agent_id,
             context_limit=context_limit,
         )
         with self._lock:
@@ -933,6 +939,7 @@ class SessionStore:
                 model_override=old_session.model_override,
                 workspace_override=old_session.workspace_override,
                 agent_file=old_session.agent_file,
+                agent_id=old_session.agent_id,
                 context_limit=old_session.context_limit,
                 pending_deliveries=list(old_session.pending_deliveries),
                 deferred_deliveries=list(old_session.deferred_deliveries),
@@ -1562,6 +1569,7 @@ class SessionStore:
         result["event_count"] = self.event_count(session_id)
         result["is_primary"] = session.is_primary
         result["alias"] = session.alias
+        result["agent_id"] = self.agents.effective_id(session.agent_id)
         result.update(attention_fields(self.attention.open_records(session_id)))
         # Same key, same shape as the session-list row: ids, not whole cards.
         result["pending_deliveries"] = session.pending_delivery_ids
@@ -1938,6 +1946,7 @@ def create_interactive_session(
     metadata=None,
     source: str = SessionSource.INTERACTIVE.value,
     parent_id=None,
+    agent_id: Optional[str] = None,
 ) -> str:
     """Provision a fresh interactive session and broadcast its creation.
 
@@ -1954,6 +1963,7 @@ def create_interactive_session(
             title=title or None,
             metadata=metadata or {},
             parent_id=parent_id,
+            agent_id=agent_id,
         )
     )
     if event_bus is not None:

@@ -235,7 +235,6 @@ class TestResolveWorkspaceDir:
         from tsugite.agent_runner.runner import _resolve_workspace_dir
 
         pc = SimpleNamespace(workspace_dir=Path("/ws/from/context"))
-        # This is the daemon case: no workspace object, only a path_context.
         assert _resolve_workspace_dir(None, pc) == Path("/ws/from/context")
 
     def test_none_when_neither(self):
@@ -271,6 +270,7 @@ class TestGatewaySessionSandboxResolver:
             )
         )
         gw._session_store = SessionStore(tmp_path / "s.json")
+        gw._session_store.agents.ensure_default(tmp_path, "default")
         return gw
 
     def test_inherited_override_wins_over_disabled_default(self, tmp_path):

@@ -37,7 +37,9 @@ class _Bus:
 
 @pytest.fixture
 def store(tmp_path, history_dir):
-    return SessionStore(tmp_path / "store.json")
+    store = SessionStore(tmp_path / "store.json")
+    store.agents.ensure_default(tmp_path, "default")
+    return store
 
 
 @pytest.fixture

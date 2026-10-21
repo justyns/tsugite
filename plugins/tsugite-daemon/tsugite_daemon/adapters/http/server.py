@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Optional
 
 from starlette.applications import Starlette
@@ -12,6 +11,7 @@ from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.activity import ActivityMixin
 from tsugite_daemon.adapters.http.agents import AgentsMixin
+from tsugite_daemon.adapters.http.agents_api import AgentsApiMixin
 from tsugite_daemon.adapters.http.files import FilesMixin
 from tsugite_daemon.adapters.http.helpers import (
     ActiveChat,
@@ -34,6 +34,7 @@ from tsugite_daemon.adapters.http.terminals import TerminalsMixin
 from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
 from tsugite_daemon.adapters.http.workspace_files import WorkspaceFilesMixin
+from tsugite_daemon.agent_store import UnknownAgentError
 from tsugite_daemon.auth import Token
 from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.session_store import SessionSource
@@ -42,6 +43,7 @@ from tsugite_daemon.webhook_store import WebhookStore
 
 class HTTPServer(
     AgentsMixin,
+    AgentsApiMixin,
     WorkspaceFilesMixin,
     HooksConfigMixin,
     SessionsMixin,
@@ -186,6 +188,7 @@ class HTTPServer(
         routes = [
             *self._core_routes(),
             *self._agent_routes(),
+            *self._agents_api_routes(),
             *self._workspace_routes(),
             *self._hooks_routes(),
             *self._session_routes(),
@@ -274,25 +277,26 @@ class HTTPServer(
             }
         )
 
-    def _context_provider_ctx(self, session_id: Optional[str]) -> dict:
+    def _context_provider_ctx(self, session_id: Optional[str]) -> tuple[dict, Optional[JSONResponse]]:
         """The ``ctx`` a context provider receives, resolved from the request's
         session the way the chat/command endpoints resolve its workspace: the
-        session's ``workspace_override`` if set, else the daemon default, plus the
+        session's working directory (``AgentStore.working_dir``), plus the
         session's ``user_id``. Fields stay None when the session is unknown so a
-        ctx-agnostic provider still runs."""
+        ctx-agnostic provider still runs. A session whose agent is gone is a 400."""
         ctx = {"session_id": session_id, "user_id": None, "agent": None, "workspace_dir": None}
         if not session_id or self.adapter is None:
-            return ctx
+            return ctx, None
         try:
             session = self.adapter.session_store.get_session(session_id)
         except (ValueError, KeyError):
-            return ctx
+            return ctx, None
         ctx["user_id"] = session.user_id
         ctx["agent"] = self.adapter.agent_label
-        ctx["workspace_dir"] = (
-            Path(session.workspace_override) if session.workspace_override else self.adapter.runtime.workspace_dir
-        )
-        return ctx
+        try:
+            ctx["workspace_dir"] = self.adapter.session_store.agents.working_dir(session)
+        except UnknownAgentError as e:
+            return ctx, JSONResponse({"error": str(e)}, status_code=400)
+        return ctx, None
 
     async def _list_context_providers(self, request: Request) -> JSONResponse:
         if err := self._check_auth(request):
@@ -326,13 +330,15 @@ class HTTPServer(
         from tsugite.context import get_choices
 
         key = request.path_params["key"]
-        ctx = self._context_provider_ctx(request.query_params.get("session_id"))
+        ctx, err = self._context_provider_ctx(request.query_params.get("session_id"))
+        if err:
+            return err
         choices = get_choices(key, ctx)
         return JSONResponse({"choices": [{"value": c.value, "label": c.label} for c in choices]})
 
     async def _context_provider_search(self, request: Request) -> JSONResponse:
         """Query-aware autocomplete for an ``@<prefix> <query>`` source. Called per
-        keystroke, so it always returns 200 with a (possibly empty) result list;
+        keystroke, so any query returns 200 with a (possibly empty) result list;
         the frontend renders empty rather than surfacing an error."""
         if err := self._check_auth(request):
             return err
@@ -340,7 +346,9 @@ class HTTPServer(
 
         key = request.path_params["key"]
         query = request.query_params.get("q", "")
-        ctx = self._context_provider_ctx(request.query_params.get("session_id"))
+        ctx, err = self._context_provider_ctx(request.query_params.get("session_id"))
+        if err:
+            return err
         results = run_search(key, query, ctx)
         return JSONResponse({"results": [{"value": c.value, "label": c.label} for c in results]})
 
@@ -356,7 +364,9 @@ class HTTPServer(
             body = {}
         if not isinstance(body, dict):
             body = {}
-        ctx = self._context_provider_ctx(body.get("session_id"))
+        ctx, err = self._context_provider_ctx(body.get("session_id"))
+        if err:
+            return err
         try:
             items = run_capture(key, body.get("arg"), ctx)
         except Exception as e:  # noqa: BLE001 -- a deliberately-picked provider's error goes to the user

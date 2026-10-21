@@ -4,11 +4,13 @@ rather than silently ignored."""
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from tsugite_daemon.config import load_daemon_config
 from tsugite_daemon.gateway import Gateway
+from tsugite_daemon.session_store import SessionStore
 
 
 def _write_config(path, agent_file: str = "alpha.md", port: int = 8321, extra: str = "") -> None:
@@ -38,7 +40,8 @@ def env(tmp_path):
     runtime.context_limit = Gateway._resolve_context_limit(runtime)
     adapter = SimpleNamespace(runtime=runtime, event_bus=None)
     gateway._http_server = SimpleNamespace(adapter=adapter, event_bus=object())
-    gateway._session_store = SimpleNamespace(update_context_limit=lambda *a, **k: None)
+    gateway._session_store = SessionStore(tmp_path / "state" / "session_store.json")
+    gateway._session_store.agents.ensure_default(runtime.workspace_dir, runtime.agent_file)
     return gateway, cfg_path, ws
 
 
@@ -55,6 +58,16 @@ async def test_reload_hot_swaps_changed_runtime_defaults(env):
     assert runtime.agent_file == "beta.md"
     assert runtime.model == "openai:gpt-5.4-mini"
     assert gateway.config.default_agent_file == "beta.md"
+
+
+@pytest.mark.asyncio
+async def test_reload_updates_the_default_agent(env, tmp_path):
+    gateway, cfg_path, ws = env
+    _write_config(cfg_path, agent_file="beta.md")
+
+    await gateway.reload_config()
+
+    assert gateway._session_store.agents.default().template == "beta.md"
 
 
 @pytest.mark.asyncio
@@ -100,3 +113,28 @@ async def test_reload_rebuilds_identity_map_in_place(env):
 
     assert gateway._identity_map is shared_ref
     assert shared_ref == {"discord:42": "alice"}
+
+
+@pytest.mark.asyncio
+async def test_startup_creates_the_default_agent(tmp_path, monkeypatch):
+    from tsugite.tools import set_daemon_mode
+    from tsugite.tools.daemon_control import set_restart_controller
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "alpha.md").write_text("---\nname: alpha\n---\nYou are alpha.\n")
+    cfg_path = tmp_path / "daemon.yaml"
+    _write_config(cfg_path)
+    cfg_path.write_text(cfg_path.read_text().replace("enabled: true", "enabled: false"))
+    gateway = Gateway(load_daemon_config(cfg_path), config_path=cfg_path)
+    monkeypatch.setattr(asyncio.get_running_loop(), "add_signal_handler", lambda *a: None)
+
+    try:
+        with pytest.raises(ValueError, match="No adapters enabled"):
+            await gateway.start()
+    finally:
+        set_daemon_mode(False)
+        set_restart_controller(None, None)
+
+    default = SessionStore(tmp_path / "state" / "session_store.json").agents.default()
+    assert (default.workspace, default.template) == (str(ws), "alpha.md")

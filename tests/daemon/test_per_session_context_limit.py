@@ -14,7 +14,9 @@ from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 @pytest.fixture
 def store(tmp_path):
-    return SessionStore(tmp_path / "store.json", default_context_limit=128_000)
+    store = SessionStore(tmp_path / "store.json", default_context_limit=128_000)
+    store.agents.ensure_default(tmp_path, "default")
+    return store
 
 
 def _make_session(store: SessionStore, sid: str, agent: str = "agent-a") -> Session:

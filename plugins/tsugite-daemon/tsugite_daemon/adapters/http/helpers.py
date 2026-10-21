@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -20,10 +21,22 @@ from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext
 from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend
 
 if TYPE_CHECKING:
+    from tsugite_daemon.agent_store import AgentStore
     from tsugite_daemon.session_store import SessionStore
 
 # adapters/http/helpers.py -> up three parents reaches the daemon package root.
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
+
+
+def agent_id_error(agents: "AgentStore", agent_id: Any) -> Optional[JSONResponse]:
+    """A 400 for a request body's `agent_id` that is not None or a known agent id."""
+    if agent_id is None:
+        return None
+    if not isinstance(agent_id, str):
+        return JSONResponse({"error": "agent_id must be a string"}, status_code=400)
+    if agents.get(agent_id) is None:
+        return JSONResponse({"error": f"unknown agent: {agent_id}"}, status_code=400)
+    return None
 
 
 def mounted_api_routes(prefix: str, name: str, routes: list) -> list:

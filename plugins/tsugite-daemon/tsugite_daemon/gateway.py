@@ -226,6 +226,7 @@ class Gateway:
             self.config.state_dir / "session_store.json",
             default_context_limit=runtime.context_limit,
         )
+        session_store.agents.ensure_default(runtime.workspace_dir, runtime.agent_file)
         self._session_store = session_store
 
         tasks = []
@@ -567,14 +568,14 @@ class Gateway:
             sb = self.config.sandbox
         if sb is None or not sb.enabled:
             return None
-        workspace = getattr(session, "workspace_override", None) or self.config.default_workspace_dir
+        workspace = store.agents.working_dir(session)
         return SandboxContext(
             allow_domains=list(sb.allow_domains),
             no_network=sb.no_network,
             extra_ro_binds=list(sb.extra_ro_binds),
             extra_rw_binds=list(sb.extra_rw_binds),
             pass_env=list(getattr(sb, "pass_env", [])),
-            workspace_dir=Path(workspace) if workspace else None,
+            workspace_dir=workspace,
         )
 
     @staticmethod
@@ -613,6 +614,7 @@ class Gateway:
         runtime.sandbox = self.config.sandbox
         if self._session_store is not None:
             self._session_store.update_context_limit(runtime.context_limit)
+            self._session_store.agents.ensure_default(runtime.workspace_dir, runtime.agent_file)
 
         # Every DaemonConfig section is hot-reconciled (runtime defaults,
         # notification_channels, identity_links) or boot-only (BOOT_ONLY_SECTIONS); a

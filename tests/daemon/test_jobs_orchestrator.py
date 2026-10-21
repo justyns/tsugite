@@ -6,10 +6,12 @@ import os
 import subprocess
 from collections import namedtuple
 from pathlib import Path
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
+from tsugite_daemon.agent_store import Agent, AgentStore
 from tsugite_daemon.job_store import Job, JobState, JobStore, UnknownJobError
 from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
 from tsugite_daemon.jobs_orchestrator import (
@@ -24,9 +26,11 @@ MAX_VERIFY_ATTEMPTS = 3
 class FakeStore:
     """Minimal stand-in for SessionStore - records append_event + holds sessions for get_session lookups."""
 
-    def __init__(self):
+    def __init__(self, tmp_path: Path):
         self.events: list[tuple[str, dict]] = []
         self.sessions: dict[str, Session] = {}
+        self.agents = AgentStore(tmp_path / "store.json")
+        self.agents.ensure_default(tmp_path, "default")
 
     def append_event(self, session_id, event):
         self.events.append((session_id, event))
@@ -50,11 +54,12 @@ class FakeStore:
 class FakeRunner:
     """Minimal stand-in for SessionRunner."""
 
-    def __init__(self):
-        self.store = FakeStore()
+    def __init__(self, tmp_path: Path):
+        self.store = FakeStore(tmp_path)
         self._completion_listeners: list = []
         self.attention: list[tuple[str, dict]] = []
         self.started: list[Session] = []
+        self.inherited_from: list[Optional[str]] = []
         self.cancelled: list[str] = []
         self._next_session_id_counter = 0
         # Seed the default parent session so create_and_start_job's parent-agent
@@ -75,12 +80,13 @@ class FakeRunner:
         if callback not in self._completion_listeners:
             self._completion_listeners.append(callback)
 
-    def start_session(self, session: Session) -> Session:
+    def start_session(self, session: Session, inherit_from: Optional[str] = None) -> Session:
         self._next_session_id_counter += 1
         if not session.id:
             session.id = f"session-{self._next_session_id_counter}"
         session.status = SessionStatus.RUNNING.value
         self.started.append(session)
+        self.inherited_from.append(inherit_from)
         return session
 
     def cancel_session(self, session_id: str) -> None:
@@ -93,8 +99,8 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def runner():
-    return FakeRunner()
+def runner(tmp_path):
+    return FakeRunner(tmp_path)
 
 
 @pytest.fixture
@@ -517,11 +523,12 @@ class RaisingStore:
 class RaisingStoreRunner(FakeRunner):
     """FakeRunner whose store raises ValueError on get_session misses."""
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, tmp_path: Path):
+        super().__init__(tmp_path)
         self.store = RaisingStore()
 
         self.started: list[Session] = []
+        self.inherited_from: list[Optional[str]] = []
         self.cancelled: list[str] = []
         self._next_session_id_counter = 0
 
@@ -529,12 +536,13 @@ class RaisingStoreRunner(FakeRunner):
         live = self.store.resolve_live(session_id)
         return live.id if live else session_id
 
-    def start_session(self, session: Session) -> Session:
+    def start_session(self, session: Session, inherit_from: Optional[str] = None) -> Session:
         self._next_session_id_counter += 1
         if not session.id:
             session.id = f"session-{self._next_session_id_counter}"
         session.status = SessionStatus.RUNNING.value
         self.started.append(session)
+        self.inherited_from.append(inherit_from)
         return session
 
     def cancel_session(self, session_id: str) -> None:
@@ -542,11 +550,11 @@ class RaisingStoreRunner(FakeRunner):
 
 
 @pytest.mark.asyncio
-async def test_cancel_job_finalizes_when_store_raises_on_session_miss(store, event_bus):
+async def test_cancel_job_finalizes_when_store_raises_on_session_miss(store, event_bus, tmp_path):
     """cancel_job calls _session_already_terminal(worker_session_id); with the real
     store contract that's a ValueError on a missing session. The job must still be
     finalized to CANCELLED and the exception must NOT propagate."""
-    runner = RaisingStoreRunner()
+    runner = RaisingStoreRunner(tmp_path)
     orchestrator = JobsOrchestrator(store, runner, event_bus=event_bus)
     job = store.add(Job(id="", parent_session_id="parent-1", prompt="x"))
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
@@ -556,10 +564,10 @@ async def test_cancel_job_finalizes_when_store_raises_on_session_miss(store, eve
     assert "user cancel" in (store.get(job.id).error or "")
 
 
-def test_on_timeout_finalizes_when_store_raises_on_session_miss(store, event_bus):
+def test_on_timeout_finalizes_when_store_raises_on_session_miss(store, event_bus, tmp_path):
     """_on_timeout probes _session_already_terminal for both worker and verifier ids;
     a ValueError-on-miss store must not break finalization to STUCK."""
-    runner = RaisingStoreRunner()
+    runner = RaisingStoreRunner(tmp_path)
     orchestrator = JobsOrchestrator(store, runner, event_bus=event_bus)
     job = store.add(Job(id="", parent_session_id="parent-1", prompt="x"))
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
@@ -786,7 +794,7 @@ def test_create_and_start_job_marks_job_errored_when_spawn_fails(store, runner, 
     """If start_session raises, the persisted Job must be moved out of QUEUED so it
     doesn't accumulate as a zombie in jobs.json."""
 
-    def boom(session):
+    def boom(session, **kw):
         raise RuntimeError("adapter not registered")
 
     runner.start_session = boom
@@ -1153,7 +1161,7 @@ def test_repo_path_that_is_a_linked_worktree_is_covered_by_the_shared_exclude(st
     assert status.stdout == ""
 
 
-def test_create_job_without_repo_does_not_provision(store, runner, orchestrator):
+def test_create_job_without_repo_does_not_provision(store, runner, orchestrator, tmp_path):
     job, started = asyncio.run(
         orchestrator.create_and_start_job(
             parent_session_id="parent-1",
@@ -1163,7 +1171,7 @@ def test_create_job_without_repo_does_not_provision(store, runner, orchestrator)
         )
     )
     assert store.get(job.id).worktree_path is None
-    assert started.workspace_override is None
+    assert started.workspace_override == str(tmp_path)
 
 
 def _commit_in(worktree, filename="inventory.txt", body="counted\n"):
@@ -2433,6 +2441,33 @@ async def test_non_repo_job_verifier_anchored_to_parent_workspace(store, runner,
     assert verifier.workspace_override == ws, (
         "verifier for a non-repo job must run in the worker's workspace so read_file/run see the artifacts"
     )
+
+
+@pytest.mark.asyncio
+async def test_worker_and_verifier_inherit_from_the_parent_session(store, runner, orchestrator):
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="do", acceptance_criteria=["the thing is done"]
+    )
+    await orchestrator.on_session_complete(_worker_session(job, started.id), "## Summary\ndid it")
+
+    assert len(runner.started) == 2
+    assert runner.inherited_from == ["parent-1", "parent-1"]
+
+
+@pytest.mark.asyncio
+async def test_relative_repo_resolves_against_the_parent_agent_workspace(store, runner, orchestrator, tmp_path):
+    from types import SimpleNamespace
+
+    _make_git_repo(tmp_path / "homelab" / "myrepo")
+    runner.store.agents.create(Agent(id="homelab", name="Homelab", workspace=str(tmp_path / "homelab"), template="t"))
+    runner.store.sessions["parent-1"].agent_id = "homelab"
+    runner.runtime = SimpleNamespace(workspace_dir=tmp_path / "elsewhere")
+
+    job, _ = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="do", acceptance_criteria=[], repo="myrepo"
+    )
+
+    assert Path(store.get(job.id).worktree_path).is_relative_to((tmp_path / "homelab" / "myrepo").resolve())
 
 
 @pytest.mark.asyncio

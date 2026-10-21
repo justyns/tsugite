@@ -19,6 +19,7 @@ from tsugite_daemon.adapters.http.helpers import (
     _file_handler,
     _is_text_mime,
 )
+from tsugite_daemon.agent_store import UnknownAgentError
 
 # Defensive cap on a single recursive workspace listing so a pathologically large
 # tree degrades (truncated flag on the response) instead of building an unbounded
@@ -32,16 +33,12 @@ MAX_WORKSPACE_RAW_SIZE = 10 * 1024 * 1024
 
 
 def _session_workspace_dir(adapter: "HTTPAgentAdapter", session_id: Optional[str]) -> Path:
-    """The session's `workspace_override` (a job worker's provisioned worktree) if
-    it has one, else the daemon default. An unknown session falls back."""
-    if session_id:
-        try:
-            session = adapter.session_store.get_session(session_id)
-        except (ValueError, KeyError):
-            session = None
-        if session is not None and session.workspace_override:
-            return Path(session.workspace_override)
-    return adapter.runtime.workspace_dir
+    """The session's working directory. An unknown session falls back to the default agent's."""
+    try:
+        session = adapter.session_store.get_session(session_id) if session_id else None
+    except (ValueError, KeyError):
+        session = None
+    return adapter.session_store.agents.working_dir(session)
 
 
 class WorkspaceFilesMixin:
@@ -62,7 +59,10 @@ class WorkspaceFilesMixin:
         `session_id` picks the root: that session's workspace, so a read for a job
         worker lands in its worktree. Without one the root is the daemon workspace.
         """
-        workspace_dir = _session_workspace_dir(adapter, session_id)
+        try:
+            workspace_dir = _session_workspace_dir(adapter, session_id)
+        except UnknownAgentError as e:
+            return Path(), JSONResponse({"error": str(e)}, status_code=400)
         try:
             resolved = (workspace_dir / path_str).resolve()
         except (ValueError, OSError):

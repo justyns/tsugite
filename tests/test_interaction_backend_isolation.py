@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.adapters.http import HTTPAgentAdapter
+from tsugite_daemon.agent_store import Agent
 from tsugite_daemon.config import RuntimeDefaults
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import Session, SessionStore
@@ -53,18 +54,15 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
     backend after a child session runs concurrently and installs its own
     NonInteractiveBackend."""
     ws_parent, ws_child = workspaces
-    parent_adapter = HTTPAgentAdapter(
+    adapter = HTTPAgentAdapter(
         RuntimeDefaults(workspace_dir=ws_parent, agent_file="default"),
         session_store,
     )
-    child_adapter = HTTPAgentAdapter(
-        RuntimeDefaults(workspace_dir=ws_child, agent_file="default"),
-        session_store,
-    )
+    session_store.agents.create(Agent(id="child", name="Child", workspace=str(ws_child), template="default"))
 
     runner = SessionRunner(
         store=session_store,
-        adapter=child_adapter,
+        adapter=adapter,
     )
 
     parent_backend = MagicMock(spec=NonInteractiveBackend)
@@ -85,6 +83,7 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
                 prompt="child hi",
                 model=None,
                 agent_file=None,
+                agent_id="child",
             )
             future = asyncio.run_coroutine_threadsafe(
                 _run_child(runner, child_session),
@@ -108,7 +107,7 @@ async def test_parent_interactive_backend_survives_nested_session_spawn(monkeypa
         reply_to="http:parent-user",
     )
     await asyncio.wait_for(
-        parent_adapter.handle_message("parent-user", "hi", parent_ctx),
+        adapter.handle_message("parent-user", "hi", parent_ctx),
         timeout=10.0,
     )
 
@@ -135,14 +134,12 @@ async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, works
     backend inside handle_message — one session's set_interaction_backend must
     not leak into the other's context."""
     ws_a, ws_b = workspaces
-    adapter_a = HTTPAgentAdapter(
+    adapter = HTTPAgentAdapter(
         RuntimeDefaults(workspace_dir=ws_a, agent_file="default"),
         session_store,
     )
-    adapter_b = HTTPAgentAdapter(
-        RuntimeDefaults(workspace_dir=ws_b, agent_file="default"),
-        session_store,
-    )
+    session_store.agents.create(Agent(id="b", name="B", workspace=str(ws_b), template="default"))
+    session_b = session_store.create_session(Session(id="", user_id="u-b", agent_id="b"))
 
     backend_a = MagicMock(spec=NonInteractiveBackend)
     backend_a.tag = "backend-a"
@@ -167,11 +164,17 @@ async def test_concurrent_sessions_each_see_their_own_backend(monkeypatch, works
     monkeypatch.setattr("tsugite_daemon.adapters.base.run_agent", shared_probe)
 
     ctx_a = ChannelContext(source="http", channel_id=None, user_id="u-a", reply_to="http:u-a")
-    ctx_b = ChannelContext(source="http", channel_id=None, user_id="u-b", reply_to="http:u-b")
+    ctx_b = ChannelContext(
+        source="http",
+        channel_id=None,
+        user_id="u-b",
+        reply_to="http:u-b",
+        metadata={"conv_id_override": session_b.id},
+    )
 
     await asyncio.gather(
-        adapter_a.handle_message("u-a", "hi", ctx_a),
-        adapter_b.handle_message("u-b", "hi", ctx_b),
+        adapter.handle_message("u-a", "hi", ctx_a),
+        adapter.handle_message("u-b", "hi", ctx_b),
     )
 
     assert sessions_observed["a"] is backend_a, (

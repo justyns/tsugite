@@ -17,7 +17,9 @@ from .conftest import _wait_until
 
 @pytest.fixture
 def store(tmp_path):
-    return SessionStore(tmp_path / "store.json")
+    store = SessionStore(tmp_path / "store.json")
+    store.agents.ensure_default(tmp_path, "default")
+    return store
 
 
 def _session(store: SessionStore, sid: str = "s1") -> str:

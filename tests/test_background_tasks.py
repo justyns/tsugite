@@ -706,11 +706,14 @@ class TestPartialHistoryOnError:
         mock_adapter.session_store.get_sticky_skills.return_value = {}
         mock_adapter.session_store.get_reasoning_effort.return_value = None
         mock_adapter.session_store.get_model_override.return_value = None
+        mock_adapter.session_store.agents.identity_dir.return_value = Path("/fake")
+        mock_adapter.session_store.agents.working_dir.return_value = Path("/fake")
         mock_session = MagicMock()
         mock_session.id = "conv-123"
         mock_adapter.session_store.get_or_create_interactive.return_value = mock_session
         mock_adapter.resolve_user = MagicMock(return_value="test-user")
-        mock_adapter._resolve_agent_path = MagicMock(return_value=Path("/fake/agent.yaml"))
+        mock_adapter._session_and_agent = MagicMock(return_value=(None, MagicMock(reasoning_effort=None)))
+        mock_adapter._session_agent_path = MagicMock(return_value=Path("/fake/agent.yaml"))
         mock_adapter._build_message_context = MagicMock(return_value="test prompt")
         mock_adapter._build_agent_context = MagicMock(return_value={})
         mock_adapter._emit_ui = MagicMock()

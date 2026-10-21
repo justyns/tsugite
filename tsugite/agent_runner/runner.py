@@ -839,15 +839,17 @@ def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
 
 
 def _resolve_workspace_dir(workspace: Optional[Any], path_context: Optional[Any]) -> Optional[Path]:
-    """Resolve the executor's workspace directory.
+    """Resolve the directory the executor runs code in.
 
-    Prefer an explicit Workspace object (CLI workspace runs); otherwise fall back
-    to the PathContext's workspace_dir. The daemon passes only a path_context (no
-    Workspace), so without this fallback the sandbox would bind/chdir the daemon's
-    CWD instead of the agent's workspace (or job worktree).
+    Checks: an explicit Workspace -> the directory bound with set_workspace_dir
+    (the daemon binds the session's working directory) -> path_context.workspace_dir.
     """
+    from tsugite.cli.helpers import get_workspace_dir
+
     if workspace:
         return workspace.path
+    if bound := get_workspace_dir():
+        return bound
     if path_context and getattr(path_context, "workspace_dir", None):
         return path_context.workspace_dir
     return None

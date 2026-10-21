@@ -46,8 +46,10 @@ def token(tmp_path):
 
 
 @pytest.fixture
-def session_store(tmp_path):
-    return SessionStore(tmp_path / "sessions.json")
+def session_store(tmp_path, workspace):
+    store = SessionStore(tmp_path / "sessions.json")
+    store.agents.ensure_default(workspace, "default")
+    return store
 
 
 @pytest.fixture

@@ -470,7 +470,7 @@ class JobsOrchestrator:
             workspace_override=workspace,
             metadata=_with_sandbox(job, worker_meta),
         )
-        return self._runner.start_session(session)
+        return self._runner.start_session(session, inherit_from=job.parent_session_id)
 
     def _activate_worker(
         self, job_id: str, worker_session_id: str, *, kind: str, timeout_minutes: int, clear_error: bool = False
@@ -1048,7 +1048,7 @@ class JobsOrchestrator:
             metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker_id or job.id}),
         )
         try:
-            started_verifier = self._runner.start_session(verifier_session)
+            started_verifier = self._runner.start_session(verifier_session, inherit_from=job.parent_session_id)
         except Exception as e:
             logger.exception("Failed to spawn verifier for job '%s': %s", job.id, e)
             self._finalize(job, JobState.ERRORED, error=f"verifier spawn failed: {e}")
@@ -1748,17 +1748,14 @@ class JobsOrchestrator:
 
     def _resolve_workspace_root(self, parent_session_id: str) -> Optional[Path]:
         """Workspace root a relative --repo is interpreted against: the parent
-        session's workspace_override, else the daemon's configured workspace_dir.
+        session's working directory.
 
-        Returns None when nothing is resolvable, so a relative path falls back to
-        the daemon CWD. Tolerates a real SessionStore raising ValueError on a
-        missing session.
+        Returns None when nothing is resolvable.
         """
-        parent = self._get_parent_session(parent_session_id)
-        if parent is not None and getattr(parent, "workspace_override", None):
-            return Path(parent.workspace_override)
-        workspace_dir = getattr(self._runtime(), "workspace_dir", None)
-        return Path(workspace_dir) if workspace_dir is not None else None
+        store = getattr(self._runner, "store", None)
+        if store is None or not hasattr(store, "agents"):
+            return None
+        return store.agents.working_dir(self._get_parent_session(parent_session_id))
 
     def _emit_job_event(self, job: Optional[Job]) -> None:
         if job is None:

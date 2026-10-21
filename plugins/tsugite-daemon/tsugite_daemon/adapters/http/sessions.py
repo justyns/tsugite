@@ -8,6 +8,7 @@ from starlette.routing import Route
 
 from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
+    agent_id_error,
     mounted_api_routes,
 )
 from tsugite_daemon.session_store import AliasConflictError, attention_fields
@@ -167,6 +168,7 @@ class SessionsMixin:
                         "title": s.title,
                         "metadata": s.metadata or {},
                         "is_primary": s.is_primary,
+                        "agent_id": store.agents.effective_id(s.agent_id),
                         "alias": s.alias,
                         **attention_fields(by_owner.get(s.id, [])),
                     }
@@ -187,6 +189,10 @@ class SessionsMixin:
         if not prompt:
             return JSONResponse({"error": "prompt is required"}, status_code=400)
 
+        agent_id = body.get("agent_id")
+        if err := agent_id_error(self.session_runner.store.agents, agent_id):
+            return err
+
         from tsugite_daemon.session_store import Session, SessionSource
 
         session = Session(
@@ -195,6 +201,7 @@ class SessionsMixin:
             prompt=prompt,
             model=body.get("model"),
             agent_file=body.get("agent_file"),
+            agent_id=agent_id,
             notify=body.get("notify", []),
         )
 
@@ -422,6 +429,7 @@ class SessionsMixin:
             prompt=old.prompt,
             model=old.model,
             agent_file=old.agent_file,
+            agent_id=old.agent_id,
             notify=old.notify,
             workspace_override=old.workspace_override,
             metadata=dict(old.metadata or {}),

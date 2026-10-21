@@ -201,6 +201,8 @@ def _make_base_adapter(tmp_path, **overrides):
     adapter.session_store = MagicMock()
     adapter.session_store.needs_compaction.return_value = False
     adapter.session_store.is_compacting.return_value = False
+    adapter.session_store.agents.identity_dir.return_value = tmp_path
+    adapter.session_store.agents.working_dir.return_value = tmp_path
     mock_session = MagicMock()
     mock_session.id = "conv-123"
     adapter.session_store.get_or_create_interactive.return_value = mock_session

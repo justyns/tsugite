@@ -56,7 +56,7 @@ class FakeRunner:
         live = self.store.resolve_live(session_id)
         return live.id if live else session_id
 
-    def start_session(self, session: Session) -> Session:
+    def start_session(self, session: Session, inherit_from=None) -> Session:
         self._next_session_id_counter += 1
         if not session.id:
             session.id = f"session-{self._next_session_id_counter}"

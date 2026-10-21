@@ -99,9 +99,15 @@ def get_commands() -> dict[str, AdapterCommand]:
     params=[
         CommandParam("prompt", str, "The task to run"),
         CommandParam("agent", str, "Agent file to run (default: the daemon default)", required=False),
+        CommandParam(
+            "session_id",
+            str,
+            "Session whose agent runs the task (auto-injected by the web UI from the currently-open chat)",
+            required=False,
+        ),
     ],
 )
-async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) -> str:
+async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None, session_id: str | None = None) -> str:
     """Start a background session with the given prompt."""
     from tsugite.tools.sessions import _session_runner
     from tsugite_daemon.session_store import Session, SessionSource
@@ -115,6 +121,11 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None) ->
         source=SessionSource.BACKGROUND.value,
         prompt=prompt,
     )
+    if session_id:
+        try:
+            session.agent_id = _session_runner.store.get_session(session_id).agent_id
+        except ValueError as e:
+            raise CommandError(str(e)) from e
 
     try:
         result = _session_runner.start_session(session)

@@ -12,12 +12,14 @@ from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
 def _adapter(tmp_path):
     store = SessionStore(tmp_path / "session_store.json")
+    store.agents.ensure_default(tmp_path, "default")
     adapter = MagicMock()
     adapter.session_store = store
     adapter.agent_name = "default"
     adapter.resolve_model.return_value = "claude_code:haiku"
     # Exercise the real per-session resolver (override wins, else agent default)
     # rather than the mock's auto-stub.
+    adapter._session_and_agent.side_effect = lambda sid: BaseAdapter._session_and_agent(adapter, sid)
     adapter.resolve_turn_model.side_effect = lambda sid: BaseAdapter.resolve_turn_model(adapter, sid)
     adapter.resolve_session_model.side_effect = lambda sid: BaseAdapter.resolve_session_model(adapter, sid)
     return adapter, store

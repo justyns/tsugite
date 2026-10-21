@@ -500,8 +500,8 @@ class PathContext:
     effective_cwd: Path
 
 
-# Mirrors PathContext.workspace_dir for call sites (fs tools, shell, subprocesses)
-# that don't receive PathContext explicitly. Task-local so concurrent agent runs
+# The directory the running agent's code and fs tools work in, for call sites
+# (fs tools, shell, subprocesses, the executor) that don't receive PathContext explicitly. Task-local so concurrent agent runs
 # don't share state.
 _workspace_dir_cv: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar("workspace_dir", default=None)
 

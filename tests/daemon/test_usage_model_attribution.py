@@ -207,7 +207,7 @@ async def test_turn_with_no_model_configured_reports_no_model_specified(pinned_a
     """
     bare_agent = pinned_adapter.runtime.workspace_dir / "bare.md"
     bare_agent.write_text("---\nname: bare-agent\nextends: none\n---\n\nHi.\n")
-    pinned_adapter.runtime.agent_file = str(bare_agent)
+    pinned_adapter.session_store.agents.ensure_default(pinned_adapter.runtime.workspace_dir, str(bare_agent))
 
     with pytest.raises(RuntimeError, match="No model specified"):
         await _run_turn(pinned_adapter, monkeypatch)

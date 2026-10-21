@@ -256,6 +256,21 @@ def reset_tool_registry():
 
 
 @pytest.fixture(autouse=True)
+def adapters_start_with_a_default_agent(monkeypatch):
+    """Gateway startup creates the default agent before it builds adapters. Tests build
+    adapters directly, so constructing one creates the default agent from its runtime."""
+    from tsugite_daemon.adapters.base import BaseAdapter
+
+    init = BaseAdapter.__init__
+
+    def init_with_default_agent(self, runtime, session_store, *args, **kwargs):
+        session_store.agents.ensure_default(runtime.workspace_dir, runtime.agent_file)
+        init(self, runtime, session_store, *args, **kwargs)
+
+    monkeypatch.setattr(BaseAdapter, "__init__", init_with_default_agent)
+
+
+@pytest.fixture(autouse=True)
 def default_local_executor(monkeypatch):
     """Tests default to the in-process executor (fast + namespace-inspectable), matching
     the pre-unify default. Production defaults to subprocess; tests that need it construct
