@@ -45,7 +45,7 @@ def adapter(tmp_path, monkeypatch):
     runtime = RuntimeDefaults(workspace_dir=workspace, agent_file=str(agent_file), model="anthropic:claude-opus-4")
     adapter = _StubAdapter(runtime, SessionStore(tmp_path / "store.json"))
 
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: agent_file)
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *_: agent_file)
     monkeypatch.setattr(adapter, "_build_message_context", lambda message, *a, **kw: message)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_update_skill_ttl", lambda *a, **kw: None)

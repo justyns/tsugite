@@ -117,7 +117,7 @@ def _fake_result():
 def captured_run(adapter, monkeypatch):
     """Stub the heavy internals and capture the kwargs handle_message hands to
     run_agent, so a test can assert what reaches the prompt / user_input."""
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.runtime.agent_file))
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *_: Path(adapter.runtime.agent_file))
     monkeypatch.setattr(
         adapter, "_build_message_context", lambda msg, *a, **kw: f"<message_context>x</message_context>\n\n{msg}"
     )

@@ -881,6 +881,7 @@ class SessionStore:
             model_override = source.model_override
             reasoning_effort = source.reasoning_effort
             workspace_override = source.workspace_override
+            agent_file = source.agent_file
             context_limit = source.context_limit
 
         new_id = get_history_backend().create_branch(session_id, at_event_id=at_event_id)
@@ -894,6 +895,7 @@ class SessionStore:
             model_override=model_override,
             reasoning_effort=reasoning_effort,
             workspace_override=workspace_override,
+            agent_file=agent_file,
             context_limit=context_limit,
         )
         with self._lock:
@@ -930,6 +932,7 @@ class SessionStore:
                 reasoning_effort=old_session.reasoning_effort,
                 model_override=old_session.model_override,
                 workspace_override=old_session.workspace_override,
+                agent_file=old_session.agent_file,
                 context_limit=old_session.context_limit,
                 pending_deliveries=list(old_session.pending_deliveries),
                 deferred_deliveries=list(old_session.deferred_deliveries),

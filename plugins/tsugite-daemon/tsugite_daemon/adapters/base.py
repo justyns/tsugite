@@ -400,6 +400,12 @@ class BaseAdapter(ABC):
             self._workspace,
         )
 
+    def _session_agent_file(self, session_id: str) -> Optional[str]:
+        try:
+            return self.session_store.get_session(session_id).agent_file
+        except ValueError:
+            return None
+
     def resolve_model(self, agent_path: Optional[Path] = None) -> str:
         """Resolve the effective model name, returning 'unknown' on failure.
 
@@ -834,13 +840,14 @@ class BaseAdapter(ABC):
 
         metadata = channel_context.to_dict()
 
-        agent_path = self._resolve_agent_path()
-        if channel_context.metadata and channel_context.metadata.get("agent_file_override"):
-            override = Path(channel_context.metadata["agent_file_override"])
-            if override.exists():
-                agent_path = override
-        if not agent_path:
-            raise ValueError(f"Agent not found: {self.runtime.agent_file}")
+        override = (channel_context.metadata or {}).get("agent_file_override")
+        if override and Path(override).exists():
+            agent_path = Path(override)
+        else:
+            agent_file = self._session_agent_file(conv_id)
+            agent_path = self._resolve_agent_path(agent_file)
+            if not agent_path:
+                raise ValueError(f"Agent not found: {agent_file or self.runtime.agent_file}")
 
         enriched_prompt = self._build_message_context(message, channel_context, user_id)
 

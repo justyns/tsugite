@@ -593,7 +593,7 @@ def adapter(tmp_path, store, runner, monkeypatch):
     (ws / "agent.md").write_text("---\nname: agent\n---\n\nHi.\n")
     adapter = _StubAdapter(RuntimeDefaults(workspace_dir=ws, agent_file=str(ws / "agent.md")), store)
 
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: ws / "agent.md")
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *_: ws / "agent.md")
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)

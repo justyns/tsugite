@@ -52,7 +52,7 @@ def adapter(tmp_path, monkeypatch):
         runtime=RuntimeDefaults(workspace_dir=ws, agent_file=str(agent_file)),
         session_store=SessionStore(tmp_path / "store.json"),
     )
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.runtime.agent_file))
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *_: Path(adapter.runtime.agent_file))
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)

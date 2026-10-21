@@ -292,8 +292,6 @@ class SessionRunner:
             "conv_id_override": session.id,
             "model_override": session.model,
         }
-        if session.agent_file:
-            metadata["agent_file_override"] = str(adapter._resolve_agent_path(session.agent_file) or session.agent_file)
         if session.workspace_override:
             metadata["workspace_override"] = session.workspace_override
         # Carry an inherited sandbox policy (stamped by a sandboxed spawner) into

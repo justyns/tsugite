@@ -47,7 +47,7 @@ def stub_adapter_internals(adapter, monkeypatch):
     """Stub out adapter side-effect methods irrelevant to retry/compaction
     behavior so tests can focus on `run_agent` + `_run_compaction` interplay.
     """
-    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda: Path(adapter.runtime.agent_file))
+    monkeypatch.setattr(adapter, "_resolve_agent_path", lambda *_: Path(adapter.runtime.agent_file))
     monkeypatch.setattr(adapter, "_build_message_context", lambda msg, *a, **kw: msg)
     monkeypatch.setattr(adapter, "_build_agent_context", lambda *a, **kw: {})
     monkeypatch.setattr(adapter, "_save_history", lambda **kw: None)
