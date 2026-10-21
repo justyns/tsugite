@@ -20,7 +20,7 @@ from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
-from tsugite_daemon.agent_store import Agent, UnknownAgentError
+from tsugite_daemon.agent_store import EDITABLE_FIELDS, NULLABLE_FIELDS, Agent, UnknownAgentError
 from tsugite_daemon.config import RuntimeDefaults, SandboxSettings
 from tsugite_daemon.session_store import (
     METADATA_PRIMARY_FLAG,
@@ -426,6 +426,30 @@ class BaseAdapter(ABC):
             self._workspace if workspace_dir == self.runtime.workspace_dir else Workspace.try_load(workspace_dir)
         )
         return resolve_agent_path(agent_file or self.runtime.agent_file, workspace_dir, workspace)
+
+    def agent_fields(self, body: dict, current: Optional[Agent] = None) -> dict:
+        """The body's fields, type-checked, with the workspace resolved. Raises ValueError."""
+        if unknown := body.keys() - EDITABLE_FIELDS:
+            raise ValueError(f"Unknown agent field(s): {', '.join(sorted(unknown))}")
+        if current is not None and current.is_default and body.keys() & {"workspace", "template"}:
+            raise ValueError("The default agent's workspace and template are set in the daemon config")
+        for key in EDITABLE_FIELDS & body.keys():
+            if not isinstance(body[key], str) and not (body[key] is None and key in NULLABLE_FIELDS):
+                raise ValueError(f"{key} must be a string")
+        fields = dict(body)
+        if "workspace" in body or "template" in body:
+            workspace = Path(body.get("workspace", current.workspace if current else "")).expanduser()
+            if not workspace.is_absolute() or not workspace.is_dir():
+                raise ValueError(f"workspace must be an absolute path to a directory: {workspace}")
+            workspace = workspace.resolve()
+            state_dir = self.session_store.agents.state_dir.resolve()
+            if workspace == Path("/") or workspace.is_relative_to(state_dir):
+                raise ValueError(f"workspace cannot be / or inside the daemon state dir: {workspace}")
+            fields["workspace"] = str(workspace)
+            template = body.get("template", current.template if current else "")
+            if not self._resolve_agent_path(template, workspace):
+                raise ValueError(f"template not found: {template}")
+        return fields
 
     def _session_and_agent(self, session_id: Optional[str]) -> tuple[Optional[Session], Agent]:
         try:

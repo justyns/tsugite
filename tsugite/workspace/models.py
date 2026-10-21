@@ -5,6 +5,14 @@ from pathlib import Path
 from typing import List, Optional
 
 DEFAULT_COMPACTION_THRESHOLD = 0.8
+TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+IDENTITY_ABOUT_PLACEHOLDER = "*(Who am I? What's my purpose? How would I describe myself?)*"
+
+
+def _fill_identity(text: str, marker: str, value: str) -> str:
+    if marker not in text:
+        raise ValueError(f"IDENTITY.md template has no {marker!r} to fill")
+    return text.replace(marker, value, 1)
 
 
 class WorkspaceNotFoundError(ValueError):
@@ -137,6 +145,8 @@ class Workspace:
         persona_template: Optional[str] = None,
         user_name: Optional[str] = None,
         init_git: bool = False,
+        agent_name: Optional[str] = None,
+        about: Optional[str] = None,
     ) -> "Workspace":
         """Create new workspace with optional persona template.
 
@@ -145,6 +155,8 @@ class Workspace:
             persona_template: Optional persona template name
             user_name: Optional user name for template rendering
             init_git: Whether to initialize git repository
+            agent_name: Optional name for IDENTITY.md
+            about: Optional "About Me" text for IDENTITY.md
 
         Returns:
             Created workspace
@@ -190,15 +202,14 @@ Thumbs.db
         (path / ".gitignore").write_text(gitignore_content)
 
         # Copy AGENTS.md template (operating instructions)
-        templates_dir = Path(__file__).parent.parent / "templates"
-        agents_template = templates_dir / "AGENTS.md"
+        agents_template = TEMPLATES_DIR / "AGENTS.md"
         if agents_template.exists():
             import shutil
 
             shutil.copy(agents_template, path / "AGENTS.md")
 
         # Copy USER.md template (user profile)
-        user_template = templates_dir / "USER.md"
+        user_template = TEMPLATES_DIR / "USER.md"
         if user_template.exists():
             user_content = user_template.read_text()
             if user_name:
@@ -206,14 +217,19 @@ Thumbs.db
             (path / "USER.md").write_text(user_content)
 
         # Copy MEMORY.md template (long-term memory)
-        memory_template = templates_dir / "MEMORY.md"
+        memory_template = TEMPLATES_DIR / "MEMORY.md"
         if memory_template.exists():
             shutil.copy(memory_template, path / "MEMORY.md")
 
         # Copy IDENTITY.md template (agent identity)
-        identity_template = templates_dir / "IDENTITY.md"
+        identity_template = TEMPLATES_DIR / "IDENTITY.md"
         if identity_template.exists():
-            shutil.copy(identity_template, path / "IDENTITY.md")
+            identity = identity_template.read_text()
+            if agent_name:
+                identity = _fill_identity(identity, "- **Name:**", f"- **Name:** {agent_name}")
+            if about:
+                identity = _fill_identity(identity, IDENTITY_ABOUT_PLACEHOLDER, about)
+            (path / "IDENTITY.md").write_text(identity)
 
         if persona_template:
             from .templates import load_persona_template

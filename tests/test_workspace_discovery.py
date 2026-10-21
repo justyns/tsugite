@@ -63,6 +63,25 @@ def test_workspace_create_with_template(tmp_path):
     assert "Test User" in user_content
 
 
+def test_workspace_create_fills_the_identity(tmp_path):
+    workspace = Workspace.create(tmp_path / "ws", agent_name="Atlas", about="I map the homelab.")
+
+    identity = (workspace.path / "IDENTITY.md").read_text()
+    assert "- **Name:** Atlas" in identity
+    assert "## About Me\n\nI map the homelab.\n" in identity
+    assert "Who am I?" not in identity
+
+
+def test_workspace_create_fails_when_the_identity_template_lacks_a_marker(tmp_path, monkeypatch):
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "IDENTITY.md").write_text("# Identity\n")
+    monkeypatch.setattr("tsugite.workspace.models.TEMPLATES_DIR", templates)
+
+    with pytest.raises(ValueError, match="IDENTITY.md"):
+        Workspace.create(tmp_path / "ws", agent_name="Atlas")
+
+
 def test_workspace_properties(tmp_path):
     """Test workspace path properties."""
     workspace_path = tmp_path / "workspace"

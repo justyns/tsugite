@@ -1,9 +1,14 @@
 """Session tools for agents to manage async agent sessions."""
 
+import logging
+import re
+import shutil
 from dataclasses import asdict
 from typing import Optional
 
 from . import call_on_loop, tool
+
+logger = logging.getLogger(__name__)
 
 _session_runner = None
 _loop = None
@@ -274,3 +279,61 @@ def session_metadata(key: str, value: Optional[str] = None, session_id: Optional
         return {"session_id": session_id, "metadata": session.metadata}
     except ValueError as e:
         return {"error": str(e)}
+
+
+@tool(require_daemon=True)
+def create_agent(
+    id: str,
+    name: Optional[str] = None,
+    template: Optional[str] = None,
+    model: Optional[str] = None,
+    color: Optional[str] = None,
+    identity: Optional[str] = None,
+) -> dict:
+    """Create an agent with a fresh workspace seeded from the workspace templates."""
+    from tsugite_daemon.agent_store import Agent, validate_agent_id
+
+    from tsugite.config import get_xdg_data_path
+    from tsugite.workspace import Workspace
+
+    validate_agent_id(id)
+    if template and (re.search(r"[/\\]", template) or template.startswith(("~", "."))):
+        raise ValueError(f"template must be a bare template name: {template}")
+    adapter = _session_runner.adapter
+    if adapter is None:
+        raise RuntimeError("create_agent needs the daemon adapter")
+    agents = _session_runner.store.agents
+    if _call(agents.get, id) is not None:
+        raise ValueError(f"Agent already exists: {id}")
+    name = name or id
+    workspace = get_xdg_data_path("agents") / id
+    try:
+        workspace.mkdir(parents=True)
+    except FileExistsError:
+        raise ValueError(f"Workspace directory already exists: {workspace}") from None
+    try:
+        Workspace.create(workspace, agent_name=name, about=identity)
+        body = {
+            "name": name,
+            "workspace": str(workspace),
+            "template": template or _call(agents.default).template,
+            "model": model,
+            "color": color,
+        }
+        fields = _call(adapter.agent_fields, body)
+        return asdict(_call(agents.create, Agent(id=id, **fields)))
+    except BaseException:
+        try:
+            shutil.rmtree(workspace)
+        except OSError as e:
+            logger.warning("Could not remove workspace %s of failed agent %s: %s", workspace, id, e)
+        raise
+
+
+@tool(require_daemon=True)
+def list_agents() -> list:
+    """List agents with their id, name, model, color and whether each is the default."""
+    return [
+        {"id": a.id, "name": a.name, "model": a.model, "color": a.color, "is_default": a.is_default}
+        for a in _call(_session_runner.store.agents.list)
+    ]

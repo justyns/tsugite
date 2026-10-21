@@ -1,5 +1,6 @@
 """Agents: identities with their own workspace that sessions run under."""
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ from tsugite_daemon.webhook_store import WebhookStore
 
 from tsugite.agent_runner.runner import _resolve_workspace_dir
 from tsugite.cli.helpers import PathContext
+from tsugite.config import get_xdg_data_path
 from tsugite.tools import sessions as sessions_tools
 
 
@@ -393,6 +395,129 @@ class TestChildSessionsInheritTheAgent:
         result = await cmd_bg(adapter, prompt="go")
 
         assert result == "Failed to start background session: disk full"
+
+
+class TestAgentTools:
+    @pytest.fixture(autouse=True)
+    def bound(self, store, adapter, monkeypatch):
+        monkeypatch.setattr(sessions_tools, "_session_runner", SessionRunner(store, adapter))
+        monkeypatch.setattr(sessions_tools, "_call", lambda fn, *a, **kw: fn(*a, **kw))
+
+    @pytest.fixture
+    def agents_root(self):
+        return get_xdg_data_path("agents")
+
+    def test_create_agent_makes_a_seeded_workspace_and_record(self, store, agents_root):
+        result = sessions_tools.create_agent(
+            "atlas", name="Atlas", model="openai:gpt-5", color="teal", identity="I map the homelab."
+        )
+
+        ws = agents_root / "atlas"
+        assert result["workspace"] == str(ws.resolve())
+        for name in ("IDENTITY.md", "MEMORY.md", "AGENTS.md", "USER.md", "memory"):
+            assert (ws / name).exists()
+        identity = (ws / "IDENTITY.md").read_text()
+        assert "- **Name:** Atlas" in identity
+        assert "I map the homelab." in identity
+        assert "Who am I?" not in identity
+        agent = store.agents.get("atlas")
+        assert (agent.name, agent.template, agent.model, agent.color, agent.is_default) == (
+            "Atlas",
+            "default",
+            "openai:gpt-5",
+            "teal",
+            False,
+        )
+
+    def test_create_agent_writes_the_name_without_identity_text(self, agents_root):
+        sessions_tools.create_agent("atlas")
+
+        identity = (agents_root / "atlas" / "IDENTITY.md").read_text()
+        assert "- **Name:** atlas" in identity
+        assert "Who am I?" in identity
+
+    @pytest.mark.parametrize("agent_id", ["../escape", "Atlas", ""])
+    def test_create_agent_rejects_a_bad_id(self, store, agent_id, agents_root):
+        with pytest.raises(ValueError, match="Invalid agent id"):
+            sessions_tools.create_agent(agent_id)
+
+        assert not agents_root.exists()
+
+    def test_create_agent_rejects_a_duplicate_id(self, agents_root):
+        (agents_root / "homelab").mkdir(parents=True)
+        (agents_root / "homelab" / "MEMORY.md").write_text("keep")
+
+        with pytest.raises(ValueError, match="Agent already exists: homelab"):
+            sessions_tools.create_agent("homelab")
+
+        assert (agents_root / "homelab" / "MEMORY.md").read_text() == "keep"
+
+    @pytest.mark.parametrize(
+        "template", ["/etc/passwd", "~/agent.md", "../main/default", "sub/ops", "sub\\ops", ".hidden"]
+    )
+    def test_create_agent_takes_a_bare_template_name_only(self, store, agents_root, template):
+        with pytest.raises(ValueError, match="bare template name"):
+            sessions_tools.create_agent("atlas", template=template)
+
+        assert not (agents_root / "atlas").exists()
+        assert store.agents.get("atlas") is None
+
+    def test_create_agent_accepts_a_template_name_with_md(self, store):
+        sessions_tools.create_agent("atlas", template="default.md")
+
+        assert store.agents.get("atlas").template == "default.md"
+
+    def test_create_agent_keeps_the_error_when_cleanup_fails(self, store, agents_root, monkeypatch):
+        monkeypatch.setattr(sessions_tools.shutil, "rmtree", MagicMock(side_effect=OSError("busy")))
+
+        with pytest.raises(ValueError, match="color"):
+            sessions_tools.create_agent("atlas", color="magenta")
+
+    def test_create_agent_needs_the_adapter(self, store, agents_root, monkeypatch):
+        monkeypatch.setattr(sessions_tools, "_session_runner", SessionRunner(store, None))
+
+        with pytest.raises(RuntimeError, match="adapter"):
+            sessions_tools.create_agent("atlas")
+
+        assert not agents_root.exists()
+
+    def test_create_agent_rejects_an_existing_directory(self, store, agents_root):
+        (agents_root / "atlas").mkdir(parents=True)
+        (agents_root / "atlas" / "MEMORY.md").write_text("keep")
+
+        with pytest.raises(ValueError, match="already exists"):
+            sessions_tools.create_agent("atlas")
+
+        assert (agents_root / "atlas" / "MEMORY.md").read_text() == "keep"
+        assert store.agents.get("atlas") is None
+
+    @pytest.mark.parametrize(
+        "kwargs,match", [({"color": "magenta"}, "color"), ({"template": "nope"}, "template not found")]
+    )
+    def test_create_agent_rejects_bad_fields_and_removes_the_workspace(self, store, agents_root, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            sessions_tools.create_agent("atlas", **kwargs)
+
+        assert not (agents_root / "atlas").exists()
+        assert store.agents.get("atlas") is None
+
+    def test_create_agent_has_no_path_parameter(self):
+        assert set(inspect.signature(sessions_tools.create_agent).parameters) == {
+            "id",
+            "name",
+            "template",
+            "model",
+            "color",
+            "identity",
+        }
+
+    def test_list_agents(self, store):
+        store.agents.update("homelab", color="green")
+
+        assert sessions_tools.list_agents() == [
+            {"id": "main", "name": "main", "model": None, "color": "blue", "is_default": True},
+            {"id": "homelab", "name": "Homelab", "model": "anthropic:claude-x", "color": "green", "is_default": False},
+        ]
 
 
 def test_cli_executor_runs_in_the_workspace_not_the_root(tmp_path):

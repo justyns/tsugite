@@ -17,12 +17,20 @@ if TYPE_CHECKING:
 AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 EDITABLE_FIELDS = frozenset({"name", "workspace", "template", "model", "reasoning_effort", "color"})
+NULLABLE_FIELDS = frozenset({"model", "reasoning_effort", "color"})
 
 AGENT_COLORS = ("blue", "green", "red", "purple", "orange", "yellow", "teal", "pink")
 
 
 class UnknownAgentError(ValueError):
     pass
+
+
+def validate_agent_id(agent_id: str) -> None:
+    if not AGENT_ID_PATTERN.fullmatch(agent_id):
+        raise ValueError(
+            f"Invalid agent id {agent_id!r}: use lowercase letters, digits, '-' and '_' (max 64 characters)"
+        )
 
 
 @dataclass
@@ -91,10 +99,7 @@ class AgentStore:
         self._agents[agent.id] = agent
 
     def create(self, agent: Agent) -> Agent:
-        if not AGENT_ID_PATTERN.fullmatch(agent.id):
-            raise ValueError(
-                f"Invalid agent id {agent.id!r}: use lowercase letters, digits, '-' and '_' (max 64 characters)"
-            )
+        validate_agent_id(agent.id)
         with self._lock:
             if agent.id in self._agents:
                 raise ValueError(f"Agent already exists: {agent.id}")

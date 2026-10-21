@@ -241,6 +241,10 @@ class SessionRunner:
         return self._store
 
     @property
+    def adapter(self):
+        return self._adapter
+
+    @property
     def runtime(self):
         """The adapter's runtime defaults, or None when no adapter is wired."""
         return getattr(self._adapter, "runtime", None)
