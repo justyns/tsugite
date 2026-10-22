@@ -104,3 +104,19 @@ async def test_cmd_context_targets_injected_session(tmp_path):
     # The session exists but has no prompt snapshots yet - the reply must be the
     # 'no data yet' message, NOT 'No active session'.
     assert "No active session" not in result
+
+
+def test_session_and_agent_unknown_id_falls_back_to_default_agent_and_warns(tmp_path, caplog):
+    adapter, store = _adapter(tmp_path)
+    with caplog.at_level("WARNING", logger="tsugite_daemon.adapters.base"):
+        session, agent = BaseAdapter._session_and_agent(adapter, "no-such-session")
+    assert session is None
+    assert agent is store.agents.for_session(None)
+    assert "no-such-session" in caplog.text
+
+
+def test_session_and_agent_none_id_does_not_warn(tmp_path, caplog):
+    adapter, _ = _adapter(tmp_path)
+    with caplog.at_level("WARNING", logger="tsugite_daemon.adapters.base"):
+        BaseAdapter._session_and_agent(adapter, None)
+    assert caplog.text == ""

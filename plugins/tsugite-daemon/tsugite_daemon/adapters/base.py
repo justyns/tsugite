@@ -455,6 +455,7 @@ class BaseAdapter(ABC):
         try:
             session = self.session_store.get_session(session_id) if session_id else None
         except ValueError:
+            logger.warning("Session %s not found, running as the default agent", session_id)
             session = None
         return session, self.session_store.agents.for_session(session)
 
