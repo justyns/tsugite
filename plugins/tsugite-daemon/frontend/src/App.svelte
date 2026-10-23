@@ -21,6 +21,8 @@
   import { connectEvents, type SSEEvent } from '$lib/api/sse';
   import { routeShellEvent, type ShellEventSink } from '$lib/api/events';
   import { sessions } from '$lib/stores/sessions.svelte';
+  import { rooms } from '$lib/stores/rooms.svelte';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
@@ -170,8 +172,15 @@
     const title = sessions.ordered.find((r) => r.id === sessionId)?.title ?? 'Chat';
     return { kind: 'chat', params: { sessionId }, title };
   }
-  function openChat(sessionId: string): void {
-    openSurface(chatRef(sessionId));
+  // A room's id is also its transcript session's id.
+  async function openChat(sessionId: string): Promise<void> {
+    try {
+      openSurface((await rooms.surfaceRef(sessionId)) ?? chatRef(sessionId));
+    } catch (err) {
+      toasts.push('err', 'Could not open the chat', {
+        body: `Rooms failed to load: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   }
   function openTerminal(terminalId: string): void {
     const title = terminals.list.find((t) => t.id === terminalId)?.cmd ?? 'Terminal';
@@ -226,7 +235,7 @@
     const id = router.view;
     const params = router.params;
     untrack(() => {
-      if (id === 'chats' && params.sessionId) openChat(params.sessionId);
+      if (id === 'chats' && params.sessionId) void openChat(params.sessionId);
       else if (id === 'terminals' && params.terminalId) openTerminal(params.terminalId);
       else if (id === 'files' && params.path) openFile(params.path);
     });
@@ -407,7 +416,10 @@
       files.applySessionEvent(data);
       openAgentArtifact(data);
     },
-    onSessionUpdate: (data) => sessions.applySessionUpdate(data),
+    onSessionUpdate: (data) => {
+      sessions.applySessionUpdate(data);
+      rooms.applySessionUpdate(data);
+    },
     onCompactionStarted: (data) => sessions.applyCompaction(data, true),
     onCompactionFinished: (data) => sessions.applyCompaction(data, false),
     onJobUpdate: (data) => jobs.applyJobUpdate(data),

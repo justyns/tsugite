@@ -284,6 +284,9 @@ export class SessionsStore {
             needs_attention: data.needs_attention === true,
           } as Partial<SessionRow>);
         return;
+      case 'room_updated':
+        // The rooms store applies it.
+        return;
       case 'reordered':
         if (Array.isArray(data.ids)) this.rows = reorderPinRows(this.rows, data.ids as string[]);
         return;

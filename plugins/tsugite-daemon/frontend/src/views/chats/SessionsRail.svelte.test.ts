@@ -8,6 +8,7 @@ import { collectLeaves } from '$lib/shell/mux/layout';
 import { TESTID } from '$lib/testids';
 import { sessions } from '$lib/stores/sessions.svelte';
 import { agent, sessionRow as row } from './__fixtures__/sessionRow';
+import type { Room } from '$lib/stores/rooms.svelte';
 import '../../styles/tokens.css';
 
 // The ended section and agent groups persist their open/closed choice.
@@ -739,4 +740,105 @@ test('the agent needs-you count stays readable in every theme', async () => {
   } finally {
     delete document.documentElement.dataset.theme;
   }
+});
+
+const roomOf = (id: string, title: string, extra: Partial<Room> = {}): Room => ({
+  id,
+  title,
+  participants: [
+    { agent_id: 'main', session_id: 'p-main', lead: true, muted: false },
+    { agent_id: 'ops', session_id: 'p-ops', lead: false, muted: false },
+  ],
+  max_rounds: 12,
+  rounds_used: 0,
+  created_at: '2026-10-22T00:00:00Z',
+  status: 'active',
+  ...extra,
+});
+
+test('open rooms list in their own section with a count and a busy mark', async () => {
+  const onOpenRoom = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    agents: twoAgents,
+    rows: [row('a1', { title: 'chat' })],
+    rooms: [roomOf('r1', 'PROJ-123'), roomOf('r2', 'old room', { status: 'completed' })],
+    busyRooms: new Set(['r1']),
+    onOpenRoom,
+  });
+  await expect.element(page.getByText('rooms', { exact: true })).toBeInTheDocument();
+  const roomRow = page.getByRole('button', { name: 'PROJ-123, running' });
+  await expect.element(roomRow).toHaveTextContent('2 agents');
+  await roomRow.click();
+  expect(onOpenRoom).toHaveBeenCalledWith('r1');
+  await expect.element(page.getByText('old room')).not.toBeInTheDocument();
+});
+
+test('the open room row is marked current', async () => {
+  render(SessionsRail, {
+    ...base,
+    rows: [row('a1', { title: 'chat' })],
+    rooms: [roomOf('r1', 'PROJ-123'), roomOf('r3', 'other room')],
+    selectedRoomId: 'r1',
+  });
+  await expect
+    .element(page.getByRole('button', { name: 'PROJ-123, idle' }))
+    .toHaveAttribute('aria-current', 'true');
+  await expect
+    .element(page.getByRole('button', { name: 'other room, idle' }))
+    .not.toHaveAttribute('aria-current');
+});
+
+test('an active filter hides the rooms section', async () => {
+  render(SessionsRail, {
+    ...base,
+    rows: [row('a1', { title: 'chat' })],
+    rooms: [roomOf('r1', 'PROJ-123')],
+  });
+  await expect.element(page.getByText('rooms', { exact: true })).toBeInTheDocument();
+  await page.getByLabelText('Filter sessions').fill('chat');
+  await expect.element(page.getByText('rooms', { exact: true })).not.toBeInTheDocument();
+});
+
+test('a failed room list shows a note whose Retry reloads it', async () => {
+  const onRetryRooms = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    rows: [row('a1', { title: 'chat' })],
+    roomsError: 'daemon down',
+    onRetryRooms,
+  });
+  await expect.element(page.getByText("Couldn't load rooms")).toBeInTheDocument();
+  await page.getByRole('button', { name: 'Retry' }).click();
+  expect(onRetryRooms).toHaveBeenCalled();
+});
+
+test('the rooms section is hidden when no room is open', async () => {
+  render(SessionsRail, {
+    ...base,
+    rows: [row('a1', { title: 'chat' })],
+    rooms: [roomOf('r2', 'old room', { status: 'completed' })],
+  });
+  await expect.element(page.getByRole('button', { name: /chat/ })).toBeInTheDocument();
+  await expect.element(page.getByText('rooms', { exact: true })).not.toBeInTheDocument();
+});
+
+test('a participant session sits under its agent with a badge that opens the room', async () => {
+  const onOpenRoom = vi.fn();
+  const onSelect = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    onSelect,
+    agents: twoAgents,
+    rows: [row('p-ops', { title: 'PROJ-123', agent_id: 'ops', metadata: { room_id: 'r1' } })],
+    rooms: [roomOf('r1', 'PROJ-123')],
+    onOpenRoom,
+  });
+  await page
+    .getByRole('button', { name: /^homelab/ })
+    .first()
+    .click();
+  await page.getByRole('button', { name: 'Open room PROJ-123' }).click();
+  expect(onOpenRoom).toHaveBeenCalledWith('r1');
+  expect(onSelect).not.toHaveBeenCalled();
 });

@@ -423,9 +423,11 @@
   <div class="attrow">
     {@render pasteAffordance?.()}
     <StagedStrip {attachments} {contextItems} {onRemoveAttachment} {onRemoveContext} />
-    <Button variant="ghost" size="sm" onclick={() => onAttach?.()}>
-      {#snippet icon()}<Icon name="plus" />{/snippet}attach
-    </Button>
+    {#if onAttach}
+      <Button variant="ghost" size="sm" onclick={() => onAttach()}>
+        {#snippet icon()}<Icon name="plus" />{/snippet}attach
+      </Button>
+    {/if}
     {#if onCamera}
       <span class="cam-only">
         <Button variant="ghost" size="sm" aria-label="Take a photo" onclick={() => onCamera?.()}>

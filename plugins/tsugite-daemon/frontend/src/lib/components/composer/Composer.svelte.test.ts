@@ -458,6 +458,7 @@ test('clicking a context chip opens a modal showing the full value', async () =>
 test('the attach and context buttons stay present alongside two oversized chips', async () => {
   const path = '/very/long/workspace/path/that/would/overflow/the/composer/row/file.md';
   render(Composer, {
+    onAttach: () => {},
     contextItems: [
       { key: 'a', label: `${path}-a`, value: 'A'.repeat(6000), icon: 'file' },
       { key: 'b', label: `${path}-b`, value: 'B'.repeat(6000), icon: 'file' },
@@ -469,6 +470,12 @@ test('the attach and context buttons stay present alongside two oversized chips'
   // Playwright verify's job, where real CSS applies).
   await expect.element(page.getByRole('button', { name: 'attach' })).toBeInTheDocument();
   await expect.element(page.getByTestId(TESTID.composerContext)).toBeInTheDocument();
+});
+
+test('the attach button is absent without an onAttach handler', async () => {
+  render(Composer, {});
+  await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
+  await expect.element(page.getByRole('button', { name: 'attach' })).not.toBeInTheDocument();
 });
 
 test('an attached context item makes an empty composer sendable', async () => {
@@ -575,7 +582,7 @@ test('double-clicking Send does not stop the turn it just started', async () => 
 // ── dense composer ──
 
 test('a dense composer puts the attach row beside the send row and drops the shortcut strip', async () => {
-  const { container } = await render(Composer, { dense: true, showKbd: true });
+  const { container } = await render(Composer, { dense: true, showKbd: true, onAttach: () => {} });
   await expect.element(page.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
   const attrow = container.querySelector<HTMLElement>('.attrow')!;
   const btmrow = container.querySelector<HTMLElement>('.btmrow')!;

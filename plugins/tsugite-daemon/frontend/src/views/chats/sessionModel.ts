@@ -23,9 +23,8 @@ const DONE_STATUSES = new Set(['completed', 'cancelled']);
  *  by any outcome. Kept in hand-sync with the daemon, which owns the list. */
 const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
-/** Whether the session has ended (done, failed, or cancelled) and so leaves the
- *  rail's live recency flow for its own bucket. */
-export function isFinishedSession(row: SessionRow): boolean {
+/** Whether the session has ended (completed, failed, or cancelled). */
+export function isFinishedSession(row: Pick<SessionRow, 'status'>): boolean {
   return FINISHED_STATUSES.has(row.status);
 }
 

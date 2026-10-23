@@ -21,6 +21,7 @@
   import { readLocal, writeLocal } from '$lib/storage';
   import type { SessionRow as Row } from '$lib/stores/sessions.svelte';
   import type { Agent } from '$lib/stores/agents.svelte';
+  import type { Room } from '$lib/stores/rooms.svelte';
   import type { SessionJobTally } from '$lib/stores/jobsFilter';
   import { TESTID } from '$lib/testids';
   import {
@@ -50,6 +51,12 @@
     agents = [],
     agentsError = null,
     onRetryAgents,
+    rooms = [],
+    roomsError = null,
+    onRetryRooms,
+    busyRooms = new Set(),
+    selectedRoomId = null,
+    onOpenRoom,
     selectedId,
     attn,
     jobCounts = new Map(),
@@ -65,6 +72,13 @@
     agents?: Agent[];
     agentsError?: string | null;
     onRetryAgents?: () => void;
+    /** All rooms, closed ones included. Open rooms get their own section, and every room badges its participants' rows. */
+    rooms?: Room[];
+    roomsError?: string | null;
+    onRetryRooms?: () => void;
+    busyRooms?: Set<string>;
+    selectedRoomId?: string | null;
+    onOpenRoom?: (roomId: string) => void;
     selectedId: string | null;
     attn: Set<string>;
     jobCounts?: Map<string, SessionJobTally>;
@@ -200,6 +214,11 @@
   function endedOpen(key: string): boolean {
     return isActiveFilter(filter) || storedChoice(key) === '1';
   }
+
+  const roomById = $derived(new Map(rooms.map((r) => [r.id, r])));
+  const liveRooms = $derived(
+    isActiveFilter(filter) ? [] : rooms.filter((r) => !isFinishedSession(r)),
+  );
 
   const agentGroups = $derived(agents.length > 1 ? groupByAgent(agents, rows, attn) : null);
   const agentById = $derived(new Map(agents.map((a) => [a.id, a])));
@@ -337,6 +356,7 @@
 
   {#snippet rowItem(row: Row)}
     {@const display = sessionRowState(row, { needsYou: rowNeedsYou(row) })}
+    {@const room = roomById.get(String(row.metadata?.room_id ?? ''))}
     {@const index = pinnedIds.indexOf(row.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -372,6 +392,8 @@
         onSelect={() => onSelect(row.id)}
         onOpenSchedule={() => onOpenSchedule(row.parent_id!)}
         onOpenNewTab={() => openInNewTab(row)}
+        {room}
+        onOpenRoom={() => onOpenRoom?.(room!.id)}
       />
     </div>
   {/snippet}
@@ -411,6 +433,27 @@
   {/snippet}
 
   <div class="rail-scroll">
+    {#if liveRooms.length > 0}
+      <div class="sb-group">rooms</div>
+      {#each liveRooms as room (room.id)}
+        {@const n = room.participants.length}
+        <SessionRow
+          title={room.title}
+          when={formatWhen(room.created_at)}
+          description="{n} agent{n === 1 ? '' : 's'}"
+          state={busyRooms.has(room.id) ? 'running' : 'idle'}
+          sourceType="room"
+          isActive={room.id === selectedRoomId}
+          onSelect={() => onOpenRoom?.(room.id)}
+        />
+      {/each}
+    {/if}
+    {#if roomsError}
+      <p class="rail-note">
+        Couldn't load rooms
+        <Button size="sm" onclick={onRetryRooms}>Retry</Button>
+      </p>
+    {/if}
     {#if agentsError}
       <p class="rail-note">
         Couldn't load agents

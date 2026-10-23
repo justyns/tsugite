@@ -87,6 +87,18 @@ interface PageOpts {
   limit?: number | null;
 }
 
+export async function fetchEventsPage(sessionId: string, opts: PageOpts): Promise<EventsPage> {
+  const params = new URLSearchParams();
+  if (opts.afterId != null) params.set('after_id', String(opts.afterId));
+  if (opts.beforeId != null) params.set('before_id', String(opts.beforeId));
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  const res = await api.get<{ events: Event[]; has_more?: boolean; oldest_id?: number | null }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/events${qs ? `?${qs}` : ''}`,
+  );
+  return { events: res.events, hasMore: res.has_more ?? false, oldestId: res.oldest_id ?? null };
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -214,7 +226,7 @@ export class ConversationController {
     this.loading = true;
     try {
       // Load only the newest window; older turns arrive on demand via loadEarlier.
-      const page = await this.fetchPage(sessionId, { limit: WINDOW });
+      const page = await fetchEventsPage(sessionId, { limit: WINDOW });
       if (token !== this.loadToken) return; // superseded by a newer open()
       this.setWindow(page);
     } catch (err) {
@@ -613,25 +625,9 @@ export class ConversationController {
     this.reconcileAsk();
   }
 
-  private eventsPath(sessionId: string, opts: PageOpts): string {
-    const params = new URLSearchParams();
-    if (opts.afterId != null) params.set('after_id', String(opts.afterId));
-    if (opts.beforeId != null) params.set('before_id', String(opts.beforeId));
-    if (opts.limit != null) params.set('limit', String(opts.limit));
-    const qs = params.toString();
-    return `/api/sessions/${encodeURIComponent(sessionId)}/events${qs ? `?${qs}` : ''}`;
-  }
-
-  private async fetchPage(sessionId: string, opts: PageOpts): Promise<EventsPage> {
-    const res = await api.get<{ events: Event[]; has_more?: boolean; oldest_id?: number | null }>(
-      this.eventsPath(sessionId, opts),
-    );
-    return { events: res.events, hasMore: res.has_more ?? false, oldestId: res.oldest_id ?? null };
-  }
-
   private async tryFetchPage(sessionId: string, opts: PageOpts): Promise<EventsPage | null> {
     try {
-      return await this.fetchPage(sessionId, opts);
+      return await fetchEventsPage(sessionId, opts);
     } catch {
       return null;
     }

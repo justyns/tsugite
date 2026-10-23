@@ -31,7 +31,7 @@
     type TurnOrigin,
   } from './turns';
   import { isValidAlias, suggestAlias } from './alias';
-  import { formatAgo } from '$lib/relativeTime';
+  import { clockTime, formatAgo } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
@@ -269,11 +269,6 @@
       : `turn ${lastTurn.turnNum} / ${lastTurn.maxTurns}`;
   });
 
-  function clock(iso: string): string {
-    const t = Date.parse(iso);
-    if (Number.isNaN(t)) return '';
-    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
   const MONTHS = [
     'jan',
     'feb',
@@ -382,6 +377,7 @@
     environment: 'context',
     client_context: 'context',
     session_finished: 'session',
+    room_context: 'room',
   };
   const ORIGIN_WHO: Record<TurnOrigin['kind'], string> = {
     session: 'session',
@@ -651,7 +647,7 @@
         <Msg
           role={turn.role}
           who={turnWho(turn)}
-          at={clock(turn.at)}
+          at={clockTime(turn.at)}
           index={i + 1}
           streaming={turn.streaming}
           retryFailed={failed}

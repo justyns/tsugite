@@ -11,6 +11,7 @@ import { type Layout, type PaneTabModel, collectLeaves, findLeaf } from './mux/l
 // other view id doubles as its own surface kind.
 const VIEW_FOR_SURFACE: Record<string, string> = {
   chat: 'chats',
+  room: 'chats',
   terminal: 'terminals',
   file: 'files',
 };

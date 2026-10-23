@@ -5,7 +5,7 @@ import type { IconName } from '$lib/components/icon/icons';
 // ---------- SessionRow ----------
 
 export type SessionState = 'running' | 'thinking' | 'idle' | 'done' | 'failed';
-export type SessionSourceType = 'ops' | 'code' | 'research' | 'chat';
+export type SessionSourceType = 'ops' | 'code' | 'research' | 'chat' | 'room';
 
 export type SessionStateMeta = {
   /** Word shown in the composed aria-label and used as the state-language text. */
@@ -39,6 +39,7 @@ const SOURCE_TYPE_LABEL: Record<SessionSourceType, string> = {
   code: 'code',
   research: 'res',
   chat: 'chat',
+  room: 'room',
 };
 
 /** Session-row label abbreviations (research -> "res"). */

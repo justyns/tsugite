@@ -11,11 +11,13 @@ import { chatsNeedingAnswer } from './sessionModel';
 import { TESTID } from '$lib/testids';
 import { api } from '$lib/api/client';
 import { agents } from '$lib/stores/agents.svelte';
+import { rooms } from '$lib/stores/rooms.svelte';
 
 // The ended section persists its open/closed choice across tests.
 beforeEach(() => {
   localStorage.removeItem('tsugite_rail_ended_open');
   vi.spyOn(agents, 'load').mockResolvedValue();
+  vi.spyOn(rooms, 'load').mockResolvedValue();
 });
 
 afterEach(() => {

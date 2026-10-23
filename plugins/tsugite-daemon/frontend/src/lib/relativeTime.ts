@@ -35,3 +35,10 @@ export function formatAgo(
   if (delta >= 365 * DAY) opts.year = 'numeric';
   return new Intl.DateTimeFormat('en-US', opts).format(new Date(t)).toLowerCase();
 }
+
+/** Local wall-clock time, e.g. "14:22". "" for an unparseable input. */
+export function clockTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}

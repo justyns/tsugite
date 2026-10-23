@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
+  import AgentDot from '$lib/components/rows/AgentDot.svelte';
   import { TESTID } from '$lib/testids';
 
   let {
     role,
     who,
+    agentColor,
     at,
     index,
     streaming = false,
@@ -19,6 +21,8 @@
     role: 'user' | 'ai';
     // Author label shown in the gutter, e.g. "you" / "tsugite".
     who: string;
+    // Agent color token for a dot beside `who`. Null shows a grey dot, undefined shows none.
+    agentColor?: string | null;
     // Timestamp shown under the author, e.g. "14:22".
     at: string;
     // Optional turn index, rendered as "#NN" alongside the timestamp.
@@ -51,7 +55,9 @@
 
 <article class="t-msg t-msg--{role}">
   <div class="gut">
-    <span class="who">{who}</span>
+    <span class="who"
+      >{#if agentColor !== undefined}<AgentDot color={agentColor} />{/if}{who}</span
+    >
     <span class="at">{at}</span>
     {#if index != null}<span class="idx">#{String(index).padStart(2, '0')}</span>{/if}
   </div>
@@ -114,6 +120,9 @@
     text-align: right;
   }
   .t-msg .who {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font: 600 var(--fs-2xs) / 1.6 var(--font-mono);
     letter-spacing: 0.07em;
     text-transform: uppercase;

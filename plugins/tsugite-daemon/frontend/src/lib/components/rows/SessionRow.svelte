@@ -26,9 +26,11 @@
     waitingOnCount = 0,
     runCount = 0,
     agent,
+    room,
     onSelect,
     onOpenSchedule,
     onOpenNewTab,
+    onOpenRoom,
   }: {
     title: string;
     when: string;
@@ -45,9 +47,12 @@
     runCount?: number;
     /** Owning agent, shown as a color dot among the markers. */
     agent?: { name: string; color: string | null };
+    /** The room this session takes part in, shown as a badge that opens it. */
+    room?: { title: string };
     onSelect?: () => void;
     onOpenNewTab?: () => void;
     onOpenSchedule?: () => void;
+    onOpenRoom?: () => void;
   } = $props();
 
   const meta = $derived(sessionStateMeta(state));
@@ -58,7 +63,13 @@
     buildSessionRowAriaLabel({ title, agent: agent?.name, state, needsYou, isUnread }),
   );
   const hasMarkers = $derived(
-    needsYou || activeJobCount > 0 || waitingOnCount > 0 || isPinned || runCount > 0 || !!agent,
+    needsYou ||
+      activeJobCount > 0 ||
+      waitingOnCount > 0 ||
+      isPinned ||
+      runCount > 0 ||
+      !!agent ||
+      !!room,
   );
   const isEnded = $derived(state === 'done' || state === 'failed');
 
@@ -136,6 +147,18 @@
           >
             <Icon name="sched" size={10} />
           </button>
+        {/if}
+        {#if room}
+          <button
+            type="button"
+            class="room-link"
+            aria-label="Open room {room.title}"
+            onclick={(e) => {
+              e.stopPropagation();
+              onOpenRoom?.();
+            }}
+            ondblclick={(e) => e.stopPropagation()}>room</button
+          >
         {/if}
         {#if agent}
           <AgentDot color={agent.color} name={agent.name} />
@@ -252,6 +275,9 @@
   .t-type[data-k='research'] {
     --c: var(--st-queue);
   }
+  .t-type[data-k='room'] {
+    --c: var(--st-info);
+  }
   .t-type[data-k='chat'] {
     /* tx2, not st-mute: the badge renders --c as 10px text on a tinted chip,
        and st-mute lands under 3:1 there. */
@@ -293,6 +319,19 @@
   }
   .t-srow .sched-link:hover {
     color: var(--tx0);
+  }
+  .t-srow .room-link {
+    font: 600 var(--fs-2xs) / 1.4 var(--font-mono);
+    padding: 0 4px;
+    border: 1px solid var(--bd1);
+    border-radius: 3px;
+    background: none;
+    color: var(--tx2);
+    cursor: pointer;
+  }
+  .t-srow .room-link:hover {
+    color: var(--tx0);
+    border-color: var(--tx3);
   }
 
   /* t-dot (unread marker) */

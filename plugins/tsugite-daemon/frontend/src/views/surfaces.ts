@@ -12,6 +12,7 @@ import ChatSurface from './chats/Surface.svelte';
 import TerminalSurface from './terminals/Surface.svelte';
 import FileSurface from './files/Surface.svelte';
 import ArtifactSurface from './artifacts/Surface.svelte';
+import RoomSurface from './chats/RoomSurface.svelte';
 
 export type SurfaceProps = {
   params?: Record<string, string>;
@@ -34,6 +35,7 @@ export type SurfaceProps = {
 
 const SURFACES: Record<string, Component<SurfaceProps>> = {
   chat: ChatSurface as Component<SurfaceProps>,
+  room: RoomSurface as Component<SurfaceProps>,
   terminal: TerminalSurface as Component<SurfaceProps>,
   file: FileSurface as Component<SurfaceProps>,
   // Opened by the agent's open_artifact tool, never from the nav rail.
