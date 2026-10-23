@@ -893,3 +893,11 @@ class TestBuildExecutorKwargs:
 
         extra = set(kwargs.keys()) - accepted
         assert not extra, f"run_agent rejects: {extra}"
+
+
+def test_run_rejects_daemon_option(cli_runner, sample_agent_file):
+    for flag in ("--daemon", "-d"):
+        result = cli_runner.invoke(app, ["run", str(sample_agent_file), "test prompt", flag])
+
+        assert result.exit_code == 2
+        assert "No such option" in result.output

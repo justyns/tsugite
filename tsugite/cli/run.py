@@ -257,7 +257,6 @@ def run(
     ),
     no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
     new_session: bool = typer.Option(False, "--new-session", help="Start fresh session (ignore workspace session)"),
-    join_daemon: bool = typer.Option(False, "--daemon", "-d", help="Join the daemon's most recent session"),
     sandbox: bool = typer.Option(False, "--sandbox", help="Run agent code in bubblewrap sandbox"),
     no_sandbox: bool = typer.Option(False, "--no-sandbox", help="Disable sandbox (overrides config)"),
     allow_domain: Optional[List[str]] = typer.Option(
@@ -282,7 +281,6 @@ def run(
         tsu run --continue "prompt"  # Continue latest conversation (auto-detect agent)
         tsu run +assistant --continue "prompt"  # Continue latest with specific agent
         tsu run --continue --conversation-id CONV_ID "prompt"  # Continue specific conversation
-        tsu run --daemon "follow up message"  # Join the daemon's most recent session
     """
     from tsugite.agent_runner import get_agent_info, run_agent
     from tsugite.console import get_stderr_console
@@ -381,7 +379,7 @@ def run(
     # Resolve UI mode to update ui_opts
     ui_opts = _resolve_ui_mode(ui, ui_opts, stderr_console)
 
-    # Handle subagent mode and daemon mode (both need os)
+    # Handle subagent mode
     import os
 
     if subagent_mode:
@@ -392,54 +390,6 @@ def run(
         ui_opts.non_interactive = True
         history_opts.enabled = False
         os.environ["TSUGITE_SUBAGENT_MODE"] = "1"
-
-    daemon_metadata = None
-    if join_daemon:
-        from tsugite.agent_runner.history_integration import get_latest_conversation
-
-        try:
-            from tsugite_daemon.config import load_daemon_config
-
-            # Probe: the daemon battery has to be installed and configured.
-            load_daemon_config()
-        except ModuleNotFoundError as e:
-            stderr_console.print(
-                "[red]The daemon battery is not installed.[/red] Install it with: pip install tsugite-cli[daemon]"
-            )
-            raise typer.Exit(1) from e
-        except ValueError as e:
-            stderr_console.print(f"[red]Daemon config not found: {e}[/red]")
-            stderr_console.print("[dim]Run 'tsugite daemon' to start daemon first[/dim]")
-            raise typer.Exit(1)
-
-        user_id = os.environ.get("USER", "cli-user")
-
-        latest_conv_id = get_latest_conversation()
-        if latest_conv_id:
-            stderr_console.print(f"[cyan]Joining daemon session: {latest_conv_id}[/cyan]")
-            history_opts.continue_id = latest_conv_id
-        else:
-            stderr_console.print("[yellow]No active daemon session found[/yellow]")
-            stderr_console.print("[dim]Creating new daemon-managed session...[/dim]")
-
-        # Build CLI metadata for history
-        from datetime import datetime, timezone
-
-        daemon_metadata = {
-            "source": "cli",
-            "channel_id": None,
-            "user_id": user_id,
-            "reply_to": "cli",
-            "is_daemon_managed": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        all_attachments = list(attachment) if attachment else []
-        attach_opts = AttachmentOptions(
-            sources=all_attachments,
-            refresh_cache=refresh_cache,
-            auto_context=auto_context,
-        )
 
     # Handle conversation continuation - check before parsing args
     if continue_conversation and not history_opts.continue_id:
@@ -641,7 +591,6 @@ def run(
                     continue_conversation_id=target_session,
                     system_prompt=system_prompt,
                     attachments=attachments,
-                    channel_metadata=daemon_metadata,
                     status=status,
                     error_message=error_message,
                 )
