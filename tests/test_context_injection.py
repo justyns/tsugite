@@ -37,7 +37,7 @@ async def test_make_pre_llm_call_callback_mutates_messages(monkeypatch, tmp_path
     cfg = HooksConfig(pre_llm_call=[HookRule(type="python", hook_callable=inject, name="inj")])
     monkeypatch.setattr(hooks_mod, "load_hooks_config", lambda wd: cfg)
 
-    callback = runner._make_pre_llm_call_callback(tmp_path, "agent")
+    callback = runner._make_pre_llm_call_callback(tmp_path, "agent", True)
     assert callback is not None
 
     messages = [{"role": "user", "content": "hi"}]
@@ -50,7 +50,7 @@ def test_make_pre_llm_call_callback_none_without_hooks(monkeypatch, tmp_path):
     from tsugite.agent_runner import runner
 
     monkeypatch.setattr(hooks_mod, "load_hooks_config", lambda wd: HooksConfig())
-    assert runner._make_pre_llm_call_callback(tmp_path, "agent") is None
+    assert runner._make_pre_llm_call_callback(tmp_path, "agent", True) is None
 
 
 @pytest.mark.asyncio

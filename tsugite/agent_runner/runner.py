@@ -345,7 +345,17 @@ def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any]
                 event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=None))
 
 
-def _make_pre_llm_call_callback(hooks_dir: Path, agent_name: str):
+# Daemon chat sources with a person at the other end; any other source counts as background.
+INTERACTIVE_SOURCES = frozenset({"http", "discord"})
+
+
+def _run_is_interactive(channel_metadata: Optional[Dict[str, Any]]) -> bool:
+    """Whether a person is present: the session source in the daemon, the TTY otherwise."""
+    source = (channel_metadata or {}).get("source")
+    return source in INTERACTIVE_SOURCES if source else is_interactive()
+
+
+def _make_pre_llm_call_callback(hooks_dir: Path, agent_name: str, interactive: bool):
     """Build an async callback that fires pre_llm_call hooks to mutate outgoing
     messages in place. Returns None when no such hooks exist (keeps the hot path clean)."""
     from tsugite.hooks import fire_hooks, load_hooks_config
@@ -359,7 +369,7 @@ def _make_pre_llm_call_callback(hooks_dir: Path, agent_name: str):
             hooks_dir,
             "pre_llm_call",
             {"messages": messages, "model": model, "agent": agent_name},
-            interactive=is_interactive(),
+            interactive=interactive,
         )
 
     return _callback
@@ -449,8 +459,9 @@ async def _execute_agent_with_prompt(
         hooks_dir = path_context.effective_cwd
     else:
         hooks_dir = Path.cwd()
-    setup_hook_handler(hooks_dir, event_bus, interactive=is_interactive())
-    pre_llm_call_cb = _make_pre_llm_call_callback(hooks_dir, agent_config.name)
+    interactive = _run_is_interactive(channel_metadata)
+    setup_hook_handler(hooks_dir, event_bus, interactive=interactive)
+    pre_llm_call_cb = _make_pre_llm_call_callback(hooks_dir, agent_config.name, interactive)
 
     # Start with tools from prepared agent
     tools = list(prepared.tools)  # Make a copy
@@ -936,7 +947,7 @@ async def _run_unit(
             "rendered_prompt": prepared.rendered_prompt[:500] if prepared.rendered_prompt else "",
             "tools": [t.name for t in prepared.tools] if prepared.tools else [],
         },
-        interactive=is_interactive(),
+        interactive=_run_is_interactive(setup.channel_metadata),
         on_status=setup.on_status,
         on_result=setup.on_hook_result,
     )
@@ -1142,10 +1153,11 @@ async def run_agent_async(
         on_status = None
         on_hook_result = None
 
+    interactive = _run_is_interactive(channel_metadata)
     hook_vars = await fire_pre_message_hooks(
         hooks_dir,
         {"message": hook_message, "agent_name": agent_path.stem},
-        interactive=is_interactive(),
+        interactive=interactive,
         on_status=on_status,
         on_result=on_hook_result,
     )
@@ -1159,7 +1171,7 @@ async def run_agent_async(
         hooks_dir,
         "pre_context_build",
         {"message": hook_message, "agent_name": agent_path.stem, **context, "blocks": context_blocks},
-        interactive=is_interactive(),
+        interactive=interactive,
         on_status=on_status,
         on_result=on_hook_result,
     )

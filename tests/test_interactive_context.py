@@ -310,3 +310,39 @@ class TestDaemonModeInteractiveTools:
             assert "ask_user_batch" in tools
         finally:
             set_interaction_backend(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "channel_metadata, hook_runs",
+    [
+        ({"source": "http"}, True),
+        ({"source": "discord"}, True),
+        ({"source": "scheduler"}, False),
+        ({"source": "session"}, False),
+        (None, False),
+    ],
+)
+async def test_only_interactive_hooks_follow_session_source(
+    temp_dir, monkeypatch, mock_agent_runner, channel_metadata, hook_runs
+):
+    """Without a TTY, only_interactive hooks run for chat sources and are skipped for background ones."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.chdir(temp_dir)
+
+    marker = temp_dir / "hook-ran"
+    (temp_dir / ".tsugite").mkdir()
+    (temp_dir / ".tsugite" / "hooks.yaml").write_text(
+        f"hooks:\n  pre_message:\n    - run: touch {marker}\n      only_interactive: true\n"
+    )
+    agent_file = temp_dir / "test_agent.md"
+    agent_file.write_text(
+        "---\nname: hook_source\nextends: none\nmodel: openai:gpt-4o-mini\nmax_turns: 1\ntools: []\n---\n\n"
+        "Task: {{ user_prompt }}\n"
+    )
+
+    mock_instance, _ = mock_agent_runner()
+    with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_instance):
+        await run_agent_async(agent_file, "test prompt", channel_metadata=channel_metadata)
+
+    assert marker.exists() is hook_runs
