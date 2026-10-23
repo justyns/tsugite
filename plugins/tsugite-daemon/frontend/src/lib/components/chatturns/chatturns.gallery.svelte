@@ -15,7 +15,7 @@
     'Found the client — one `EventSource` wrapper, reconnect currently naïve ' +
     '(fixed 1s). Plan: **decorrelated jitter** capped at 30s, reset on any received ' +
     'event, and a `state` field the UI can subscribe to. Complexity stays ' +
-    '<span class="math">O(1)</span> per tick.';
+    '`O(1)` per tick.';
 
   const sseCode = `function nextDelay(attempt: number, prev: number) {
   const base = 1_000, cap = 30_000
@@ -201,7 +201,7 @@ E    +  where emitted = ['open', 'backoff']
     <div class="cell wide">
       <span class="lbl">Prose · markdown sampler</span>
       <Prose
-        content={'Supports **strong**, *emphasis*, inline `code`, links like [the daemon](#gallery), and lists:\n\n- decorrelated jitter\n- capped at 30s\n- resets on any event\n\nInline math renders as <span class="math">O(log n)</span>.'}
+        content={'Supports **strong**, *emphasis*, inline `code`, links like [the daemon](#gallery), and lists:\n\n- decorrelated jitter\n- capped at 30s\n- resets on any event\n\nRaw <b>HTML</b> shows as text.'}
       />
     </div>
   </div>

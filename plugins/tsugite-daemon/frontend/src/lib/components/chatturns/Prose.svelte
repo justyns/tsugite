@@ -6,16 +6,12 @@
     content = '',
     breaks = false,
   }: {
-    // Markdown source. Rendered to HTML with `marked`; raw inline HTML in the
-    // source (e.g. `<span class="math">`) passes through.
+    // Markdown source. Rendered to HTML with `marked`; raw HTML in the source
+    // is escaped to visible text.
     content?: string;
     // Render soft line breaks as hard ones. Set for the person's own turns.
     breaks?: boolean;
   } = $props();
-
-  // NOTE: content originates from the trusted daemon/agent stream. If untrusted
-  // markdown is ever rendered here, sanitize before this point - this component
-  // deliberately owns no sanitization policy.
 
   // Seed synchronously so first paint is never empty. During a live token stream
   // `content` grows every few ms; re-parsing the whole string each time is
@@ -106,14 +102,5 @@
   }
   .t-prose :global(li) {
     margin: 3px 0;
-  }
-  .t-prose :global(.math) {
-    font-family: var(--font-mono);
-    font-style: italic;
-    color: var(--tx0);
-    background: color-mix(in oklab, var(--brand) 8%, transparent);
-    padding: 0 4px;
-    border-radius: 4px;
-    /* No nowrap, same as inline code: a long span must break, not widen the pane. */
   }
 </style>

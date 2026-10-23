@@ -1,13 +1,27 @@
 // Pure helpers shared by the chat-turn components. Kept framework-free so they
 // run in the fast `unit` vitest project.
 
-import { marked } from 'marked';
+import { Marked } from 'marked';
 
-/** Render trusted markdown to an HTML string synchronously. Shared by the
- *  reasoning (Think) and prose bubbles so both parse with identical options.
+// `&` is rejected before the first delimiter: the browser decodes entities
+// such as `&#106;avascript:` in the href.
+const SAFE_HREF = /^(https?:|mailto:|[^:/?#&]*([/?#]|$))/i;
+
+const md = new Marked({
+  renderer: {
+    html: ({ text }) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+    link({ href, tokens }) {
+      return SAFE_HREF.test(href) ? false : this.parser.parseInline(tokens);
+    },
+  },
+});
+
+/** Render markdown to an HTML string synchronously. Shared by the reasoning
+ *  (Think) and prose bubbles so both parse with identical options. Raw HTML in
+ *  the source is escaped to visible text, since agent output is untrusted.
  *  `breaks` renders soft line breaks as hard ones. */
 export function parseMarkdown(src: string, breaks = false): string {
-  return marked.parse(src, { async: false, breaks }) as string;
+  return md.parse(src, { async: false, breaks }) as string;
 }
 
 /** Split a command line into its program (bolded in exec headers) and the rest. */

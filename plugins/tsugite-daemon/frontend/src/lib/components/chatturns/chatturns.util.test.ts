@@ -4,6 +4,47 @@ import { formatTokens, parseMarkdown, splitCommand } from './chatturns.util';
 describe('parseMarkdown', () => {
   const links = 'https://example.test/a\nhttps://example.test/b\nhttps://example.test/c';
 
+  it('escapes raw HTML so agent output mounts no element', () => {
+    for (const src of [
+      '<img src=x onerror=alert(1)>',
+      '<script>alert(1)</script>',
+      'a <b onclick=x>b</b>',
+    ]) {
+      const html = parseMarkdown(src);
+      expect(html).not.toMatch(/<(img|script|b)\b/);
+      expect(html).toContain('&lt;');
+    }
+  });
+
+  it('renders links with a script scheme as plain text', () => {
+    for (const src of [
+      '[x](javascript:alert(1))',
+      '[x](JaVaScRiPt:alert(1))',
+      '[x](&#106;avascript:alert(1))',
+      '[x](data:text/html,hi)',
+      '<javascript:alert(1)>',
+    ]) {
+      expect(parseMarkdown(src)).not.toContain('<a');
+    }
+  });
+
+  it('keeps http, mailto and relative links', () => {
+    for (const href of [
+      'https://example.test/a',
+      'mailto:a@example.test',
+      '#gallery',
+      './a/b:c',
+      '/x?y=1',
+    ]) {
+      expect(parseMarkdown(`[x](${href})`)).toContain('<a href=');
+    }
+  });
+
+  it('keeps raw HTML inside code spans and fences as literal text', () => {
+    expect(parseMarkdown('`<b>x</b>`')).toContain('<code>&lt;b&gt;x&lt;/b&gt;</code>');
+    expect(parseMarkdown('```\n<img src=x>\n```')).toContain('&lt;img src=x&gt;');
+  });
+
   it('collapses single newlines into one paragraph by default', () => {
     const html = parseMarkdown(links);
     expect(html).not.toContain('<br');
@@ -17,10 +58,9 @@ describe('parseMarkdown', () => {
     expect(html.match(/<p>/g)).toHaveLength(1);
   });
 
-  it('renders a backticked context key as code, where the bare form would autolink', () => {
-    // The composer writes `<file:x>` for an attached @ reference. Bare, that is
-    // CommonMark autolink syntax and shows as a dead link in the person's turn.
-    expect(parseMarkdown('see <file:index.md>')).toContain('<a href="file:index.md">');
+  it('renders a backticked context key as code, and the bare form as no link', () => {
+    // The composer writes `<file:x>` for an attached @ reference.
+    expect(parseMarkdown('see <file:index.md>')).not.toContain('<a ');
     const html = parseMarkdown('see `<file:index.md>`');
     expect(html).toContain('<code>');
     expect(html).not.toContain('<a ');
