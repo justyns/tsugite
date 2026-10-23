@@ -700,6 +700,7 @@ class TestPartialHistoryOnError:
         mock_adapter.session_store = MagicMock()
         mock_adapter.session_store.needs_compaction.return_value = False
         mock_adapter.session_store.is_compacting.return_value = False
+        mock_adapter.session_store.resolve_live.return_value = None
         mock_adapter.session_store.find_by_thread.return_value = None
         mock_adapter.session_store.count_events_by_type.return_value = 0
         mock_adapter.session_store.get_suppressed_skills.return_value = set()

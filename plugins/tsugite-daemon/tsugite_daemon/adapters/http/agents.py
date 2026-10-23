@@ -242,9 +242,7 @@ class AgentsMixin:
         if q:
             # Search scans the FULL session set (the recency limit exists to
             # bound the sidebar payload, not to hide sessions from search).
-            all_sessions = adapter.session_store.search_sessions(q, limit=limit)
-            if source:
-                all_sessions = [s for s in all_sessions if s.source == source]
+            all_sessions = adapter.session_store.search_sessions(q, limit=limit, source=source)
             if status:
                 all_sessions = [s for s in all_sessions if s.status == status]
         else:
@@ -1066,7 +1064,7 @@ class AgentsMixin:
 
         context_metadata = body.get("context_metadata")
 
-        from tsugite_daemon.session_store import SessionSource
+        from tsugite_daemon.session_store import SessionSource, room_transcript_error
 
         target_session = None
         if session_id:
@@ -1089,6 +1087,14 @@ class AgentsMixin:
 
         if target_session is None:
             target_session = adapter.session_store.get_or_create_interactive(user_id, source=SessionSource.WEB.value)
+        if target_session.is_room_transcript:
+            return JSONResponse(
+                {
+                    "error": room_transcript_error(target_session.id),
+                    "code": "room_transcript",
+                },
+                status_code=409,
+            )
         target_session_id = target_session.id
 
         reasoning_effort, err_resp = self._resolve_effort_or_400(

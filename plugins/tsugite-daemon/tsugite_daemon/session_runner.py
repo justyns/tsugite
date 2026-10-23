@@ -17,6 +17,7 @@ from tsugite.tools.notify import send_notification_nowait
 from tsugite.ui.jsonl import JSONLUIHandler
 from tsugite_daemon.adapters.base import ChannelContext
 from tsugite_daemon.attention_store import OWNER_SESSION, SOURCE_ERROR
+from tsugite_daemon.rooms import Rooms
 from tsugite_daemon.session_store import (
     Session,
     SessionSource,
@@ -167,6 +168,7 @@ class SessionRunner:
         self._adapter = adapter
         self._event_bus = event_bus
         self._notification_channels = notification_channels or {}
+        self.rooms = Rooms(store, event_bus)
         store.set_turn_end_listener(self._on_turn_end)
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._cancel_events: dict[str, threading.Event] = {}

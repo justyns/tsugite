@@ -278,6 +278,11 @@ class SessionsMixin:
             return JSONResponse({"error": "Only 'completed' status is allowed"}, status_code=400)
         runner = self.session_runner
         try:
+            if (title is not None or status is not None) and runner.store.get_session(session_id).is_room_transcript:
+                return JSONResponse(
+                    {"error": "A room transcript is renamed and ended through the rooms API."},
+                    status_code=400,
+                )
             result = {}
             if title is not None:
                 runner.rename_session(session_id, title)

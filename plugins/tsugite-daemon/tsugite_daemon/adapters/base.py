@@ -28,6 +28,7 @@ from tsugite_daemon.session_store import (
     Session,
     SessionStore,
     render_pending_deliveries_xml,
+    room_transcript_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -879,6 +880,9 @@ class BaseAdapter(ABC):
                 conv_id = thread_session.id
             else:
                 conv_id = self.session_store.get_or_create_interactive(user_id).id
+        target = self.session_store.resolve_live(conv_id)
+        if target is not None and target.is_room_transcript:
+            raise ValueError(room_transcript_error(conv_id))
         if _broadcast_state is not None:
             _broadcast_state["conv_id"] = conv_id
         self.session_store.begin_turn(conv_id)

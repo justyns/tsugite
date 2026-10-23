@@ -206,22 +206,27 @@ class SqliteSession:
         self.backend = backend
         self.session_id = session_id
 
-    def record(self, type: str, *, ts: Optional[datetime] = None, **data: Any) -> None:
-        self.record_many([Event(type=type, ts=ts or datetime.now(timezone.utc), data=data)])
+    def record(self, type: str, *, ts: Optional[datetime] = None, **data: Any) -> int:
+        """The stored event's id."""
+        [event_id] = self.record_many([Event(type=type, ts=ts or datetime.now(timezone.utc), data=data)])
+        return event_id
 
-    def record_many(self, events: Iterable[Event]) -> None:
+    def record_many(self, events: Iterable[Event]) -> List[int]:
         events = list(events)
         if not events:
-            return
+            return []
         conn = self.backend._conn()
         now_iso = iso_utc()
+        ids: List[int] = []
 
         def body():
+            ids.clear()
             for event in events:
-                _insert_event(conn, self.session_id, event)
+                ids.append(_insert_event(conn, self.session_id, event))
                 _fold_event(conn, self.session_id, event, now_iso)
 
         _run_write(conn, body)
+        return ids
 
     def iter_events(self, types: Optional[Iterable[str]] = None) -> Iterator[Event]:
         conn = self.backend._conn()

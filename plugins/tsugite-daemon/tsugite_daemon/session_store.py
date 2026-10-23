@@ -29,6 +29,7 @@ from tsugite_daemon.attention_store import (
     AttentionStore,
 )
 from tsugite_daemon.memory import DEFAULT_CONTEXT_LIMIT
+from tsugite_daemon.room_store import RoomStore
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,8 @@ READ_ONLY_METADATA_KEYS = frozenset(
         "session_name",
         # Which platform DM route this session serves. Stamped at creation.
         "dm_route",
+        # The room a participant session belongs to. Stamped on sessions the room creates.
+        "room_id",
     }
 )
 
@@ -179,6 +182,7 @@ METADATA_SESSION_NAME = "session_name"
 METADATA_DM_ROUTE = "dm_route"
 METADATA_PRIMARY_FLAG = "is_primary"
 METADATA_INCIDENT_KEY = "incident_key"
+METADATA_ROOM_ID = "room_id"
 # Truthy on a placeholder session that exists only to host a /job spawned outside a
 # conversation. The jobs orchestrator reconciles these to a terminal status when the
 # job finishes so they stop rendering as active/"starting" in the sidebar.
@@ -245,6 +249,17 @@ class SessionSource(str, Enum):
     # Written as a raw string by tsugite/agent_runner/runner.py (core can't
     # import this plugin enum), so "cli" exists in stored session data.
     CLI = "cli"
+    # A room's shared transcript. No agent runs a turn on it.
+    ROOM = "room"
+
+
+def matches_source(session: "Session", source: Optional[str]) -> bool:
+    """`source` when one is asked for, else every session but room transcripts."""
+    return session.source == source if source else not session.is_room_transcript
+
+
+def room_transcript_error(session_id: str) -> str:
+    return f"Session {session_id} is a room transcript. Post to the room instead."
 
 
 class SessionStatus(str, Enum):
@@ -322,6 +337,10 @@ class Session:
     # call (or any other secondary-model side effect) can't clobber the value
     # other sessions are reading.
     context_limit: Optional[int] = None
+
+    @property
+    def is_room_transcript(self) -> bool:
+        return self.source == SessionSource.ROOM.value
 
     @property
     def is_primary(self) -> bool:
@@ -433,6 +452,7 @@ class SessionStore:
         self._storage = SqliteCollectionStorage.for_state_file(store_path, "sessions")
         self.attention = AttentionStore(store_path)
         self.agents = AgentStore(store_path)
+        self.rooms = RoomStore(store_path)
         self._sessions: dict[str, Session] = {}
         self._lock = threading.Lock()
 
@@ -1419,7 +1439,7 @@ class SessionStore:
             results = [
                 s
                 for s in self._sessions.values()
-                if (not source or s.source == source)
+                if matches_source(s, source)
                 and (not parent_id or s.parent_id == parent_id)
                 and (not status or s.status == status)
                 and (not user_id or s.user_id == user_id)
@@ -1438,7 +1458,7 @@ class SessionStore:
                 results = head
             return results
 
-    def search_sessions(self, q: str, limit: int = 50) -> list[Session]:
+    def search_sessions(self, q: str, limit: int = 50, source: Optional[str] = None) -> list[Session]:
         """Case-insensitive substring search over ALL sessions - title, id,
         prompt, and string metadata values (topic etc.) - ignoring the recency
         window that bounds list_sessions. A hit on a superseded session
@@ -1461,7 +1481,7 @@ class SessionStore:
                     seen.add(s.id)
                     s = self._sessions[s.superseded_by]
                 resolved[s.id] = s
-            results = list(resolved.values())
+            results = [s for s in resolved.values() if matches_source(s, source)]
             results.sort(key=lambda s: s.last_active or s.created_at, reverse=True)
             return results[:limit]
 
@@ -1479,7 +1499,7 @@ class SessionStore:
     # UI events (prompt_snapshots, hook executions, etc.) are recorded into the
     # same history session as the conversation events, through the history backend.
 
-    def append_event(self, session_id: str, event: dict) -> None:
+    def append_event(self, session_id: str, event: dict) -> int:
         """Append a UI/telemetry event to the session's history JSONL.
 
         Accepts the legacy flat-dict shape `{type, timestamp, ...rest}` and
@@ -1491,7 +1511,7 @@ class SessionStore:
         backend = get_history_backend()
         ts = _parse_ts(event.get("timestamp"))
         data = {k: v for k, v in event.items() if k not in ("type", "timestamp")}
-        backend.ensure_session(session_id).record(event.get("type", "unknown"), ts=ts, **data)
+        event_id = backend.ensure_session(session_id).record(event.get("type", "unknown"), ts=ts, **data)
 
         # Update hot caches incrementally. Skip when the session_id has never
         # been read - the cold-load path will populate everything in one go.
@@ -1501,6 +1521,7 @@ class SessionStore:
             progress = self._progress_cache.get(session_id)
             if progress is not None:
                 _apply_event_to_progress(progress, event)
+        return event_id
 
     def read_events(self, session_id: str) -> list[dict]:
         """Return events as flat UI dicts (type/timestamp + data) for callers."""
