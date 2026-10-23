@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Callable, Optional
 from xml.sax.saxutils import quoteattr
@@ -916,7 +917,7 @@ class JobsOrchestrator:
                 reason = session.error or result_str or f"verifier session ended with status '{session.status}'"
                 self._finalize(job, JobState.ERRORED, error=f"verifier infra failure: {reason}")
             else:
-                await self._handle_verifier_complete(job, result_str)
+                await self._handle_verifier_complete(job, session.id, result_str)
         elif session_failed:
             await self._handle_worker_failed(job, session, result_str)
         else:
@@ -1033,7 +1034,9 @@ class JobsOrchestrator:
 
         # Mixed (predicates passed + prose remaining) or pure-prose path -
         # spawn the verifier with prose ACs only.
+        self._spawn_verifier(job, worker_id=worker_id, result_str=result_str, prose_acs=prose_acs)
 
+    def _spawn_verifier(self, job: Job, *, worker_id: Optional[str], result_str: str, prose_acs: list[str]) -> None:
         # Arm a fresh timer covering the verifier round; a hung verifier would
         # otherwise leave the Job pinned in VERIFYING forever.
         self._schedule_timeout(job.id, job.timeout_minutes)
@@ -1204,7 +1207,7 @@ class JobsOrchestrator:
             return
         self._finalize(job, JobState.ERRORED, error=reason, error_detail=detail)
 
-    async def _handle_verifier_complete(self, job: Job, result_str: str) -> None:
+    async def _handle_verifier_complete(self, job: Job, verifier_session_id: str, result_str: str) -> None:
         # Attempt counter is 1-indexed (matches the UX of "attempt #N"). Captured
         # before _handle_verifier_failure bumps job.verify_attempts.
         attempt_num = job.verify_attempts + 1
@@ -1222,22 +1225,26 @@ class JobsOrchestrator:
 
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
-            self._update_latest_attempt(job.id, verifier_pass=False)
-            # Synthetic one-entry batch so the UI sees *something* for this
-            # attempt; the excerpt makes the formatting failure diagnosable from
-            # the tile instead of requiring a dig through the verifier session.
             reason = (
                 "verifier output unparseable (no JSON verdict object found); "
                 f"excerpt: {_sanitize_output_excerpt(result_str)}"
             )
-            synthetic = [{"ac_text": "(verifier output)", "pass": False, "reason": reason}]
-            self._record_ac_results(
-                job.id,
-                synthetic,
-                attempt_num,
-                merge_with_existing_attempt=merge_with_existing_attempt,
-            )
-            return await self._handle_verifier_failure(job, failed_acs=synthetic)
+            if job.attempts[-1].get("verifier_rerun"):
+                # Rerun exhausted. The synthetic one-entry batch gives the UI a
+                # row for this attempt, and its excerpt makes the formatting
+                # failure readable from the tile.
+                self._update_latest_attempt(job.id, verifier_pass=False)
+                synthetic = [{"ac_text": "(verifier output)", "pass": False, "reason": reason}]
+                self._record_ac_results(
+                    job.id,
+                    synthetic,
+                    attempt_num,
+                    merge_with_existing_attempt=merge_with_existing_attempt,
+                )
+            return await self._rerun_verifier_or_error(job, detail=reason)
+        if self._unbacked_inspection_claim(parsed, verifier_session_id):
+            reason = "verifier claimed an inspection but recorded no tool calls"
+            return await self._rerun_verifier_or_error(job, detail=reason)
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
         ac_results_raw = parsed.get("ac_results", [])
@@ -1280,6 +1287,34 @@ class JobsOrchestrator:
         await self._handle_verifier_failure(
             job,
             failed_acs=_extract_failed_acs(ac_results_raw),
+        )
+
+    def _unbacked_inspection_claim(self, parsed: dict, verifier_session_id: str) -> bool:
+        """True when a verdict reason opens with `inspected:` or `ran <cmd>:` but the
+        verifier session recorded no code_execution event."""
+        ac_results = parsed.get("ac_results")
+        if not isinstance(ac_results, list):
+            return False
+        claims = any(
+            isinstance(r, dict) and re.match(r"(inspected|ran [^:]+):", str(r.get("reason") or "").strip().lower())
+            for r in ac_results
+        )
+        return claims and self._runner.store.count_events_by_type(verifier_session_id, "code_execution") == 0
+
+    async def _rerun_verifier_or_error(self, job: Job, *, detail: str) -> None:
+        """Discard an empty verdict: re-run the verifier once for this attempt
+        without consuming a verify attempt, then error the job."""
+        attempt = job.attempts[-1]
+        if attempt.get("verifier_rerun"):
+            self._finalize(job, JobState.ERRORED, error="verifier produced no inspection", error_detail=detail)
+            return
+        self._update_latest_attempt(job.id, verifier_rerun=True)
+        _, prose_entries = partition_acs(job.acceptance_criteria)
+        self._spawn_verifier(
+            job,
+            worker_id=attempt["worker_session_id"],
+            result_str=job.result["summary"],
+            prose_acs=[e["ac_text"] for e in prose_entries],
         )
 
     async def _handle_verifier_failure(self, job: Job, failed_acs: list[dict]) -> None:

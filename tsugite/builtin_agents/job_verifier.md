@@ -76,7 +76,9 @@ is `true` only if every `ac_results[i].pass` is `true`.
 
 `reason` opens with the basis for the verdict, then one sentence:
 
-- `inspected:` - you read the artifact, file, or Output text yourself.
+- `inspected:` - you read the artifact or file yourself with a tool call.
+- `read Output:` - the deliverable is inline text and you judged the `## Output`
+  text itself, with no tool call.
 - `ran <command>:` - you executed the command and judged its exit status.
 - `accepted worker claim:` - you could not check it, so the verdict rests on
   the worker's report.

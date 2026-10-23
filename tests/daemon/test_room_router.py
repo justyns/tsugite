@@ -832,7 +832,7 @@ class TestJobVerification:
         job = _job(orchestrator, lead_chat.id)
         rooms.link_job(room.id, job.id)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
 
         [card] = _cards(store, room.id, "job_done")
         assert card["job_id"] == job.id
@@ -845,7 +845,7 @@ class TestJobVerification:
         job = _job(orchestrator, lead_chat.id, max_attempts=1)
         rooms.link_job(room.id, job.id)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(False))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(False))
         await _settle(rooms, room.id)
 
         [card] = _cards(store, room.id, "job_failed")
@@ -860,7 +860,7 @@ class TestJobVerification:
     async def test_a_re_emitted_job_state_posts_nothing_new(self, rooms, store, adapter, room, lead_chat, orchestrator):
         job = _job(orchestrator, lead_chat.id, max_attempts=1)
         rooms.link_job(room.id, job.id)
-        await orchestrator._handle_verifier_complete(job, _verdict(False))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(False))
         await _settle(rooms, room.id)
 
         orchestrator._emit_job_event(orchestrator.get_job(job.id))
@@ -890,7 +890,7 @@ class TestJobVerification:
         homelab = rooms.get(room.id).participant("homelab")
         job = _job(orchestrator, homelab.session_id)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
 
         assert _cards(store, room.id)[-1]["kind"] == "job_status"
         assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
@@ -915,7 +915,7 @@ class TestJobVerification:
         rooms.link_job(room.id, job.id)
         rooms.link_job(room.id, None)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
 
         assert _cards(store, room.id, "job_done") == []
         assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
@@ -926,7 +926,7 @@ class TestJobVerification:
         other = rooms.create("PROJ-2", user_id="u", lead_agent_id="research", job_id=job.id)
         rooms.link_job(room.id, job.id)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
 
         assert {store.get_session(r).status for r in (room.id, other.id)} == {SessionStatus.COMPLETED.value}
 
@@ -975,7 +975,7 @@ class TestJobVerification:
         rooms.post_user_message(room.id, "status?")
         await started.wait()
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
         assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
         with pytest.raises(RoomConflictError):
             rooms.post_user_message(room.id, "more?")
@@ -995,7 +995,7 @@ class TestJobVerification:
         orchestrator._event_bus = type("Bus", (), {"emit": lambda _self, kind, data: frames.append(kind)})()
         monkeypatch.setattr(rooms, "on_job_event", lambda *a, **kw: 1 / 0)
 
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
 
         assert orchestrator.get_job(job.id).state == "done"
         assert "job_update" in frames

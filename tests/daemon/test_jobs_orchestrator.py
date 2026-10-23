@@ -29,8 +29,12 @@ class FakeStore:
     def __init__(self, tmp_path: Path):
         self.events: list[tuple[str, dict]] = []
         self.sessions: dict[str, Session] = {}
+        self.code_events: dict[str, int] = {}
         self.agents = AgentStore(tmp_path / "store.json")
         self.agents.ensure_default(tmp_path, "default")
+
+    def count_events_by_type(self, session_id: str, event_type: str) -> int:
+        return self.code_events.get(session_id, 0) if event_type == "code_execution" else 0
 
     def append_event(self, session_id, event):
         self.events.append((session_id, event))
@@ -455,16 +459,108 @@ async def test_persistent_verifier_fail_marks_stuck_at_max_attempts(store, runne
     assert "x" in final.error
 
 
+def _verifier_spawns(runner):
+    return [s for s in runner.started if (s.metadata or {}).get("verifier_for")]
+
+
 @pytest.mark.asyncio
-async def test_malformed_verifier_output_treated_as_fail_and_loops(store, runner, orchestrator):
+async def test_malformed_verifier_output_reruns_verifier_without_consuming_an_attempt(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "worker output")
     job = store.get(job.id)
     await orchestrator.on_session_complete(_verifier_session(job), "this is not json at all")
     refreshed = store.get(job.id)
-    # First malformed verdict still permits one more attempt (under max).
-    assert refreshed.state == JobState.RUNNING.value
-    assert refreshed.verify_attempts == 1
+    assert refreshed.state == JobState.VERIFYING.value
+    assert refreshed.verify_attempts == 0
+    assert len(_verifier_spawns(runner)) == 2
+    assert "worker output" in _verifier_spawns(runner)[1].prompt
+
+
+@pytest.mark.asyncio
+async def test_second_malformed_verifier_output_errors_the_job(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "this is not json at all")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "verifier-2"), "still not json")
+    refreshed = store.get(job.id)
+    assert refreshed.state == JobState.ERRORED.value
+    assert refreshed.error == "verifier produced no inspection"
+    assert refreshed.verify_attempts == 0
+    assert len(_verifier_spawns(runner)) == 2
+
+
+def _verdict_with_reasons(*reasons):
+    return json.dumps(
+        {
+            "ac_results": [{"ac_text": "x", "pass": True, "reason": r} for r in reasons],
+            "overall_pass": True,
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["inspected: read the file", "ran pytest: exit 0"])
+async def test_inspection_claim_with_no_tool_calls_reruns_then_errors(store, runner, orchestrator, reason):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), _verdict_with_reasons(reason))
+    assert store.get(job.id).state == JobState.VERIFYING.value
+    assert store.get(job.id).verify_attempts == 0
+    assert len(_verifier_spawns(runner)) == 2
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id), "verifier-2"), _verdict_with_reasons(reason)
+    )
+    refreshed = store.get(job.id)
+    assert refreshed.state == JobState.ERRORED.value
+    assert refreshed.error == "verifier produced no inspection"
+
+
+@pytest.mark.asyncio
+async def test_unparseable_first_reply_leaves_no_stale_row_when_rerun_passes(store, runner, orchestrator, monkeypatch):
+    def predicate_passes(predicate, **kw):
+        return {"ac_index": kw["ac_index"], "ac_text": kw["ac_text"], "pass": True, "attempt": kw["attempt"]}
+
+    monkeypatch.setattr(orch_mod, "_evaluate_predicate", predicate_passes)
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["file_exists:a.txt", "x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "not json")
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id), "verifier-2"), _verdict_with_reasons("read Output: ok")
+    )
+    refreshed = store.get(job.id)
+    assert refreshed.state == JobState.DONE.value
+    assert all(r["ac_text"] != "(verifier output)" for r in refreshed.ac_results)
+
+
+@pytest.mark.asyncio
+async def test_reason_starting_with_ran_but_not_a_command_claim_passes(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id)), _verdict_with_reasons("ran out of context so read Output ok")
+    )
+    assert store.get(job.id).state == JobState.DONE.value
+
+
+@pytest.mark.asyncio
+async def test_inspection_claim_backed_by_a_tool_call_passes(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    runner.store.code_events["verifier-1"] = 1
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id)), _verdict_with_reasons("inspected: read the file")
+    )
+    assert store.get(job.id).state == JobState.DONE.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["read Output: the poem has four lines", "accepted worker claim: not checkable"])
+async def test_verdict_without_inspection_claim_passes_with_no_tool_calls(store, runner, orchestrator, reason):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), _verdict_with_reasons(reason))
+    assert store.get(job.id).state == JobState.DONE.value
+    assert len(_verifier_spawns(runner)) == 1
 
 
 @pytest.mark.asyncio
@@ -2101,6 +2197,7 @@ async def test_ac_results_recorded_on_unparseable_verifier_output(store, runner,
     await orchestrator.on_session_complete(_worker_session(job), "w1")
     job = store.get(job.id)
     await orchestrator.on_session_complete(_verifier_session(job, "v1"), "definitely not json")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v2"), "definitely not json")
     fresh = store.get(job.id)
     assert fresh.ac_results, "unparseable verifier output must still produce an ac_results entry"
     assert fresh.ac_results[0]["pass"] is False
@@ -2619,10 +2716,15 @@ async def test_unparseable_verifier_output_error_includes_excerpt(store, runner,
     await orchestrator.on_session_complete(
         _verifier_session(store.get(job.id)), "I could not decide, sorry about the format"
     )
+    await orchestrator.on_session_complete(
+        _verifier_session(store.get(job.id), "verifier-2"), "I could not decide, sorry about the format"
+    )
     fresh = store.get(job.id)
-    assert fresh.state == JobState.STUCK.value
-    assert "could not decide" in (fresh.error or ""), f"error must include an output excerpt; got {fresh.error!r}"
-    assert "no JSON verdict" in (fresh.error or ""), "error must name the parse failure concisely"
+    assert fresh.state == JobState.ERRORED.value
+    assert "could not decide" in (fresh.error_detail or ""), (
+        f"detail must include an excerpt; got {fresh.error_detail!r}"
+    )
+    assert "no JSON verdict" in (fresh.error_detail or ""), "detail must name the parse failure concisely"
 
 
 @pytest.mark.asyncio
@@ -2635,9 +2737,10 @@ async def test_unparseable_verifier_excerpt_is_bounded(store, runner, orchestrat
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
     await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "did it")
     await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "y" * 5000)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "verifier-2"), "y" * 5000)
     fresh = store.get(job.id)
-    assert fresh.state == JobState.STUCK.value
-    assert len(fresh.error or "") < 500, f"error must stay bounded; got {len(fresh.error or '')} chars"
+    assert fresh.state == JobState.ERRORED.value
+    assert len(fresh.error_detail or "") < 500, f"detail must stay bounded; got {len(fresh.error_detail or '')} chars"
 
 
 # ── verdict derivation hardening ──
