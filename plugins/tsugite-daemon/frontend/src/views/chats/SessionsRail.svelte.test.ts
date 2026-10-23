@@ -751,6 +751,7 @@ const roomOf = (id: string, title: string, extra: Partial<Room> = {}): Room => (
   ],
   max_rounds: 12,
   rounds_used: 0,
+  queued: [],
   job_id: null,
   needs_attention: false,
   attention: [],

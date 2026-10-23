@@ -429,6 +429,13 @@ class TestAgentTools:
             False,
         )
 
+    def test_create_agent_uses_a_default_template_from_the_default_workspace(self, store, default_ws):
+        store.agents.ensure_default(default_ws, "pinned")
+
+        sessions_tools.create_agent("atlas")
+
+        assert store.agents.get("atlas").template == str((default_ws / "pinned.md").resolve())
+
     def test_create_agent_writes_the_name_without_identity_text(self, agents_root):
         sessions_tools.create_agent("atlas")
 

@@ -17,6 +17,7 @@
   import Button from '$lib/components/buttons/Button.svelte';
   import Spin from '$lib/components/feedback/Spin.svelte';
   import AgentDot from '$lib/components/rows/AgentDot.svelte';
+  import Icon from '$lib/components/icon/Icon.svelte';
   import PhoneBack from '$lib/shell/PhoneBack.svelte';
   import JobPill from '../jobs/JobPill.svelte';
   import { sessionStateMeta } from '$lib/components/rows/rowState';
@@ -24,15 +25,15 @@
   import type { RefItem } from '$lib/components/composer/types';
   import { ScrollFollow } from './scrollFollow.svelte';
   import { fetchEventsPage } from './conversation.svelte';
-  import { isFinishedSession } from './sessionModel';
+  import { isFinishedSession, liveSessionId } from './sessionModel';
   import {
     USER_AUTHOR,
     cardHref,
     messageTargets,
     participantBusy,
     pendingCapCard,
-    roomBusy,
     roomEvents,
+    workingParticipants,
     type RoomEvent,
   } from './roomModel';
 
@@ -46,7 +47,10 @@
   const room = $derived(rooms.byId(roomId));
   const agentById = $derived(new Map(agents.list.map((a) => [a.id, a])));
   const open = $derived(room !== undefined && !isFinishedSession(room));
-  const busy = $derived(room !== undefined && roomBusy(room, sessions.ordered));
+  const working = $derived(
+    room ? workingParticipants(room, sessions.ordered).map((p) => label(p.agent_id)) : [],
+  );
+  const busy = $derived(working.length > 0);
   const job = $derived(room?.job_id ? jobs.jobs.find((j) => j.job_id === room.job_id) : undefined);
 
   let events = $state<RoomEvent[]>([]);
@@ -55,6 +59,7 @@
   let loadError = $state<string | null>(null);
   let syncError = $state<string | null>(null);
   let draft = $state('');
+  let composer = $state<ReturnType<typeof Composer>>();
   let oldestId: number | null = null;
   // Bumped on every room switch. A response for an earlier opening is dropped.
   let generation = 0;
@@ -210,6 +215,15 @@
     void act(() => rooms.setMaxRounds(room.id, maxRounds), 'Could not raise the round cap');
   }
 
+  function mention(agentId: string) {
+    draft = `${draft}${draft && !/\s$/.test(draft) ? ' ' : ''}@${agentId} `;
+    composer?.focus();
+  }
+
+  function sessionHref(p: RoomParticipant): string {
+    return buildHash('chats', { sessionId: liveSessionId(sessions.ordered, p.session_id) });
+  }
+
   function toggleMute(p: RoomParticipant) {
     const name = label(p.agent_id);
     void act(
@@ -245,9 +259,10 @@
     <div class="chips" role="group" aria-label="Participants">
       {#each room.participants as p (p.agent_id)}
         {@const agent = agentById.get(p.agent_id)}
-        <span class="pchip" class:is-muted={p.muted} title="@{p.agent_id}">
+        {@const name = label(p.agent_id)}
+        {#snippet chipBody()}
           <AgentDot color={agent?.color ?? null} />
-          <span>{label(p.agent_id)}</span>
+          <span>{name}</span>
           <span class="pmodel">{agent?.model ?? 'default'}</span>
           {#if p.lead}<span class="ptag">lead</span>{/if}
           {#if participantBusy(p, sessions.ordered)}
@@ -255,12 +270,31 @@
               ><Spin color={sessionStateMeta('running').color} /></span
             >
           {/if}
-          {#if !p.lead && open}
+        {/snippet}
+        <span class="pchip" class:is-muted={p.muted}>
+          {#if p.lead || !open}
+            <a
+              class="pmain"
+              href={sessionHref(p)}
+              title="@{p.agent_id}"
+              aria-label="Open {name} session">{@render chipBody()}</a
+            >
+          {:else}
+            <button
+              type="button"
+              class="pmain"
+              title="@{p.agent_id}"
+              aria-label="Mention {name}"
+              onclick={() => mention(p.agent_id)}>{@render chipBody()}</button
+            >
+            <a class="popen" href={sessionHref(p)} aria-label="Open {name} session"
+              ><Icon name="chev-r" size={11} /></a
+            >
             <button
               type="button"
               class="pmute"
               aria-pressed={p.muted}
-              aria-label="Mute {label(p.agent_id)}"
+              aria-label="Mute {name}"
               onclick={() => toggleMute(p)}>{p.muted ? 'muted' : 'mute'}</button
             >
           {/if}
@@ -336,6 +370,13 @@
   </div>
 
   {#if open && targets}
+    {#if busy}
+      <p class="working" role="status">
+        <Spin color={sessionStateMeta('running').color} />
+        {new Intl.ListFormat('en').format(working)}
+        {working.length === 1 ? 'is' : 'are'} working…
+      </p>
+    {/if}
     <p class="target" aria-live="polite">
       to
       {#if targets.mentioned.length > 0}
@@ -345,6 +386,7 @@
       {/if}
     </p>
     <Composer
+      bind:this={composer}
       bind:value={draft}
       {dense}
       {busy}
@@ -409,7 +451,7 @@
     gap: 5px;
     min-width: 0;
     height: 22px;
-    padding: 0 4px 0 8px;
+    padding: 0 4px 0 0;
     border: 1px solid var(--bd1);
     border-radius: var(--r-full);
     background: var(--bg1);
@@ -418,6 +460,46 @@
   }
   .pchip.is-muted {
     opacity: 0.55;
+  }
+  .pmain {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    align-self: stretch;
+    padding: 0 2px 0 8px;
+    background: none;
+    border: 0;
+    border-radius: var(--r-full);
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .pmain:hover {
+    color: var(--tx0);
+  }
+  .popen {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    padding: 0 3px;
+    border-radius: var(--r-full);
+    color: var(--tx3);
+  }
+  .popen:hover {
+    background: var(--bg3);
+    color: var(--tx0);
+  }
+  @media (pointer: coarse) {
+    .pchip {
+      height: 30px;
+    }
+    .popen,
+    .pmute {
+      min-width: 28px;
+    }
   }
   .pmodel,
   .ptag {
@@ -528,6 +610,21 @@
   .worked:hover {
     color: var(--tx1);
     border-color: var(--bd1);
+  }
+  .working {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 5px 14px 0;
+    border-top: 1px solid var(--bd0);
+    background: var(--bg1);
+    color: var(--tx2);
+    font: 500 var(--fs-2xs) var(--font-mono);
+    flex: none;
+  }
+  .working + .target {
+    border-top: 0;
   }
   .target {
     margin: 0;

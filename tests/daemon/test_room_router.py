@@ -8,6 +8,7 @@ from tsugite_daemon.attention_store import SOURCE_ASK, SOURCE_ROOM
 from tsugite_daemon.gateway import terminal_state_callback
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
+from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS
 from tsugite_daemon.rooms import RoomConflictError
 from tsugite_daemon.session_runner import SessionRunner, get_current_session_id, report_send_failure
 from tsugite_daemon.session_store import Session, SessionStatus, SessionStore
@@ -300,12 +301,12 @@ class TestRoomContext:
 class TestRoundCap:
     @pytest.mark.asyncio
     async def test_cap_skips_the_participant_and_still_wakes_the_lead(self, rooms, store, adapter, room):
-        store.rooms.update(room.id, max_rounds=1, rounds_used=1)
+        store.rooms.update(room.id, max_rounds=1)
 
-        rooms.post_user_message(room.id, "@homelab hi")
+        rooms.post_user_message(room.id, "@homelab @research hi")
         await _settle(rooms, room.id)
 
-        assert [agent for agent, _ in adapter.calls] == ["main"]
+        assert [agent for agent, _ in adapter.calls] == ["homelab", "main"]
         [card] = [e for e in store.read_events(room.id) if e["type"] == "room_card"]
         assert card["kind"] == "round_cap"
         [record] = store.attention.open_records(room.id)
@@ -313,14 +314,29 @@ class TestRoundCap:
 
     @pytest.mark.asyncio
     async def test_raising_the_cap_clears_the_attention(self, rooms, store, room):
-        store.rooms.update(room.id, max_rounds=1, rounds_used=1)
-        rooms.post_user_message(room.id, "@homelab hi")
+        store.rooms.update(room.id, max_rounds=1)
+        rooms.post_user_message(room.id, "@homelab @research hi")
         await _settle(rooms, room.id)
 
         rooms.set_max_rounds(room.id, 5)
 
         assert store.rooms.get(room.id).max_rounds == 5
         assert store.attention.open_records(room.id) == []
+
+    @pytest.mark.asyncio
+    async def test_a_user_message_resets_the_rounds_and_clears_the_attention(self, rooms, store, adapter, bus, room):
+        store.rooms.update(room.id, max_rounds=1)
+        rooms.post_user_message(room.id, "@homelab @research hi")
+        await _settle(rooms, room.id)
+        adapter.calls.clear()
+
+        rooms.post_user_message(room.id, "@research go on")
+
+        assert bus.room_updates()[-1]["rounds_used"] == 0
+        assert store.attention.open_records(room.id) == []
+        await _settle(rooms, room.id)
+        assert [agent for agent, _ in adapter.calls] == ["research", "main"]
+        assert store.rooms.get(room.id).rounds_used == 1
 
     def test_cap_must_be_positive(self, rooms, room):
         with pytest.raises(ValueError, match="max_rounds"):
@@ -374,6 +390,12 @@ class TestRoomTools:
         room = store.rooms.get(result["id"])
         [lead] = room.participants
         assert (lead.agent_id, lead.session_id, lead.lead) == ("main", lead_chat.id, True)
+
+    def test_open_sets_the_round_cap(self, store):
+        default = store.rooms.get(sessions_tools.room_open("PROJ-9")["id"])
+        capped = store.rooms.get(sessions_tools.room_open("PROJ-10", max_rounds=40)["id"])
+
+        assert (default.max_rounds, capped.max_rounds) == (DEFAULT_MAX_ROUNDS, 40)
 
     def test_invite_handoff_and_close_resolve_the_room_from_the_session(self, rooms, store, lead_chat):
         room_id = sessions_tools.room_open("PROJ-9")["id"]
@@ -634,6 +656,37 @@ class TestRoundCapRules:
         await _settle(rooms, room.id)
 
         assert bus.room_updates()[-1]["rounds_used"] == 1
+
+
+class TestQueuedTurns:
+    @pytest.mark.asyncio
+    async def test_queued_turns_are_broadcast_until_they_start(self, rooms, store, bus, lead_chat, room):
+        store.begin_turn(lead_chat.id)
+        rooms.handoff(
+            room.id,
+            [{"agent": "homelab", "message": "a"}, {"agent": "research", "message": "b"}],
+            "sequential",
+        )
+
+        assert bus.room_updates()[-1]["queued"] == ["homelab", "research", "main"]
+        store.end_turn(lead_chat.id)
+        await _settle(rooms, room.id)
+        assert [r["queued"] for r in bus.room_updates()][-3:] == [["research", "main"], ["main"], []]
+
+    @pytest.mark.asyncio
+    async def test_a_user_message_broadcasts_its_queued_turns(self, rooms, bus, room):
+        rooms.post_user_message(room.id, "@homelab hi")
+
+        assert bus.room_updates()[-1]["queued"] == ["homelab", "main"]
+        await _settle(rooms, room.id)
+
+    def test_stop_broadcasts_no_queued_turns(self, rooms, store, bus, lead_chat, room):
+        store.begin_turn(lead_chat.id)
+        rooms.handoff(room.id, [{"agent": "homelab", "message": "a"}], "sequential")
+
+        rooms.stop(room.id)
+
+        assert bus.room_updates()[-1]["queued"] == []
 
 
 class TestCloseFromALeadTurn:

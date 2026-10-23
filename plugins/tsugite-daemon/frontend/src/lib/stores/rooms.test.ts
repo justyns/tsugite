@@ -12,6 +12,7 @@ const room = (id: string, extra: Partial<Room> = {}): Room => ({
   participants: [],
   max_rounds: 12,
   rounds_used: 0,
+  queued: [],
   job_id: null,
   needs_attention: false,
   attention: [],

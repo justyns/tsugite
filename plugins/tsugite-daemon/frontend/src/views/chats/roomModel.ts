@@ -13,8 +13,15 @@ export function participantBusy(p: RoomParticipant, rows: SessionRow[]): boolean
   return rows.some((row) => row.id === id && row.busy);
 }
 
+/** Participants whose turn is running or queued, in roster order. */
+export function workingParticipants(room: Room, rows: SessionRow[]): RoomParticipant[] {
+  return room.participants.filter(
+    (p) => participantBusy(p, rows) || room.queued.includes(p.agent_id),
+  );
+}
+
 export function roomBusy(room: Room, rows: SessionRow[]): boolean {
-  return room.participants.some((p) => participantBusy(p, rows));
+  return workingParticipants(room, rows).length > 0;
 }
 
 /** The participants a user message runs: each @mentioned non-lead participant,

@@ -16,6 +16,8 @@ export interface Room {
   participants: RoomParticipant[];
   max_rounds: number;
   rounds_used: number;
+  /** Agent ids with a turn waiting to start, in queue order. */
+  queued: string[];
   created_at: string;
   /** The transcript session's status. A finished status means the room is closed. */
   status: string;

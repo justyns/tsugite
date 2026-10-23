@@ -4,6 +4,7 @@ import logging
 import re
 import shutil
 from dataclasses import asdict
+from pathlib import Path
 from typing import Optional
 
 from . import call_on_loop, tool
@@ -313,10 +314,16 @@ def create_agent(
         raise ValueError(f"Workspace directory already exists: {workspace}") from None
     try:
         Workspace.create(workspace, agent_name=name, about=identity)
+        if not template:
+            default = _call(agents.default)
+            template = default.template
+            in_default = _call(adapter._resolve_agent_path, template, Path(default.workspace))
+            if in_default and not _call(adapter._resolve_agent_path, template, workspace):
+                template = str(in_default)
         body = {
             "name": name,
             "workspace": str(workspace),
-            "template": template or _call(agents.default).template,
+            "template": template,
             "model": model,
             "color": color,
         }
@@ -360,14 +367,23 @@ def _lead_room(room_id: Optional[str]):
 
 
 @tool(require_daemon=True)
-def room_open(title: str, job_id: Optional[str] = None) -> dict:
-    """Open a room for a group chat between agents, led by the current session and closed once job_id's acceptance criteria verify."""
+def room_open(title: str, job_id: Optional[str] = None, max_rounds: Optional[int] = None) -> dict:
+    """Open a room for a group chat between agents, led by the current session, allowing max_rounds participant turns between user messages, and closed once job_id's acceptance criteria verify."""
+    from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS
+
     session_id = get_current_session_id()
     if not session_id:
         raise ValueError("room_open needs a current session to lead the room")
     session = _call(_session_runner.store.get_session, session_id)
     rooms = _session_runner.rooms
-    room = _call(rooms.create, title, user_id=session.user_id, lead_session_id=session_id, job_id=job_id)
+    room = _call(
+        rooms.create,
+        title,
+        user_id=session.user_id,
+        lead_session_id=session_id,
+        max_rounds=DEFAULT_MAX_ROUNDS if max_rounds is None else max_rounds,
+        job_id=job_id,
+    )
     return _call(rooms.detail, room)
 
 

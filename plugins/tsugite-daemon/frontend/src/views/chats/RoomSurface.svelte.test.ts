@@ -31,6 +31,7 @@ const room: Room = {
   ],
   max_rounds: 12,
   rounds_used: 3,
+  queued: [],
   job_id: null,
   needs_attention: false,
   attention: [],
@@ -116,6 +117,34 @@ test('participant chips show name, model, lead, busy and a mute toggle for non-l
   await expect
     .element(page.getByRole('button', { name: 'Mute homelab' }))
     .toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a working line above the composer lists running and queued participants', async () => {
+  await mount();
+  const line = page.getByRole('status').filter({ hasText: 'working' });
+  await expect.element(line).toHaveTextContent('homelab is working…');
+  rooms.applySessionUpdate({ action: 'room_updated', room: { ...room, queued: ['main'] } });
+  await expect.element(line).toHaveTextContent('atlas and homelab are working…');
+});
+
+test('tapping a participant chip mentions it, and its open link opens its session', async () => {
+  await mount();
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await userEvent.type(box, 'hi');
+  await page.getByRole('button', { name: 'Mention homelab' }).click();
+  await expect.element(box).toHaveValue('hi @ops ');
+  await expect.element(box).toHaveFocus();
+  await expect
+    .element(page.getByRole('link', { name: 'Open homelab session' }))
+    .toHaveAttribute('href', '#chats?sessionId=p-ops');
+});
+
+test('the lead chip opens the lead session instead of mentioning it', async () => {
+  await mount();
+  await expect
+    .element(page.getByRole('link', { name: 'Open atlas session' }))
+    .toHaveAttribute('href', '#chats?sessionId=p-main');
+  expect(page.getByRole('button', { name: 'Mention atlas' }).elements()).toHaveLength(0);
 });
 
 test('the target line follows the mentions in the draft', async () => {

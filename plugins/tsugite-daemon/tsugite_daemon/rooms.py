@@ -103,6 +103,7 @@ class Rooms:
             "title": transcript.title,
             "status": transcript.status,
             "created_at": transcript.created_at,
+            "queued": list(dict.fromkeys(t.agent_id for step in self._steps.get(room.id, ()) for t in step)),
             **attention_fields(self._attention_records(room)),
         }
 
@@ -183,9 +184,10 @@ class Rooms:
         return self._post(room_id, content, author, participant_session_id, private_ref)
 
     def post_user_message(self, room_id: str, content: str) -> Room:
-        """Post as the user, then run each @mentioned participant once and the lead, ahead of queued handoffs."""
+        """Post as the user, reset the rounds, then run each @mentioned participant once and the lead, ahead of queued handoffs."""
         self.post_message(room_id, content)
-        room = self.get(room_id)
+        self._runner.clear_attention_ref(SOURCE_ROOM, self._cap_ref(room_id))
+        room = self._store.rooms.update(room_id, rounds_used=0)
         mentioned = dict.fromkeys(_MENTION_RE.findall(content))
         steps = [
             [_Turn(p.agent_id, _USER_ADDRESSED, forced=True)]
@@ -196,7 +198,7 @@ class Rooms:
         steps.append([_Turn(self._lead(room).agent_id, lead_prompt)])
         self._steps.setdefault(room_id, deque()).extendleft(reversed(steps))
         self._kick(room_id)
-        return room
+        return self._updated(room)
 
     def handoff(self, room_id: str, handoffs: list[dict], mode: str) -> int:
         """Queue the handoffs and a lead turn after them, starting once the lead's current turn ends."""
@@ -243,7 +245,10 @@ class Rooms:
         self._enqueue(room_id, lead, steps)
         return len(turns)
 
-    def stop(self, room_id: str, keep_session_id: Optional[str] = None) -> Room:
+    def stop(self, room_id: str) -> Room:
+        return self._updated(self._halt(room_id))
+
+    def _halt(self, room_id: str, keep_session_id: Optional[str] = None) -> Room:
         """Cancel the running turns, except the one on `keep_session_id`, and drop the queued ones."""
         room = self.get(room_id)
         self._steps.pop(room_id, None)
@@ -260,7 +265,7 @@ class Rooms:
         """Close the room. A lead turn that calls this keeps running, and its reply still posts."""
         self._closing.discard(room_id)
         room = self._open_room(room_id)
-        self.stop(room_id, keep_session_id=caller_session_id)
+        self._halt(room_id, keep_session_id=caller_session_id)
         for participant in room.participants:
             live = self._store.resolve_live(participant.session_id)
             if live is not None and live.metadata.get(METADATA_ROOM_ID) == room_id:
@@ -411,7 +416,8 @@ class Rooms:
                 if room.rounds_used + charged > room.max_rounds:
                     self._cap(room)
                     continue
-                room = self._updated(self._store.rooms.update(room_id, rounds_used=room.rounds_used + charged))
+                room = self._store.rooms.update(room_id, rounds_used=room.rounds_used + charged)
+            self._updated(room)
             # Rendered before any turn starts, so parallel turns all start from the same transcript.
             starts = [(turn, p, *self._render_context(room, p, turn.exclude_id)) for turn, p in runnable]
             await asyncio.gather(*(self._start_turn(room_id, *start) for start in starts), return_exceptions=True)
@@ -690,6 +696,7 @@ class Rooms:
     def _enqueue(self, room_id: str, lead: Participant, steps: list[list[_Turn]]) -> None:
         """Queue steps, starting them now unless the lead's current turn will start them when it ends."""
         self._steps.setdefault(room_id, deque()).extend(steps)
+        self._updated(self.get(room_id))
         if not self._runner.is_busy(self._runner.live_id(lead.session_id)):
             self._kick(room_id)
 

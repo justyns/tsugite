@@ -6,6 +6,7 @@ import {
   messageTargets,
   pendingCapCard,
   roomBusy,
+  workingParticipants,
   type RoomCard,
   type RoomEvent,
 } from './roomModel';
@@ -21,6 +22,7 @@ function room(extra: Partial<Room> = {}): Room {
     ],
     max_rounds: 12,
     rounds_used: 0,
+    queued: [],
     job_id: null,
     needs_attention: false,
     attention: [],
@@ -42,6 +44,19 @@ describe('roomBusy', () => {
       sessionRow('s-homelab-2', { busy: true }),
     ];
     expect(roomBusy(room(), rows)).toBe(true);
+  });
+});
+
+describe('workingParticipants', () => {
+  it('lists running and queued participants in roster order', () => {
+    const rows = [sessionRow('s-homelab', { busy: true })];
+    const ids = (r: Room) => workingParticipants(r, rows).map((p) => p.agent_id);
+    expect(ids(room())).toEqual(['homelab']);
+    expect(ids(room({ queued: ['homelab', 'atlas'] }))).toEqual(['atlas', 'homelab']);
+  });
+
+  it('makes the room busy while a turn is only queued', () => {
+    expect(roomBusy(room({ queued: ['atlas'] }), [])).toBe(true);
   });
 });
 
