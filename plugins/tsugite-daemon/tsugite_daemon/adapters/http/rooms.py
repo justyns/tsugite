@@ -77,12 +77,11 @@ class RoomsMixin:
         job_id = body.get("job_id")
         if err := _job_id_error(job_id):
             return err
-        agents = self.session_runner.store.agents
         return self._room_response(
             lambda: self.session_runner.rooms.create(
                 title.strip(),
                 user_id=self.adapter.resolve_http_user(body.get("user_id", "web-anonymous")),
-                lead_agent_id=agents.effective_id(body.get("lead_agent_id")),
+                lead_agent_id=body.get("lead_agent_id"),
                 max_rounds=max_rounds,
                 job_id=job_id,
             ),

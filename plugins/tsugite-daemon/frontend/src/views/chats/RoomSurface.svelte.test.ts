@@ -102,6 +102,13 @@ test('room messages show their author, and system rows show joins and failures',
   await expect.element(link).toHaveAttribute('href', '#chats?sessionId=p-ops');
 });
 
+test("an opener's post shows its agent as the opener", async () => {
+  await mount(() => ({ events: [message(1, 'main', 'how is it going?', { role: 'opener' })] }));
+  await expect
+    .element(page.getByRole('article').filter({ hasText: 'how is it going?' }))
+    .toHaveTextContent(/^atlas \(opener\)/);
+});
+
 test('participant chips show name, model, lead, busy and a mute toggle for non-leads', async () => {
   await mount();
   const chips = page.getByRole('group', { name: 'Participants' });

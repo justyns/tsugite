@@ -42,6 +42,8 @@ export interface RoomMessage {
   participant_session_id: string | null;
   content: string;
   private_ref: number | null;
+  /** Set on a post by the session that opened the room. */
+  role?: 'opener';
 }
 
 export interface RoomMember {

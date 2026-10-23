@@ -541,7 +541,10 @@ class SessionRunner:
         self._flush_deferred_deliveries(session_id)
         self._job_turn_end(session_id)
         self.drain_queued_messages(session_id)
-        self.rooms.on_turn_end(session_id)
+        try:
+            self.rooms.on_turn_end(session_id)
+        except Exception:
+            logger.exception("Failed to update rooms after the turn on session '%s'", session_id)
 
     @staticmethod
     def _job_turn_end(session_id: str) -> None:
@@ -611,8 +614,8 @@ class SessionRunner:
             )
         return session
 
-    def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> None:
-        """Open an attention record; a re-report of something already open announces nothing."""
+    def open_attention(self, session_id: str, *, source: str, ref_id: str, kind: str) -> bool:
+        """Open an attention record, returning whether it was newly opened. A re-report of something already open announces nothing."""
         session_id = self.live_id(session_id)
         opened = self._store.attention.open(
             owner_kind=OWNER_SESSION,
@@ -623,6 +626,7 @@ class SessionRunner:
         )
         if opened:
             self._emit_attention(session_id)
+        return bool(opened)
 
     def clear_attention_ref(self, source: str, ref_id: str) -> None:
         for record in self._store.attention.clear_ref(source, ref_id):

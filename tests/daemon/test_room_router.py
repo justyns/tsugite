@@ -385,27 +385,27 @@ class TestRoomTools:
         monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: lead_chat.id)
 
     def test_open_makes_the_calling_session_the_lead(self, store, lead_chat):
-        result = sessions_tools.room_open("PROJ-9")
+        result = sessions_tools.room_open("PROJ-9", lead_self=True)
 
         room = store.rooms.get(result["id"])
         [lead] = room.participants
         assert (lead.agent_id, lead.session_id, lead.lead) == ("main", lead_chat.id, True)
 
     def test_open_sets_the_round_cap(self, store):
-        default = store.rooms.get(sessions_tools.room_open("PROJ-9")["id"])
-        capped = store.rooms.get(sessions_tools.room_open("PROJ-10", max_rounds=40)["id"])
+        default = store.rooms.get(sessions_tools.room_open("PROJ-9", lead_self=True)["id"])
+        capped = store.rooms.get(sessions_tools.room_open("PROJ-10", lead_self=True, max_rounds=40)["id"])
 
         assert (default.max_rounds, capped.max_rounds) == (DEFAULT_MAX_ROUNDS, 40)
 
     def test_invite_handoff_and_close_resolve_the_room_from_the_session(self, rooms, store, lead_chat):
-        room_id = sessions_tools.room_open("PROJ-9")["id"]
+        room_id = sessions_tools.room_open("PROJ-9", lead_self=True)["id"]
 
         sessions_tools.room_invite("homelab", "Check the NAS.")
         store.begin_turn(lead_chat.id)
         queued = sessions_tools.room_handoff([{"agent": "homelab", "message": "go"}])
         closed = sessions_tools.room_close()
 
-        assert queued["queued"] == 1
+        assert {p["agent_id"]: p["working"] for p in queued["participants"]}["homelab"] is True
         assert rooms.get(room_id).participant("homelab").brief == "Check the NAS."
         assert closed["status"] == SessionStatus.COMPLETED.value
         assert store.get_session(lead_chat.id).status == SessionStatus.ACTIVE.value
@@ -416,7 +416,7 @@ class TestRoomTools:
             sessions_tools.room_handoff([{"agent": "homelab", "message": "go"}])
 
     def test_only_the_lead_invites(self, rooms, monkeypatch):
-        room_id = sessions_tools.room_open("PROJ-9")["id"]
+        room_id = sessions_tools.room_open("PROJ-9", lead_self=True)["id"]
         sessions_tools.room_invite("homelab", "hi")
         homelab = rooms.get(room_id).participant("homelab")
         monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: homelab.session_id)
@@ -807,9 +807,9 @@ class TestLinkJob:
         monkeypatch.setattr(sessions_tools, "_call", lambda fn, *a, **kw: fn(*a, **kw))
         monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: lead_chat.id)
 
-        result = sessions_tools.room_open("PROJ-1", job_id=job.id)
+        result = sessions_tools.room_open("PROJ-1", lead_self=True, job_id=job.id)
 
-        assert result["job_id"] == job.id
+        assert result["job"]["id"] == job.id
         assert store.rooms.get(result["id"]).job_id == job.id
 
     @pytest.mark.asyncio
@@ -1102,3 +1102,385 @@ class TestBootRecoveryWithJobs:
         rooms.recover_interrupted()
 
         assert store.get_session(room.id).status == SessionStatus.COMPLETED.value
+
+
+@pytest.fixture
+def opener(store):
+    return store.create_session(Session(id="", user_id="web-anonymous"))
+
+
+@pytest.fixture
+def opened(rooms, opener):
+    room = rooms.create("PROJ-7", user_id="web-anonymous", lead_agent_id="main", opener_session_id=opener.id)
+    rooms.invite(room.id, "homelab")
+    rooms.invite(room.id, "research")
+    return rooms.get(room.id)
+
+
+async def _reports(rooms, store, session_id):
+    """The report turns that woke `session_id`, once every pending wake has run."""
+    while rooms._wakes:
+        await asyncio.wait(list(rooms._wakes.values()))
+        await asyncio.sleep(0)
+    return [e["text"] for e in store.read_events(session_id) if e["type"] == "user_input"]
+
+
+def _as_caller(monkeypatch, runner, session_id):
+    _bind_tools(monkeypatch, runner)
+    monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: session_id)
+
+
+def _lead_session(room):
+    return room.participant("main").session_id
+
+
+class TestRoomOpenFreshLead:
+    @pytest.fixture(autouse=True)
+    def bound(self, runner, monkeypatch, opener):
+        _as_caller(monkeypatch, runner, opener.id)
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_lead_of_the_callers_agent_is_briefed_and_started(self, rooms, store, adapter, opener):
+        result = sessions_tools.room_open("PROJ-7", brief="Free up space on the NAS.")
+
+        room = store.rooms.get(result["id"])
+        [lead] = room.participants
+        assert lead.lead and lead.agent_id == "main" and lead.session_id != opener.id
+        assert room.opener_session_id == opener.id
+        assert store.get_session(lead.session_id).metadata["room_id"] == room.id
+        assert result["participants"][0]["working"] is True
+        await _settle(rooms, room.id)
+        [(agent, prompt)] = adapter.calls
+        assert agent == "main"
+        assert "Free up space on the NAS." in _context(prompt)
+        assert store.read_events(opener.id) == []
+
+    @pytest.mark.asyncio
+    async def test_lead_agent_picks_the_leads_agent(self, rooms, store):
+        result = sessions_tools.room_open("PROJ-7", brief="Read up.", lead_agent="research")
+
+        await _settle(rooms, result["id"])
+        assert [p.agent_id for p in store.rooms.get(result["id"]).participants] == ["research"]
+
+    def test_a_fresh_lead_needs_a_brief(self):
+        with pytest.raises(ValueError, match="brief"):
+            sessions_tools.room_open("PROJ-7")
+
+    def test_lead_self_keeps_the_caller_as_lead(self, store, adapter, opener):
+        result = sessions_tools.room_open("PROJ-7", lead_self=True)
+
+        room = store.rooms.get(result["id"])
+        [lead] = room.participants
+        assert (lead.session_id, room.opener_session_id) == (opener.id, opener.id)
+        assert adapter.calls == []
+
+    def test_notify_when_takes_a_bare_event_name(self, store):
+        result = sessions_tools.room_open("PROJ-7", lead_self=True, notify_when="closed")
+
+        assert store.rooms.get(result["id"]).notify_when == ["closed"]
+
+    @pytest.mark.parametrize("notify_when,error", [(["x"], "notify_when takes"), (5, "notify_when must be a list")])
+    def test_a_bad_notify_when_is_rejected(self, notify_when, error):
+        with pytest.raises(ValueError, match=error):
+            sessions_tools.room_open("PROJ-7", lead_self=True, notify_when=notify_when)
+
+
+class TestOpenerReports:
+    @pytest.mark.asyncio
+    async def test_a_user_close_wakes_the_opener_with_the_leads_final_message(self, rooms, store, opener, opened):
+        rooms.post_user_message(opened.id, "wrap up")
+        await _settle(rooms, opened.id)
+
+        rooms.close(opened.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert f"Room 'PROJ-7' ({opened.id}): Closed by the user." in report
+        assert f"(#chats?sessionId={opened.id})" in report
+        assert "@main's final message:\nmain replies" in report
+
+    @pytest.mark.asyncio
+    async def test_a_close_from_the_leads_turn_reports_the_reply_it_posts(
+        self, rooms, runner, store, adapter, opener, opened, monkeypatch
+    ):
+        _as_caller(monkeypatch, runner, _lead_session(opened))
+
+        async def lead_closes():
+            sessions_tools.room_close()
+
+        adapter.hooks[_lead_session(opened)] = lead_closes
+        rooms.post_user_message(opened.id, "wrap up")
+        await _settle(rooms, opened.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "Closed by the lead." in report and "main replies" in report
+
+    @pytest.mark.asyncio
+    async def test_the_opener_closes_its_room(self, rooms, runner, store, opener, opened, monkeypatch):
+        _as_caller(monkeypatch, runner, opener.id)
+
+        result = sessions_tools.room_close(room_id=opened.id)
+
+        assert result["status"] == SessionStatus.COMPLETED.value
+        [report] = await _reports(rooms, store, opener.id)
+        assert "Closed by its opener." in report
+
+    @pytest.mark.asyncio
+    async def test_the_final_message_skips_the_openers_later_post(self, rooms, store, opener, opened):
+        rooms.post_user_message(opened.id, "wrap up")
+        await _settle(rooms, opened.id)
+        rooms._post(opened.id, "thanks all", "main", opener.id, None, role="opener")
+
+        rooms.close(opened.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "main replies" in report and "thanks all" not in report
+
+    @pytest.mark.asyncio
+    async def test_a_verified_job_closes_the_room_once_after_the_running_turn(
+        self, rooms, store, adapter, opener, opened, orchestrator
+    ):
+        job = _job(orchestrator, opener.id)
+        rooms.link_job(opened.id, job.id)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def hold():
+            started.set()
+            await release.wait()
+
+        adapter.hooks[_lead_session(opened)] = hold
+        rooms.post_user_message(opened.id, "status?")
+        await started.wait()
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        release.set()
+        await _settle(rooms, opened.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert f"Closed after job {job.id} verified (done)." in report and "main replies" in report
+
+    @pytest.mark.asyncio
+    async def test_boot_recovery_says_why_it_closed_the_room(self, rooms, store, opener, opened, orchestrator):
+        job = _job(orchestrator, opener.id)
+        rooms.link_job(opened.id, job.id)
+        orchestrator._jobs.update_state(job.id, "done")
+
+        rooms.recover_interrupted()
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert f"Closed at boot recovery, after job {job.id} verified (done)." in report
+
+    @pytest.mark.asyncio
+    async def test_round_cap_is_reported_once_while_its_attention_is_open(self, rooms, store, opener, opened):
+        store.rooms.update(opened.id, max_rounds=1)
+        rooms.post_user_message(opened.id, "@homelab @research hi")
+        await _settle(rooms, opened.id)
+
+        rooms._cap(rooms.get(opened.id))
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "Round cap reached (1/1)." in report
+
+    @pytest.mark.asyncio
+    async def test_attention_is_reported(self, rooms, runner, store, opener, opened):
+        runner.open_attention(opened.participant("homelab").session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "@homelab needs you (ask)." in report
+
+    @pytest.mark.asyncio
+    async def test_failed_turns_in_one_step_are_reported_once(self, rooms, store, adapter, opener, opened):
+        async def boom():
+            raise RuntimeError("provider down")
+
+        for agent_id in ("homelab", "research"):
+            adapter.hooks[opened.participant(agent_id).session_id] = boom
+        store.begin_turn(_lead_session(opened))
+        rooms.handoff(
+            opened.id, [{"agent": "homelab", "message": "a"}, {"agent": "research", "message": "b"}], "parallel"
+        )
+        store.end_turn(_lead_session(opened))
+        await _settle(rooms, opened.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "@homelab's turn failed: provider down. @research's turn failed: provider down." in report
+
+    @pytest.mark.asyncio
+    async def test_room_turns_do_not_reach_the_opener(self, rooms, store, adapter, opener, opened):
+        rooms.post_user_message(opened.id, "@homelab hi")
+        await _settle(rooms, opened.id)
+
+        assert _agents_called(adapter) == ["homelab", "main"]
+        assert await _reports(rooms, store, opener.id) == []
+
+    @pytest.mark.asyncio
+    async def test_reports_during_the_openers_turn_wake_it_once_after(self, rooms, runner, store, opener, opened):
+        store.begin_turn(opener.id)
+        for agent_id in ("homelab", "research"):
+            runner.open_attention(
+                opened.participant(agent_id).session_id, source=SOURCE_ASK, ref_id=agent_id, kind="ask"
+            )
+        await asyncio.sleep(0)
+        assert not [e for e in store.read_events(opener.id) if e["type"] == "user_input"]
+        assert opener.id in rooms._wakes
+
+        store.end_turn(opener.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "@homelab needs you" in report and "@research needs you" in report
+
+    @pytest.mark.asyncio
+    async def test_reports_wait_for_the_openers_queued_messages(self, rooms, runner, store, opener, opened):
+        store.queue_message(opener.id, {"id": "q-1", "text": "hi"})
+        runner.open_attention(opened.participant("homelab").session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+        await asyncio.sleep(0)
+        assert not [e for e in store.read_events(opener.id) if e["type"] == "user_input"]
+
+        store.drop_queued_message(opener.id, "q-1")
+
+        assert len(await _reports(rooms, store, opener.id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_compacted_opener_gets_the_reports(self, rooms, runner, store, opener, opened):
+        successor = store.compact_session(opener.id)
+
+        runner.open_attention(opened.participant("homelab").session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+
+        assert len(await _reports(rooms, store, successor.id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_notify_when_narrows_the_reports(self, rooms, runner, store, opener):
+        room = rooms.create(
+            "PROJ-8", user_id="u", lead_agent_id="main", opener_session_id=opener.id, notify_when=["closed"]
+        )
+        room = rooms.invite(room.id, "homelab")
+
+        runner.open_attention(room.participant("homelab").session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+        assert await _reports(rooms, store, opener.id) == []
+        rooms.close(room.id)
+
+        [report] = await _reports(rooms, store, opener.id)
+        assert "Closed by the user." in report
+
+    @pytest.mark.asyncio
+    async def test_no_reports_when_the_opener_leads_even_after_compaction(self, rooms, runner, store, opener):
+        room = rooms.create("PROJ-8", user_id="u", lead_session_id=opener.id, opener_session_id=opener.id)
+        room = rooms.invite(room.id, "homelab")
+        successor = store.compact_session(opener.id)
+
+        runner.open_attention(room.participant("homelab").session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+        rooms.close(room.id)
+
+        assert await _reports(rooms, store, successor.id) == []
+
+
+class TestRoomPost:
+    @pytest.fixture(autouse=True)
+    def bound(self, runner, monkeypatch, opener):
+        _as_caller(monkeypatch, runner, opener.id)
+
+    @pytest.mark.asyncio
+    async def test_unaddressed_post_goes_to_the_lead_and_keeps_the_rounds(self, rooms, store, adapter, opened):
+        store.rooms.update(opened.id, rounds_used=3)
+
+        sessions_tools.room_post(opened.id, "how is it going?")
+        await _settle(rooms, opened.id)
+
+        assert _agents_called(adapter) == ["main"]
+        assert 'author="main" role="opener" untrusted="true">how is it going?' in _context(adapter.calls[0][1])
+        assert store.rooms.get(opened.id).rounds_used == 3
+
+    @pytest.mark.asyncio
+    async def test_mention_runs_that_participant_then_the_lead_and_spends_a_round(self, rooms, store, adapter, opened):
+        store.rooms.update(opened.id, rounds_used=3)
+
+        sessions_tools.room_post(opened.id, "@homelab check sda")
+        await _settle(rooms, opened.id)
+
+        assert _agents_called(adapter) == ["homelab", "main"]
+        assert 'author="main" role="opener" untrusted="true">@homelab check sda' in _context(adapter.calls[0][1])
+        assert store.rooms.get(opened.id).rounds_used == 4
+
+    @pytest.mark.asyncio
+    async def test_a_compacted_opener_still_posts(self, rooms, store, adapter, opener, opened, runner, monkeypatch):
+        _as_caller(monkeypatch, runner, store.compact_session(opener.id).id)
+
+        sessions_tools.room_post(opened.id, "still there?")
+        await _settle(rooms, opened.id)
+
+        assert _agents_called(adapter) == ["main"]
+
+    def test_the_lead_is_pointed_to_room_handoff(self, store, opened, runner, monkeypatch):
+        _as_caller(monkeypatch, runner, store.compact_session(_lead_session(opened)).id)
+
+        with pytest.raises(ValueError, match="room_handoff"):
+            sessions_tools.room_post(opened.id, "@homelab go")
+
+    def test_other_sessions_cannot_post(self, opened, runner, monkeypatch):
+        _as_caller(monkeypatch, runner, opened.participant("homelab").session_id)
+
+        with pytest.raises(ValueError, match="opened"):
+            sessions_tools.room_post(opened.id, "hi")
+
+    def test_a_muted_participant_is_refused(self, rooms, opened):
+        rooms.set_muted(opened.id, "homelab", True)
+
+        with pytest.raises(ValueError, match="muted"):
+            sessions_tools.room_post(opened.id, "@homelab go")
+        assert _messages(rooms._store, opened.id) == []
+
+    @pytest.mark.asyncio
+    async def test_a_mention_at_the_cap_is_refused_without_a_report(self, rooms, store, opener, opened):
+        store.rooms.update(opened.id, max_rounds=1, rounds_used=1)
+
+        with pytest.raises(ValueError, match="Only the user can raise the cap"):
+            sessions_tools.room_post(opened.id, "@homelab status?")
+        assert await _reports(rooms, store, opener.id) == []
+
+
+class TestRoomListAndStatus:
+    @pytest.fixture(autouse=True)
+    def bound(self, runner, monkeypatch, opener):
+        _as_caller(monkeypatch, runner, opener.id)
+
+    def test_list_defaults_to_open_rooms_this_session_opened(self, rooms, store, opener, opened, room, monkeypatch):
+        closed = rooms.create("PROJ-old", user_id="u", lead_agent_id="main", opener_session_id=opener.id)
+        rooms.close(closed.id)
+
+        assert [r["id"] for r in sessions_tools.room_list()] == [opened.id]
+        assert {r["id"] for r in sessions_tools.room_list(all=True)} == {opened.id, room.id}
+        monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: store.compact_session(opener.id).id)
+        assert [r["id"] for r in sessions_tools.room_list()] == [opened.id]
+
+    @pytest.mark.asyncio
+    async def test_status_reports_the_room_without_its_transcript(
+        self, rooms, runner, store, opened, orchestrator, opener
+    ):
+        job = _job(orchestrator, opener.id)
+        rooms.link_job(opened.id, job.id)
+        rooms.set_muted(opened.id, "research", True)
+        rooms.post_message(opened.id, "x" * 2000)
+        store.rooms.update(opened.id, rounds_used=2)
+        homelab = opened.participant("homelab")
+        runner.open_attention(homelab.session_id, source=SOURCE_ASK, ref_id="a", kind="ask")
+        store.begin_turn(homelab.session_id)
+
+        status = sessions_tools.room_status(opened.id)
+
+        assert (status["id"], status["title"], status["status"]) == (opened.id, "PROJ-7", "active")
+        assert (status["rounds_used"], status["max_rounds"]) == (2, DEFAULT_MAX_ROUNDS)
+        assert status["participants"] == [
+            {"agent_id": "main", "name": "main", "lead": True, "muted": False, "working": False},
+            {"agent_id": "homelab", "name": "Homelab", "lead": False, "muted": False, "working": True},
+            {"agent_id": "research", "name": "Research", "lead": False, "muted": True, "working": False},
+        ]
+        assert status["last_message"] == {"author": "user", "content": "x" * 500 + "…"}
+        assert status["attention"] == [{"kind": "ask", "agent_id": "homelab"}]
+        assert status["job"] == {"id": job.id, "state": "verifying"}
+
+    def test_the_last_message_is_found_beyond_one_page(self, rooms, opened, monkeypatch):
+        monkeypatch.setattr("tsugite_daemon.rooms._PAGE_EVENTS", 2)
+        rooms.post_message(opened.id, "the last word")
+        for _ in range(3):
+            rooms.set_muted(opened.id, "homelab", True)
+            rooms.set_muted(opened.id, "homelab", False)
+
+        assert sessions_tools.room_status(opened.id)["last_message"]["content"] == "the last word"

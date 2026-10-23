@@ -8,7 +8,7 @@ import threading
 from collections import deque
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Sequence
 
 from tsugite.cancellation import set_cancel_event
 from tsugite.history import generate_session_id
@@ -19,7 +19,7 @@ from tsugite.tools.jobs import get_jobs_orchestrator
 from tsugite_daemon.agent_store import UnknownAgentError
 from tsugite_daemon.attention_store import SOURCE_ROOM, AttentionRecord
 from tsugite_daemon.job_store import Job, JobState, JobStore
-from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, Participant, Room
+from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, NOTIFY_EVENTS, Participant, Room
 from tsugite_daemon.session_store import (
     FINISHED_STATUSES,
     METADATA_ROOM_ID,
@@ -39,6 +39,8 @@ _USER_AUTHOR = "user"
 _HANDOFF_MODES = ("sequential", "parallel")
 # Room messages a participant sees on its first turn, besides the brief.
 JOIN_HISTORY = 20
+_EXCERPT_CHARS = 500
+_PAGE_EVENTS = 50
 
 # The room whose router turn is running, for tools called during that turn.
 _current_room_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_room_id", default=None)
@@ -48,10 +50,26 @@ _MENTION_RE = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9_-]{0,63})")
 _BATCH_DONE = "Your handoffs have replied. Hand off again with room_handoff, close the room with room_close, or reply."
 _USER_POSTED = "The user posted in the room. Reply, or hand off with room_handoff."
 _USER_ADDRESSED = "The user addressed you in the room."
+_LEAD_BRIEFED = "Start on the brief: reply, invite participants with room_invite, or hand off with room_handoff."
+_OPENER_POSTED = "@{author} opened this room and posted in it. Reply, or hand off with room_handoff."
+_OPENER_ADDRESSED = "@{author}, who opened this room, addressed you in it."
 
 
 def get_current_room_id() -> Optional[str]:
     return _current_room_id.get()
+
+
+def _excerpt(text: str) -> str:
+    return text if len(text) <= _EXCERPT_CHARS else text[:_EXCERPT_CHARS] + "…"
+
+
+def _mentions(room: Room, content: str) -> list[Participant]:
+    """The non-lead participants `content` @mentions, once each, in mention order."""
+    return [
+        p
+        for agent_id in dict.fromkeys(_MENTION_RE.findall(content))
+        if (p := room.participant(agent_id)) and not p.lead
+    ]
 
 
 class RoomLookupError(LookupError):
@@ -84,8 +102,16 @@ class Rooms:
         self._turns: dict[str, dict[str, tuple[asyncio.Task, threading.Event]]] = {}
         # Last job state mirrored into each room, by (room id, job id).
         self._job_states: dict[tuple[str, str], str] = {}
-        # Rooms whose job is done, closing once their running turns post.
-        self._closing: set[str] = set()
+        # Rooms whose job is done, closing once their running turns post, with the close reason.
+        self._closing: dict[str, str] = {}
+        # Report messages waiting to wake each opener, by opener session id, and the wake running for each.
+        self._reports: dict[str, list[tuple[str, str]]] = {}
+        self._wakes: dict[str, asyncio.Task] = {}
+        # The daemon loop, for reports raised on worker threads. None when built outside a loop.
+        try:
+            self._loop: Optional[asyncio.AbstractEventLoop] = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     def get(self, room_id: str) -> Room:
         room = self._store.rooms.get(room_id)
@@ -103,7 +129,7 @@ class Rooms:
             "title": transcript.title,
             "status": transcript.status,
             "created_at": transcript.created_at,
-            "queued": list(dict.fromkeys(t.agent_id for step in self._steps.get(room.id, ()) for t in step)),
+            "queued": self._queued(room.id),
             **attention_fields(self._attention_records(room)),
         }
 
@@ -116,14 +142,28 @@ class Rooms:
         lead_session_id: Optional[str] = None,
         max_rounds: int = DEFAULT_MAX_ROUNDS,
         job_id: Optional[str] = None,
+        opener_session_id: Optional[str] = None,
+        brief: Optional[str] = None,
+        notify_when: Sequence[str] | str = NOTIFY_EVENTS,
     ) -> Room:
-        """Open a room led by a new session of `lead_agent_id`, or by the existing `lead_session_id`."""
+        """Open a room led by the existing `lead_session_id`, or by a new session of `lead_agent_id` (default: the default agent) that starts on `brief` when one is given."""
         if lead_session_id:
-            lead_agent_id = self._store.agents.effective_id(self._store.get_session(lead_session_id).agent_id)
+            lead_agent_id = self._store.get_session(lead_session_id).agent_id
+        lead_agent_id = self._store.agents.effective_id(lead_agent_id)
         self._require_agent(lead_agent_id)
         if job_id is not None:
             self._require_job(job_id)
-        room = Room(id=generate_session_id("room"), max_rounds=max_rounds, job_id=job_id)
+        if isinstance(notify_when, str):
+            notify_when = [notify_when]
+        elif not isinstance(notify_when, (list, tuple)):
+            raise ValueError(f"notify_when must be a list of: {', '.join(NOTIFY_EVENTS)}")
+        room = Room(
+            id=generate_session_id("room"),
+            max_rounds=max_rounds,
+            job_id=job_id,
+            opener_session_id=opener_session_id,
+            notify_when=list(notify_when),
+        )
         self._store.create_session(Session(id=room.id, source=SessionSource.ROOM.value, user_id=user_id, title=title))
         self._store.rooms.create(room)
         self._emit_update("created", room.id)
@@ -131,7 +171,10 @@ class Rooms:
             return self._add_participant(
                 room, Participant(agent_id=lead_agent_id, session_id=lead_session_id, lead=True)
             )
-        return self._join(room, lead_agent_id, lead=True)
+        room = self._join(room, lead_agent_id, lead=True, brief=brief)
+        if brief:
+            self._enqueue(room.id, self._lead(room), [[_Turn(lead_agent_id, _LEAD_BRIEFED)]])
+        return room
 
     def invite(self, room_id: str, agent_id: str, brief: Optional[str] = None) -> Room:
         room = self._open_room(room_id)
@@ -184,21 +227,45 @@ class Rooms:
         return self._post(room_id, content, author, participant_session_id, private_ref)
 
     def post_user_message(self, room_id: str, content: str) -> Room:
-        """Post as the user, reset the rounds, then run each @mentioned participant once and the lead, ahead of queued handoffs."""
         self.post_message(room_id, content)
         self._runner.clear_attention_ref(SOURCE_ROOM, self._cap_ref(room_id))
         room = self._store.rooms.update(room_id, rounds_used=0)
-        mentioned = dict.fromkeys(_MENTION_RE.findall(content))
-        steps = [
-            [_Turn(p.agent_id, _USER_ADDRESSED, forced=True)]
-            for agent_id in mentioned
-            if (p := room.participant(agent_id)) and not p.lead
-        ]
-        lead_prompt = _BATCH_DONE if steps else _USER_POSTED
-        steps.append([_Turn(self._lead(room).agent_id, lead_prompt)])
-        self._steps.setdefault(room_id, deque()).extendleft(reversed(steps))
-        self._kick(room_id)
+        return self._route(room, _mentions(room, content), _USER_POSTED, _USER_ADDRESSED, forced=True)
+
+    def post_as_opener(self, room_id: str, content: str, session_id: str) -> Room:
+        """Post as the opener's agent, waking the participants it mentions and then the lead. The rounds are not reset."""
+        room = self._open_room(room_id)
+        if self._same_session(self._lead(room).session_id, session_id):
+            raise ValueError("The lead hands off with room_handoff, not room_post")
+        self._require_opener(room, session_id)
+        mentioned = _mentions(room, content)
+        for participant in mentioned:
+            if participant.muted:
+                raise ValueError(f"{participant.agent_id} is muted. Only the user can address a muted participant")
+        if len(mentioned) > (left := self._rounds_left(room)):
+            raise ValueError(f"Only {left} round(s) are left in room {room_id}. Only the user can raise the cap.")
+        session_id = self._runner.live_id(session_id)
+        author = self._store.agents.effective_id(self._store.get_session(session_id).agent_id)
+        self._post(room_id, content, author, session_id, None, role="opener")
+        return self._route(
+            room, mentioned, _OPENER_POSTED.format(author=author), _OPENER_ADDRESSED.format(author=author)
+        )
+
+    def _route(
+        self, room: Room, mentioned: list[Participant], posted: str, addressed: str, *, forced: bool = False
+    ) -> Room:
+        """Run each mentioned participant once and then the lead, ahead of queued handoffs."""
+        steps = [[_Turn(p.agent_id, addressed, forced=forced)] for p in mentioned]
+        steps.append([_Turn(self._lead(room).agent_id, _BATCH_DONE if mentioned else posted)])
+        self._steps.setdefault(room.id, deque()).extendleft(reversed(steps))
+        self._kick(room.id)
         return self._updated(room)
+
+    def _rounds_left(self, room: Room) -> int:
+        """Rounds left after the queued participant turns spend theirs."""
+        lead_id = self._lead(room).agent_id
+        queued = sum(t.agent_id != lead_id for step in self._steps.get(room.id, ()) for t in step)
+        return room.max_rounds - room.rounds_used - queued
 
     def handoff(self, room_id: str, handoffs: list[dict], mode: str) -> int:
         """Queue the handoffs and a lead turn after them, starting once the lead's current turn ends."""
@@ -219,9 +286,7 @@ class Rooms:
                 raise ValueError(f"{agent_id} is muted")
             if not isinstance(message, str) or not message.strip():
                 raise ValueError(f"Handoff to {agent_id} needs a message")
-        queued = sum(t.agent_id != lead.agent_id for step in self._steps.get(room_id, ()) for t in step)
-        left = room.max_rounds - room.rounds_used - queued
-        if len(handoffs) > left:
+        if len(handoffs) > (left := self._rounds_left(room)):
             raise ValueError(
                 f"Only {left} round(s) are left in room {room_id}. "
                 "Hand off to fewer participants, or ask the user to raise the cap."
@@ -261,17 +326,71 @@ class Rooms:
             driver.cancel()
         return room
 
-    def close(self, room_id: str, caller_session_id: Optional[str] = None) -> Room:
-        """Close the room. A lead turn that calls this keeps running, and its reply still posts."""
-        self._closing.discard(room_id)
+    def close(self, room_id: str, caller_session_id: Optional[str] = None, reason: str = "by the user") -> Room:
+        """Close the room, reporting `reason` to the opener. A lead turn that calls this keeps running, and its reply still posts."""
+        self._closing.pop(room_id, None)
         room = self._open_room(room_id)
+        kept = self._turns.get(room_id, {}).get(caller_session_id, (None,))[0]
         self._halt(room_id, keep_session_id=caller_session_id)
         for participant in room.participants:
             live = self._store.resolve_live(participant.session_id)
             if live is not None and live.metadata.get(METADATA_ROOM_ID) == room_id:
                 self._end_session(live.id)
         self._end_session(room_id)
+        if kept is None:
+            self._report_closed(room, reason)
+        else:
+            kept.add_done_callback(lambda _task: self._report_closed(room, reason))
         return self._updated(room)
+
+    def close_as(self, room_id: str, session_id: str) -> Room:
+        """Close the room for its lead or its opener."""
+        room = self.get(room_id)
+        lead = self._lead(room)
+        if self._same_session(lead.session_id, session_id):
+            return self.close(room_id, session_id, reason="by the lead")
+        if room.opener_session_id and self._same_session(room.opener_session_id, session_id):
+            return self.close(room_id, session_id, reason="by its opener")
+        raise ValueError(f"Only the lead (@{lead.agent_id}) or the opener can close room {room_id}")
+
+    def status(self, room: Room) -> dict:
+        transcript = self._store.get_session(room.id)
+        queued = self._queued(room.id)
+        participants = []
+        for p in room.participants:
+            agent = self._store.agents.get(p.agent_id)
+            participants.append(
+                {
+                    "agent_id": p.agent_id,
+                    "name": agent.name if agent else None,
+                    "lead": p.lead,
+                    "muted": p.muted,
+                    "working": p.agent_id in queued or self._runner.is_busy(self._runner.live_id(p.session_id)),
+                }
+            )
+        agents = {self._runner.live_id(p.session_id): p.agent_id for p in room.participants}
+        last = self._last_message(room.id, lambda e: True)
+        job = self._job(room)
+        return {
+            "id": room.id,
+            "title": transcript.title,
+            "status": transcript.status,
+            "rounds_used": room.rounds_used,
+            "max_rounds": room.max_rounds,
+            "participants": participants,
+            "last_message": {"author": last["author"], "content": _excerpt(last["content"])} if last else None,
+            "attention": [{"kind": r.kind, "agent_id": agents.get(r.owner_id)} for r in self._attention_records(room)],
+            "job": {"id": job.id, "state": job.state} if job else None,
+        }
+
+    def list_status(self, opener_session_id: Optional[str] = None) -> list[dict]:
+        """The status of each open room, or of each one `opener_session_id` opened."""
+        rooms = self._open_rooms()
+        if opener_session_id is not None:
+            rooms = [
+                r for r in rooms if r.opener_session_id and self._same_session(r.opener_session_id, opener_session_id)
+            ]
+        return [self.status(room) for room in rooms]
 
     def room_for_session(self, session_id: str) -> Room:
         """The newest open room `session_id` takes part in."""
@@ -285,6 +404,14 @@ class Rooms:
         if self._runner.live_id(lead.session_id) != session_id:
             raise ValueError(f"Only the lead (@{lead.agent_id}) can do that in room {room.id}")
         return lead
+
+    def _require_opener(self, room: Room, session_id: str) -> None:
+        if room.opener_session_id is None or not self._same_session(room.opener_session_id, session_id):
+            raise ValueError(f"Only the session that opened room {room.id} can do that")
+
+    def _same_session(self, a: str, b: str) -> bool:
+        """Whether `a` and `b` are the same session, across compactions."""
+        return self._runner.live_id(a) == self._runner.live_id(b)
 
     def on_turn_end(self, session_id: str) -> None:
         for room_id in [r for r, steps in self._steps.items() if steps]:
@@ -301,11 +428,10 @@ class Rooms:
                     self._record(
                         room.id, "room_card", {"kind": "interrupted", "text": "The daemon restarted mid-turn."}
                     )
-        orchestrator = get_jobs_orchestrator()
         for room in self._open_rooms():
-            job = orchestrator.get_job(room.job_id) if room.job_id and orchestrator else None
+            job = self._job(room)
             if job is not None and job.state == JobState.DONE.value:
-                self.close(room.id)
+                self.close(room.id, reason=f"at boot recovery, after job {job.id} verified ({job.state})")
 
     def check_job_link(self, room_id: str, job_id: Optional[str]) -> None:
         self._open_room(room_id)
@@ -328,7 +454,7 @@ class Rooms:
                 self._job_card(room, "job_status", job, participant)
             elif job.state == JobState.DONE.value:
                 self._job_card(room, "job_done", job, participant)
-                self._close_when_idle(room.id)
+                self._close_when_idle(room.id, f"after job {job.id} verified ({job.state})")
             elif recovered:
                 self._card(
                     room,
@@ -359,6 +485,7 @@ class Rooms:
                 attention_kind=record.kind,
                 session_id=record.owner_id,
             )
+            self._report(room, "attention", f"@{participant.agent_id} needs you ({record.kind}).")
             self._updated(room)
 
     def on_attention_changed(self, session_id: str) -> None:
@@ -397,7 +524,7 @@ class Rooms:
             del self._drivers[room_id]
             self._store.rooms.update(room_id, routing=False)
             if room_id in self._closing:
-                self.close(room_id)
+                self.close(room_id, reason=self._closing[room_id])
             if not done.cancelled() and done.exception() is not None:
                 logger.error("Room %s stopped routing", room_id, exc_info=done.exception())
 
@@ -420,7 +547,11 @@ class Rooms:
             self._updated(room)
             # Rendered before any turn starts, so parallel turns all start from the same transcript.
             starts = [(turn, p, *self._render_context(room, p, turn.exclude_id)) for turn, p in runnable]
-            await asyncio.gather(*(self._start_turn(room_id, *start) for start in starts), return_exceptions=True)
+            results = await asyncio.gather(
+                *(self._start_turn(room_id, *start) for start in starts), return_exceptions=True
+            )
+            if failures := [r for r in results if isinstance(r, str)]:
+                self._report(self.get(room_id), "turn_failed", " ".join(failures))
 
     def _runnable(self, room: Room, turn: _Turn) -> Optional[Participant]:
         participant = room.participant(turn.agent_id)
@@ -443,7 +574,8 @@ class Rooms:
             "room_card",
             {"kind": "round_cap", "text": f"Round cap reached ({room.rounds_used}/{room.max_rounds})."},
         )
-        self._runner.open_attention(room.id, source=SOURCE_ROOM, ref_id=self._cap_ref(room.id), kind="round_cap")
+        if self._runner.open_attention(room.id, source=SOURCE_ROOM, ref_id=self._cap_ref(room.id), kind="round_cap"):
+            self._report(room, "round_cap", f"Round cap reached ({room.rounds_used}/{room.max_rounds}).")
 
     def _start_turn(
         self, room_id: str, turn: _Turn, participant: Participant, context: str, cursor: int
@@ -478,7 +610,8 @@ class Rooms:
         prompt: str,
         cursor: int,
         cancel_event: threading.Event,
-    ) -> None:
+    ) -> Optional[str]:
+        """The failure to report, when the turn fails."""
         set_interaction_backend(NonInteractiveBackend())
         set_permissions(None)
         set_cancel_event(cancel_event)
@@ -497,6 +630,8 @@ class Rooms:
             self._post(room_id, str(reply), turn.agent_id, session_id, self._turn_event_id(session_id, before))
         except Exception as e:
             self._record(room_id, "room_card", {"kind": "turn_failed", "agent_id": turn.agent_id, "text": str(e)})
+            return f"@{turn.agent_id}'s turn failed: {e}."
+        return None
 
     def _render_context(
         self, room: Room, participant: Participant, exclude_id: Optional[int] = None
@@ -521,7 +656,10 @@ class Rooms:
                 {
                     "id": e["id"],
                     "author": e["author"],
-                    "untrusted": None if e["author"] in (_USER_AUTHOR, participant.agent_id) else "true",
+                    "role": e.get("role"),
+                    "untrusted": None
+                    if e["author"] == _USER_AUTHOR or (e["author"] == participant.agent_id and not e.get("role"))
+                    else "true",
                 },
                 inline=True,
             )
@@ -623,17 +761,18 @@ class Rooms:
         author: str,
         participant_session_id: Optional[str],
         private_ref: Optional[int],
+        *,
+        role: Optional[str] = None,
     ) -> int:
-        event_id = self._record(
-            room_id,
-            "room_message",
-            {
-                "author": author,
-                "participant_session_id": participant_session_id,
-                "content": content,
-                "private_ref": private_ref,
-            },
-        )
+        data = {
+            "author": author,
+            "participant_session_id": participant_session_id,
+            "content": content,
+            "private_ref": private_ref,
+        }
+        if role:
+            data["role"] = role
+        event_id = self._record(room_id, "room_message", data)
         self._store.update_session(room_id)
         return event_id
 
@@ -658,9 +797,13 @@ class Rooms:
             raise RoomConflictError(f"Job {job_id} is already {job.state}")
         return job
 
-    def _job_context(self, room: Room) -> Optional[El]:
+    @staticmethod
+    def _job(room: Room) -> Optional[Job]:
         orchestrator = get_jobs_orchestrator()
-        job = orchestrator.get_job(room.job_id) if room.job_id and orchestrator else None
+        return orchestrator.get_job(room.job_id) if room.job_id and orchestrator else None
+
+    def _job_context(self, room: Room) -> Optional[El]:
+        job = self._job(room)
         if job is None:
             return None
         note = El("note", ["The room closes when these acceptance criteria verify."])
@@ -672,14 +815,90 @@ class Rooms:
         owners = dict.fromkeys([room.id, *(self._runner.live_id(p.session_id) for p in room.participants)])
         return [r for owner in owners for r in self._store.attention.open_records(owner)]
 
-    def _close_when_idle(self, room_id: str) -> None:
+    def _close_when_idle(self, room_id: str, reason: str) -> None:
         """Close now, or once the running turns post, dropping queued ones."""
         driver = self._drivers.get(room_id)
         if driver is None or driver.done():
-            self.close(room_id)
+            self.close(room_id, reason=reason)
             return
-        self._closing.add(room_id)
+        self._closing[room_id] = reason
         self._steps.pop(room_id, None)
+
+    def _queued(self, room_id: str) -> list[str]:
+        """Agent ids with a turn waiting to start, in queue order."""
+        return list(dict.fromkeys(t.agent_id for step in self._steps.get(room_id, ()) for t in step))
+
+    def _last_message(self, room_id: str, match: Callable[[dict], bool]) -> Optional[dict]:
+        """The newest room message `match` accepts, read a page at a time from the end."""
+        before = None
+        while True:
+            page = self._store.read_events_page(room_id, before_id=before, limit=_PAGE_EVENTS)
+            found = next((e for e in reversed(page["events"]) if e["type"] == "room_message" and match(e)), None)
+            if found is not None or not page["has_more"]:
+                return found
+            before = page["oldest_id"]
+
+    def _report_closed(self, room: Room, reason: str) -> None:
+        lead = self._lead(room)
+        final = self._last_message(room.id, lambda e: e["author"] == lead.agent_id and not e.get("role"))
+        detail = f"@{lead.agent_id}'s final message:\n{_excerpt(final['content'])}" if final else None
+        self._report(room, "closed", f"Closed {reason}.", detail)
+
+    def _report(self, room: Room, event: str, line: str, detail: Optional[str] = None) -> None:
+        """Queue `line` and a room link to wake the opener, unless `notify_when` omits `event` or the opener leads the room."""
+        if event not in room.notify_when or room.opener_session_id is None:
+            return
+        opener = self._store.resolve_live(room.opener_session_id)
+        if opener is None:
+            logger.info("Room %s has no live opener (%s) for its %s report", room.id, room.opener_session_id, event)
+            return
+        if opener.id == self._runner.live_id(self._lead(room).session_id):
+            return
+        title = self._store.get_session(room.id).title
+        message = f"Room '{title}' ({room.id}): {line} [Open room](#chats?sessionId={room.id})"
+        if detail:
+            message += f"\n{detail}"
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            if self._loop is not None:
+                self._loop.call_soon_threadsafe(self._queue_report, opener.id, room.id, message)
+            return
+        self._queue_report(opener.id, room.id, message)
+
+    def _queue_report(self, opener_id: str, room_id: str, message: str) -> None:
+        """Add a report for the opener, starting a wake unless one is already waiting to send it."""
+        self._reports.setdefault(opener_id, []).append((room_id, message))
+        if opener_id not in self._wakes:
+            self._start_wake(opener_id)
+
+    def _start_wake(self, opener_id: str) -> None:
+        # A fresh context: the wake must not inherit the cancel event or room of the turn that reported.
+        task = asyncio.get_running_loop().create_task(self._wake(opener_id), context=contextvars.Context())
+        self._wakes[opener_id] = task
+
+        def _forget(_task: asyncio.Task) -> None:
+            del self._wakes[opener_id]
+            if self._reports.get(opener_id):
+                self._start_wake(opener_id)
+
+        task.add_done_callback(_forget)
+
+    async def _wake(self, opener_id: str) -> None:
+        """Wait until the opener is idle, then send every report queued by then as one turn."""
+        await self._runner.wait_idle(opener_id)
+        reports = self._reports.pop(opener_id)
+        message = "\n\n".join(m for _, m in reports)
+        room_id = reports[0][0]
+        try:
+            reply = await self._runner.reply_to_session(
+                opener_id, message, source="room_report", metadata={"from_session": room_id}
+            )
+        except Exception:
+            logger.exception("Failed to wake the opener %s with room reports", opener_id)
+            return
+        if reply is None:
+            logger.info("Dropped room reports for opener %s: the session has finished", opener_id)
 
     def _open_rooms(self) -> list[Room]:
         return [r for r in self._store.rooms.list() if self._store.get_session(r.id).status not in FINISHED_STATUSES]

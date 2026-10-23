@@ -11,6 +11,7 @@ from typing import Optional
 from tsugite.core.record_store import SqliteCollectionStorage
 
 DEFAULT_MAX_ROUNDS = 12
+NOTIFY_EVENTS = ("closed", "round_cap", "attention", "turn_failed")
 
 
 @dataclass
@@ -35,10 +36,15 @@ class Room:
     job_id: Optional[str] = None
     # True while turns are queued or running. Still True at boot means a restart interrupted them.
     routing: bool = False
+    # Set by room_open. Woken with a report of each `notify_when` event unless it leads the room.
+    opener_session_id: Optional[str] = None
+    notify_when: list[str] = field(default_factory=lambda: list(NOTIFY_EVENTS))
 
     def __post_init__(self):
         if self.max_rounds < 1:
             raise ValueError("max_rounds must be at least 1")
+        if unknown := set(self.notify_when) - set(NOTIFY_EVENTS):
+            raise ValueError(f"notify_when takes {', '.join(NOTIFY_EVENTS)}, not {', '.join(sorted(unknown))}")
 
     def participant(self, agent_id: str) -> Optional[Participant]:
         return next((p for p in self.participants if p.agent_id == agent_id), None)

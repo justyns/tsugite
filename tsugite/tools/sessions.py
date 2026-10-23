@@ -366,45 +366,82 @@ def _lead_room(room_id: Optional[str]):
     return room
 
 
-@tool(require_daemon=True)
-def room_open(title: str, job_id: Optional[str] = None, max_rounds: Optional[int] = None) -> dict:
-    """Open a room for a group chat between agents, led by the current session, allowing max_rounds participant turns between user messages, and closed once job_id's acceptance criteria verify."""
-    from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS
+def _status(room) -> dict:
+    return _call(_session_runner.rooms.status, room)
 
+
+def _caller() -> str:
     session_id = get_current_session_id()
     if not session_id:
-        raise ValueError("room_open needs a current session to lead the room")
+        raise ValueError("Room tools need a current session")
+    return session_id
+
+
+@tool(require_daemon=True)
+def room_open(
+    title: str,
+    brief: Optional[str] = None,
+    lead_agent: Optional[str] = None,
+    lead_self: bool = False,
+    job_id: Optional[str] = None,
+    max_rounds: Optional[int] = None,
+    notify_when: Optional[list[str]] = None,
+) -> dict:
+    """Open a group-chat room led by a fresh session of lead_agent (default yours) started on brief, or by you with lead_self=True, waking you with a report when it closes, hits max_rounds participant turns between user messages, needs the user or a turn fails (narrow with notify_when: closed, round_cap, attention, turn_failed), and closing it once job_id's acceptance criteria verify."""
+    from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, NOTIFY_EVENTS
+
+    session_id = _caller()
+    if not lead_self and not brief:
+        raise ValueError("A fresh lead needs a brief. Pass brief, or lead the room yourself with lead_self=True")
     session = _call(_session_runner.store.get_session, session_id)
-    rooms = _session_runner.rooms
     room = _call(
-        rooms.create,
+        _session_runner.rooms.create,
         title,
         user_id=session.user_id,
-        lead_session_id=session_id,
+        lead_session_id=session_id if lead_self else None,
+        lead_agent_id=lead_agent or session.agent_id,
         max_rounds=DEFAULT_MAX_ROUNDS if max_rounds is None else max_rounds,
         job_id=job_id,
+        opener_session_id=session_id,
+        brief=brief,
+        notify_when=NOTIFY_EVENTS if notify_when is None else notify_when,
     )
-    return _call(rooms.detail, room)
+    return _status(room)
 
 
 @tool(require_daemon=True)
 def room_invite(agent: str, brief: str, room_id: Optional[str] = None) -> dict:
     """Invite an agent to the room, with a brief summarizing the room so far."""
-    rooms = _session_runner.rooms
-    room = _call(rooms.invite, _lead_room(room_id).id, agent, brief)
-    return _call(rooms.detail, room)
+    return _status(_call(_session_runner.rooms.invite, _lead_room(room_id).id, agent, brief))
 
 
 @tool(require_daemon=True)
 def room_handoff(handoffs: list[dict], mode: str = "sequential", room_id: Optional[str] = None) -> dict:
     """Hand the turn to participants given as [{agent, message}], sequential or parallel, and wake when all reply."""
     room = _lead_room(room_id)
-    return {"room_id": room.id, "queued": _call(_session_runner.rooms.handoff, room.id, handoffs, mode)}
+    _call(_session_runner.rooms.handoff, room.id, handoffs, mode)
+    return _status(_call(_session_runner.rooms.get, room.id))
 
 
 @tool(require_daemon=True)
 def room_close(room_id: Optional[str] = None) -> dict:
-    """Close the room, stopping any running or queued participant turns."""
-    rooms = _session_runner.rooms
-    room = _call(rooms.close, _lead_room(room_id).id, get_current_session_id())
-    return _call(rooms.detail, room)
+    """Close a room you lead or opened, stopping any running or queued participant turns."""
+    return _status(_call(_session_runner.rooms.close_as, _current_room(room_id).id, _caller()))
+
+
+@tool(require_daemon=True)
+def room_post(room_id: str, message: str) -> dict:
+    """Post in a room you opened, waking the participants it @mentions and then its lead, without resetting the room's rounds."""
+    return _status(_call(_session_runner.rooms.post_as_opener, room_id, message, _caller()))
+
+
+@tool(require_daemon=True)
+def room_list(all: bool = False) -> list:
+    """List the status of the open rooms you opened, or of every open room with all=True."""
+    return _call(_session_runner.rooms.list_status, None if all else _caller())
+
+
+@tool(require_daemon=True)
+def room_status(room_id: str) -> dict:
+    """Get a room's status, rounds, participants, last message, attention items and job state, without its transcript."""
+    return _status(_call(_session_runner.rooms.get, room_id))

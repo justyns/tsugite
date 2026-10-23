@@ -332,7 +332,7 @@
         {@const user = e.author === USER_AUTHOR}
         <Msg
           role={user ? 'user' : 'ai'}
-          who={user ? 'you' : label(e.author)}
+          who={user ? 'you' : e.role === 'opener' ? `${label(e.author)} (opener)` : label(e.author)}
           agentColor={user ? undefined : (agentById.get(e.author)?.color ?? null)}
           at={clockTime(e.timestamp)}
         >
