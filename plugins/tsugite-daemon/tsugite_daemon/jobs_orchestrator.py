@@ -302,6 +302,8 @@ class JobsOrchestrator:
         max_attempts: verifier-loop cap. Defaults to 3 when omitted.
         model_ladder: ordered "cheap first" model list; `model` is set to the
             first rung and qualifying failures escalate to the next rung.
+        model: when omitted for an agent executor, the parent session's model
+            override is used.
         """
         worker_agent_file = agent or WORKER_AGENT
 
@@ -334,6 +336,9 @@ class JobsOrchestrator:
             job_kwargs["model_ladder"] = ladder
             job_kwargs["ladder_index"] = 0
             model = ladder[0]
+        elif model is None and executor == "agent":
+            parent = self._get_parent_session(parent_session_id)
+            model = parent.model_override if parent else None
         if max_attempts is not None:
             job_kwargs["max_attempts"] = max_attempts
         if notify_when:

@@ -47,7 +47,7 @@ def spawn_job(
 ) -> dict:
     """Spawn a background Job with an optional verification loop.
 
-    Creates a Job record + worker session pinned to the workspace default model
+    Creates a Job record + worker session pinned to your current model
     (or the supplied `model`). On worker completion, if `acceptance_criteria`
     were given, the orchestrator spawns a verifier sub-agent that judges the
     result against them; on failure the Job loops back up to `max_attempts`
@@ -68,10 +68,11 @@ def spawn_job(
             isolated from the parent checkout; it's pruned on done/cancelled and
             kept on stuck/errored for inspection.
         model: Optional model override for the worker; defaults to the
-            workspace default.
+            spawning session's model.
         verifier_model: Optional separate model for the verifier round. Defaults
-            to `model` (then the workspace default) when unset - handy to pin
-            verification to a cheaper/more-available model than the worker.
+            to the worker's model for agent jobs, else the workspace default.
+            Handy to pin verification to a cheaper/more-available model than
+            the worker.
         model_ladder: Ordered "cheap first" model list, e.g.
             ["claude_code:haiku", "claude_code:opus"]. The Job starts on the
             first entry; when a rung exhausts its verifier attempts or the

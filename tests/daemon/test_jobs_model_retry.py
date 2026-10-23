@@ -188,3 +188,40 @@ async def test_attempts_record_model_used(store, runner, orchestrator):
     )
     attempts = store.get(job.id).attempts
     assert attempts and attempts[0].get("model") == "claude_code:sonnet", "each attempt must record the model it ran on"
+
+
+# ── Part 4: omitted model inherits the parent session's model ──
+
+
+@pytest.mark.asyncio
+async def test_omitted_model_inherits_parent_session_model(store, runner, orchestrator):
+    runner.store.sessions["parent-1"].model_override = "claude_code:opus"
+    job, _worker = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="p", acceptance_criteria=["x"]
+    )
+    assert store.get(job.id).model == "claude_code:opus"
+    assert runner.started[-1].model == "claude_code:opus"
+
+
+@pytest.mark.asyncio
+async def test_explicit_model_beats_parent_session_model(store, runner, orchestrator):
+    runner.store.sessions["parent-1"].model_override = "claude_code:opus"
+    job, _worker = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="p", model="claude_code:haiku"
+    )
+    assert store.get(job.id).model == "claude_code:haiku"
+
+
+@pytest.mark.asyncio
+async def test_ladder_beats_parent_session_model(store, runner, orchestrator):
+    runner.store.sessions["parent-1"].model_override = "claude_code:opus"
+    job, _worker = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="p", model_ladder=["claude_code:haiku", "claude_code:opus"]
+    )
+    assert store.get(job.id).model == "claude_code:haiku"
+
+
+@pytest.mark.asyncio
+async def test_parent_without_model_override_leaves_job_model_unset(store, runner, orchestrator):
+    job, _worker = await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="p")
+    assert store.get(job.id).model is None
