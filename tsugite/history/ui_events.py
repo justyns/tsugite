@@ -31,6 +31,7 @@ _INJECTED_TAGS = (
     "scheduled_message",
     "client_context",
     "session_finished",
+    "room_context",
 )
 _INJECTED_RES = {tag: re.compile(rf"<{tag}(\s[^>]*)?>(.*?)</{tag}>", re.DOTALL) for tag in _INJECTED_TAGS}
 # Single quotes because quoteattr falls back to them when the value holds a `"`.

@@ -362,6 +362,7 @@ class Gateway:
                 self._http_server.session_runner = self._session_runner
                 self._session_runner.set_queued_message_sender(self._http_server.run_queued_message)
             set_session_runner(self._session_runner, asyncio.get_running_loop())
+            self._session_runner.rooms.recover_interrupted()
 
             # Terminal viewer: PTY runtime + persistent session store. Owned by
             # the gateway so it survives across HTTP restarts and shuts down

@@ -168,8 +168,10 @@ class SessionRunner:
         self._adapter = adapter
         self._event_bus = event_bus
         self._notification_channels = notification_channels or {}
-        self.rooms = Rooms(store, event_bus)
+        self.rooms = Rooms(self, event_bus)
         store.set_turn_end_listener(self._on_turn_end)
+        store.set_maybe_idle_listener(self._wake_idle_waiters)
+        self._idle_events: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Event]] = {}
         self._active_tasks: dict[str, asyncio.Task] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._completion_listeners: list[NotifyCallback] = []
@@ -202,6 +204,7 @@ class SessionRunner:
             # A later drain may already hold the slot.
             if self._queue_drain_tasks.get(session_id) is done:
                 del self._queue_drain_tasks[session_id]
+            self._wake_idle_waiters(session_id)
 
         task.add_done_callback(_forget)
 
@@ -274,18 +277,40 @@ class SessionRunner:
         progress._emit("session_start", {"prompt": session.prompt[:200]})
 
         cancel_event = threading.Event()
-        self._cancel_events[session.id] = cancel_event
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(self._run_session(session, progress, cancel_event))
-        self._active_tasks[session.id] = task
+        task = asyncio.get_running_loop().create_task(self._run_session(session, progress, cancel_event))
+        self.register_turn(session.id, task, cancel_event)
+        return session
+
+    def register_turn(self, session_id: str, task: asyncio.Task, cancel_event: threading.Event) -> None:
+        """Make a running turn reachable by `cancel_turn` and `cancel_session`."""
+        self._cancel_events[session_id] = cancel_event
+        self._active_tasks[session_id] = task
 
         def _forget(_task: asyncio.Task) -> None:
-            self._active_tasks.pop(session.id, None)
-            self._cancel_events.pop(session.id, None)
+            if self._active_tasks.get(session_id) is task:
+                del self._active_tasks[session_id]
+                del self._cancel_events[session_id]
 
         task.add_done_callback(_forget)
 
-        return session
+    def is_busy(self, session_id: str) -> bool:
+        """Whether a turn on `session_id` must wait: one is running, or queued chat messages go first."""
+        session = self._store.get_session(session_id)
+        drain = self._queue_drain_tasks.get(session_id)
+        return session.has_live_work or bool(session.queued_messages) or (drain is not None and not drain.done())
+
+    async def wait_idle(self, session_id: str) -> None:
+        while self.is_busy(session_id):
+            if session_id not in self._idle_events:
+                self._idle_events[session_id] = (asyncio.get_running_loop(), asyncio.Event())
+            await self._idle_events[session_id][1].wait()
+
+    def _wake_idle_waiters(self, session_id: str) -> None:
+        """Wake `wait_idle` callers to re-check. Safe from any thread."""
+        waiting = self._idle_events.pop(session_id, None)
+        if waiting is not None:
+            loop, event = waiting
+            loop.call_soon_threadsafe(event.set)
 
     async def _run_session(
         self, session: Session, progress: LoggingProgressHandler, cancel_event: threading.Event
@@ -515,6 +540,7 @@ class SessionRunner:
         self._flush_deferred_deliveries(session_id)
         self._job_turn_end(session_id)
         self.drain_queued_messages(session_id)
+        self.rooms.on_turn_end(session_id)
 
     @staticmethod
     def _job_turn_end(session_id: str) -> None:
@@ -648,13 +674,19 @@ class SessionRunner:
         except Exception as e:
             logger.debug("Auto-title failed for session '%s': %s", session.id, e)
 
-    def cancel_session(self, session_id: str) -> None:
+    def cancel_turn(self, session_id: str) -> bool:
+        """Stop the session's registered turn, if one is running."""
         event = self._cancel_events.get(session_id)
         if event:
             event.set()
         task = self._active_tasks.get(session_id)
-        if task and not task.done():
-            task.cancel()
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
+
+    def cancel_session(self, session_id: str) -> None:
+        self.cancel_turn(session_id)
         self._store.update_session(session_id, status=SessionStatus.CANCELLED.value)
 
     async def reply_or_defer(self, session_id: str, message: str, *, metadata: dict | None = None) -> dict:

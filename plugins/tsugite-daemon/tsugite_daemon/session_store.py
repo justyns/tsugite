@@ -474,6 +474,8 @@ class SessionStore:
 
         # Fired with the session id after each turn ends, outside the lock.
         self._on_turn_end: Optional[Callable[[str], None]] = None
+        # Fired with a session id when it may have stopped being busy, outside the lock.
+        self._on_maybe_idle: Optional[Callable[[str], None]] = None
 
         # Hot caches keyed by session_id, populated lazily on first read and
         # then updated incrementally inside `append_event`. Without these,
@@ -1020,6 +1022,7 @@ class SessionStore:
 
             self._persist(old_session, new_session)
         self._evict_progress_cache(session_id)
+        self._notify_maybe_idle(session_id)
         return new_session
 
     def _live_end_locked(self, session: Session) -> Optional[Session]:
@@ -1184,6 +1187,8 @@ class SessionStore:
             self._persist(session)
         if session.status in FINISHED_STATUSES:
             self._evict_progress_cache(session_id)
+        if "status" in fields:
+            self._notify_maybe_idle(session_id)
         return session
 
     def _evict_progress_cache(self, session_id: str) -> None:
@@ -1323,7 +1328,8 @@ class SessionStore:
                 return False
             session.queued_messages = remaining
             self._persist(session)
-            return True
+        self._notify_maybe_idle(session_id)
+        return True
 
     def sessions_holding_deliveries(self) -> list[str]:
         with self._lock:
@@ -1805,6 +1811,13 @@ class SessionStore:
     def set_turn_end_listener(self, callback: Optional[Callable[[str], None]]) -> None:
         self._on_turn_end = callback
 
+    def set_maybe_idle_listener(self, callback: Optional[Callable[[str], None]]) -> None:
+        self._on_maybe_idle = callback
+
+    def _notify_maybe_idle(self, session_id: str) -> None:
+        if self._on_maybe_idle:
+            self._on_maybe_idle(session_id)
+
     def begin_turn(self, session_id: str) -> None:
         """Durably mark a turn in flight so a daemon death mid-turn can be
         finalized at the next boot."""
@@ -1828,6 +1841,7 @@ class SessionStore:
             if session and session.turn_in_flight:
                 session.turn_in_flight = False
                 self._persist(session)
+        self._notify_maybe_idle(session_id)
         if notify_listeners and self._on_turn_end:
             self._on_turn_end(session_id)
 

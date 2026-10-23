@@ -19,6 +19,10 @@ class Participant:
     session_id: str
     lead: bool = False
     muted: bool = False
+    # Id of the last room event this participant has been shown.
+    cursor: int = 0
+    # The inviter's summary, shown on the participant's first turn.
+    brief: Optional[str] = None
 
 
 @dataclass
@@ -27,6 +31,8 @@ class Room:
     participants: list[Participant] = field(default_factory=list)
     max_rounds: int = DEFAULT_MAX_ROUNDS
     rounds_used: int = 0
+    # True while turns are queued or running. Still True at boot means a restart interrupted them.
+    routing: bool = False
 
     def __post_init__(self):
         if self.max_rounds < 1:

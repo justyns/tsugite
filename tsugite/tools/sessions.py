@@ -337,3 +337,58 @@ def list_agents() -> list:
         {"id": a.id, "name": a.name, "model": a.model, "color": a.color, "is_default": a.is_default}
         for a in _call(_session_runner.store.agents.list)
     ]
+
+
+def _current_room(room_id: Optional[str]):
+    """`room_id`, else the room whose turn is running, else the newest open room of the current session."""
+    from tsugite_daemon.rooms import get_current_room_id
+
+    rooms = _session_runner.rooms
+    room_id = room_id or get_current_room_id()
+    if room_id:
+        return _call(rooms.get, room_id)
+    session_id = get_current_session_id()
+    if not session_id:
+        raise ValueError("No current session - pass room_id")
+    return _call(rooms.room_for_session, session_id)
+
+
+def _lead_room(room_id: Optional[str]):
+    room = _current_room(room_id)
+    _call(_session_runner.rooms.require_lead, room, get_current_session_id())
+    return room
+
+
+@tool(require_daemon=True)
+def room_open(title: str) -> dict:
+    """Open a room for a group chat between agents, with the current session as its lead."""
+    session_id = get_current_session_id()
+    if not session_id:
+        raise ValueError("room_open needs a current session to lead the room")
+    session = _call(_session_runner.store.get_session, session_id)
+    rooms = _session_runner.rooms
+    room = _call(rooms.create, title, user_id=session.user_id, lead_session_id=session_id)
+    return _call(rooms.detail, room)
+
+
+@tool(require_daemon=True)
+def room_invite(agent: str, brief: str, room_id: Optional[str] = None) -> dict:
+    """Invite an agent to the room, with a brief summarizing the room so far."""
+    rooms = _session_runner.rooms
+    room = _call(rooms.invite, _lead_room(room_id).id, agent, brief)
+    return _call(rooms.detail, room)
+
+
+@tool(require_daemon=True)
+def room_handoff(handoffs: list[dict], mode: str = "sequential", room_id: Optional[str] = None) -> dict:
+    """Hand the turn to participants given as [{agent, message}], sequential or parallel, and wake when all reply."""
+    room = _lead_room(room_id)
+    return {"room_id": room.id, "queued": _call(_session_runner.rooms.handoff, room.id, handoffs, mode)}
+
+
+@tool(require_daemon=True)
+def room_close(room_id: Optional[str] = None) -> dict:
+    """Close the room, stopping any running or queued participant turns."""
+    rooms = _session_runner.rooms
+    room = _call(rooms.close, _lead_room(room_id).id, get_current_session_id())
+    return _call(rooms.detail, room)

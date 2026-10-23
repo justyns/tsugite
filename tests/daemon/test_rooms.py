@@ -115,7 +115,9 @@ class TestRoomsApi:
             ("GET", "/api/rooms"),
             ("POST", "/api/rooms"),
             ("GET", "/api/rooms/r1"),
+            ("PATCH", "/api/rooms/r1"),
             ("POST", "/api/rooms/r1/close"),
+            ("POST", "/api/rooms/r1/stop"),
             ("POST", "/api/rooms/r1/participants"),
             ("PATCH", "/api/rooms/r1/participants/homelab"),
             ("DELETE", "/api/rooms/r1/participants/homelab"),
@@ -217,6 +219,24 @@ class TestRoomsApi:
         assert (
             client.post("/api/rooms/nope/participants", headers=auth, json={"agent_id": "research"}).status_code == 404
         )
+
+    def test_invite_stores_the_brief(self, client, auth, room, store):
+        client.post(
+            f"/api/rooms/{room['id']}/participants", headers=auth, json={"agent_id": "research", "brief": "Read up."}
+        )
+
+        assert store.rooms.get(room["id"]).participant("research").brief == "Read up."
+
+    def test_patch_sets_the_round_cap(self, client, auth, room):
+        base = f"/api/rooms/{room['id']}"
+
+        assert client.patch(base, headers=auth, json={"max_rounds": 30}).json()["max_rounds"] == 30
+        assert client.patch(base, headers=auth, json={"max_rounds": 0}).status_code == 400
+        assert client.patch(base, headers=auth, json={}).status_code == 400
+
+    def test_stop(self, client, auth, room):
+        assert client.post(f"/api/rooms/{room['id']}/stop", headers=auth).status_code == 200
+        assert client.post("/api/rooms/nope/stop", headers=auth).status_code == 404
 
     def test_mute_and_unmute(self, client, auth, room, store):
         client.post(f"/api/rooms/{room['id']}/participants", headers=auth, json={"agent_id": "research"})

@@ -1,6 +1,6 @@
 """RoomsMixin: /api/rooms handlers for HTTPServer."""
 
-from typing import Callable
+from typing import Callable, Optional
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -9,6 +9,12 @@ from starlette.routing import Route
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, Room
 from tsugite_daemon.rooms import RoomConflictError, RoomLookupError
+
+
+def _max_rounds_error(value) -> Optional[JSONResponse]:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return JSONResponse({"error": "max_rounds must be an integer"}, status_code=400)
+    return None
 
 
 class RoomsMixin:
@@ -20,7 +26,9 @@ class RoomsMixin:
                 Route("/", self._api_list_rooms, methods=["GET"]),
                 Route("/", self._api_create_room, methods=["POST"]),
                 Route("/{room_id}", self._api_get_room, methods=["GET"]),
+                Route("/{room_id}", self._api_update_room, methods=["PATCH"]),
                 Route("/{room_id}/close", self._api_close_room, methods=["POST"]),
+                Route("/{room_id}/stop", self._api_stop_room, methods=["POST"]),
                 Route("/{room_id}/participants", self._api_invite, methods=["POST"]),
                 Route("/{room_id}/participants/{agent_id}", self._api_set_muted, methods=["PATCH"]),
                 Route("/{room_id}/participants/{agent_id}", self._api_remove_participant, methods=["DELETE"]),
@@ -58,8 +66,8 @@ class RoomsMixin:
         if not isinstance(title, str) or not title.strip():
             return JSONResponse({"error": "title is required"}, status_code=400)
         max_rounds = body.get("max_rounds", DEFAULT_MAX_ROUNDS)
-        if not isinstance(max_rounds, int) or isinstance(max_rounds, bool):
-            return JSONResponse({"error": "max_rounds must be an integer"}, status_code=400)
+        if err := _max_rounds_error(max_rounds):
+            return err
         agents = self.session_runner.store.agents
         return self._room_response(
             lambda: self.session_runner.rooms.create(
@@ -70,6 +78,22 @@ class RoomsMixin:
             ),
             status_code=201,
         )
+
+    async def _api_update_room(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        body = await self._optional_json_body(request)
+        max_rounds = body.get("max_rounds")
+        if err := _max_rounds_error(max_rounds):
+            return err
+        return self._room_response(
+            lambda: self.session_runner.rooms.set_max_rounds(request.path_params["room_id"], max_rounds)
+        )
+
+    async def _api_stop_room(self, request: Request) -> JSONResponse:
+        if err := self._require_auth_and_sessions(request):
+            return err
+        return self._room_response(lambda: self.session_runner.rooms.stop(request.path_params["room_id"]))
 
     async def _api_close_room(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):
@@ -84,7 +108,8 @@ class RoomsMixin:
         if not isinstance(agent_id, str):
             return JSONResponse({"error": "agent_id must be a string"}, status_code=400)
         return self._room_response(
-            lambda: self.session_runner.rooms.invite(request.path_params["room_id"], agent_id), status_code=201
+            lambda: self.session_runner.rooms.invite(request.path_params["room_id"], agent_id, body.get("brief")),
+            status_code=201,
         )
 
     async def _api_set_muted(self, request: Request) -> JSONResponse:
@@ -112,11 +137,7 @@ class RoomsMixin:
         content = body.get("content")
         if not isinstance(content, str) or not content.strip():
             return JSONResponse({"error": "content is required"}, status_code=400)
-        room_id = request.path_params["room_id"]
-        rooms = self.session_runner.rooms
-
-        def post() -> Room:
-            rooms.post_message(room_id, content)
-            return rooms.get(room_id)
-
-        return self._room_response(post, status_code=201)
+        return self._room_response(
+            lambda: self.session_runner.rooms.post_user_message(request.path_params["room_id"], content),
+            status_code=201,
+        )

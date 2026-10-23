@@ -23,6 +23,7 @@ SOURCE_DELIVERY = "delivery"
 SOURCE_ASK = "ask"
 SOURCE_JOB = "job"
 SOURCE_ERROR = "error"
+SOURCE_ROOM = "room"
 
 # Sources the user can dismiss. An ask clears when it is answered and a parked
 # job when it resumes, so neither belongs here.

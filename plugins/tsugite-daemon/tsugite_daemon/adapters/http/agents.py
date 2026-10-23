@@ -1160,4 +1160,6 @@ class AgentsMixin:
             chat.cancel_event.set()
             chat.task.cancel()
             return JSONResponse({"status": "cancelled"})
+        if self.session_runner and self.session_runner.cancel_turn(session_id):
+            return JSONResponse({"status": "cancelled"})
         return JSONResponse({"error": "no active chat"}, status_code=404)
