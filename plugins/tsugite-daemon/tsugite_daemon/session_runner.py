@@ -169,6 +169,7 @@ class SessionRunner:
         self._event_bus = event_bus
         self._notification_channels = notification_channels or {}
         self.rooms = Rooms(self, event_bus)
+        store.attention.on_open = self.rooms.on_attention_opened
         store.set_turn_end_listener(self._on_turn_end)
         store.set_maybe_idle_listener(self._wake_idle_waiters)
         self._idle_events: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Event]] = {}
@@ -598,7 +599,7 @@ class SessionRunner:
     def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:
         session_id = self.live_id(session_id)
         session = self._store.clear_attention(session_id, delivery_id)
-        self._emit_attention(session_id)
+        self._attention_cleared(session_id)
         if self._event_bus:
             self._event_bus.emit(
                 "session_update",
@@ -625,11 +626,19 @@ class SessionRunner:
 
     def clear_attention_ref(self, source: str, ref_id: str) -> None:
         for record in self._store.attention.clear_ref(source, ref_id):
-            self._emit_attention(record.owner_id)
+            self._attention_cleared(record.owner_id)
 
     def clear_attention_source_except(self, source: str, live_ref_ids: set[str]) -> None:
         for record in self._store.attention.clear_source_except(source, live_ref_ids):
-            self._emit_attention(record.owner_id)
+            self._attention_cleared(record.owner_id)
+
+    def _attention_cleared(self, session_id: str) -> None:
+        """Opening reaches rooms through the attention store's `on_open`, so only clearing reports here."""
+        try:
+            self.rooms.on_attention_changed(session_id)
+        except Exception:
+            logger.exception("Failed to update rooms for session '%s' attention", session_id)
+        self._emit_attention(session_id)
 
     def _emit_attention(self, session_id: str) -> None:
         if not self._event_bus:

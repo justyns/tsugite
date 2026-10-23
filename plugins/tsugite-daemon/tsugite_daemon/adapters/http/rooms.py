@@ -17,6 +17,12 @@ def _max_rounds_error(value) -> Optional[JSONResponse]:
     return None
 
 
+def _job_id_error(value) -> Optional[JSONResponse]:
+    if value is not None and not isinstance(value, str):
+        return JSONResponse({"error": "job_id must be a string"}, status_code=400)
+    return None
+
+
 class RoomsMixin:
     def _rooms_routes(self) -> list:
         return mounted_api_routes(
@@ -68,6 +74,9 @@ class RoomsMixin:
         max_rounds = body.get("max_rounds", DEFAULT_MAX_ROUNDS)
         if err := _max_rounds_error(max_rounds):
             return err
+        job_id = body.get("job_id")
+        if err := _job_id_error(job_id):
+            return err
         agents = self.session_runner.store.agents
         return self._room_response(
             lambda: self.session_runner.rooms.create(
@@ -75,6 +84,7 @@ class RoomsMixin:
                 user_id=self.adapter.resolve_http_user(body.get("user_id", "web-anonymous")),
                 lead_agent_id=agents.effective_id(body.get("lead_agent_id")),
                 max_rounds=max_rounds,
+                job_id=job_id,
             ),
             status_code=201,
         )
@@ -83,12 +93,22 @@ class RoomsMixin:
         if err := self._require_auth_and_sessions(request):
             return err
         body = await self._optional_json_body(request)
-        max_rounds = body.get("max_rounds")
-        if err := _max_rounds_error(max_rounds):
+        room_id = request.path_params["room_id"]
+        rooms = self.session_runner.rooms
+        if "max_rounds" not in body and "job_id" not in body:
+            return JSONResponse({"error": "max_rounds or job_id is required"}, status_code=400)
+        if "max_rounds" in body and (err := _max_rounds_error(body["max_rounds"])):
             return err
-        return self._room_response(
-            lambda: self.session_runner.rooms.set_max_rounds(request.path_params["room_id"], max_rounds)
-        )
+        if "job_id" in body and (err := _job_id_error(body["job_id"])):
+            return err
+
+        def update() -> Room:
+            if "job_id" in body:
+                rooms.check_job_link(room_id, body["job_id"])
+            room = rooms.set_max_rounds(room_id, body["max_rounds"]) if "max_rounds" in body else None
+            return rooms.link_job(room_id, body["job_id"]) if "job_id" in body else room
+
+        return self._room_response(update)
 
     async def _api_stop_room(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_sessions(request):

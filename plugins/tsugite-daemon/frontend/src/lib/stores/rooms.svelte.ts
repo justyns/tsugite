@@ -1,6 +1,7 @@
 /** Rooms store (GET /api/rooms). A room's id is also its transcript session's id. */
 import { api } from '$lib/api/client';
 import type { SurfaceRef } from '$lib/shell/mux/layout';
+import type { AttentionRecord } from './sessions.svelte';
 
 export interface RoomParticipant {
   agent_id: string;
@@ -18,6 +19,11 @@ export interface Room {
   created_at: string;
   /** The transcript session's status. A finished status means the room is closed. */
   status: string;
+  /** The room closes when this Job's acceptance criteria verify. */
+  job_id: string | null;
+  /** Open attention records on the room and its participant sessions. */
+  needs_attention: boolean;
+  attention: AttentionRecord[];
 }
 
 function roomPath(id: string, rest = ''): string {

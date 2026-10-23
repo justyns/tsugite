@@ -10,10 +10,14 @@ from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
 from tsugite_daemon.agent_store import Agent
 from tsugite_daemon.auth import TokenStore
 from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
+from tsugite_daemon.job_store import Job, JobStore
+from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
 from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, Participant, Room, RoomStore
 from tsugite_daemon.session_runner import SessionRunner
 from tsugite_daemon.session_store import SessionSource, SessionStatus, SessionStore, room_transcript_error
 from tsugite_daemon.webhook_store import WebhookStore
+
+from tsugite.tools import jobs as jobs_tools
 
 
 def _workspace(path, *agent_names):
@@ -395,3 +399,65 @@ class TestRoomTranscriptIsNotAChat:
         with pytest.raises(ValueError, match=re.escape(room_transcript_error(room["id"]))):
             await adapter.handle_message("u", "hi", context)
         assert store.get_session(room["id"]).turn_in_flight is False
+
+
+@pytest.fixture
+def job(server, tmp_path, monkeypatch):
+    orchestrator = JobsOrchestrator(JobStore(tmp_path / "jobs.json"), server.session_runner)
+    monkeypatch.setattr(jobs_tools, "_jobs_orchestrator", orchestrator)
+    return orchestrator._jobs.add(Job(id="", parent_session_id="s1", prompt="free up disk"))
+
+
+class TestJobLink:
+    def test_create_links_a_job(self, client, auth, job):
+        resp = client.post("/api/rooms", headers=auth, json={"title": "PROJ-1", "job_id": job.id})
+
+        assert resp.status_code == 201
+        assert resp.json()["job_id"] == job.id
+        assert resp.json()["needs_attention"] is False
+
+    @pytest.mark.parametrize("job_id,status", [("nope", 400), (7, 400)])
+    def test_create_rejects_a_bad_job(self, client, auth, job, job_id, status):
+        resp = client.post("/api/rooms", headers=auth, json={"title": "PROJ-1", "job_id": job_id})
+
+        assert resp.status_code == status
+        assert client.get("/api/rooms", headers=auth).json()["rooms"] == []
+
+    def test_patch_links_a_job(self, client, auth, room, job):
+        resp = client.patch(f"/api/rooms/{room['id']}", headers=auth, json={"job_id": job.id})
+
+        assert resp.json()["job_id"] == job.id
+
+    def test_patch_rejects_an_unknown_job(self, client, auth, room, job):
+        resp = client.patch(f"/api/rooms/{room['id']}", headers=auth, json={"job_id": "nope"})
+
+        assert resp.status_code == 400
+        assert resp.json()["error"] == "Unknown job: nope"
+
+    def test_patch_rejects_a_finished_job(self, client, auth, room, job, server):
+        job_store = jobs_tools._jobs_orchestrator._jobs
+        job_store.update_state(job.id, "cancelled")
+
+        resp = client.patch(f"/api/rooms/{room['id']}", headers=auth, json={"job_id": job.id})
+
+        assert resp.status_code == 409
+
+    def test_patch_unlinks_a_job(self, client, auth, room, job):
+        path = f"/api/rooms/{room['id']}"
+        client.patch(path, headers=auth, json={"job_id": job.id})
+
+        assert client.patch(path, headers=auth, json={"job_id": None}).json()["job_id"] is None
+
+    def test_patch_needs_a_field(self, client, auth, room, job):
+        resp = client.patch(f"/api/rooms/{room['id']}", headers=auth, json={})
+
+        assert (resp.status_code, resp.json()["error"]) == (400, "max_rounds or job_id is required")
+
+    def test_patch_changes_nothing_when_one_field_is_bad(self, client, auth, room, job):
+        path = f"/api/rooms/{room['id']}"
+
+        assert client.patch(path, headers=auth, json={"max_rounds": 30, "job_id": "nope"}).status_code == 400
+        assert client.patch(path, headers=auth, json={"max_rounds": 0, "job_id": job.id}).status_code == 400
+
+        after = client.get(path, headers=auth).json()
+        assert (after["max_rounds"], after["job_id"]) == (room["max_rounds"], None)

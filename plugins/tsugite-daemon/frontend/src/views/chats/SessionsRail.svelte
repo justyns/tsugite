@@ -442,6 +442,7 @@
           when={formatWhen(room.created_at)}
           description="{n} agent{n === 1 ? '' : 's'}"
           state={busyRooms.has(room.id) ? 'running' : 'idle'}
+          needsYou={room.needs_attention}
           sourceType="room"
           isActive={room.id === selectedRoomId}
           onSelect={() => onOpenRoom?.(room.id)}

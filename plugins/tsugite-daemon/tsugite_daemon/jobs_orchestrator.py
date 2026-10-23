@@ -255,7 +255,7 @@ class JobsOrchestrator:
             fresh = self._jobs.get(job.id)
             if self._claim_teardown(fresh, JobState.ERRORED):
                 self._schedule_executor_teardown(fresh, prune_worktree=False, run_teardown=True)
-            self._emit_job_event(fresh)
+            self._emit_job_event(fresh, recovered=True)
             recovered += 1
         if recovered:
             logger.info("Recovered %d orphaned job(s) from previous daemon run", recovered)
@@ -1757,7 +1757,7 @@ class JobsOrchestrator:
             return None
         return store.agents.working_dir(self._get_parent_session(parent_session_id))
 
-    def _emit_job_event(self, job: Optional[Job]) -> None:
+    def _emit_job_event(self, job: Optional[Job], *, recovered: bool = False) -> None:
         if job is None:
             return
         self._sync_attention(job)
@@ -1780,6 +1780,10 @@ class JobsOrchestrator:
             )
         except Exception:
             logger.exception("Failed to persist job_status event for job '%s'", job.id)
+        try:
+            self._runner.rooms.on_job_event(job, recovered=recovered)
+        except Exception:
+            logger.exception("Failed to mirror job '%s' into rooms", job.id)
         if self._event_bus:
             try:
                 self._event_bus.emit("job_update", payload)

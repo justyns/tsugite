@@ -83,6 +83,7 @@ class HTTPServer(
         self.job_store = None  # Set by Gateway alongside jobs_orchestrator
         self.terminal_store = None  # Set by Gateway when terminal viewer is wired
         self.pty_manager = None  # Set by Gateway alongside terminal_store
+        self.terminal_state_change_callback = None  # Set by Gateway alongside terminal_store
         self.push_store = None  # Set by Gateway if web-push is configured
         self.vapid_public_key = None  # Set by Gateway if web-push is configured
         self.plugin_ui_surfaces: list[dict] = []  # Filled by Gateway from the plugin UI surface registry

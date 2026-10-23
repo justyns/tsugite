@@ -7,6 +7,8 @@ import { api } from '$lib/api/client';
 import { rooms, type Room } from '$lib/stores/rooms.svelte';
 import { agents } from '$lib/stores/agents.svelte';
 import { sessions } from '$lib/stores/sessions.svelte';
+import { jobs } from '$lib/stores/jobs.svelte';
+import { jobDrawerRequest } from '../jobs/jobDrawerSignal.svelte';
 import { toasts } from '$lib/components/feedback/toast-store.svelte';
 import { agent, sessionRow } from './__fixtures__/sessionRow';
 import '../../styles/tokens.css';
@@ -29,6 +31,9 @@ const room: Room = {
   ],
   max_rounds: 12,
   rounds_used: 3,
+  job_id: null,
+  needs_attention: false,
+  attention: [],
   created_at: '2026-10-22T00:00:00Z',
   status: 'active',
 };
@@ -294,4 +299,75 @@ test('a used-up round count offers to raise the cap without a card', async () =>
   await rooms.load();
   render(RoomSurface, { params: { roomId: 'r1' } });
   await expect.element(page.getByRole('button', { name: '+12 rounds' })).toBeInTheDocument();
+});
+
+test('the header shows the linked job, and cards link to the job or session they reference', async () => {
+  const job = { job_id: 'job-1', state: 'verifying', prompt: 'free up NAS disk' };
+  const card = (id: number, extra: object) => ({ id, type: 'room_card', timestamp: at, ...extra });
+  stubApi((path) =>
+    path === '/api/jobs/job-1'
+      ? (job as never)
+      : {
+          events: [
+            card(5, { kind: 'job_failed', job_id: 'job-1', state: 'stuck', text: 'Job stuck.' }),
+            card(6, { kind: 'job_done', job_id: 'job-1', state: 'done', text: 'Job done.' }),
+            card(7, {
+              kind: 'attention',
+              session_id: 'p-ops',
+              agent_id: 'ops',
+              text: 'Needs you (ask).',
+            }),
+          ],
+        },
+  );
+  await rooms.load();
+  rooms.list = [{ ...room, job_id: 'job-1' }];
+  await agents.load();
+  render(RoomSurface, { params: { roomId: 'r1' } });
+
+  try {
+    const header = page.getByRole('link', { name: /free up NAS disk/ });
+    await expect.element(header).toHaveAttribute('href', '#jobs');
+    await expect.element(header).toHaveTextContent('verifying');
+    await header.click();
+    expect(jobDrawerRequest.pending).toBe('job-1');
+    jobDrawerRequest.consume();
+    const done = page.getByRole('link', { name: 'Job done.' });
+    await expect.element(done).toHaveAttribute('href', '#jobs');
+    expect(done.element().closest('.sys')!.classList).toContain('is-ok');
+    await done.click();
+    expect(jobDrawerRequest.pending).toBe('job-1');
+    const failed = page.getByRole('link', { name: 'Job stuck.' });
+    expect(failed.element().closest('.sys')!.classList).toContain('is-err');
+    await expect
+      .element(page.getByRole('link', { name: 'homelab: Needs you (ask).' }))
+      .toHaveAttribute('href', '#chats?sessionId=p-ops');
+  } finally {
+    jobs.jobs = [];
+    jobDrawerRequest.consume();
+    window.location.hash = '';
+  }
+});
+
+test('a failed job fetch is not retried on every room update', async () => {
+  const get = stubApi((path) =>
+    path === '/api/jobs/gone' ? Promise.reject(new Error('404')) : { events },
+  );
+  await rooms.load();
+  rooms.list = [{ ...room, job_id: 'gone' }];
+  await agents.load();
+  render(RoomSurface, { params: { roomId: 'r1' } });
+  await expect.element(page.getByText('all disks healthy')).toBeInTheDocument();
+
+  rooms.applySessionUpdate({
+    action: 'room_updated',
+    room: { ...room, job_id: 'gone', rounds_used: 4 },
+  });
+  rooms.applySessionUpdate({
+    action: 'room_updated',
+    room: { ...room, job_id: 'gone', rounds_used: 5 },
+  });
+  await expect.element(page.getByText('rounds 5/12')).toBeInTheDocument();
+
+  expect(get.mock.calls.filter(([path]) => path === '/api/jobs/gone')).toHaveLength(1);
 });

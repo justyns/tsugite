@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from uuid import uuid4
 
 from tsugite.core.record_store import SqliteCollectionStorage
@@ -57,6 +57,8 @@ class AttentionStore:
         self._storage = SqliteCollectionStorage.for_state_file(path, "attention")
         self._records: dict[str, AttentionRecord] = {}
         self._lock = threading.RLock()
+        # Called with each new record, outside the lock.
+        self.on_open: Optional[Callable[[AttentionRecord], None]] = None
         self._load()
 
     def open(
@@ -82,7 +84,12 @@ class AttentionStore:
             )
             self._records[record.id] = record
             self._storage.upsert(record.id, asdict(record))
-            return record
+        if self.on_open:
+            try:
+                self.on_open(record)
+            except Exception:
+                logger.exception("Attention listener failed for record '%s'", record.id)
+        return record
 
     def clear_ref(self, source: str, ref_id: str) -> list[AttentionRecord]:
         with self._lock:

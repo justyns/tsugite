@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from tsugite_daemon.adapters.base import BaseAdapter, resolve_agent_path
 from tsugite_daemon.config import DaemonConfig, load_daemon_config
@@ -120,6 +120,20 @@ async def _send_webhook(config, message: str) -> dict:
         resp.raise_for_status()
 
     return {"status": "sent", "status_code": resp.status_code}
+
+
+def terminal_state_callback(event_bus, terminal_store, rooms) -> Callable[[str, str], None]:
+    """The on_state_change callback for every PTY terminal: broadcast the state and mirror it into rooms."""
+
+    def on_state_change(terminal_id: str, state: str) -> None:
+        if event_bus:
+            event_bus.emit("terminal_state", {"terminal_id": terminal_id, "state": state})
+        try:
+            rooms.on_terminal_state(terminal_id, state, terminal_store.get(terminal_id).parent_session_id)
+        except Exception:
+            logger.exception("Failed to mirror terminal '%s' into rooms", terminal_id)
+
+    return on_state_change
 
 
 def check_sandbox_prerequisites(config: DaemonConfig) -> None:
@@ -362,7 +376,6 @@ class Gateway:
                 self._http_server.session_runner = self._session_runner
                 self._session_runner.set_queued_message_sender(self._http_server.run_queued_message)
             set_session_runner(self._session_runner, asyncio.get_running_loop())
-            self._session_runner.rooms.recover_interrupted()
 
             # Terminal viewer: PTY runtime + persistent session store. Owned by
             # the gateway so it survives across HTTP restarts and shuts down
@@ -373,12 +386,13 @@ class Gateway:
 
             self._terminal_store = TerminalSessionStore(self.config.state_dir / "terminal_sessions.json")
             self._pty_manager = PtyManager()
-            terminal_state_change_cb = lambda tid, state: (  # noqa: E731
-                event_bus.emit("terminal_state", {"terminal_id": tid, "state": state}) if event_bus else None
+            terminal_state_change_cb = terminal_state_callback(
+                event_bus, self._terminal_store, self._session_runner.rooms
             )
             if self._http_server:
                 self._http_server.terminal_store = self._terminal_store
                 self._http_server.pty_manager = self._pty_manager
+                self._http_server.terminal_state_change_callback = terminal_state_change_cb
             # Expose to the adapter so the /run slash command can reach them.
             http_adapter.terminal_store = self._terminal_store
             http_adapter.pty_manager = self._pty_manager
@@ -405,6 +419,7 @@ class Gateway:
             session_store.attention.clear_stale_asks()
             self._jobs_orchestrator.reconcile_attention()
             set_jobs_orchestrator(self._jobs_orchestrator, asyncio.get_running_loop())
+            self._session_runner.rooms.recover_interrupted()
             if self._http_server:
                 self._http_server.jobs_orchestrator = self._jobs_orchestrator
                 self._http_server.job_store = self._job_store

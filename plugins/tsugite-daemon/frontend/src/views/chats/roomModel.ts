@@ -1,4 +1,5 @@
 import type { Room, RoomParticipant } from '$lib/stores/rooms.svelte';
+import { buildHash } from '$lib/router.svelte';
 import type { SessionRow } from '$lib/stores/sessions.svelte';
 import { liveSessionId } from './sessionModel';
 
@@ -51,6 +52,14 @@ export interface RoomCard {
   kind: string;
   text: string;
   agent_id?: string;
+  job_id?: string;
+  session_id?: string;
+}
+
+export function cardHref(card: RoomCard): string | null {
+  if (card.job_id) return '#jobs';
+  if (card.session_id) return buildHash('chats', { sessionId: card.session_id });
+  return null;
 }
 
 export type RoomEvent = RoomMessage | RoomMember | RoomCard;

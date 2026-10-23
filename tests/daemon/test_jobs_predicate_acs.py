@@ -40,6 +40,7 @@ class FakeRunner:
 
     def __init__(self):
         self.store = FakeStore()
+        self.rooms = MagicMock()
         self.started: list[Session] = []
         self.attention: list[tuple[str, dict]] = []
         self.cancelled: list[str] = []

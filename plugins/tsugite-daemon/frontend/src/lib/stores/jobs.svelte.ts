@@ -137,6 +137,12 @@ export class JobsStore {
     );
   }
 
+  /** Load one job into the list. */
+  async fetch(jobId: string): Promise<void> {
+    const job = await api.get<Job>(`/api/jobs/${encodeURIComponent(jobId)}`);
+    this.applyJobUpdate(job as unknown as Record<string, unknown>);
+  }
+
   async markDone(jobId: string, reason?: string): Promise<void> {
     await api.post(
       `/api/jobs/${encodeURIComponent(jobId)}/mark-done`,

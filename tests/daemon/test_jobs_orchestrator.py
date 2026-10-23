@@ -56,6 +56,7 @@ class FakeRunner:
 
     def __init__(self, tmp_path: Path):
         self.store = FakeStore(tmp_path)
+        self.rooms = MagicMock()
         self._completion_listeners: list = []
         self.attention: list[tuple[str, dict]] = []
         self.started: list[Session] = []

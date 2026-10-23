@@ -50,10 +50,6 @@ class TerminalsMixin:
             data.setdefault("truncated", False)
         return data
 
-    def _emit_terminal_state(self, terminal_id: str, new_state: str) -> None:
-        """on_state_change callback for spawn_terminal: broadcast a state change."""
-        self.event_bus.emit("terminal_state", {"terminal_id": terminal_id, "state": new_state})
-
     async def _api_list_terminals(self, request: Request) -> JSONResponse:
         if err := self._require_auth_and_terminals(request):
             return err
@@ -103,7 +99,7 @@ class TerminalsMixin:
                 cwd=cwd,
                 env=env,
                 parent_session_id=parent_session_id,
-                on_state_change=self._emit_terminal_state,
+                on_state_change=self.terminal_state_change_callback,
                 cols=cols,
                 rows=rows,
             )
@@ -193,7 +189,7 @@ class TerminalsMixin:
                 cmd=old.cmd,
                 cwd=old.cwd,
                 parent_session_id=old.parent_session_id,
-                on_state_change=self._emit_terminal_state,
+                on_state_change=self.terminal_state_change_callback,
             )
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)

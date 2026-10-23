@@ -1,15 +1,22 @@
 import asyncio
 import contextvars
+import json
 
 import pytest
 from tsugite_daemon.agent_store import Agent
-from tsugite_daemon.attention_store import SOURCE_ROOM
-from tsugite_daemon.session_runner import SessionRunner, get_current_session_id
+from tsugite_daemon.attention_store import SOURCE_ASK, SOURCE_ROOM
+from tsugite_daemon.gateway import terminal_state_callback
+from tsugite_daemon.job_store import Job, JobState, JobStore
+from tsugite_daemon.jobs_orchestrator import JobsOrchestrator
+from tsugite_daemon.rooms import RoomConflictError
+from tsugite_daemon.session_runner import SessionRunner, get_current_session_id, report_send_failure
 from tsugite_daemon.session_store import Session, SessionStatus, SessionStore
+from tsugite_pty.terminal_store import TerminalSession, TerminalSessionStore
 
 from tsugite.cancellation import is_cancelled
 from tsugite.history.ui_events import split_injected_context
 from tsugite.interaction import NonInteractiveBackend, get_interaction_backend, set_interaction_backend
+from tsugite.tools import jobs as jobs_tools
 from tsugite.tools import sessions as sessions_tools
 
 
@@ -692,3 +699,353 @@ class TestRoomToolGates:
             sessions_tools.room_handoff([{"agent": "homelab", "message": "x"}], room_id=room.id)
         with pytest.raises(ValueError, match="closed"):
             rooms.post_user_message(room.id, "late")
+
+
+_CRITERIA = ["The NAS has 20% free space", "No data was deleted"]
+
+
+@pytest.fixture
+def orchestrator(tmp_path, runner, rooms, monkeypatch):
+    orchestrator = JobsOrchestrator(JobStore(tmp_path / "jobs.json"), runner)
+    monkeypatch.setattr(jobs_tools, "_jobs_orchestrator", orchestrator)
+    return orchestrator
+
+
+def _job(orchestrator, parent_session_id, **fields):
+    job = orchestrator._jobs.add(
+        Job(id="", parent_session_id=parent_session_id, prompt="free up disk", acceptance_criteria=_CRITERIA, **fields)
+    )
+    orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    orchestrator._jobs.update_state(job.id, "verifying")
+    return orchestrator.get_job(job.id)
+
+
+def _verdict(passed: bool) -> str:
+    return json.dumps({"ac_results": [{"ac_text": c, "pass": passed, "reason": "checked"} for c in _CRITERIA]})
+
+
+def _cards(store, room_id, kind=None):
+    return [e for e in store.read_events(room_id) if e["type"] == "room_card" and (kind is None or e["kind"] == kind)]
+
+
+class TestLinkJob:
+    def test_unknown_job_is_rejected(self, rooms, store, lead_chat, orchestrator):
+        with pytest.raises(ValueError, match="Unknown job: nope"):
+            rooms.create("PROJ-1", user_id="u", lead_session_id=lead_chat.id, job_id="nope")
+        with pytest.raises(ValueError, match="Unknown job: nope"):
+            rooms.link_job(rooms.create("PROJ-1", user_id="u", lead_session_id=lead_chat.id).id, "nope")
+
+        assert all(r.job_id is None for r in store.rooms.list())
+
+    @pytest.mark.asyncio
+    async def test_a_finished_job_cannot_be_linked(self, rooms, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id)
+        orchestrator._finalize(job, JobState.CANCELLED)
+
+        with pytest.raises(RoomConflictError, match="cancelled"):
+            rooms.link_job(room.id, job.id)
+        with pytest.raises(RoomConflictError):
+            rooms.create("PROJ-2", user_id="u", lead_agent_id="research", job_id=job.id)
+
+    @pytest.mark.asyncio
+    async def test_room_open_tool_links_a_job(self, runner, store, lead_chat, orchestrator, monkeypatch):
+        job = _job(orchestrator, lead_chat.id)
+        monkeypatch.setattr(sessions_tools, "_session_runner", runner)
+        monkeypatch.setattr(sessions_tools, "_call", lambda fn, *a, **kw: fn(*a, **kw))
+        monkeypatch.setattr(sessions_tools, "get_current_session_id", lambda: lead_chat.id)
+
+        result = sessions_tools.room_open("PROJ-1", job_id=job.id)
+
+        assert result["job_id"] == job.id
+        assert store.rooms.get(result["id"]).job_id == job.id
+
+    @pytest.mark.asyncio
+    async def test_context_shows_the_job_criteria_and_state(self, rooms, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+        room = rooms.get(room.id)
+
+        context, _cursor = rooms._render_context(room, room.participant("homelab"))
+
+        assert f'<job id="{job.id}" state="verifying">' in context
+        assert all(c in context for c in _CRITERIA)
+
+
+class TestJobVerification:
+    @pytest.mark.asyncio
+    async def test_verified_job_posts_a_done_card_and_closes_the_room(
+        self, rooms, store, room, lead_chat, orchestrator
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+
+        [card] = _cards(store, room.id, "job_done")
+        assert card["job_id"] == job.id
+        assert store.get_session(room.id).status == SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_failed_verification_posts_a_card_and_wakes_the_lead(
+        self, rooms, store, adapter, room, lead_chat, orchestrator
+    ):
+        job = _job(orchestrator, lead_chat.id, max_attempts=1)
+        rooms.link_job(room.id, job.id)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(False))
+        await _settle(rooms, room.id)
+
+        [card] = _cards(store, room.id, "job_failed")
+        assert (card["job_id"], card["state"]) == (job.id, "stuck")
+        assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
+        [(agent, prompt)] = adapter.calls
+        assert agent == "main"
+        assert job.id in prompt and 'state="stuck"' in _context(prompt)
+        assert "Verifier failed after max attempts" in prompt
+
+    @pytest.mark.asyncio
+    async def test_a_re_emitted_job_state_posts_nothing_new(self, rooms, store, adapter, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id, max_attempts=1)
+        rooms.link_job(room.id, job.id)
+        await orchestrator._handle_verifier_complete(job, _verdict(False))
+        await _settle(rooms, room.id)
+
+        orchestrator._emit_job_event(orchestrator.get_job(job.id))
+        await _settle(rooms, room.id)
+
+        assert len(_cards(store, room.id, "job_failed")) == 1
+        assert len(adapter.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_participant_jobs_are_mirrored_as_status_cards(self, rooms, store, room, orchestrator):
+        homelab = rooms.get(room.id).participant("homelab")
+
+        job = _job(orchestrator, homelab.session_id)
+
+        assert [(c["kind"], c["job_id"], c["state"], c["agent_id"]) for c in _cards(store, room.id)[-1:]] == [
+            ("job_status", job.id, "running", "homelab")
+        ]
+        assert "prompt" not in _cards(store, room.id)[-1]
+
+        orchestrator._emit_job_event(orchestrator.get_job(job.id))
+        orchestrator._emit_job_event(orchestrator.get_job(job.id))
+
+        assert [c["state"] for c in _cards(store, room.id, "job_status")] == ["running", "verifying"]
+
+    @pytest.mark.asyncio
+    async def test_a_participant_job_finishing_leaves_an_unlinked_room_open(self, rooms, store, room, orchestrator):
+        homelab = rooms.get(room.id).participant("homelab")
+        job = _job(orchestrator, homelab.session_id)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+
+        assert _cards(store, room.id)[-1]["kind"] == "job_status"
+        assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("state", ["errored", "cancelled"])
+    async def test_errored_and_cancelled_jobs_count_as_failures(
+        self, rooms, store, adapter, room, lead_chat, orchestrator, state
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+
+        orchestrator._finalize(job, JobState(state))
+        await _settle(rooms, room.id)
+
+        assert [c["state"] for c in _cards(store, room.id, "job_failed")] == [state]
+        assert [agent for agent, _ in adapter.calls] == ["main"]
+
+    @pytest.mark.asyncio
+    async def test_an_unlinked_job_no_longer_closes_the_room(self, rooms, store, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+        rooms.link_job(room.id, None)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+
+        assert _cards(store, room.id, "job_done") == []
+        assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_a_job_linked_to_two_rooms_closes_both(self, rooms, store, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id)
+        other = rooms.create("PROJ-2", user_id="u", lead_agent_id="research", job_id=job.id)
+        rooms.link_job(room.id, job.id)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+
+        assert {store.get_session(r).status for r in (room.id, other.id)} == {SessionStatus.COMPLETED.value}
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_job_wakes_the_lead_without_blaming_the_criteria(
+        self, rooms, store, adapter, room, lead_chat, orchestrator
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+
+        await orchestrator.cancel_job(job.id, reason="no longer needed")
+        await _settle(rooms, room.id)
+
+        [(_agent, prompt)] = adapter.calls
+        assert "is cancelled" in prompt and "no longer needed" in prompt
+        assert "did not verify" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_boot_recovery_posts_a_restart_card_and_leaves_the_lead_asleep(
+        self, rooms, store, adapter, room, lead_chat, orchestrator
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+
+        orchestrator.recover_orphaned_jobs()
+        await _settle(rooms, room.id)
+
+        assert _cards(store, room.id, "job_failed") == []
+        [card] = _cards(store, room.id, "interrupted")
+        assert card["job_id"] == job.id and "restarted" in card["text"]
+        assert adapter.calls == []
+
+    @pytest.mark.asyncio
+    async def test_job_done_lets_the_running_turn_post_before_closing(
+        self, rooms, store, adapter, room, lead_chat, orchestrator
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def hold():
+            started.set()
+            await release.wait()
+
+        adapter.hooks[lead_chat.id] = hold
+        rooms.post_user_message(room.id, "status?")
+        await started.wait()
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        assert store.get_session(room.id).status != SessionStatus.COMPLETED.value
+        with pytest.raises(RoomConflictError):
+            rooms.post_user_message(room.id, "more?")
+
+        release.set()
+        await _settle(rooms, room.id)
+
+        assert _messages(store, room.id)[-1] == ("main", "main replies")
+        assert store.get_session(room.id).status == SessionStatus.COMPLETED.value
+
+    @pytest.mark.asyncio
+    async def test_a_failing_rooms_hook_leaves_the_job_transition_intact(
+        self, rooms, store, room, lead_chat, orchestrator, monkeypatch
+    ):
+        job = _job(orchestrator, lead_chat.id)
+        frames = []
+        orchestrator._event_bus = type("Bus", (), {"emit": lambda _self, kind, data: frames.append(kind)})()
+        monkeypatch.setattr(rooms, "on_job_event", lambda *a, **kw: 1 / 0)
+
+        await orchestrator._handle_verifier_complete(job, _verdict(True))
+
+        assert orchestrator.get_job(job.id).state == "done"
+        assert "job_update" in frames
+
+
+class TestAttention:
+    def test_participant_attention_is_mirrored_and_counted(self, rooms, runner, store, bus, room):
+        homelab = rooms.get(room.id).participant("homelab")
+
+        runner.open_attention(homelab.session_id, source=SOURCE_ASK, ref_id="ask-1", kind="ask")
+
+        [card] = _cards(store, room.id, "attention")
+        [record] = store.attention.open_records(homelab.session_id)
+        assert (card["attention_id"], card["session_id"], card["agent_id"]) == (
+            record.id,
+            homelab.session_id,
+            "homelab",
+        )
+        detail = rooms.detail(rooms.get(room.id))
+        assert detail["needs_attention"] is True
+        assert [r["id"] for r in detail["attention"]] == [record.id]
+        assert bus.room_updates()[-1]["needs_attention"] is True
+
+        runner.clear_attention_ref(SOURCE_ASK, "ask-1")
+
+        assert rooms.detail(rooms.get(room.id))["attention"] == []
+        assert bus.room_updates()[-1]["needs_attention"] is False
+
+    def test_send_failures_and_needs_ack_deliveries_are_mirrored(self, rooms, store, bus, room):
+        homelab = rooms.get(room.id).participant("homelab")
+
+        report_send_failure(store, bus, homelab.session_id, ref_id="send-1", error="boom")
+        store.record_delivery(
+            homelab.session_id,
+            {"type": "delivery", "delivery_id": "d-1", "kind": "needs_ack", "message": "approve?"},
+            needs_ack=True,
+        )
+
+        cards = _cards(store, room.id, "attention")
+        assert [c["attention_kind"] for c in cards] == ["send_failed", "needs_ack"]
+        assert "approve?" not in str(cards)
+        assert len(bus.room_updates()[-1]["attention"]) == 2
+
+    def test_a_failing_rooms_hook_leaves_attention_intact(self, rooms, runner, store, room, monkeypatch):
+        homelab = rooms.get(room.id).participant("homelab")
+        monkeypatch.setattr(rooms, "on_attention_opened", lambda record: 1 / 0)
+        monkeypatch.setattr(rooms, "on_attention_changed", lambda session_id: 1 / 0)
+        store.attention.on_open = rooms.on_attention_opened
+
+        runner.open_attention(homelab.session_id, source=SOURCE_ASK, ref_id="ask-9", kind="ask")
+        assert len(store.attention.open_records(homelab.session_id)) == 1
+
+        runner.clear_attention_ref(SOURCE_ASK, "ask-9")
+        assert store.attention.open_records(homelab.session_id) == []
+
+    def test_attention_outside_rooms_posts_nothing(self, rooms, runner, store, room, lead_chat):
+        other = store.create_session(type(lead_chat)(id="", user_id="u"))
+
+        runner.open_attention(other.id, source=SOURCE_ASK, ref_id="ask-2", kind="ask")
+
+        assert _cards(store, room.id, "attention") == []
+
+
+class TestTerminals:
+    def test_participant_terminal_state_is_mirrored(self, rooms, store, bus, room, tmp_path):
+        homelab = rooms.get(room.id).participant("homelab")
+
+        terminals = TerminalSessionStore(tmp_path / "terminals.json")
+        terminals.add(TerminalSession(id="term-1", cmd="make", cwd=str(tmp_path), parent_session_id=homelab.session_id))
+
+        terminal_state_callback(bus, terminals, rooms)("term-1", "failed")
+
+        assert ("terminal_state", {"terminal_id": "term-1", "state": "failed"}) in bus.frames
+
+        [card] = _cards(store, room.id, "terminal")
+        assert (card["terminal_id"], card["state"], card["agent_id"]) == ("term-1", "failed", "homelab")
+
+
+class TestAttentionBroadcasts:
+    def test_runner_open_broadcasts_the_room_once(self, rooms, runner, bus, room):
+        homelab = rooms.get(room.id).participant("homelab")
+        before = len(bus.room_updates())
+
+        runner.open_attention(homelab.session_id, source=SOURCE_ASK, ref_id="ask-1", kind="ask")
+
+        assert len(bus.room_updates()) == before + 1
+
+    def test_needs_ack_delivery_broadcasts_the_room_once(self, rooms, runner, bus, room):
+        homelab = rooms.get(room.id).participant("homelab")
+        before = len(bus.room_updates())
+
+        runner.deliver_to_session(homelab.session_id, "approve?", source="test", kind="needs_ack")
+
+        assert len(bus.room_updates()) == before + 1
+
+
+class TestBootRecoveryWithJobs:
+    @pytest.mark.asyncio
+    async def test_open_room_whose_job_is_done_closes_at_boot(self, rooms, store, room, lead_chat, orchestrator):
+        job = _job(orchestrator, lead_chat.id)
+        rooms.link_job(room.id, job.id)
+        orchestrator._jobs.update_state(job.id, "done")
+
+        rooms.recover_interrupted()
+
+        assert store.get_session(room.id).status == SessionStatus.COMPLETED.value

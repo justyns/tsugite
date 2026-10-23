@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Room } from '$lib/stores/rooms.svelte';
 import { sessionRow } from './__fixtures__/sessionRow';
-import { messageTargets, pendingCapCard, roomBusy, type RoomEvent } from './roomModel';
+import {
+  cardHref,
+  messageTargets,
+  pendingCapCard,
+  roomBusy,
+  type RoomCard,
+  type RoomEvent,
+} from './roomModel';
 
 function room(extra: Partial<Room> = {}): Room {
   return {
@@ -14,6 +21,9 @@ function room(extra: Partial<Room> = {}): Room {
     ],
     max_rounds: 12,
     rounds_used: 0,
+    job_id: null,
+    needs_attention: false,
+    attention: [],
     created_at: '2026-10-22T00:00:00Z',
     status: 'active',
     ...extra,
@@ -75,5 +85,24 @@ describe('pendingCapCard', () => {
 
   it('clears once a message follows the card', () => {
     expect(pendingCapCard([cap, msg(4)])).toBeUndefined();
+  });
+});
+
+describe('cardHref', () => {
+  const card = (extra: Partial<RoomCard>): RoomCard => ({
+    type: 'room_card',
+    id: 1,
+    timestamp: '2026-10-22T00:00:00Z',
+    kind: 'job_status',
+    text: 'Job running.',
+    ...extra,
+  });
+
+  it('links a job card to the jobs board and a session card to its chat', () => {
+    expect(cardHref(card({ job_id: 'job-1', agent_id: 'ops' }))).toBe('#jobs');
+    expect(cardHref(card({ kind: 'attention', session_id: 's-ops' }))).toBe(
+      '#chats?sessionId=s-ops',
+    );
+    expect(cardHref(card({ kind: 'round_cap' }))).toBeNull();
   });
 });

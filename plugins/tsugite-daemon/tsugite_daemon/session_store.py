@@ -1352,15 +1352,17 @@ class SessionStore:
                         "timestamp": event.get("timestamp") or "",
                     }
                 )
-                self.attention.open(
-                    owner_kind=OWNER_SESSION,
-                    owner_id=session_id,
-                    source=SOURCE_DELIVERY,
-                    ref_id=event["delivery_id"],
-                    kind="needs_ack",
-                )
             session.last_active = datetime.now(timezone.utc).isoformat()
             self._persist(session)
+        # Outside the lock: attention listeners read sessions.
+        if needs_ack:
+            self.attention.open(
+                owner_kind=OWNER_SESSION,
+                owner_id=session_id,
+                source=SOURCE_DELIVERY,
+                ref_id=event["delivery_id"],
+                kind="needs_ack",
+            )
         return session
 
     def clear_attention(self, session_id: str, delivery_id: Optional[str] = None) -> Session:

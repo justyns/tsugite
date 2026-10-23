@@ -751,6 +751,9 @@ const roomOf = (id: string, title: string, extra: Partial<Room> = {}): Room => (
   ],
   max_rounds: 12,
   rounds_used: 0,
+  job_id: null,
+  needs_attention: false,
+  attention: [],
   created_at: '2026-10-22T00:00:00Z',
   status: 'active',
   ...extra,
@@ -841,4 +844,18 @@ test('a participant session sits under its agent with a badge that opens the roo
   await page.getByRole('button', { name: 'Open room PROJ-123' }).click();
   expect(onOpenRoom).toHaveBeenCalledWith('r1');
   expect(onSelect).not.toHaveBeenCalled();
+});
+
+test('a room whose sessions need you is marked needs-you', async () => {
+  render(SessionsRail, {
+    ...base,
+    rows: [row('a1', { title: 'chat' })],
+    rooms: [roomOf('r1', 'PROJ-123', { needs_attention: true }), roomOf('r2', 'quiet room')],
+  });
+  await expect
+    .element(page.getByRole('button', { name: /^PROJ-123, .*awaiting your input/ }))
+    .toBeInTheDocument();
+  await expect
+    .element(page.getByRole('button', { name: /^quiet room, .*awaiting your input/ }))
+    .not.toBeInTheDocument();
 });

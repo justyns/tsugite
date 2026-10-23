@@ -360,14 +360,14 @@ def _lead_room(room_id: Optional[str]):
 
 
 @tool(require_daemon=True)
-def room_open(title: str) -> dict:
-    """Open a room for a group chat between agents, with the current session as its lead."""
+def room_open(title: str, job_id: Optional[str] = None) -> dict:
+    """Open a room for a group chat between agents, led by the current session and closed once job_id's acceptance criteria verify."""
     session_id = get_current_session_id()
     if not session_id:
         raise ValueError("room_open needs a current session to lead the room")
     session = _call(_session_runner.store.get_session, session_id)
     rooms = _session_runner.rooms
-    room = _call(rooms.create, title, user_id=session.user_id, lead_session_id=session_id)
+    room = _call(rooms.create, title, user_id=session.user_id, lead_session_id=session_id, job_id=job_id)
     return _call(rooms.detail, room)
 
 

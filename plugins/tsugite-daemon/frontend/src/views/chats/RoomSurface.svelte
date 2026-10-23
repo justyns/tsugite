@@ -5,6 +5,8 @@
   import { rooms, type RoomParticipant } from '$lib/stores/rooms.svelte';
   import { agents } from '$lib/stores/agents.svelte';
   import { sessions } from '$lib/stores/sessions.svelte';
+  import { jobs } from '$lib/stores/jobs.svelte';
+  import { jobDrawerRequest } from '../jobs/jobDrawerSignal.svelte';
   import { conn } from '$lib/stores/conn.svelte';
   import { buildHash } from '$lib/router.svelte';
   import { clockTime } from '$lib/relativeTime';
@@ -16,6 +18,7 @@
   import Spin from '$lib/components/feedback/Spin.svelte';
   import AgentDot from '$lib/components/rows/AgentDot.svelte';
   import PhoneBack from '$lib/shell/PhoneBack.svelte';
+  import JobPill from '../jobs/JobPill.svelte';
   import { sessionStateMeta } from '$lib/components/rows/rowState';
   import { goBackToWorkspaceList } from '$lib/shell/phoneNav';
   import type { RefItem } from '$lib/components/composer/types';
@@ -24,6 +27,7 @@
   import { isFinishedSession } from './sessionModel';
   import {
     USER_AUTHOR,
+    cardHref,
     messageTargets,
     participantBusy,
     pendingCapCard,
@@ -43,6 +47,7 @@
   const agentById = $derived(new Map(agents.list.map((a) => [a.id, a])));
   const open = $derived(room !== undefined && !isFinishedSession(room));
   const busy = $derived(room !== undefined && roomBusy(room, sessions.ordered));
+  const job = $derived(room?.job_id ? jobs.jobs.find((j) => j.job_id === room.job_id) : undefined);
 
   let events = $state<RoomEvent[]>([]);
   let hasEarlier = $state(false);
@@ -156,6 +161,12 @@
     if (reconnected) untrack(() => void (events.length ? resync() : openRoom()));
   });
 
+  const jobId = $derived(room?.job_id ?? null);
+  $effect(() => {
+    const id = jobId;
+    if (id && !untrack(() => job)) jobs.fetch(id).catch(() => {});
+  });
+
   $effect(() => {
     if (!rooms.loaded) rooms.load().catch(() => {});
     void agents.load();
@@ -213,6 +224,12 @@
     <PhoneBack onBack={() => goBackToWorkspaceList('chats')} label="Back to chats" />
     <h2>{room?.title ?? 'Room'}</h2>
     {#if room && !open}<span class="closed">closed</span>{/if}
+    {#if job}
+      <a class="job" href="#jobs" onclick={() => jobDrawerRequest.request(job.job_id)}>
+        <span class="job-title">{job.prompt}</span>
+        <JobPill st={job.state} />
+      </a>
+    {/if}
     <span class="grow"></span>
     {#if room}
       <span class="rounds" class:is-cap={atCap}>
@@ -295,13 +312,18 @@
       {:else if e.type === 'room_member'}
         <p class="sys">{label(e.agent_id)} {MEMBER_VERB[e.action]}</p>
       {:else}
+        {@const href = cardHref(e)}
+        {@const text = e.agent_id ? `${label(e.agent_id)}: ${e.text}` : e.text}
         <p
           class="sys"
-          class:is-err={e.kind === 'turn_failed'}
+          class:is-ok={e.kind === 'job_done'}
+          class:is-err={e.kind === 'turn_failed' || e.kind === 'job_failed'}
           class:is-warn={e.kind === 'round_cap' || e.kind === 'interrupted'}
           class:is-quiet={e.kind === 'turn_skipped'}
         >
-          {e.agent_id ? `${label(e.agent_id)}: ${e.text}` : e.text}
+          {#if href}<a {href} onclick={() => e.job_id && jobDrawerRequest.request(e.job_id)}
+              >{text}</a
+            >{:else}{text}{/if}
         </p>
       {/if}
     {/each}
@@ -467,6 +489,31 @@
   }
   .sys.is-quiet {
     opacity: 0.7;
+  }
+  .sys.is-ok {
+    color: var(--st-ok);
+  }
+  .sys a {
+    color: inherit;
+  }
+  .job {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--tx2);
+    font: 500 var(--fs-xs) var(--font-ui);
+    text-decoration: none;
+  }
+  .job:hover {
+    color: var(--tx0);
+  }
+  .job-title {
+    min-width: 0;
+    max-width: 24ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .worked {
     justify-self: start;

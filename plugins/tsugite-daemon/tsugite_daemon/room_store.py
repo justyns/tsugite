@@ -31,6 +31,8 @@ class Room:
     participants: list[Participant] = field(default_factory=list)
     max_rounds: int = DEFAULT_MAX_ROUNDS
     rounds_used: int = 0
+    # The room closes when this Job's acceptance criteria verify.
+    job_id: Optional[str] = None
     # True while turns are queued or running. Still True at boot means a restart interrupted them.
     routing: bool = False
 
