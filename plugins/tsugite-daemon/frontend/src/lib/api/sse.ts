@@ -34,8 +34,6 @@ export interface SSEHandle {
   /** Force an immediate reconnect on the SAME instance (PWA resume) - keeps
    *  epoch/lastSeq so missed events replay instead of being lost. */
   kick(): void;
-  pause(): void;
-  resume(): void;
 }
 
 // ---------- pure helpers (unit-tested) ----------
@@ -91,8 +89,6 @@ export function reconcileHello(
 }
 
 // ---------- streaming ----------
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Decode a fetch SSE body into parsed JSON events. `onActivity` fires on any
  *  bytes (keepalive comments included) so the watchdog can tell live from dead. */
@@ -161,8 +157,9 @@ export function connectEvents(
   onStatus?: (connected: boolean) => void,
 ): SSEHandle {
   let running = true;
-  let paused = false;
   let backoff = 1000;
+  let kicked = false;
+  let wake: (() => void) | null = null;
   let controller: AbortController | null = null;
   let epoch: string | null = null;
   let lastSeq = 0;
@@ -172,15 +169,12 @@ export function connectEvents(
   // nothing for ~3x that is a zombie (laptop wake without a TCP reset) - abort it
   // so the loop reconnects with replay.
   const watchdog = setInterval(() => {
-    if (running && !paused && controller && Date.now() - lastActivity > 45000) controller.abort();
+    if (running && controller && Date.now() - lastActivity > 45000) controller.abort();
   }, 10000);
 
   async function connect() {
     while (running) {
-      if (paused) {
-        await sleep(200);
-        continue;
-      }
+      kicked = false;
       controller = new AbortController();
       lastActivity = Date.now();
       try {
@@ -223,8 +217,17 @@ export function connectEvents(
         if (!running) return;
       }
       onStatus?.(false);
-      await sleep(backoff);
+      if (kicked) continue;
+      const delay = backoff;
       backoff = Math.min(backoff * 2, 30000);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      wake = null;
     }
   }
 
@@ -234,18 +237,13 @@ export function connectEvents(
       running = false;
       clearInterval(watchdog);
       controller?.abort();
+      wake?.();
     },
     kick() {
       backoff = 1000;
+      kicked = true;
       controller?.abort();
-    },
-    pause() {
-      paused = true;
-      controller?.abort();
-    },
-    resume() {
-      paused = false;
-      backoff = 1000;
+      wake?.();
     },
   };
 }

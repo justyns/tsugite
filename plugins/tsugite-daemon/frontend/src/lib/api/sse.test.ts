@@ -161,3 +161,104 @@ describe('connectEvents watchdog', () => {
     handle.close();
   });
 });
+
+describe('connectEvents reconnect wake', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function liveStream(signal: AbortSignal): Response {
+    return {
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => ({
+          read: () =>
+            new Promise<never>((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(new Error('aborted')));
+            }),
+        }),
+      },
+    } as unknown as Response;
+  }
+
+  function stubFailingFetch() {
+    const fetchMock = vi.fn((_path: string, _init: RequestInit) =>
+      Promise.reject(new Error('down')),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('reconnects on the backoff schedule without a kick', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubFailingFetch();
+    const handle = connectEvents(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    for (const [wait, calls] of [
+      [1000, 2],
+      [2000, 3],
+      [4000, 4],
+      [8000, 5],
+      [16000, 6],
+      [30000, 7],
+      [30000, 8],
+    ] as const) {
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(fetchMock).toHaveBeenCalledTimes(calls - 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(calls);
+    }
+
+    handle.close();
+  });
+
+  it('kick() during a long backoff sleep reconnects at once', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubFailingFetch();
+    const handle = connectEvents(() => {});
+    await vi.advanceTimersByTimeAsync(31_000);
+    const calls = fetchMock.mock.calls.length;
+
+    handle.kick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(calls + 1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(calls + 2);
+
+    handle.close();
+  });
+
+  it('kick() on a healthy stream reconnects without waiting out a backoff', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_path: string, init: RequestInit) =>
+      Promise.resolve(liveStream(init.signal as AbortSignal)),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const handle = connectEvents(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    handle.kick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    handle.close();
+  });
+
+  it('close() during a backoff sleep issues no further fetch', async () => {
+    vi.useFakeTimers();
+    const fetchMock = stubFailingFetch();
+    const handle = connectEvents(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    handle.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
