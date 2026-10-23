@@ -44,3 +44,15 @@ When sandboxing is on, the things the agent runs stay inside the sandbox:
 - pty sessions
 
 The scheduling tools (`schedule_create`, `background_task`, `schedule_run`, and friends) are refused while sandboxed, because they set up work that runs later, outside the sandboxed turn.  Run the daemon unsandboxed if it needs to schedule.
+
+## Behind a TLS-inspecting proxy
+
+Corporate proxies (Netskope, Zscaler) re-sign TLS with their own CA, so the CA has to be visible to every client in the sandbox.
+
+These CA variables are forwarded when set: `SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`. The file each one points at is readable inside the sandbox, as is each directory listed in `SSL_CERT_DIR`.
+
+Node reads only `NODE_EXTRA_CA_CERTS`, so set it to the corporate CA file on the host that runs the daemon.
+
+In the Docker image, put the CA as a `.crt` file in `docker/ca-certificates/` before `docker build`. Both build stages add it to the system store and point their Node or Python clients at that bundle.
+
+On macOS the CA lives in the System Keychain, which neither Python nor Node reads, and a container cannot see it. Export it to PEM and save it as `docker/ca-certificates/corp.crt`.

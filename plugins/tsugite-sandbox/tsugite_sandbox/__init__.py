@@ -11,6 +11,15 @@ import hozo
 
 from tsugite.core.sandbox import SandboxConfig
 
+_CA_ENV = (
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+)
+
 # Added to Hozo's own env allowlist (TERM, LANG, LC_*, TZ). Secrets reach sandboxed code
 # only through the masked get_secret tool.
 _ENV_ALLOWLIST = (
@@ -21,12 +30,7 @@ _ENV_ALLOWLIST = (
     "PYTHONIOENCODING",
     "PYTHONDONTWRITEBYTECODE",
     "VIRTUAL_ENV",
-    "SSL_CERT_FILE",
-    "SSL_CERT_DIR",
-    "REQUESTS_CA_BUNDLE",
-    "NODE_EXTRA_CA_CERTS",
-    "CURL_CA_BUNDLE",
-    "GIT_SSL_CAINFO",
+    *_CA_ENV,
 )
 
 
@@ -50,12 +54,14 @@ class HozoSandbox:
 
         # sys.path covers editable installs, whose .pth files point at the source tree.
         # A read-only grant of the workspace would replace its writable bind.
+        ca = [p for name in _CA_ENV for p in os.environ.get(name, "").split(":")]
         read = _existing(
             [
                 sys.prefix,
                 sys.base_prefix,
                 *_interpreter_link_prefixes(sys.executable),
                 *sys.path,
+                *ca,
                 *self.config.extra_ro_binds,
             ]
         )

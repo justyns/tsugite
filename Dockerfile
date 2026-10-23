@@ -3,6 +3,11 @@
 FROM node:26-slim AS webui
 COPY plugins/tsugite-daemon/frontend /frontend
 WORKDIR /frontend
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY docker/ca-certificates/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 RUN npm ci && npm run build
 # vite emits to ../tsugite_daemon/web relative to the frontend dir -> /tsugite_daemon/web
 
@@ -14,6 +19,11 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+COPY docker/ca-certificates/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 COPY . /app
 COPY --from=webui /tsugite_daemon/web /app/plugins/tsugite-daemon/tsugite_daemon/web

@@ -196,3 +196,6 @@ plugins/tsugite-daemon/tsugite_daemon/web/
 # Per-job git worktrees provisioned by the daemon.
 .tsugite-jobs/
 /packaging/runtime/.cache/
+# Corporate CA certs dropped in for docker build.
+/docker/ca-certificates/*
+!/docker/ca-certificates/.gitkeep

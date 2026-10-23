@@ -78,6 +78,17 @@ class TestBinds:
         assert str(gone) not in _flag(cmd, "--allow-read")
         assert _flag(cmd, "--allow-write") is None
 
+    def test_ca_files_from_env_are_readable(self, tmp_path, monkeypatch):
+        ca = tmp_path / "corp.pem"
+        ca.write_text("")
+        certs = tmp_path / "certs"
+        certs.mkdir()
+        monkeypatch.setenv("NODE_EXTRA_CA_CERTS", str(ca))
+        monkeypatch.setenv("SSL_CERT_DIR", f"{tmp_path / 'gone'}:{certs}")
+        read = _flag(_build(), "--allow-read")
+        assert {str(ca), str(certs)} <= set(read)
+        assert str(tmp_path / "gone") not in read
+
 
 def test_pass_env_names_are_allowed_through():
     names = _flag(_build(SandboxConfig(pass_env=["MY_VAR"])), "--allow-env")
