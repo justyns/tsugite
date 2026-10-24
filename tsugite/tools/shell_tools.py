@@ -3,6 +3,7 @@
 Tools defined as shell commands, so a custom tool needs no Python.
 """
 
+import shlex
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -78,7 +79,8 @@ def interpolate_command(command_template: str, params: Dict[str, Any]) -> str:
         params: Dictionary of parameter values
 
     Returns:
-        Interpolated command string
+        Interpolated command string. String values are shell-quoted; a
+        template must not wrap a placeholder in quotes.
 
     Example:
         >>> interpolate_command("rg {pattern} {path}", {"pattern": "test", "path": "."})
@@ -98,9 +100,10 @@ def interpolate_command(command_template: str, params: Dict[str, Any]) -> str:
             else:
                 interpolated = interpolated.replace(f"{{{key}}}", "")
 
-    # Then handle regular parameter substitution
+    # Then handle regular parameter substitution, quoting strings so values stay single arguments
+    quoted = {key: shlex.quote(value) if isinstance(value, str) else value for key, value in params.items()}
     try:
-        interpolated = interpolated.format(**params)
+        interpolated = interpolated.format(**quoted)
     except KeyError as e:
         raise ValueError(f"Missing required parameter in command template: {e}")
 

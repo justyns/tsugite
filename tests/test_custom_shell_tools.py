@@ -100,6 +100,25 @@ class TestCommandInterpolation:
         result = interpolate_command(template, params)
         assert result == "grep  test"  # Flag replaced with empty string
 
+    def test_string_values_are_shell_quoted(self):
+        """A string value stays one argument and cannot inject shell syntax."""
+        result = interpolate_command("grep {pattern} .", {"pattern": "x; echo PWNED"})
+        assert result == "grep 'x; echo PWNED' ."
+
+    def test_quoted_value_runs_as_one_argument(self):
+        """Run through a real shell, the payload is echoed back, not executed."""
+        output = subprocess.run(
+            interpolate_command("printf %s {text}", {"text": "a b; echo PWNED $(id) `id`"}),
+            shell=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert output == "a b; echo PWNED $(id) `id`"
+
+    def test_non_string_values_are_not_quoted(self):
+        result = interpolate_command("head -n {count} {path}", {"count": 5, "path": "a b"})
+        assert result == "head -n 5 'a b'"
+
     def test_missing_required_parameter(self):
         """Test error when required parameter is missing."""
         template = "echo {message} {recipient}"
@@ -159,7 +178,7 @@ class TestShellToolCreation:
 
         # Verify command was built correctly
         call_args = mock_run.call_args
-        assert "find /tmp -name *.py" in call_args[0][0]
+        assert "find /tmp -name '*.py'" in call_args[0][0]
 
     @patch("subprocess.run")
     def test_tool_with_defaults(self, mock_run):

@@ -365,7 +365,7 @@ If available via custom tools configuration, consider using:
 tools:
   - name: ast_search
     description: Search code using AST patterns
-    command: "ast-grep -p '{pattern}' {path}"
+    command: "ast-grep -p {pattern} {path}"
     parameters:
       pattern: {required: true}
       path: "."
