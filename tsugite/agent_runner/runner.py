@@ -155,31 +155,6 @@ def _setup_event_context(event_bus: Optional["EventBus"]) -> None:
         set_ui_context(event_bus=event_bus)
 
 
-def get_default_instructions() -> str:
-    """Get minimal default instructions. Detailed guidance comes from skills.
-
-    Returns:
-        Default instructions for code execution mode
-    """
-    base = "You accomplish tasks by writing Python code.\n\n"
-
-    output = (
-        "## Output\n\n"
-        "- `print(x)` - See in next turn (internal)\n"
-        "- `send_message(msg)` - Show user progress\n"
-        "- `final_answer(msg)` - Final response (stops execution)\n\n"
-    )
-
-    rules = (
-        "## Rules\n\n"
-        "1. Always respond with Python code blocks\n"
-        "2. Call `final_answer()` when done\n"
-        "3. Variables persist between turns\n"
-    )
-
-    return base + output + rules
-
-
 def _render_args(value: Any, renderer: AgentRenderer, context: Dict[str, Any]) -> Any:
     """Recursively render Jinja in string leaves of a tool args structure.
 

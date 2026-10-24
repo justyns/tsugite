@@ -1188,7 +1188,7 @@ class TsugiteAgent:
             {"role": "assistant", "content": "previous response 1"},
             {"role": "user", "content": task},
             {"role": "assistant", "content": "```python-exec\\n...```"},
-            {"role": "user", "content": <loaded_skill>...</loaded_skill>\\n<observation>..."},
+            {"role": "user", "content": <skill_content>...</skill_content>\\n<observation>..."},
             ...
         ]
         """

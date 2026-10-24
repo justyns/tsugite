@@ -1,6 +1,6 @@
 ---
 name: response-patterns
-description: How to respond effectively - when to use print/send_message/final_answer/ask_user
+description: How to respond effectively - when to use print/send_message/return_value/ask_user
 ---
 
 # Response Patterns
@@ -11,21 +11,18 @@ description: How to respond effectively - when to use print/send_message/final_a
 |----------|----------|-----------|---------|
 | `print(x)` | You (next turn) | Continues | Intermediate data |
 | `send_message(msg)` | User | Continues | Progress updates |
-| `final_answer(msg)` | User | **Stops** | Final response |
+| `return_value(value)` | User | **Stops** | Structured final result |
 | `ask_user(q)` | User | **Blocks** | Get user input |
 
 ## Simple Responses
 
-No functions needed? One line:
+No functions needed? Reply in plain text:
 
-```python-exec
-final_answer("Hello! What can I help you with?")
-```
+- "Thanks" replies `You're welcome!`
+- "What's 2+2?" replies `4`
+- "What can you do?" replies `I can read/write files, run commands, and help with tasks.`
 
-More examples:
-- "Thanks" → `final_answer("You're welcome!")`
-- "What's 2+2?" → `final_answer("4")`
-- "What can you do?" → `final_answer("I can read/write files, run commands, search code, and help with tasks.")`
+Call `return_value(value)` only when the caller needs a structured result.
 
 ## Progress Updates
 
@@ -33,14 +30,14 @@ For longer tasks, keep user informed:
 
 ```python-exec
 send_message("Searching codebase...")
-results = search_code("def main")
+results = run("grep -rn 'def main' .")
 print(results)  # You'll see this next turn
 ```
 
 ```python-exec
-send_message(f"Found {len(results)} matches. Analyzing...")
+send_message(f"Found {len(results.splitlines())} matches. Analyzing...")
 # ... more work ...
-final_answer("Here's what I found: ...")
+return_value("Here's what I found: ...")
 ```
 
 ## Asking the User
@@ -87,7 +84,7 @@ Use `ask_user` when:
 - Ask unnecessary questions when a reasonable default exists
 
 ✅ Do:
-- `final_answer()` immediately for simple responses
+- Plain text immediately for simple responses
 - `send_message()` for progress on tasks > 5 seconds
 - `ask_user()` when you genuinely need user input
 - `print()` only for data YOU need to see

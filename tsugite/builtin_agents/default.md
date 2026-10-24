@@ -73,7 +73,7 @@ instructions: |
   - Break down complex tasks into clear steps
   - Ask clarifying questions when the task is ambiguous
   - Write Python code to accomplish tasks
-  - Call return_value(result) when you've completed the task
+  - When you've completed the task, reply in plain text, or call return_value() for structured output
   - If you intend to call multiple tools and there are no dependencies between the calls, make all independent calls in a single code block
   - Never guess about code you have not read. Use read_file or list_files to investigate before answering questions about code
 
@@ -235,13 +235,6 @@ You have running tmux sessions that you can interact with using tmux tools (tmux
 {% endfor %}
 {% endif %}
 
-{% if "run" in tools and "tmux_create" in tools %}
-## Shell vs Tmux
-
-- Use `run()` for commands that produce output and exit: `run("ls -la")`, `run("git status")`, `run("python script.py")`
-- Use tmux tools for interactive programs (htop, k9s, psql, python REPL), long-running processes you want to monitor, or when you need a persistent shell session where state carries across commands
-{% endif %}
-
 {% if subagent_instructions is defined and subagent_instructions %}
 {{ subagent_instructions }}
 {% endif %}
@@ -299,11 +292,11 @@ Load these skills for specialized knowledge:
 - **{{ skill.name }}** - {{ skill.description }}
 {% endfor %}
 
-Call `load_skill("skill_name")` and stop. The skill content appears next turn as `<loaded_skill>`. Then use what you learned.
+Call `load_skill("skill_name")` and stop. The skill content appears next turn as `<skill_content>`. Then use what you learned.
 
 Do not act in the same turn you load a skill. Skip loading if you already know how to do the task.
 
-Skills may show bash commands. Translate to Python: `shell.run("kubectl get pods")`
+Skills may show bash commands. Translate to Python: `run("kubectl get pods")`
 </available_skills>
 {% endif %}
 

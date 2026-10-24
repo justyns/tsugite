@@ -434,7 +434,6 @@ class AgentPreparer:
             _combine_instructions,
             execute_exec_directives,
             execute_tool_directives,
-            get_default_instructions,
         )
         from tsugite.core.agent import build_system_prompt
         from tsugite.renderer import AgentRenderer
@@ -506,12 +505,16 @@ class AgentPreparer:
                     skip_reason=skip_reason,
                 )
 
+        tools = self._expand_tools(agent_config, full_context, interactive_mode)
+        # Templates test membership against the names actually installed, not the
+        # frontmatter specs (`"@secrets"`).
+        full_context["tools"] = [t.name for t in tools]
+
         try:
             rendered_prompt = renderer.render(modified_content, full_context)
         except Exception as e:
             raise RuntimeError(f"Template rendering failed: {e}") from e
 
-        base_instructions = get_default_instructions()
         agent_instructions = getattr(agent_config, "instructions", "")
 
         # Render agent instructions as Jinja2 template
@@ -521,9 +524,7 @@ class AgentPreparer:
             except Exception as e:
                 raise RuntimeError(f"Failed to render agent instructions: {e}") from e
 
-        combined_instructions = _combine_instructions(base_instructions, agent_instructions)
-
-        tools = self._expand_tools(agent_config, full_context, interactive_mode)
+        combined_instructions = _combine_instructions(agent_instructions)
 
         skill_load = self._load_skills(agent_config, prompt, full_context, _skill_manager, event_bus)
         skills, expiring_skills = skill_load.skills, skill_load.expiring

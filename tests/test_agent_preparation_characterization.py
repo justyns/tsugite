@@ -57,7 +57,7 @@ def test_minimal_agent_prepares_a_complete_bundle():
     assert prepared.rendered_prompt == "Hello do the thing"
     assert prepared.user_message == prepared.rendered_prompt
     assert prepared.system_message
-    assert prepared.combined_instructions
+    assert prepared.combined_instructions == ""
     assert prepared.tools == []
     assert prepared.attachments == []
     assert prepared.skipped is False

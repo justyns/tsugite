@@ -141,7 +141,6 @@ class TestContextVariablesInTemplates:
         # Mock the steps that require external resources
         with (
             patch("tsugite.utils.is_interactive", return_value=False),
-            patch("tsugite.agent_runner.runner.get_default_instructions", return_value=""),
             patch("tsugite.agent_runner.runner._combine_instructions", return_value=""),
             patch("tsugite.tools.expand_tool_specs", return_value=[]),
             patch("tsugite.core.tools.create_tool_from_tsugite"),
@@ -177,7 +176,6 @@ class TestContextVariablesInTemplates:
 
         with (
             patch("tsugite.utils.is_interactive", return_value=False),
-            patch("tsugite.agent_runner.runner.get_default_instructions", return_value=""),
             patch("tsugite.agent_runner.runner._combine_instructions", return_value=""),
             patch("tsugite.tools.expand_tool_specs", return_value=[]),
             patch("tsugite.core.tools.create_tool_from_tsugite"),
@@ -224,7 +222,6 @@ class TestEnvironmentBlockInSystemPrompt:
 
         with (
             patch("tsugite.utils.is_interactive", return_value=False),
-            patch("tsugite.agent_runner.runner.get_default_instructions", return_value=""),
             patch("tsugite.agent_runner.runner._combine_instructions", return_value=""),
             patch("tsugite.tools.expand_tool_specs", return_value=[]),
             patch("tsugite.core.tools.create_tool_from_tsugite"),
@@ -271,7 +268,6 @@ class TestEnvironmentBlockInSystemPrompt:
 
         with (
             patch("tsugite.utils.is_interactive", return_value=False),
-            patch("tsugite.agent_runner.runner.get_default_instructions", return_value=""),
             patch("tsugite.agent_runner.runner._combine_instructions", return_value=""),
             patch("tsugite.tools.expand_tool_specs", return_value=[]),
             patch("tsugite.core.tools.create_tool_from_tsugite"),
