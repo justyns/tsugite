@@ -31,7 +31,7 @@ export function isMarkdown(name: string): boolean {
 }
 
 function markdownPaths(entries: WorkspaceEntry[]): string[] {
-  return entries.filter((e) => !e.is_dir && isMarkdown(e.name)).map((e) => e.path);
+  return entries.filter((e) => !e.is_dir && !e.ignored && isMarkdown(e.name)).map((e) => e.path);
 }
 
 // The files store exposes only a stateful single-slot `list()`; loading the wiki
@@ -40,11 +40,12 @@ function markdownPaths(entries: WorkspaceEntry[]): string[] {
 // the full flat listing in one response (it sets `truncated` if it hit its cap).
 async function readDir(
   subdir: string,
-  opts: { recursive?: boolean } = {},
+  opts: { recursive?: boolean; includeIgnored?: boolean } = {},
 ): Promise<{ entries: WorkspaceEntry[]; workspaceDir: string; truncated: boolean }> {
   const params = new URLSearchParams();
   if (subdir) params.set('subdir', subdir);
   if (opts.recursive) params.set('recursive', '1');
+  if (opts.includeIgnored) params.set('include_ignored', '1');
   const qs = params.toString();
   const res = await api.get<{
     entries: WorkspaceEntry[];
@@ -58,8 +59,11 @@ async function readDir(
   };
 }
 
-export async function loadWorkspace(): Promise<Workspace> {
-  const { entries, workspaceDir, truncated } = await readDir('', { recursive: true });
+export async function loadWorkspace(opts: { includeIgnored?: boolean } = {}): Promise<Workspace> {
+  const { entries, workspaceDir, truncated } = await readDir('', {
+    recursive: true,
+    includeIgnored: opts.includeIgnored,
+  });
   return {
     entries,
     tree: buildTree(entries),

@@ -9,6 +9,7 @@ interface Entry {
   is_dir: boolean;
   size?: number;
   modified?: string;
+  ignored?: boolean;
 }
 
 const INITIAL_CONTENT: Record<string, string> = {
@@ -74,6 +75,15 @@ const DIRS: Record<string, Entry[]> = {
   ],
 };
 
+const IGNORED_ENTRY: Entry = {
+  path: 'debug.log',
+  name: 'debug.log',
+  is_dir: false,
+  size: 10,
+  modified: '2026-07-14T00:00:00Z',
+  ignored: true,
+};
+
 export const WORKSPACE = {
   /** Stand in for an agent's tool rewriting a file underneath an open tab. */
   setContent: (path: string, content: string) => {
@@ -102,7 +112,9 @@ export const WORKSPACE = {
         if (url.searchParams.get('recursive')) {
           // The daemon walks the tree server-side and returns the whole flat
           // listing in one response; loadWorkspace uses this recursive form.
-          return { entries: Object.values(DIRS).flat(), workspace_dir: '/ws/smoke' };
+          const entries = Object.values(DIRS).flat();
+          if (url.searchParams.get('include_ignored')) entries.push(IGNORED_ENTRY);
+          return { entries, workspace_dir: '/ws/smoke' };
         }
         const subdir = url.searchParams.get('subdir') ?? '';
         return { entries: DIRS[subdir] ?? [], subdir, workspace_dir: '/ws/smoke' };

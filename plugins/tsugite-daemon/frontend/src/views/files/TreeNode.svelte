@@ -44,6 +44,7 @@
       <button
         type="button"
         data-act="wk-dir"
+        class:is-ignored={node.ignored}
         aria-expanded={open}
         onclick={() => onToggle(node.path)}
       >
@@ -69,6 +70,7 @@
       type="button"
       class="wk-file"
       class:is-active={node.path === activePath}
+      class:is-ignored={node.ignored}
       data-testid={TESTID.fileNode(node.path)}
       aria-current={node.path === activePath ? 'true' : undefined}
       draggable="true"
@@ -104,6 +106,10 @@
   .wk-file:hover {
     background: var(--bg2);
     color: var(--tx0);
+  }
+  .wk-dir > button.is-ignored,
+  .wk-file.is-ignored {
+    opacity: 0.55;
   }
   .wk-file.is-active {
     background: color-mix(in oklab, var(--acc) 13%, transparent);

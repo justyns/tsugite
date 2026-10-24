@@ -1,6 +1,6 @@
 /**
- * Files store: the workspace tree (GET /api/workspace), text read/write, and
- * attach-into-chat. The listing is gitignore-filtered and
+ * Files store: the workspace tree (GET /api/workspace), text read/write,
+ * attach-into-chat and download. The listing is gitignore-filtered and
  * text-only server-side (binaries never appear); a binary read comes back
  * {content:null, is_text:false}. Exported as a class instance.
  */
@@ -14,6 +14,8 @@ export interface WorkspaceEntry {
   /** Files only. */
   size?: number;
   modified?: string;
+  /** Set only when the listing was asked to include gitignored paths. */
+  ignored?: boolean;
 }
 
 export interface WorkspaceFile {
@@ -81,6 +83,22 @@ export class FilesStore {
     const qs = new URLSearchParams({ path }).toString();
     const res = await api.post<{ files: AttachedFile[] }>(`/api/workspace/attach?${qs}`);
     return res.files;
+  }
+
+  /** Save a workspace file to the person's machine under its own name. The raw
+   *  route's auth is a Bearer header, which a plain `<a download>` cannot send,
+   *  so the bytes go through fetch and a blob URL. */
+  async download(path: string): Promise<void> {
+    const qs = new URLSearchParams({ path, download: '1' });
+    const resp = await api.getRaw(`/api/workspace/raw?${qs.toString()}`);
+    const url = URL.createObjectURL(await resp.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = path.split('/').pop() ?? path;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }
 

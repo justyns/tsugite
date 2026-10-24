@@ -54,6 +54,7 @@ export interface TreeNode {
   isDir: boolean;
   size?: number;
   modified?: string;
+  ignored?: boolean;
   children: TreeNode[];
 }
 
@@ -223,7 +224,8 @@ export function buildTree(entries: WorkspaceEntry[]): TreeNode[] {
   };
   for (const e of entries) {
     if (e.is_dir) {
-      ensureDir(e.path);
+      const dir = ensureDir(e.path);
+      if (e.ignored) dir.ignored = true;
     } else {
       const parts = e.path.split('/');
       parts.pop();
@@ -233,6 +235,7 @@ export function buildTree(entries: WorkspaceEntry[]): TreeNode[] {
         isDir: false,
         size: e.size,
         modified: e.modified,
+        ignored: e.ignored,
         children: [],
       });
     }

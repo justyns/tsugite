@@ -9,6 +9,8 @@ vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api 
 
 beforeEach(async () => {
   await page.viewport(1440, 900);
+  const { filesShowIgnored } = await import('$lib/stores/filesShowIgnored.svelte');
+  filesShowIgnored.set(false);
   const { agentsMeta } = await import('$lib/stores/agentsMeta.svelte');
   agentsMeta.runtime = null;
   const { filesWorkspace } = await import('./workspace.svelte');
@@ -89,4 +91,42 @@ test('a workspace reload keeps a collapsed directory collapsed', async () => {
 
   await expect.element(page.getByTestId('file-node-notes/todo.md')).toBeInTheDocument();
   expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
+});
+
+test('the Show ignored files switch reloads the tree with ignored entries, dimmed', async () => {
+  await mountRail();
+  await expect.element(page.getByTestId('file-node-index.md')).toBeInTheDocument();
+  expect(page.getByTestId('file-node-debug.log').elements()).toHaveLength(0);
+
+  await page.getByRole('switch', { name: 'Show ignored files' }).click();
+
+  const node = page.getByTestId('file-node-debug.log');
+  await expect.element(node).toBeInTheDocument();
+  await expect.element(node).toHaveClass('is-ignored');
+  await expect.element(page.getByTestId('file-node-index.md')).not.toHaveClass('is-ignored');
+  const { filesShowIgnored } = await import('$lib/stores/filesShowIgnored.svelte');
+  expect(filesShowIgnored.enabled).toBe(true);
+
+  await page.getByRole('switch', { name: 'Show ignored files' }).click();
+  await expect.element(page.getByTestId('file-node-debug.log')).not.toBeInTheDocument();
+});
+
+test('right-click Download on a file saves it through the files store', async () => {
+  const { files } = await import('$lib/stores/files.svelte');
+  const download = vi.spyOn(files, 'download').mockResolvedValue();
+  await mountRail();
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+
+  await page.getByTestId('file-node-ops/alpha.md').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Download' }).click();
+
+  expect(download).toHaveBeenCalledWith('ops/alpha.md');
+  download.mockRestore();
+});
+
+test('a directory row has no file menu', async () => {
+  await mountRail();
+  await expect.element(page.getByRole('button', { name: 'ops', exact: true })).toBeInTheDocument();
+  await page.getByRole('button', { name: 'ops', exact: true }).click({ button: 'right' });
+  expect(page.getByRole('menuitem', { name: 'Download' }).elements()).toHaveLength(0);
 });

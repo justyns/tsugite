@@ -1330,6 +1330,57 @@ class TestWorkspaceRawEndpoint:
         resp = self._get(client, test_token, "big.png")
         assert resp.status_code == 413
 
+    def _download(self, client, test_token, path):
+        return client.get(
+            "/api/workspace/raw",
+            params={"path": path, "download": "1"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+
+    def test_download_sends_an_attachment_with_the_original_name(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "sub").mkdir()
+        (tmp_workspace / "sub" / "my report é.png").write_bytes(self.IMG_BYTES)
+        resp = self._download(client, test_token, "sub/my report é.png")
+        assert resp.status_code == 200, resp.text
+        assert resp.content == self.IMG_BYTES
+        assert resp.headers["content-disposition"] == "attachment; filename*=UTF-8''my%20report%20%C3%A9.png"
+        assert resp.headers["content-type"] == "image/png"
+
+    def test_download_skips_the_preview_size_cap(self, client, test_token, tmp_workspace, monkeypatch):
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
+
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_RAW_SIZE", 4)
+        (tmp_workspace / "big.png").write_bytes(self.IMG_BYTES)
+        assert self._get(client, test_token, "big.png").status_code == 413
+        resp = self._download(client, test_token, "big.png")
+        assert resp.status_code == 200
+        assert resp.content == self.IMG_BYTES
+
+    def test_download_refuses_path_traversal(self, client, test_token, tmp_workspace, tmp_path):
+        (tmp_path / "secret.png").write_bytes(self.IMG_BYTES)
+        assert self._download(client, test_token, "../secret.png").status_code == 403
+
+    def test_raw_and_download_refuse_git_paths(self, client, test_token, tmp_workspace):
+        (tmp_workspace / ".git").mkdir()
+        (tmp_workspace / ".git" / "config").write_text("[remote]\n")
+        for path in (".git/config", "sub/../.git/config"):
+            assert self._get(client, test_token, path).status_code == 403
+            assert self._download(client, test_token, path).status_code == 403
+
+    def test_download_of_a_directory_is_404(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "uploads").mkdir()
+        assert self._download(client, test_token, "uploads").status_code == 404
+
+    def test_download_requires_auth(self, client, tmp_workspace):
+        (tmp_workspace / "x.png").write_bytes(self.IMG_BYTES)
+        resp = client.get("/api/workspace/raw", params={"path": "x.png", "download": "1"})
+        assert resp.status_code == 401
+
+    def test_serves_a_gitignored_file(self, client, test_token, tmp_workspace):
+        (tmp_workspace / ".gitignore").write_text("*.png\n")
+        (tmp_workspace / "hidden.png").write_bytes(self.IMG_BYTES)
+        assert self._get(client, test_token, "hidden.png").content == self.IMG_BYTES
+
 
 class TestWorkspaceSessionScope:
     """A job worker session runs in a provisioned worktree, so a read for that
@@ -1445,6 +1496,81 @@ class TestWorkspaceListEndpoint:
         body = resp.json()
         assert body.get("truncated") is True
         assert len(body["entries"]) == 2
+
+    def _seed_ignored(self, workspace):
+        (workspace / ".gitignore").write_text("build/\n*.log\n")
+        (workspace / "keep.md").write_text("# keep\n")
+        (workspace / "debug.log").write_text("x\n")
+        (workspace / "build").mkdir()
+        (workspace / "build" / "out.md").write_text("x\n")
+        (workspace / ".git").mkdir()
+        (workspace / ".git" / "config.md").write_text("x\n")
+
+    def test_ignored_paths_are_hidden_by_default(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        entries = self._get(client, test_token, "?recursive=1").json()["entries"]
+        assert {e["path"] for e in entries} == {"keep.md"}
+        assert not any("ignored" in e for e in entries)
+
+    def test_include_ignored_lists_and_marks_ignored_paths(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        entries = self._get(client, test_token, "?recursive=1&include_ignored=1").json()["entries"]
+        by_path = {e["path"]: e for e in entries}
+        assert set(by_path) == {"keep.md", "debug.log", "build", "build/out.md"}
+        assert {p for p, e in by_path.items() if e.get("ignored")} == {"debug.log", "build", "build/out.md"}
+
+    def test_include_ignored_never_lists_git(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        paths = {e["path"] for e in self._get(client, test_token, "?recursive=1&include_ignored=1").json()["entries"]}
+        assert not any(p == ".git" or p.startswith(".git/") for p in paths)
+        one_level = {e["path"] for e in self._get(client, test_token, "?include_ignored=1").json()["entries"]}
+        assert ".git" not in one_level
+
+    def test_include_ignored_keeps_the_entry_cap(self, client, test_token, tmp_workspace, monkeypatch):
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
+
+        (tmp_workspace / ".gitignore").write_text("*.log\n")
+        for i in range(5):
+            (tmp_workspace / f"f{i}.log").write_text("x\n")
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 2)
+        body = self._get(client, test_token, "?recursive=1&include_ignored=1").json()
+        assert body["truncated"] is True
+        assert len(body["entries"]) == 2
+
+    def test_subdir_listing_marks_ignored_from_the_target(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        entries = self._get(client, test_token, "?subdir=build&include_ignored=1").json()["entries"]
+        assert [(e["path"], e.get("ignored")) for e in entries] == [("build/out.md", True)]
+
+    def test_subdir_of_an_ignored_dir_lists_nothing_without_include_ignored(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        assert self._get(client, test_token, "?subdir=build").json()["entries"] == []
+
+    def test_subdir_refuses_git_directory(self, client, test_token, tmp_workspace):
+        self._seed_ignored(tmp_workspace)
+        (tmp_workspace / "x" / ".git").mkdir(parents=True)
+        for subdir in (".git", "x/.git", "x/../.git"):
+            for extra in ("", "&include_ignored=1&recursive=1"):
+                assert self._get(client, test_token, f"?subdir={subdir}{extra}").status_code == 403
+
+    def test_ignored_entries_do_not_push_normal_ones_out_of_the_cap(
+        self, client, test_token, tmp_workspace, monkeypatch
+    ):
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
+
+        (tmp_workspace / ".gitignore").write_text("*.log\n")
+        for i in range(5):
+            (tmp_workspace / f"f{i}.log").write_text("x\n")
+        (tmp_workspace / "d").mkdir()
+        (tmp_workspace / "d" / "a.md").write_text("x\n")
+        (tmp_workspace / "d" / "b.md").write_text("x\n")
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 3)
+        body = self._get(client, test_token, "?recursive=1&include_ignored=1").json()
+        assert {"d/a.md", "d/b.md"} <= {e["path"] for e in body["entries"]}
+        assert body["truncated"] is True
+
+    def test_include_ignored_still_refuses_subdir_traversal(self, client, test_token, tmp_workspace):
+        assert self._get(client, test_token, "?include_ignored=1&subdir=..").status_code == 403
 
 
 class TestHTTPConfig:

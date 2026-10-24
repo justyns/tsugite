@@ -15,6 +15,8 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { writeSurfaceDrag } from '$lib/shell/mux/drag';
   import { files } from '$lib/stores/files.svelte';
+  import { filesShowIgnored } from '$lib/stores/filesShowIgnored.svelte';
+  import Switch from '$lib/components/inputs/Switch.svelte';
   import { TESTID } from '$lib/testids';
   import TreeNode from './TreeNode.svelte';
   import { isMarkdown } from './load';
@@ -63,6 +65,11 @@
   });
   const scanning = $derived(tagQuery && filesWorkspace.indexState !== 'ready');
 
+  function setShowIgnored(next: boolean) {
+    filesShowIgnored.set(next);
+    void filesWorkspace.reload();
+  }
+
   function toggleDir(path: string) {
     const next = new Set(collapsed);
     if (next.has(path)) next.delete(path);
@@ -109,6 +116,15 @@
             ?.writeText(path)
             .then(() => toasts.push('ok', 'Path copied', { body: path }))
             .catch(() => toasts.push('err', 'Could not copy path')),
+      },
+      {
+        label: 'Download',
+        run: () =>
+          void files.download(path).catch((err) =>
+            toasts.push('err', 'Could not download file', {
+              body: err instanceof Error ? err.message : String(err),
+            }),
+          ),
       },
     ];
   });
@@ -167,6 +183,14 @@
       shortcutKey="/"
     />
   </div>
+  <div class="sidebar-ign">
+    <Switch
+      checked={filesShowIgnored.enabled}
+      onCheckedChange={setShowIgnored}
+      ariaLabel="Show ignored files"
+    />
+    <span>Show ignored files</span>
+  </div>
   <div class="wk-tree-ls">
     {#if filesWorkspace.loading && !ws}
       <PaneState kind="loading" lines={6} />
@@ -187,6 +211,7 @@
               type="button"
               class="wk-file"
               class:is-active={e.path === focusedFilePath}
+              class:is-ignored={e.ignored}
               data-testid={TESTID.fileNode(e.path)}
               draggable="true"
               ondragstart={(ev) => fileDragStart(ev, e.path, e.name)}
@@ -266,6 +291,15 @@
     padding: 0 10px 8px;
     flex: none;
   }
+  .sidebar-ign {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 8px;
+    flex: none;
+    font: 400 var(--fs-xs) var(--font-ui);
+    color: var(--tx2);
+  }
   .wk-tree-ls {
     overflow-y: auto;
     flex: 1;
@@ -297,6 +331,9 @@
   .wk-tree-ls .wk-file:hover {
     background: var(--bg2);
     color: var(--tx0);
+  }
+  .wk-tree-ls .wk-file.is-ignored {
+    opacity: 0.55;
   }
   .wk-tree-ls .wk-file.is-active {
     background: color-mix(in oklab, var(--acc) 13%, transparent);

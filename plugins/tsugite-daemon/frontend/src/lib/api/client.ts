@@ -53,6 +53,7 @@ export const api = {
   put: <T = unknown>(path: string, body?: unknown) => request<T>('PUT', path, body),
   patch: <T = unknown>(path: string, body?: unknown) => request<T>('PATCH', path, body),
   del: <T = unknown>(path: string) => request<T>('DELETE', path),
+  getRaw: (path: string) => request<Response>('GET', path, undefined, true),
   streamPost: (path: string, body?: unknown) => request<Response>('POST', path, body, true),
   uploadFiles,
 };

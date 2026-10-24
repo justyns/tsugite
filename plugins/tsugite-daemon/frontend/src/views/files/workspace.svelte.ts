@@ -7,6 +7,7 @@
  * pane's scan affordance, a #tag search) and re-runs it after saves once
  * built. Exported as a class instance - never a reassigned binding.
  */
+import { filesShowIgnored } from '$lib/stores/filesShowIgnored.svelte';
 import { loadContentIndex, loadWorkspace, type Workspace } from './load';
 
 export type IndexState = 'none' | 'building' | 'ready';
@@ -41,7 +42,7 @@ export class FilesWorkspaceStore {
     this.indexState = 'none';
     const run = (async () => {
       try {
-        this.ws = await loadWorkspace();
+        this.ws = await loadWorkspace({ includeIgnored: filesShowIgnored.enabled });
         if (rebuildIndex) void this.ensureIndex();
       } catch (err) {
         this.error = err instanceof Error ? err.message : String(err);

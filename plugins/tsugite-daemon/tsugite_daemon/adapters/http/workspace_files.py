@@ -7,9 +7,10 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from tsugite.attachments.delegation import can_inline_file
@@ -69,6 +70,8 @@ class WorkspaceFilesMixin:
             return Path(), JSONResponse({"error": "invalid path"}, status_code=400)
         if not resolved.is_relative_to(workspace_dir.resolve()):
             return Path(), JSONResponse({"error": "path outside workspace"}, status_code=403)
+        if ".git" in resolved.relative_to(workspace_dir.resolve()).parts:
+            return Path(), JSONResponse({"error": "path inside .git"}, status_code=403)
         return resolved, None
 
     def _walk_workspace_entries(
@@ -77,23 +80,33 @@ class WorkspaceFilesMixin:
         workspace_dir: Path,
         gitignore_spec,
         recursive: bool,
+        include_ignored: bool = False,
     ) -> tuple[list[dict], bool]:
         """Build the flat listing for `target`: one level, or the whole subtree.
 
         Guard rails, all shared with the one-level walk: symlinks are never
         followed or listed (S_ISLNK skip), so a symlink can neither escape the
         workspace nor cycle the walk; gitignored directories are pruned before
-        descent, keeping .git and other ignored trees out of the recursive walk;
+        descent, keeping .git and other ignored trees out of the recursive walk
+        (`include_ignored` keeps them, marked `ignored`, but never lists .git);
         and the total is capped at MAX_WORKSPACE_ENTRIES, returning a truncated
-        flag rather than an unbounded response.
+        flag rather than an unbounded response. Normal directories are walked
+        before ignored ones and ignored entries only fill the budget left over.
         """
         import stat as stat_mod
 
         entries: list[dict] = []
+        ignored_entries: list[dict] = []
         truncated = False
-        pending: deque[Path] = deque([target])
-        while pending:
-            current = pending.popleft()
+        start_ignored = False
+        if gitignore_spec and target != workspace_dir:
+            rel_target = target.relative_to(workspace_dir)
+            start_ignored = any(gitignore_spec.match_file(f"{p}/") for p in (rel_target, *rel_target.parents)[:-1])
+        pending: deque[tuple[Path, bool]] = deque()
+        pending_ignored: deque[tuple[Path, bool]] = deque()
+        (pending_ignored if start_ignored else pending).append((target, start_ignored))
+        while pending or pending_ignored:
+            current, parent_ignored = (pending or pending_ignored).popleft()
             try:
                 children = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
             except OSError:
@@ -107,28 +120,48 @@ class WorkspaceFilesMixin:
                     continue
                 if stat_mod.S_ISLNK(st.st_mode):
                     continue
+                if item.name == ".git":
+                    continue
                 is_dir = stat_mod.S_ISDIR(st.st_mode)
                 rel = str(item.relative_to(workspace_dir))
-                if gitignore_spec and gitignore_spec.match_file(rel + ("/" if is_dir else "")):
+                ignored = parent_ignored or bool(
+                    gitignore_spec and gitignore_spec.match_file(rel + ("/" if is_dir else ""))
+                )
+                if ignored and not include_ignored:
                     continue
-                if len(entries) >= MAX_WORKSPACE_ENTRIES:
-                    truncated = True
-                    pending.clear()
-                    break
+                if ignored:
+                    if len(ignored_entries) >= MAX_WORKSPACE_ENTRIES:
+                        truncated = True
+                        pending_ignored.clear()
+                        continue
+                    bucket, queue = ignored_entries, pending_ignored
+                else:
+                    if len(entries) >= MAX_WORKSPACE_ENTRIES:
+                        truncated = True
+                        pending.clear()
+                        pending_ignored.clear()
+                        break
+                    bucket, queue = entries, pending
+                mark = {"ignored": True} if ignored else {}
                 if is_dir:
-                    entries.append({"path": rel, "name": item.name, "is_dir": True})
+                    bucket.append({"path": rel, "name": item.name, "is_dir": True, **mark})
                     if recursive:
-                        pending.append(item)
+                        queue.append((item, ignored))
                 elif stat_mod.S_ISREG(st.st_mode) and _is_text_mime(item):
-                    entries.append(
+                    bucket.append(
                         {
                             "path": rel,
                             "name": item.name,
                             "is_dir": False,
                             "size": st.st_size,
                             "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                            **mark,
                         }
                     )
+        budget = MAX_WORKSPACE_ENTRIES - len(entries)
+        if len(ignored_entries) > budget:
+            truncated = True
+        entries.extend(ignored_entries[:budget])
         return entries, truncated
 
     async def _list_workspace_files(self, request: Request) -> JSONResponse:
@@ -142,6 +175,7 @@ class WorkspaceFilesMixin:
 
         subdir = request.query_params.get("subdir", "")
         recursive = request.query_params.get("recursive", "").lower() in ("1", "true", "yes")
+        include_ignored = request.query_params.get("include_ignored", "").lower() in ("1", "true", "yes")
         if subdir:
             target, path_err = self._validate_workspace_path(adapter, subdir)
             if path_err:
@@ -155,7 +189,9 @@ class WorkspaceFilesMixin:
 
         gitignore_spec = _build_gitignore_matcher(workspace_dir)
         try:
-            entries, truncated = self._walk_workspace_entries(target, workspace_dir, gitignore_spec, recursive)
+            entries, truncated = self._walk_workspace_entries(
+                target, workspace_dir, gitignore_spec, recursive, include_ignored
+            )
         except OSError as e:
             return JSONResponse({"error": f"listing failed: {e}"}, status_code=500)
 
@@ -204,6 +240,8 @@ class WorkspaceFilesMixin:
         The text read endpoint (`workspace/content`) returns null for non-text,
         so image thumbnails and the lightbox read their bytes here instead. Same
         auth + path validation as the text read; size-capped; never JSON-wrapped.
+        `download=1` streams the file as an attachment instead and skips the cap,
+        since the bytes are never held in memory.
         """
         adapter, err = self._get_adapter(request)
         if err:
@@ -219,6 +257,11 @@ class WorkspaceFilesMixin:
         if not resolved.exists() or resolved.is_dir():
             return JSONResponse({"error": "file not found"}, status_code=404)
 
+        media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+        if request.query_params.get("download", "").lower() in ("1", "true", "yes"):
+            disposition = f"attachment; filename*=UTF-8''{quote(resolved.name, safe='')}"
+            return FileResponse(resolved, media_type=media_type, headers={"Content-Disposition": disposition})
+
         st = resolved.stat()
         if st.st_size > MAX_WORKSPACE_RAW_SIZE:
             return JSONResponse(
@@ -231,7 +274,6 @@ class WorkspaceFilesMixin:
         except OSError as e:
             return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
 
-        media_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
         # Private so a shared cache never retains a workspace file; the short max-age
         # lets the lightbox reuse the thumbnail's bytes without a second round trip.
         return Response(content=data, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
