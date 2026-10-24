@@ -93,6 +93,39 @@ def session_reply(message: str, session_id: Optional[str] = None) -> dict:
 
 
 @tool(require_daemon=True)
+def session_fyi(message: str, session_id: str, title: Optional[str] = None) -> dict:
+    """Send another session a note that never wakes it.
+
+    The note lands as a card in the session's history, read on its next turn. If
+    the session is mid-turn the card lands when that turn ends, and a finished
+    session is not reached.
+
+    Args:
+        message: Note to send.
+        session_id: Session to notify, or "name:<alias>" to address one by its alias.
+        title: Optional card title.
+
+    Returns:
+        Dict with session_id and `status` ("delivered", "held" or "not_delivered").
+    """
+    target = _resolve_session_arg(session_id)
+    origin = get_current_session_id()
+    if origin and _call(_session_runner.live_id, origin) == target:
+        raise ValueError("session_fyi sends to another session, not the current one")
+    metadata = {"from_session": origin} if origin else None
+    status = _call(
+        _session_runner.deliver_to_session,
+        target,
+        message,
+        source="session",
+        kind="fyi",
+        title=title,
+        metadata=metadata,
+    )
+    return {"session_id": target, "status": status}
+
+
+@tool(require_daemon=True)
 def start_session(
     prompt: str,
     model: Optional[str] = None,
@@ -434,9 +467,11 @@ def room_close(room_id: Optional[str] = None) -> dict:
 
 
 @tool(require_daemon=True)
-def room_post(room_id: str, message: str) -> dict:
-    """Post in a room you opened, waking the participants it @mentions and then its lead, without resetting the room's rounds."""
-    return _status(_call(_session_runner.rooms.post_as_opener, room_id, message, _caller()))
+def room_post(room_id: str, message: str, wake: bool = True) -> dict:
+    """Post in a room you opened, waking the participants it @mentions and then its lead, without resetting the room's rounds.
+
+    With wake=False the message only joins the transcript: @mentions wake nobody, the lead is not woken and no round is spent."""
+    return _status(_call(_session_runner.rooms.post_as_opener, room_id, message, _caller(), wake=wake))
 
 
 @tool(require_daemon=True)

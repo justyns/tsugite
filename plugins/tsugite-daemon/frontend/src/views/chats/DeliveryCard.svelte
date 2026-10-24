@@ -7,10 +7,12 @@
 
   let {
     block,
+    originLabel,
     outstanding,
     onDismiss,
   }: {
     block: DeliveryBlock;
+    originLabel?: string;
     outstanding: boolean;
     onDismiss: () => void;
   } = $props();
@@ -26,7 +28,7 @@
     <Icon name={block.needsAck ? 'alert' : 'down'} size={12} />
     <span>{block.source || 'delivery'}</span>
     {#if block.origin}
-      <span class="dlv-origin" title={block.origin.id}>· {block.origin.id}</span>
+      <span class="dlv-origin" title={block.origin.id}>· {originLabel}</span>
     {/if}
     {#if outstanding}<span class="dlv-tag">needs you</span>{/if}
   </div>

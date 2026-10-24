@@ -47,8 +47,11 @@ afterEach(async () => {
   await page.viewport(1440, 900);
 });
 
-// The thinking pref is a module singleton shared with every other browser test.
-afterEach(() => expandThinking.set(true));
+// Module singletons shared with every other browser test.
+afterEach(() => {
+  expandThinking.set(true);
+  sessions.rows = [];
+});
 
 // mockReset restores the real implementation vi.fn() was given.
 afterEach(() => {
@@ -1246,6 +1249,18 @@ test('a card carrying no origin id keeps the plain source header', async () => {
   const card = page.getByTestId(TESTID.chatDelivery);
   await expect.element(card).toHaveTextContent('schedule');
   expect(card.element().querySelector('.dlv-origin')).toBeNull();
+});
+
+test('a session-sent fyi card shows the sender by its title', async () => {
+  sessions.rows = [{ id: 'lead-1', title: 'PROJ-8 lead' } as unknown as SessionRow];
+  const ctrl = controllerWith([
+    { ...NEEDS_ACK, kind: 'fyi', source: 'session', from_session: 'lead-1', title: 'Progress' },
+  ]);
+  render(Conversation, { ctrl, row: attentionRow([]), railCollapsed: false, ...callbacks });
+
+  const card = page.getByTestId(TESTID.chatDelivery);
+  await expect.element(card).toHaveTextContent('session');
+  await expect.element(card).toHaveTextContent('PROJ-8 lead');
 });
 
 test('the alias renders as its own chip, distinct from the title', async () => {

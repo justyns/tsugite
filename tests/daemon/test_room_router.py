@@ -1444,6 +1444,17 @@ class TestRoomPost:
         assert store.rooms.get(opened.id).rounds_used == 4
 
     @pytest.mark.asyncio
+    async def test_wake_false_only_joins_the_transcript(self, rooms, store, adapter, opened):
+        store.rooms.update(opened.id, rounds_used=3)
+
+        sessions_tools.room_post(opened.id, "@homelab fyi: sda is fine", wake=False)
+        await _settle(rooms, opened.id)
+
+        assert adapter.calls == []
+        assert _messages(store, opened.id) == [("main", "@homelab fyi: sda is fine")]
+        assert store.rooms.get(opened.id).rounds_used == 3
+
+    @pytest.mark.asyncio
     async def test_a_compacted_opener_still_posts(self, rooms, store, adapter, opener, opened, runner, monkeypatch):
         _as_caller(monkeypatch, runner, store.compact_session(opener.id).id)
 

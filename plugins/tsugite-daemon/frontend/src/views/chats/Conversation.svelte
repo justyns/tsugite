@@ -776,6 +776,7 @@
             {:else if block.kind === 'delivery'}
               <DeliveryCard
                 {block}
+                originLabel={block.origin ? originLabel(block.origin) : undefined}
                 outstanding={isOutstanding(block)}
                 onDismiss={() => onDismissAttention(block.deliveryId)}
               />

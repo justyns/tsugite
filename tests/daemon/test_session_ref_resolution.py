@@ -197,6 +197,64 @@ class TestReplyingToAFinishedSession:
         assert adapter.handle_message.await_count == 1
 
 
+def _fyis(store, sid):
+    return [e for e in store.read_events(sid) if e["type"] == "delivery" and e["kind"] == "fyi"]
+
+
+class TestSessionFyi:
+    def test_lands_as_a_card_naming_the_sender_without_a_turn(self, store, runner, adapter):
+        caller = _chat(store, "caller")
+        target = _chat(store, "target")
+        with _calling_session(caller.id):
+            result = session_tools.session_fyi(message="build is green", session_id=target.id, title="CI")
+
+        assert result == {"session_id": target.id, "status": "delivered"}
+        [card] = _fyis(store, target.id)
+        assert (card["message"], card["title"], card["source"]) == ("build is green", "CI", "session")
+        assert card["from_session"] == caller.id
+        assert adapter.handle_message.await_count == 0
+
+    def test_is_held_while_the_target_is_mid_turn(self, store, runner, adapter):
+        caller = _chat(store, "caller")
+        target = _chat(store, "target")
+        store.update_session(target.id, turn_in_flight=True)
+        with _calling_session(caller.id):
+            result = session_tools.session_fyi(message="heads up", session_id=target.id)
+
+        assert result["status"] == "held"
+        assert _fyis(store, target.id) == []
+        store.update_session(target.id, turn_in_flight=False)
+        runner._flush_deferred_deliveries(target.id)
+        assert len(_fyis(store, target.id)) == 1
+        assert adapter.handle_message.await_count == 0
+
+    def test_a_finished_target_is_not_delivered(self, store, runner, adapter):
+        caller = _chat(store, "caller")
+        target = _chat(store, "target")
+        store.update_session(target.id, status=SessionStatus.COMPLETED.value)
+        with _calling_session(caller.id):
+            result = session_tools.session_fyi(message="too late", session_id=target.id)
+
+        assert result == {"session_id": target.id, "status": "not_delivered"}
+        assert _fyis(store, target.id) == []
+        assert adapter.handle_message.await_count == 0
+
+    def test_rejects_the_callers_own_session(self, store, runner):
+        chat = _chat(store)
+        with _calling_session(chat.id), pytest.raises(ValueError, match="another session"):
+            session_tools.session_fyi(message="note to self", session_id=chat.id)
+        assert _fyis(store, chat.id) == []
+
+    def test_reaches_a_session_by_alias(self, store, runner):
+        lead = _chat(store, "lead")
+        store.set_alias(lead.id, "lead")
+        with _calling_session(None):
+            result = session_tools.session_fyi(message="progress", session_id="name:lead")
+
+        assert result["session_id"] == lead.id
+        assert "from_session" not in _fyis(store, lead.id)[0]
+
+
 class TestToolsFollowCompaction:
     def test_a_bare_id_reaches_the_session_it_became(self, store, runner):
         chat = _chat(store)

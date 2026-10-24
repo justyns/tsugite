@@ -518,8 +518,11 @@ class SessionRunner:
         title: Optional[str] = None,
         metadata: Optional[dict] = None,
         notify_channels: Optional[list[tuple[str, object]]] = None,
-    ) -> None:
+    ) -> str:
         """Deliver a card into a session's history without starting a turn.
+
+        Returns "delivered", "held" (the session is mid-turn, the card lands at
+        turn end) or "not_delivered" (the session is finished).
 
         Sync: call it from a worker thread (asyncio.to_thread) when the caller is
         on the event loop.
@@ -528,7 +531,7 @@ class SessionRunner:
         target = self._store.get_session(session_id)
         if not target.is_reachable:
             logger.info("Not delivering to session '%s': already finished", session_id)
-            return
+            return "not_delivered"
         if kind not in DELIVERY_KINDS:
             raise ValueError(f"Invalid delivery kind '{kind}' (expected one of: {', '.join(sorted(DELIVERY_KINDS))})")
 
@@ -545,8 +548,9 @@ class SessionRunner:
             **(metadata or {}),
         }
         if self._store.hold_delivery(session_id, event):
-            return
+            return "held"
         self._flush_delivery(session_id, event)
+        return "delivered"
 
     def live_id(self, session_id: str) -> str:
         live = self._store.resolve_live(session_id)

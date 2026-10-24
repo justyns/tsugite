@@ -232,13 +232,15 @@ class Rooms:
         room = self._store.rooms.update(room_id, rounds_used=0)
         return self._route(room, _mentions(room, content), _USER_POSTED, _USER_ADDRESSED, forced=True)
 
-    def post_as_opener(self, room_id: str, content: str, session_id: str) -> Room:
-        """Post as the opener's agent, waking the participants it mentions and then the lead. The rounds are not reset."""
+    def post_as_opener(self, room_id: str, content: str, session_id: str, *, wake: bool = True) -> Room:
+        """Post as the opener's agent, waking the participants it mentions and then the lead. The rounds are not reset.
+
+        With wake=False the message only joins the transcript: nobody is woken and no round is spent."""
         room = self._open_room(room_id)
         if self._same_session(self._lead(room).session_id, session_id):
             raise ValueError("The lead hands off with room_handoff, not room_post")
         self._require_opener(room, session_id)
-        mentioned = _mentions(room, content)
+        mentioned = _mentions(room, content) if wake else []
         for participant in mentioned:
             if participant.muted:
                 raise ValueError(f"{participant.agent_id} is muted. Only the user can address a muted participant")
@@ -247,6 +249,8 @@ class Rooms:
         session_id = self._runner.live_id(session_id)
         author = self._store.agents.effective_id(self._store.get_session(session_id).agent_id)
         self._post(room_id, content, author, session_id, None, role="opener")
+        if not wake:
+            return self._updated(room)
         return self._route(
             room, mentioned, _OPENER_POSTED.format(author=author), _OPENER_ADDRESSED.format(author=author)
         )
