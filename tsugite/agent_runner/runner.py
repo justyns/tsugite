@@ -295,31 +295,6 @@ def execute_tool_directives(
     return modified_content, new_context
 
 
-def _extract_reasoning_content(agent: TsugiteAgent, custom_logger: Optional[Any] = None) -> None:
-    """Extract and display reasoning content from TsugiteAgent memory.
-
-    For models like Claude/Deepseek that expose reasoning_content, displays the actual reasoning.
-
-    Args:
-        agent: The TsugiteAgent instance that just completed execution
-        custom_logger: Custom logger to display reasoning content
-    """
-    if not hasattr(agent, "memory") or not agent.memory.reasoning_history:
-        return
-
-    # Display each reasoning entry
-    for reasoning_content in agent.memory.reasoning_history:
-        if reasoning_content and custom_logger:
-            # Check if custom_logger has ui_handler (custom UI mode)
-            ui_handler = get_ui_handler(custom_logger)
-            if ui_handler:
-                from tsugite.events import EventBus, ReasoningContentEvent
-
-                event_bus = EventBus()
-                event_bus.subscribe(ui_handler.handle_event)
-                event_bus.emit(ReasoningContentEvent(content=reasoning_content, step=None))
-
-
 # Daemon chat sources with a person at the other end; any other source counts as background.
 INTERACTIVE_SOURCES = frozenset({"http", "discord"})
 
@@ -622,9 +597,6 @@ async def _execute_agent_with_prompt(
             return_full_result=exec_options.return_token_usage,
             stream=exec_options.stream,
         )
-
-        # Extract and display reasoning content if present
-        _extract_reasoning_content(agent, custom_logger)
 
         if usage_sink is not None:
             usage_sink.update(
