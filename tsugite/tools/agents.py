@@ -311,8 +311,8 @@ def spawn_agent(
 def discover_agents() -> List[Dict[str, str]]:
     """Discover available agents across standard agent directories.
 
-    Returns a structured list (used by `list_agents` for markdown formatting and
-    by `list_available_agents` as the on-demand discovery tool). Excludes the
+    Returns a structured list (used by `list_available_agents` as the on-demand
+    discovery tool and for markdown formatting). Excludes the
     currently running agent.
     """
     from ..agent_inheritance import AgentDirSource, iter_agent_search_paths
@@ -370,21 +370,6 @@ def format_agents_markdown(agents: List[Dict[str, str]]) -> str:
     if not agents:
         return ""
     return "\n".join(f"- **{a['name']}** (`{a['path']}`): {a['description']}" for a in agents)
-
-
-@tool
-def list_agents() -> str:
-    """List all available agents for delegation.
-
-    Scans standard agent directories and returns information about
-    available specialized agents. Use this to discover which agents
-    are available for delegation.
-
-    Returns:
-        Formatted list of available agents with their descriptions.
-        Returns empty string if no agents are found.
-    """
-    return format_agents_markdown(discover_agents())
 
 
 @tool

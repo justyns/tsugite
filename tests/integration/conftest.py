@@ -39,7 +39,7 @@ def _register_all_tools(reset_tool_registry):
     so _ensure_tools_loaded() won't re-execute @tool decorators after _tools is cleared.
     """
     from tsugite.tools import tool
-    from tsugite.tools.agents import list_agents, list_available_agents, spawn_agent
+    from tsugite.tools.agents import list_available_agents, spawn_agent
     from tsugite.tools.fs import (
         create_directory,
         edit_file,
@@ -67,7 +67,6 @@ def _register_all_tools(reset_tool_registry):
         ask_user,
         ask_user_batch,
         spawn_agent,
-        list_agents,
         list_available_agents,
     ]:
         tool(fn)

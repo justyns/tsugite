@@ -1,8 +1,12 @@
-"""Tests for the list_agents tool."""
+"""Tests for agent discovery and markdown formatting."""
 
 from unittest.mock import patch
 
-from tsugite.tools.agents import list_agents
+from tsugite.tools.agents import discover_agents, format_agents_markdown
+
+
+def list_agents() -> str:
+    return format_agents_markdown(discover_agents())
 
 
 class TestListAgentsTool:

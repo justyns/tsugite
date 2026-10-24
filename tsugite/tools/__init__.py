@@ -63,6 +63,12 @@ def _register_tool(func: Callable) -> None:
                 f"always called by keyword, so *args can't be supported - declare explicit named "
                 f"parameters instead."
             )
+    existing = _tools.get(func.__name__)
+    if existing is not None and existing.func.__module__ != func.__module__:
+        raise ValueError(
+            f"Tool '{func.__name__}' is already registered by {existing.func.__module__}; "
+            f"{func.__module__} cannot register it again"
+        )
     doc = func.__doc__ or "No description available"
 
     parameters = {}

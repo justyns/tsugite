@@ -434,10 +434,9 @@ def interactive_tools(reset_tool_registry):
 def agents_tools(reset_tool_registry):
     """Register agent delegation tools for testing."""
     from tsugite.tools import tool
-    from tsugite.tools.agents import list_agents, list_available_agents, spawn_agent
+    from tsugite.tools.agents import list_available_agents, spawn_agent
 
     # Re-register the tools after registry reset
-    tool(list_agents)
     tool(list_available_agents)
     tool(parent_only=True)(spawn_agent)
 

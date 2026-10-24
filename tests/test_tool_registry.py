@@ -474,3 +474,35 @@ def test_format_tool_spec_drops_the_sigil_from_an_exclusion():
     from tsugite.tools import format_tool_spec
 
     assert format_tool_spec("-@fs") == "-fs (toolset)"
+
+
+def test_list_agents_is_registered_only_by_the_daemon_sessions_module():
+    import tsugite.tools.agents as agents_tools
+
+    assert not hasattr(agents_tools, "list_agents")
+
+
+def test_registering_a_name_from_another_module_raises():
+    def duplicate():
+        """Duplicate."""
+
+    def original():
+        """Original."""
+
+    original.__name__ = duplicate.__name__ = "colliding_tool"
+    original.__module__ = "tsugite.tools.first"
+    duplicate.__module__ = "tsugite.tools.second"
+    tool(original)
+
+    with pytest.raises(ValueError, match="colliding_tool.*tsugite.tools.first"):
+        tool(duplicate)
+
+
+def test_registering_a_tool_again_from_its_own_module_is_allowed():
+    def repeated():
+        """Repeated."""
+
+    tool(repeated)
+    tool(repeated)
+
+    assert get_tool("repeated").func is repeated

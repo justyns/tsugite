@@ -6,18 +6,18 @@ import pytest
 
 from tsugite.agent_runner import execute_prefetch
 from tsugite.tools import tool
-from tsugite.tools.agents import list_agents
+from tsugite.tools.agents import discover_agents, format_agents_markdown, list_available_agents
 
 
 class TestPrefetchListAgents:
-    """Test prefetch execution with list_agents tool."""
+    """Test prefetch execution with list_available_agents tool."""
 
-    def test_prefetch_list_agents_execution(self, tmp_path, monkeypatch):
-        """Test that prefetch can execute list_agents and assign result."""
+    def test_prefetch_list_available_agents_execution(self, tmp_path, monkeypatch):
+        """Test that prefetch can execute list_available_agents and assign result."""
         monkeypatch.chdir(tmp_path)
 
-        # Register list_agents tool
-        tool(list_agents)
+        # Register list_available_agents tool
+        tool(list_available_agents)
 
         # Create an agent
         agents_dir = tmp_path / "agents"
@@ -30,7 +30,7 @@ description: Test agent
 """)
 
         # Configure prefetch like default does
-        prefetch_config = [{"tool": "list_agents", "args": {}, "assign": "available_agents"}]
+        prefetch_config = [{"tool": "list_available_agents", "args": {}, "assign": "available_agents"}]
 
         # Execute prefetch with mocked global paths
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
@@ -38,17 +38,17 @@ description: Test agent
 
             # Should have assigned the result
             assert "available_agents" in context
-            assert isinstance(context["available_agents"], str)
-            assert "test" in context["available_agents"]
+            assert isinstance(context["available_agents"], list)
+            assert "test" in [a["name"] for a in context["available_agents"]]
 
     def test_prefetch_with_package_agents(self, tmp_path, monkeypatch):
         """Test prefetch with only package-provided agents available."""
         monkeypatch.chdir(tmp_path)
 
-        # Register list_agents tool
-        tool(list_agents)
+        # Register list_available_agents tool
+        tool(list_available_agents)
 
-        prefetch_config = [{"tool": "list_agents", "args": {}, "assign": "available_agents"}]
+        prefetch_config = [{"tool": "list_available_agents", "args": {}, "assign": "available_agents"}]
 
         # Execute with mocked global paths
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
@@ -56,8 +56,9 @@ description: Test agent
 
             # Should include package-provided agents
             assert "available_agents" in context
-            assert "default" in context["available_agents"]
-            assert "file_searcher" in context["available_agents"]
+            names = [a["name"] for a in context["available_agents"]]
+            assert "default" in names
+            assert "file_searcher" in names
 
 
 class TestAutoDiscoveryWorkflow:
@@ -97,9 +98,9 @@ Research the topic.
 
         return {"code_review": code_review, "research": research}
 
-    def test_list_agents_discovers_multiple(self, agent_setup):
-        """Test that list_agents discovers all available agents."""
-        result = list_agents()
+    def test_discover_agents_finds_multiple(self, agent_setup):
+        """Test that discover_agents finds all available agents."""
+        result = format_agents_markdown(discover_agents())
 
         assert "code_review" in result
         assert "research" in result
@@ -124,7 +125,7 @@ No agents found.
 
         # Get agents list with mocked global paths - should still have package-provided agents
         with patch("tsugite.agent_inheritance.get_global_agents_paths", return_value=[]):
-            agents_list = list_agents()
+            agents_list = format_agents_markdown(discover_agents())
 
         result = template.render(available_agents=agents_list)
 
