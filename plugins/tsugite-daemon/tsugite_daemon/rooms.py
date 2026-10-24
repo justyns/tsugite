@@ -623,11 +623,14 @@ class Rooms:
             )
             if reply is None:
                 raise RuntimeError(f"Session {session_id} is finished and takes no turn")
+            text = str(reply)
+            if not participant.lead and not text.strip():
+                raise RuntimeError("the turn produced no message")
             room = self.get(room_id)
             current = room.participant(turn.agent_id)
             self._replace_participant(room, current, replace(current, cursor=cursor, brief=None))
             session_id = self._runner.live_id(session_id)
-            self._post(room_id, str(reply), turn.agent_id, session_id, self._turn_event_id(session_id, before))
+            self._post(room_id, text, turn.agent_id, session_id, self._turn_event_id(session_id, before))
         except Exception as e:
             self._record(room_id, "room_card", {"kind": "turn_failed", "agent_id": turn.agent_id, "text": str(e)})
             return f"@{turn.agent_id}'s turn failed: {e}."

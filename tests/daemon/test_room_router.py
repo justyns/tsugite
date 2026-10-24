@@ -538,6 +538,50 @@ class TestTurnOutcomes:
         assert _agents_called(adapter) == ["homelab", "research", "main"]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("empty", ["", "  \n"])
+    async def test_an_empty_turn_posts_a_card_instead_of_a_message(
+        self, rooms, store, adapter, lead_chat, room, monkeypatch, empty
+    ):
+        handle_message = adapter.handle_message
+
+        async def silent_homelab(user_id, message, channel_context, custom_logger=None):
+            reply = await handle_message(user_id, message, channel_context, custom_logger)
+            return empty if adapter.calls[-1][0] == "homelab" else reply
+
+        monkeypatch.setattr(adapter, "handle_message", silent_homelab)
+        await _handoff_from_lead_turn(rooms, store, lead_chat, room, [{"agent": "homelab", "message": "a"}])
+
+        [card] = _cards(store, room.id)
+        assert (card["kind"], card["agent_id"], card["text"]) == (
+            "turn_failed",
+            "homelab",
+            "the turn produced no message",
+        )
+        assert "homelab" not in [author for author, _ in _messages(store, room.id)]
+        assert _agents_called(adapter) == ["homelab", "main"]
+
+    @pytest.mark.asyncio
+    async def test_a_lead_turn_that_only_hands_off_posts_no_card(
+        self, rooms, store, adapter, lead_chat, room, monkeypatch
+    ):
+        handle_message = adapter.handle_message
+
+        async def silent_lead(user_id, message, channel_context, custom_logger=None):
+            reply = await handle_message(user_id, message, channel_context, custom_logger)
+            return "" if adapter.calls[-1][0] == "main" else reply
+
+        async def lead_hands_off():
+            rooms.handoff(room.id, [{"agent": "homelab", "message": "a"}], "sequential")
+
+        monkeypatch.setattr(adapter, "handle_message", silent_lead)
+        adapter.hooks[lead_chat.id] = lead_hands_off
+        rooms.post_user_message(room.id, "check the NAS")
+        await _settle(rooms, room.id)
+
+        assert _cards(store, room.id) == []
+        assert _agents_called(adapter) == ["main", "homelab", "main"]
+
+    @pytest.mark.asyncio
     async def test_a_finished_participant_session_posts_a_card(self, rooms, store, adapter, room):
         store.update_session(_session_of(rooms, room, "homelab"), status=SessionStatus.COMPLETED.value)
 
