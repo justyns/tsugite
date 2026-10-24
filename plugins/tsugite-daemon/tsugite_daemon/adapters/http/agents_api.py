@@ -10,7 +10,7 @@ from starlette.routing import Route
 
 from tsugite.workspace import Workspace
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
-from tsugite_daemon.agent_store import Agent
+from tsugite_daemon.agent_store import EDITABLE_FIELDS, Agent
 from tsugite_daemon.session_store import SessionSource
 
 SETUP_FILES = ("IDENTITY.md", "USER.md", "AGENTS.md", "MEMORY.md")
@@ -84,12 +84,17 @@ class AgentsApiMixin:
             return err
         body = await self._optional_json_body(request)
         agent_id = body.pop("id", None)
-        if not isinstance(agent_id, str) or not agent_id or "workspace" not in body:
-            return JSONResponse({"error": "id and workspace are required"}, status_code=400)
-        body.setdefault("name", agent_id)
-        body.setdefault("template", self.adapter.runtime.agent_file)
+        if not isinstance(agent_id, str) or not agent_id:
+            return JSONResponse({"error": "id is required"}, status_code=400)
         try:
-            agent = self.adapter.session_store.agents.create(Agent(id=agent_id, **self.adapter.agent_fields(body)))
+            if "workspace" in body:
+                body.setdefault("name", agent_id)
+                body.setdefault("template", self.adapter.runtime.agent_file)
+                agent = self.adapter.session_store.agents.create(Agent(id=agent_id, **self.adapter.agent_fields(body)))
+            else:
+                if unknown := body.keys() - (EDITABLE_FIELDS | {"identity"}):
+                    raise ValueError(f"Unknown agent field(s): {', '.join(sorted(unknown))}")
+                agent = await asyncio.to_thread(self.adapter.create_seeded_agent, agent_id, **body)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse(asdict(agent), status_code=201)

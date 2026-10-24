@@ -198,6 +198,12 @@ export const TESTID = {
   launcherMode: 'launcher-mode',
   launcherAgent: 'launcher-agent',
   launcherStart: 'launcher-start',
+  agentRecordRow: (id: string) => `agent-record-${id}`,
+  agentRecordNew: 'agent-create',
+  agentRecordForm: 'agent-record-form',
+  agentRecordSave: 'agent-record-save',
+  agentRecordError: 'agent-record-error',
+  agentOpenMain: 'agent-open-main',
   // Webhooks view
   webhooksNew: 'webhooks-new',
   webhooksTable: 'webhooks-table',

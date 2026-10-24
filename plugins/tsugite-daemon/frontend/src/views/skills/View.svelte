@@ -22,7 +22,7 @@
   import { untrack } from 'svelte';
   import { TESTID } from '$lib/testids';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
-  import { nextRovingIndex } from '$lib/actions/rovingNav';
+  import { rowKeydown } from '$lib/actions/rowKeydown';
   import {
     buildSkillCatalog,
     catalogHeading,
@@ -97,21 +97,6 @@
     } finally {
       if (seq === sourceSeq) sourceLoading = false;
     }
-  }
-
-  function onRowKeydown(e: KeyboardEvent, index: number): void {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      const row = filtered[index];
-      if (row) selectRow(row.path);
-      return;
-    }
-    const next = nextRovingIndex(index, e.key, filtered.length);
-    if (next === null) return;
-    e.preventDefault();
-    const host = e.currentTarget as HTMLElement;
-    const rows = host.closest('[role="listbox"]')?.querySelectorAll<HTMLElement>('[data-rowidx]');
-    rows?.[next]?.focus();
   }
 </script>
 
@@ -192,7 +177,7 @@
             tabindex={isSel || (!selectedVisible && i === 0) ? 0 : -1}
             data-rowidx={i}
             onclick={() => selectRow(row.path)}
-            onkeydown={(e) => onRowKeydown(e, i)}
+            onkeydown={(e) => rowKeydown(e, i, filtered, (r) => selectRow(r.path))}
           >
             <span class="skl-dot">
               <Dot color={row.status === 'ok' ? 'ok' : row.status === 'warning' ? 'warn' : 'err'} />

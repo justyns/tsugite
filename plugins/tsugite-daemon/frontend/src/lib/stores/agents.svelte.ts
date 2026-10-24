@@ -16,6 +16,31 @@ export interface Agent {
   is_default: boolean;
 }
 
+export const AGENT_COLORS = ['blue', 'green', 'red', 'purple', 'orange', 'yellow', 'teal', 'pink'];
+
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** Mirrors the daemon's validate_agent_id; null when the id is acceptable. */
+export function validateAgentId(id: string): string | null {
+  return AGENT_ID_PATTERN.test(id)
+    ? null
+    : "Use lowercase letters, digits, '-' and '_' (max 64 characters), starting with a letter or digit";
+}
+
+export interface AgentCreate {
+  id: string;
+  name?: string;
+  template?: string;
+  model?: string | null;
+  reasoning_effort?: string | null;
+  color?: string | null;
+  identity?: string;
+}
+
+export type AgentPatch = Partial<
+  Pick<Agent, 'name' | 'template' | 'model' | 'reasoning_effort' | 'color'>
+>;
+
 export class AgentsStore {
   list = $state<Agent[]>([]);
   error = $state<string | null>(null);
@@ -38,6 +63,24 @@ export class AgentsStore {
     } finally {
       this.inflight = null;
     }
+  }
+
+  async create(body: AgentCreate): Promise<Agent> {
+    const agent = await api.post<Agent>('/api/agents', body);
+    await this.refresh();
+    return agent;
+  }
+
+  async update(id: string, patch: AgentPatch): Promise<Agent> {
+    const agent = await api.patch<Agent>(`/api/agents/${encodeURIComponent(id)}`, patch);
+    await this.refresh();
+    return agent;
+  }
+
+  private async refresh(): Promise<void> {
+    // A load already in flight may predate the change.
+    await this.inflight;
+    await this.load();
   }
 
   /** The agent's main chat session id, created on first open. */

@@ -6,8 +6,9 @@
   import { TESTID } from '$lib/testids';
   import { agentsMeta, type MdFile } from '$lib/stores/agentsMeta.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
-  import { nextRovingIndex } from '$lib/actions/rovingNav';
   import { parseAgentFile, summarizeAgent } from './agentFrontmatter';
+  import AgentRecords from './AgentRecords.svelte';
+  import { rowKeydown } from '$lib/actions/rowKeydown';
   import AgentForm from './AgentForm.svelte';
   import { launcher } from './launcher.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
@@ -19,6 +20,8 @@
   import PaneState from '$lib/components/connstates/PaneState.svelte';
 
   type Mode = 'form' | 'markdown';
+
+  let tab = $state('agents');
 
   let selectedPath = $state<string | null>(null);
   let content = $state('');
@@ -128,21 +131,6 @@
     }
   }
 
-  function onRowKeydown(e: KeyboardEvent, index: number): void {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      const f = visibleFiles[index];
-      if (f) selectFile(f.path);
-      return;
-    }
-    const next = nextRovingIndex(index, e.key, visibleFiles.length);
-    if (next === null) return;
-    e.preventDefault();
-    const host = e.currentTarget as HTMLElement;
-    const rows = host.closest('[role="listbox"]')?.querySelectorAll<HTMLElement>('[data-rowidx]');
-    rows?.[next]?.focus();
-  }
-
   function onEditorKeydown(e: KeyboardEvent): void {
     if ((e.metaKey || e.ctrlKey) && (e.key === 's' || e.key === 'S')) {
       e.preventDefault();
@@ -159,193 +147,217 @@
   }
 </script>
 
-<section class="agents-shell" data-testid={TESTID.view('agents')}>
-  <div class="agents-list" data-testid={TESTID.agentsRoster}>
-    <div class="sidebar-hd">
-      <strong class="hd-title">Templates</strong>
-      <span class="cnt">{visibleFiles.length}</span>
-    </div>
-    <div class="sidebar-search">
-      <SearchInput
-        bind:value={query}
-        ariaLabel="Filter templates"
-        placeholder="filter templates…"
-      />
-    </div>
-
-    {#if agentsMeta.loading && agentsMeta.agentFiles.length === 0}
-      <div class="pad"><PaneState kind="loading" lines={6} /></div>
-    {:else if agentsMeta.error}
-      <div class="pad">
-        <PaneState kind="error" title="Couldn't load templates">
-          {#snippet hint()}<span>{agentsMeta.error}</span>{/snippet}
-          {#snippet actions()}
-            <Button size="sm" onclick={() => void agentsMeta.loadAgentFiles()}>Retry</Button>
-          {/snippet}
-        </PaneState>
-      </div>
-    {:else if visibleFiles.length === 0}
-      <div class="pad">
-        <PaneState kind="empty" title={query ? 'No matches' : 'No templates'}>
-          {#snippet hint()}
-            <span
-              >{query
-                ? 'No template matches your filter.'
-                : 'No template files were discovered.'}</span
-            >
-          {/snippet}
-        </PaneState>
-      </div>
-    {:else}
-      <div class="roster" role="listbox" aria-label="Templates" tabindex="-1">
-        {#each visibleFiles as f, i (f.path)}
-          {@const isSel = f.path === selectedPath}
-          {@const live = f.name === runningAgentFile}
-          {@const running = live ? (agentsMeta.runtime?.running_tasks ?? 0) : 0}
-          <button
-            type="button"
-            class="ag-row"
-            class:is-selected={isSel}
-            role="option"
-            aria-selected={isSel}
-            tabindex={isSel || (!selectedVisible && i === 0) ? 0 : -1}
-            data-rowidx={i}
-            data-testid={TESTID.agentRow(f.name)}
-            onclick={() => selectFile(f.path)}
-            onkeydown={(e) => onRowKeydown(e, i)}
-          >
-            <span class="ag-dot"><Dot color={live ? 'ok' : 'mute'} ring={!live} /></span>
-            <span class="ag-main">
-              <span class="ag-name">{f.name}<span class="ag-ext">.md</span></span>
-              <span class="ag-sub">{f.description || `${f.source} template`}</span>
-            </span>
-            <span class="ag-marks">
-              {#if running > 0}<Badge variant="action" label={`${running} running`}>{running}</Badge
-                >{/if}
-              {#if f.readonly}<Icon name="lock" size={11} class="ag-lock" />{/if}
-            </span>
-          </button>
-        {/each}
-      </div>
-    {/if}
+<section class="agents-root" data-testid={TESTID.view('agents')}>
+  <div class="agents-tabs">
+    <Seg options={['agents', 'templates']} bind:value={tab} ariaLabel="Agents section" />
   </div>
 
-  <div class="agents-ed" data-testid={TESTID.agentEditor}>
-    {#if !selectedFile}
-      <div class="pad">
-        <PaneState kind="empty" title="Select a template">
-          {#snippet hint()}<span
-              >Pick a template from the list to view and edit its definition.</span
-            >{/snippet}
-        </PaneState>
-      </div>
-    {:else}
-      <div class="wk-toolbar">
-        <span class="wk-crumb">templates / <b>{selectedFile.name}.md</b></span>
-        <span class="ed-meta mono">{metaFor()}</span>
-        {#if runningTasks > 0}
-          <span class="ed-running"><Dot color="info" pulse />{runningTasks} running</span>
-        {/if}
-        {#if readonly}
-          <span class="stag stag--mute"><Icon name="lock" size={11} />read-only</span>
-        {:else if dirty}
-          <span class="stag stag--warn"><Dot color="warn" />unsaved</span>
-        {:else if justSaved}
-          <span class="stag stag--ok"><Icon name="check" size={11} />saved</span>
-        {/if}
-        <div class="ed-seg" data-testid={TESTID.agentModeSeg}>
-          <Seg options={['form', 'markdown']} bind:value={mode} ariaLabel="Editor mode" />
+  {#if tab === 'agents'}
+    <AgentRecords />
+  {:else}
+    <div class="agents-shell">
+      <div class="agents-list" data-testid={TESTID.agentsRoster}>
+        <div class="sidebar-hd">
+          <strong class="hd-title">Templates</strong>
+          <span class="cnt">{visibleFiles.length}</span>
         </div>
-        <div class="grow"></div>
-        <Button
-          size="sm"
-          data-testid={TESTID.agentRun}
-          onclick={() => launcher.open(selectedFile.path)}
-        >
-          {#snippet icon()}<Icon name="sparkle" />{/snippet}
-          Run
-        </Button>
-        <Button
-          size="sm"
-          variant="pri"
-          data-testid={TESTID.agentSave}
-          disabled={readonly || !dirty}
-          loading={saving}
-          onclick={() => void save()}
-        >
-          Save
-        </Button>
+        <div class="sidebar-search">
+          <SearchInput
+            bind:value={query}
+            ariaLabel="Filter templates"
+            placeholder="filter templates…"
+          />
+        </div>
+
+        {#if agentsMeta.loading && agentsMeta.agentFiles.length === 0}
+          <div class="pad"><PaneState kind="loading" lines={6} /></div>
+        {:else if agentsMeta.error}
+          <div class="pad">
+            <PaneState kind="error" title="Couldn't load templates">
+              {#snippet hint()}<span>{agentsMeta.error}</span>{/snippet}
+              {#snippet actions()}
+                <Button size="sm" onclick={() => void agentsMeta.loadAgentFiles()}>Retry</Button>
+              {/snippet}
+            </PaneState>
+          </div>
+        {:else if visibleFiles.length === 0}
+          <div class="pad">
+            <PaneState kind="empty" title={query ? 'No matches' : 'No templates'}>
+              {#snippet hint()}
+                <span
+                  >{query
+                    ? 'No template matches your filter.'
+                    : 'No template files were discovered.'}</span
+                >
+              {/snippet}
+            </PaneState>
+          </div>
+        {:else}
+          <div class="roster" role="listbox" aria-label="Templates" tabindex="-1">
+            {#each visibleFiles as f, i (f.path)}
+              {@const isSel = f.path === selectedPath}
+              {@const live = f.name === runningAgentFile}
+              {@const running = live ? (agentsMeta.runtime?.running_tasks ?? 0) : 0}
+              <button
+                type="button"
+                class="ag-row"
+                class:is-selected={isSel}
+                role="option"
+                aria-selected={isSel}
+                tabindex={isSel || (!selectedVisible && i === 0) ? 0 : -1}
+                data-rowidx={i}
+                data-testid={TESTID.agentRow(f.name)}
+                onclick={() => selectFile(f.path)}
+                onkeydown={(e) => rowKeydown(e, i, visibleFiles, (f) => selectFile(f.path))}
+              >
+                <span class="ag-dot"><Dot color={live ? 'ok' : 'mute'} ring={!live} /></span>
+                <span class="ag-main">
+                  <span class="ag-name">{f.name}<span class="ag-ext">.md</span></span>
+                  <span class="ag-sub">{f.description || `${f.source} template`}</span>
+                </span>
+                <span class="ag-marks">
+                  {#if running > 0}<Badge variant="action" label={`${running} running`}
+                      >{running}</Badge
+                    >{/if}
+                  {#if f.readonly}<Icon name="lock" size={11} class="ag-lock" />{/if}
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
 
-      {#if loadingContent}
-        <div class="pad"><PaneState kind="loading" lines={8} /></div>
-      {:else if contentError}
-        <div class="pad">
-          <PaneState kind="error" title="Couldn't load this template">
-            {#snippet hint()}<span>{contentError}</span>{/snippet}
-            {#snippet actions()}
-              <Button size="sm" onclick={() => selectedPath && void loadContent(selectedPath)}
-                >Retry</Button
-              >
-            {/snippet}
-          </PaneState>
-        </div>
-      {:else if mode === 'form'}
-        <div class="ed-pane">
-          <AgentForm {summary} body={parsed.body} />
-        </div>
-      {:else}
-        <div class="ed-pane ed-md">
-          {#if readonly}
-            <div class="md-note">
-              <Icon name="lock" size={12} />
-              This is a {sourceLabel} template and is read-only. Copy it into your workspace to customise
-              it.
+      <div class="agents-ed" data-testid={TESTID.agentEditor}>
+        {#if !selectedFile}
+          <div class="pad">
+            <PaneState kind="empty" title="Select a template">
+              {#snippet hint()}<span
+                  >Pick a template from the list to view and edit its definition.</span
+                >{/snippet}
+            </PaneState>
+          </div>
+        {:else}
+          <div class="wk-toolbar">
+            <span class="wk-crumb">templates / <b>{selectedFile.name}.md</b></span>
+            <span class="ed-meta mono">{metaFor()}</span>
+            {#if runningTasks > 0}
+              <span class="ed-running"><Dot color="info" pulse />{runningTasks} running</span>
+            {/if}
+            {#if readonly}
+              <span class="stag stag--mute"><Icon name="lock" size={11} />read-only</span>
+            {:else if dirty}
+              <span class="stag stag--warn"><Dot color="warn" />unsaved</span>
+            {:else if justSaved}
+              <span class="stag stag--ok"><Icon name="check" size={11} />saved</span>
+            {/if}
+            <div class="ed-seg" data-testid={TESTID.agentModeSeg}>
+              <Seg options={['form', 'markdown']} bind:value={mode} ariaLabel="Editor mode" />
+            </div>
+            <div class="grow"></div>
+            <Button
+              size="sm"
+              data-testid={TESTID.agentRun}
+              onclick={() => launcher.open(selectedFile.path)}
+            >
+              {#snippet icon()}<Icon name="sparkle" />{/snippet}
+              Run
+            </Button>
+            <Button
+              size="sm"
+              variant="pri"
+              data-testid={TESTID.agentSave}
+              disabled={readonly || !dirty}
+              loading={saving}
+              onclick={() => void save()}
+            >
+              Save
+            </Button>
+          </div>
+
+          {#if loadingContent}
+            <div class="pad"><PaneState kind="loading" lines={8} /></div>
+          {:else if contentError}
+            <div class="pad">
+              <PaneState kind="error" title="Couldn't load this template">
+                {#snippet hint()}<span>{contentError}</span>{/snippet}
+                {#snippet actions()}
+                  <Button size="sm" onclick={() => selectedPath && void loadContent(selectedPath)}
+                    >Retry</Button
+                  >
+                {/snippet}
+              </PaneState>
+            </div>
+          {:else if mode === 'form'}
+            <div class="ed-pane">
+              <AgentForm {summary} body={parsed.body} />
+            </div>
+          {:else}
+            <div class="ed-pane ed-md">
+              {#if readonly}
+                <div class="md-note">
+                  <Icon name="lock" size={12} />
+                  This is a {sourceLabel} template and is read-only. Copy it into your workspace to customise
+                  it.
+                </div>
+              {/if}
+              <textarea
+                class="mono agent-src"
+                spellcheck="false"
+                aria-label="Template definition source"
+                bind:value={content}
+                {readonly}
+                onkeydown={onEditorKeydown}></textarea>
             </div>
           {/if}
-          <textarea
-            class="mono agent-src"
-            spellcheck="false"
-            aria-label="Template definition source"
-            bind:value={content}
-            {readonly}
-            onkeydown={onEditorKeydown}></textarea>
-        </div>
-      {/if}
-    {/if}
-  </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
   /* Layout. The .t-* controls come from the component library; these classes are
      view-local. */
-  .agents-shell {
+  .agents-root {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .agents-tabs {
+    flex: none;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--bd0);
+  }
+  /* :global rules below also style AgentRecords. */
+  .agents-root :global(.agents-shell) {
     flex: 1;
     min-height: 0;
     display: grid;
     grid-template-columns: 300px minmax(0, 1fr);
-    height: 100%;
     overflow: hidden;
   }
-  .agents-list {
+  .agents-root :global(.agents-list) {
     border-right: 1px solid var(--bd0);
     background: var(--bg1);
     min-height: 0;
     display: flex;
     flex-direction: column;
   }
-  .sidebar-hd {
+  .agents-root :global(.sidebar-hd) {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 10px 12px 6px;
     flex: none;
   }
-  .hd-title {
+  .agents-root :global(.hd-title) {
     font: 600 var(--fs-sm) var(--font-ui);
     color: var(--tx0);
   }
-  .sidebar-hd .cnt {
+  .agents-root :global(.cnt) {
     font: 500 var(--fs-2xs) var(--font-mono);
     color: var(--tx3);
   }
@@ -353,12 +365,12 @@
     padding: 0 12px 8px;
     flex: none;
   }
-  .roster {
+  .agents-root :global(.roster) {
     overflow-y: auto;
     min-height: 0;
     flex: 1;
   }
-  .ag-row {
+  .agents-root :global(.ag-row) {
     display: flex;
     align-items: center;
     gap: 9px;
@@ -371,10 +383,10 @@
     cursor: pointer;
     color: var(--tx1);
   }
-  .ag-row:hover {
+  .agents-root :global(.ag-row:hover) {
     background: var(--bg2);
   }
-  .ag-row.is-selected {
+  .agents-root :global(.ag-row.is-selected) {
     background: color-mix(in oklab, var(--acc) 12%, var(--bg1));
     box-shadow: inset 2px 0 0 var(--acc);
   }
@@ -382,14 +394,14 @@
     flex: none;
     display: inline-flex;
   }
-  .ag-main {
+  .agents-root :global(.ag-main) {
     display: flex;
     flex-direction: column;
     gap: 1px;
     min-width: 0;
     flex: 1;
   }
-  .ag-name {
+  .agents-root :global(.ag-name) {
     font: 600 var(--fs-sm) var(--font-ui);
     color: var(--tx0);
     white-space: nowrap;
@@ -400,7 +412,7 @@
     color: var(--tx3);
     font-weight: 400;
   }
-  .ag-sub {
+  .agents-root :global(.ag-sub) {
     font-size: var(--fs-xs);
     color: var(--tx3);
     white-space: nowrap;
@@ -417,13 +429,13 @@
     color: var(--tx3);
   }
 
-  .agents-ed {
+  .agents-root :global(.agents-ed) {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
   }
-  .wk-toolbar {
+  .agents-root :global(.wk-toolbar) {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -432,7 +444,7 @@
     flex-wrap: wrap;
     flex: none;
   }
-  .wk-crumb {
+  .agents-root :global(.wk-crumb) {
     font: 500 var(--fs-xs) var(--font-mono);
     color: var(--tx3);
     white-space: nowrap;
@@ -440,7 +452,7 @@
     text-overflow: ellipsis;
     max-width: 200px;
   }
-  .wk-crumb b {
+  .agents-root :global(.wk-crumb b) {
     color: var(--tx1);
     font-weight: 600;
   }
@@ -484,7 +496,7 @@
   .ed-seg {
     margin-left: 6px;
   }
-  .grow {
+  .agents-root :global(.grow) {
     flex: 1;
   }
   .ed-pane {
@@ -536,7 +548,7 @@
   .agent-src[readonly] {
     color: var(--tx2);
   }
-  .pad {
+  .agents-root :global(.pad) {
     padding: 14px;
   }
   .mono {
@@ -544,11 +556,11 @@
   }
 
   @media (max-width: 640px) {
-    .agents-shell {
+    .agents-root :global(.agents-shell) {
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: auto minmax(0, 1fr);
     }
-    .agents-list {
+    .agents-root :global(.agents-list) {
       max-height: 210px;
       border-right: 0;
       border-bottom: 1px solid var(--bd0);

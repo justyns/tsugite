@@ -1,10 +1,7 @@
 """Session tools for agents to manage async agent sessions."""
 
 import logging
-import re
-import shutil
 from dataclasses import asdict
-from pathlib import Path
 from typing import Optional
 
 from . import call_on_loop, tool
@@ -329,49 +326,11 @@ def create_agent(
     identity: Optional[str] = None,
 ) -> dict:
     """Create an agent with a fresh workspace seeded from the workspace templates."""
-    from tsugite_daemon.agent_store import Agent, validate_agent_id
-
-    from tsugite.config import get_xdg_data_path
-    from tsugite.workspace import Workspace
-
-    validate_agent_id(id)
-    if template and (re.search(r"[/\\]", template) or template.startswith(("~", "."))):
-        raise ValueError(f"template must be a bare template name: {template}")
     adapter = _session_runner.adapter
     if adapter is None:
         raise RuntimeError("create_agent needs the daemon adapter")
-    agents = _session_runner.store.agents
-    if _call(agents.get, id) is not None:
-        raise ValueError(f"Agent already exists: {id}")
-    name = name or id
-    workspace = get_xdg_data_path("agents") / id
-    try:
-        workspace.mkdir(parents=True)
-    except FileExistsError:
-        raise ValueError(f"Workspace directory already exists: {workspace}") from None
-    try:
-        Workspace.create(workspace, agent_name=name, about=identity)
-        if not template:
-            default = _call(agents.default)
-            template = default.template
-            in_default = _call(adapter._resolve_agent_path, template, Path(default.workspace))
-            if in_default and not _call(adapter._resolve_agent_path, template, workspace):
-                template = str(in_default)
-        body = {
-            "name": name,
-            "workspace": str(workspace),
-            "template": template,
-            "model": model,
-            "color": color,
-        }
-        fields = _call(adapter.agent_fields, body)
-        return asdict(_call(agents.create, Agent(id=id, **fields)))
-    except BaseException:
-        try:
-            shutil.rmtree(workspace)
-        except OSError as e:
-            logger.warning("Could not remove workspace %s of failed agent %s: %s", workspace, id, e)
-        raise
+    agent = adapter.create_seeded_agent(id, name=name, template=template, model=model, color=color, identity=identity)
+    return asdict(agent)
 
 
 @tool(require_daemon=True)

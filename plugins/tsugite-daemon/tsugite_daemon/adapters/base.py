@@ -3,6 +3,8 @@
 import asyncio
 import contextvars
 import logging
+import re
+import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -21,7 +23,7 @@ from tsugite.events.base import BaseEvent
 from tsugite.exceptions import AgentExecutionError, is_prompt_too_long_error
 from tsugite.options import ExecutionOptions
 from tsugite.ui.jsonl import JSONLUIHandler
-from tsugite_daemon.agent_store import EDITABLE_FIELDS, NULLABLE_FIELDS, Agent, UnknownAgentError
+from tsugite_daemon.agent_store import EDITABLE_FIELDS, NULLABLE_FIELDS, Agent, UnknownAgentError, validate_agent_id
 from tsugite_daemon.config import RuntimeDefaults, SandboxSettings
 from tsugite_daemon.session_store import (
     METADATA_PRIMARY_FLAG,
@@ -476,6 +478,59 @@ class BaseAdapter(ABC):
             if not self._resolve_agent_path(template, workspace):
                 raise ValueError(f"template not found: {template}")
         return fields
+
+    def create_seeded_agent(
+        self,
+        agent_id: str,
+        name: Optional[str] = None,
+        template: Optional[str] = None,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        color: Optional[str] = None,
+        identity: Optional[str] = None,
+    ) -> Agent:
+        """Create an agent with a fresh workspace seeded from the workspace templates. Raises ValueError."""
+        from tsugite.config import get_xdg_data_path
+        from tsugite.workspace import Workspace
+
+        validate_agent_id(agent_id)
+        for key, value in {"name": name, "template": template, "identity": identity}.items():
+            if value is not None and not isinstance(value, str):
+                raise ValueError(f"{key} must be a string")
+        if template and (re.search(r"[/\\]", template) or template.startswith(("~", "."))):
+            raise ValueError(f"template must be a bare template name: {template}")
+        agents = self.session_store.agents
+        if agents.get(agent_id) is not None:
+            raise ValueError(f"Agent already exists: {agent_id}")
+        name = name or agent_id
+        workspace = get_xdg_data_path("agents") / agent_id
+        try:
+            workspace.mkdir(parents=True)
+        except FileExistsError:
+            raise ValueError(f"Workspace directory already exists: {workspace}") from None
+        try:
+            Workspace.create(workspace, agent_name=name, about=identity)
+            if not template:
+                default = agents.default()
+                template = default.template
+                in_default = self._resolve_agent_path(template, Path(default.workspace))
+                if in_default and not self._resolve_agent_path(template, workspace):
+                    template = str(in_default)
+            body = {
+                "name": name,
+                "workspace": str(workspace),
+                "template": template,
+                "model": model,
+                "reasoning_effort": reasoning_effort,
+                "color": color,
+            }
+            return agents.create(Agent(id=agent_id, **self.agent_fields(body)))
+        except BaseException:
+            try:
+                shutil.rmtree(workspace)
+            except OSError as e:
+                logger.warning("Could not remove workspace %s of failed agent %s: %s", workspace, agent_id, e)
+            raise
 
     def _session_and_agent(self, session_id: Optional[str]) -> tuple[Optional[Session], Agent]:
         try:

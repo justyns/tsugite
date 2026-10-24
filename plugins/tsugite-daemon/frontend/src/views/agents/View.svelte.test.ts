@@ -76,6 +76,7 @@ const RUNTIME = {
 
 function routeGet(path: string): Promise<unknown> {
   if (path === '/api/runtime') return Promise.resolve(RUNTIME);
+  if (path === '/api/agents') return Promise.resolve({ agents: [] });
   if (path === '/api/agent-files') return Promise.resolve({ files: FILES });
   if (path.startsWith('/api/agent-files/content')) {
     const target = decodeURIComponent(path);
@@ -87,6 +88,12 @@ function routeGet(path: string): Promise<unknown> {
 }
 
 afterEach(cleanup);
+
+async function renderTemplates() {
+  const result = await render(View);
+  await page.getByRole('button', { name: 'templates' }).click();
+  return result;
+}
 
 beforeEach(() => {
   vi.mocked(api.get).mockReset();
@@ -100,7 +107,7 @@ beforeEach(() => {
 });
 
 test('roster lists agent files registered-first, and auto-selects the top agent into the Form tab', async () => {
-  render(View);
+  await renderTemplates();
   await expect.element(page.getByTestId('agent-row-hollis')).toBeInTheDocument();
   // Registered hollis carries a running badge; builtin default carries a lock.
   await expect.element(page.getByTestId('agent-row-hollis')).toHaveTextContent('2');
@@ -110,7 +117,7 @@ test('roster lists agent files registered-first, and auto-selects the top agent 
 });
 
 test('switching to the Markdown tab shows the editable source; Save is disabled until dirty', async () => {
-  const { container } = await render(View);
+  const { container } = await renderTemplates();
   await expect.element(page.getByText('claude_code:opus-4-8')).toBeInTheDocument();
 
   await page.getByRole('button', { name: 'markdown' }).click();
@@ -132,7 +139,7 @@ test('switching to the Markdown tab shows the editable source; Save is disabled 
 });
 
 test('a builtin file is read-only: the editor blocks edits and Save stays disabled', async () => {
-  const { container } = await render(View);
+  const { container } = await renderTemplates();
   await expect.element(page.getByTestId('agent-row-default')).toBeInTheDocument();
 
   await page.getByTestId('agent-row-default').click();
@@ -146,7 +153,7 @@ test('a builtin file is read-only: the editor blocks edits and Save stays disabl
 });
 
 test('the editor offers exactly form and markdown modes (no preview tab)', async () => {
-  render(View);
+  await renderTemplates();
   await expect.element(page.getByText('claude_code:opus-4-8')).toBeInTheDocument();
 
   await expect.element(page.getByRole('button', { name: 'form' })).toBeInTheDocument();
@@ -156,7 +163,7 @@ test('the editor offers exactly form and markdown modes (no preview tab)', async
 
 test('Run opens the launcher on the selected agent, chat-capable or not', async () => {
   launcher.close();
-  render(View);
+  await renderTemplates();
   await expect.element(page.getByTestId('agent-run')).toBeInTheDocument();
 
   await page.getByTestId('agent-run').click();
@@ -172,7 +179,7 @@ test('Run opens the launcher on the selected agent, chat-capable or not', async 
 });
 
 test('the roster filter narrows the list by name', async () => {
-  render(View);
+  await renderTemplates();
   await expect.element(page.getByTestId('agent-row-hollis')).toBeInTheDocument();
   await expect.element(page.getByText('Templates', { exact: true })).toBeInTheDocument();
 
@@ -191,7 +198,7 @@ test('picking a second agent while its read is in flight disables Save, so the f
     return routeGet(path);
   }) as never);
 
-  const { container } = await render(View);
+  const { container } = await renderTemplates();
   await page.getByRole('button', { name: 'markdown' }).click();
   const ta = container.querySelector<HTMLTextAreaElement>('.agent-src');
   await vi.waitFor(() => expect(ta?.value).toContain('name: hollis'));

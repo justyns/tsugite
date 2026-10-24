@@ -475,7 +475,7 @@ class TestAgentTools:
         assert store.agents.get("atlas").template == "default.md"
 
     def test_create_agent_keeps_the_error_when_cleanup_fails(self, store, agents_root, monkeypatch):
-        monkeypatch.setattr(sessions_tools.shutil, "rmtree", MagicMock(side_effect=OSError("busy")))
+        monkeypatch.setattr("tsugite_daemon.adapters.base.shutil.rmtree", MagicMock(side_effect=OSError("busy")))
 
         with pytest.raises(ValueError, match="color"):
             sessions_tools.create_agent("atlas", color="magenta")
@@ -605,6 +605,52 @@ class TestAgentsApi:
 
         cleared = client.patch("/api/agents/research", headers=auth, json={"model": None, "color": None})
         assert (cleared.status_code, cleared.json()["model"], cleared.json()["color"]) == (200, None, None)
+
+    def test_create_without_a_workspace_seeds_one_like_the_tool(self, client, auth, store, default_ws):
+        store.agents.ensure_default(default_ws, "pinned")
+        agents_root = get_xdg_data_path("agents")
+
+        resp = client.post(
+            "/api/agents",
+            headers=auth,
+            json={"id": "atlas", "name": "Atlas", "color": "teal", "reasoning_effort": "high", "identity": "I map."},
+        )
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["workspace"] == str((agents_root / "atlas").resolve())
+        assert body["template"] == str((default_ws / "pinned.md").resolve())
+        assert (body["reasoning_effort"], body["color"], body["is_default"]) == ("high", "teal", False)
+        identity = (agents_root / "atlas" / "IDENTITY.md").read_text()
+        assert "- **Name:** Atlas" in identity
+        assert "I map." in identity
+        assert store.agents.get("atlas") is not None
+
+    @pytest.mark.parametrize(
+        "body,error",
+        [
+            ({"id": "../escape"}, "Invalid agent id"),
+            ({"id": "homelab"}, "already exists"),
+            ({"id": "x", "template": "sub/ops"}, "bare template name"),
+            ({"id": "x", "template": "missing"}, "template not found"),
+            ({"id": "x", "color": "magenta"}, "color"),
+            ({"id": "x", "identity": 5}, "identity"),
+            ({"id": "x", "template": 5}, "template must be a string"),
+            ({"id": "x", "name": 5}, "name must be a string"),
+            ({"id": "x", "is_default": True}, "Unknown agent field"),
+            ({"id": "x", "workspace": "WS", "identity": "hi"}, "identity"),
+        ],
+    )
+    def test_create_without_a_workspace_rejects_bad_input_and_leaves_nothing(
+        self, client, auth, homelab_ws, body, error
+    ):
+        body = {k: (str(homelab_ws) if v == "WS" else v) for k, v in body.items()}
+
+        resp = client.post("/api/agents", headers=auth, json=body)
+
+        assert resp.status_code == 400
+        assert error in resp.json()["error"]
+        assert not (get_xdg_data_path("agents") / "x").exists()
 
     def test_create_expands_and_stores_the_resolved_workspace(self, client, auth, homelab_ws, monkeypatch):
         monkeypatch.setenv("HOME", str(homelab_ws.parent))
