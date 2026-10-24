@@ -195,6 +195,30 @@ _PERSIST_EVENT_TYPES = frozenset(
 )
 
 
+def build_session_event_persister(session_store: "SessionStore", session_id: str) -> Callable:
+    """Persist selected agent events to the per-session JSONL, and sync
+    `Session.cumulative_tokens` to `prompt_snapshot.token_breakdown.total` so
+    the UI badge matches the prompt inspector. See `tests/test_displayed_token_count.py`
+    for the failure modes this addresses.
+    """
+
+    def _persist(payload: dict[str, Any]) -> None:
+        # prompt_snapshot is recorded durably by the agent itself (storage.record,
+        # like model_request) - appending here again would double it. Only the
+        # token-badge sync still rides this live path.
+        if payload.get("type") == "prompt_snapshot":
+            total = (payload.get("token_breakdown") or {}).get("total")
+            if isinstance(total, int) and total > 0:
+                session_store.set_cumulative_tokens(session_id, total)
+            return
+        session_store.append_event(
+            session_id,
+            {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
+        )
+
+    return _persist
+
+
 class SSEBroadcastHandler(JSONLUIHandler):
     """ui_handler that fans agent events out to the cross-session SSE feed.
 

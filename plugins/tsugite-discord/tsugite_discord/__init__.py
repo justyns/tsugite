@@ -4,13 +4,18 @@ import asyncio
 import inspect
 import logging
 import re
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
 
 import discord
 from discord.ext import commands
-from tsugite_daemon.adapters.base import BaseAdapter, ChannelContext, CompositeUIHandler, SSEBroadcastHandler
+from tsugite_daemon.adapters.base import (
+    BaseAdapter,
+    ChannelContext,
+    CompositeUIHandler,
+    SSEBroadcastHandler,
+    build_session_event_persister,
+)
 from tsugite_daemon.config import DiscordBotConfig, RuntimeDefaults
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
 
@@ -698,10 +703,7 @@ class DiscordAdapter(BaseAdapter):
         sse_handler = SSEBroadcastHandler(
             broadcaster=self.event_bus,
             session_id=target_session.id,
-            persist_event=lambda payload: self.session_store.append_event(
-                target_session.id,
-                {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
-            ),
+            persist_event=build_session_event_persister(self.session_store, target_session.id),
         )
         custom_logger = SimpleNamespace(ui_handler=CompositeUIHandler(progress, sse_handler))
 

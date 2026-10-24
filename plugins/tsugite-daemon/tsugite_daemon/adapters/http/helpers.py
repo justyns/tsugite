@@ -7,9 +7,8 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
@@ -22,7 +21,6 @@ from tsugite_daemon.adapters.http.sse import HTTPInteractionBackend
 
 if TYPE_CHECKING:
     from tsugite_daemon.agent_store import AgentStore
-    from tsugite_daemon.session_store import SessionStore
 
 # adapters/http/helpers.py -> up three parents reaches the daemon package root.
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
@@ -58,30 +56,6 @@ def mounted_api_routes(prefix: str, name: str, routes: list) -> list:
             methods = sorted((r.methods or set()) - {"HEAD", "OPTIONS"})
             extra.append(Route(prefix, r.endpoint, methods=methods, name=r.name))
     return [Mount(prefix, name=name, routes=routes), *extra]
-
-
-def build_session_event_persister(session_store: "SessionStore", session_id: str) -> Callable:
-    """Persist selected agent events to the per-session JSONL, and sync
-    `Session.cumulative_tokens` to `prompt_snapshot.token_breakdown.total` so
-    the UI badge matches the prompt inspector. See `tests/test_displayed_token_count.py`
-    for the failure modes this addresses.
-    """
-
-    def _persist(payload: dict[str, Any]) -> None:
-        # prompt_snapshot is recorded durably by the agent itself (storage.record,
-        # like model_request) - appending here again would double it. Only the
-        # token-badge sync still rides this live path.
-        if payload.get("type") == "prompt_snapshot":
-            total = (payload.get("token_breakdown") or {}).get("total")
-            if isinstance(total, int) and total > 0:
-                session_store.set_cumulative_tokens(session_id, total)
-            return
-        session_store.append_event(
-            session_id,
-            {**payload, "timestamp": datetime.now(timezone.utc).isoformat()},
-        )
-
-    return _persist
 
 
 def _resolve_full_model_id(model: str) -> str:

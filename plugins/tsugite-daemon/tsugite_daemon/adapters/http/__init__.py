@@ -3,7 +3,6 @@
 from tsugite_daemon.adapters.http.helpers import (
     HTTPAgentAdapter,
     _format_upload_message_suffix,
-    build_session_event_persister,
 )
 from tsugite_daemon.adapters.http.server import HTTPServer
 from tsugite_daemon.adapters.http.sse import (
@@ -20,6 +19,5 @@ __all__ = [
     "SSEProgressHandler",
     "HTTPInteractionBackend",
     "sse_stream",
-    "build_session_event_persister",
     "_format_upload_message_suffix",
 ]

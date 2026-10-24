@@ -13,7 +13,7 @@ from starlette.routing import Route
 
 from tsugite.attachments.delegation import can_inline_file
 from tsugite.ui.jsonl import JSONLUIHandler
-from tsugite_daemon.adapters.base import ChannelContext
+from tsugite_daemon.adapters.base import ChannelContext, build_session_event_persister
 from tsugite_daemon.adapters.http.helpers import (
     MAX_UPLOAD_FILES,
     MAX_UPLOAD_TOTAL,
@@ -25,7 +25,6 @@ from tsugite_daemon.adapters.http.helpers import (
     _resolve_full_model_id,
     _sanitize_filename,
     agent_id_error,
-    build_session_event_persister,
     logger,
 )
 from tsugite_daemon.adapters.http.sse import (

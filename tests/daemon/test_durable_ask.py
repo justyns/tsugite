@@ -161,8 +161,8 @@ def test_ask_events_persist_with_ask_id_top_level(tmp_path):
     """ask_user / ask_answered land in history (they are in _PERSIST_EVENT_TYPES),
     and the read path flattens their data so ask_id/question/options arrive as
     top-level fields on reload, like every other event."""
+    from tsugite_daemon.adapters.base import build_session_event_persister
     from tsugite_daemon.adapters.http import SSEProgressHandler
-    from tsugite_daemon.adapters.http.helpers import build_session_event_persister
 
     store = SessionStore(tmp_path / "store.json")
     sid = "sess-ask"

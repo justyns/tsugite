@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,6 +26,7 @@ from tsugite.events import (  # noqa: E402
     LLMMessageEvent,
     LLMWaitProgressEvent,
     ObservationEvent,
+    PromptSnapshotEvent,
     ReasoningContentEvent,
     StepStartEvent,
     ToolCallEvent,
@@ -515,3 +516,45 @@ class TestCodeBlockChunking:
             assert body
             bodies.append(body)
         assert "".join(bodies) == "y" * 2500
+
+
+@pytest.mark.asyncio
+async def test_turn_does_not_append_prompt_snapshot_but_syncs_tokens(tmp_path):
+    """The agent records prompt_snapshot itself; the live persister only syncs the token badge."""
+    import tsugite_discord
+    from tsugite_daemon.session_store import SessionStore
+
+    store = SessionStore(tmp_path / "session_store.json", default_context_limit=200_000)
+    session = store.get_or_create_interactive("test-user")
+
+    adapter = object.__new__(DiscordAdapter)
+    adapter.session_store = store
+    adapter.event_bus = MagicMock()
+    adapter.active_progress_handlers = []
+    adapter._resolve_target_session = MagicMock(return_value=session)
+    adapter._build_progress_header = MagicMock(return_value="")
+    adapter._send_chunked = AsyncMock()
+
+    async def fake_handle_message(*, custom_logger, **kwargs):
+        custom_logger.ui_handler.handle_event(PromptSnapshotEvent(token_breakdown={"total": 4_200}))
+        return "done"
+
+    adapter.handle_message = fake_handle_message
+
+    message = MagicMock()
+    message.channel.id = 1
+    message.author.id = 2
+    with (
+        patch.object(tsugite_discord.discord, "Thread", type("Thread", (), {})),
+        patch.object(tsugite_discord.discord, "DMChannel", type("DMChannel", (), {})),
+        patch.object(
+            tsugite_discord,
+            "DiscordProgressHandler",
+            MagicMock(return_value=MagicMock(cleanup=AsyncMock(), start_typing_loop=AsyncMock())),
+        ),
+        patch.object(tsugite_discord, "DiscordInteractionBackend"),
+    ):
+        await adapter._process_message(message, "hi", "bot")
+
+    assert not any(e["type"] == "prompt_snapshot" for e in store.read_events(session.id))
+    assert store.get_session(session.id).cumulative_tokens == 4_200

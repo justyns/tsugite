@@ -23,7 +23,7 @@ pressure instead of the LLM's report for one historical call.
 """
 
 import pytest
-from tsugite_daemon.adapters.http import build_session_event_persister
+from tsugite_daemon.adapters.base import build_session_event_persister
 from tsugite_daemon.session_store import SessionStore
 
 
