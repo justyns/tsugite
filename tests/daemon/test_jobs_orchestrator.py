@@ -143,9 +143,9 @@ def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.v
     )
 
 
-def _verifier_session(job, session_id="verifier-1", status=SessionStatus.COMPLETED.value):
+def _verifier_session(job, session_id=None, status=SessionStatus.COMPLETED.value):
     return Session(
-        id=session_id,
+        id=session_id or job.verifier_session_id,
         source="spawned",
         status=status,
         metadata={"job_id": job.id, "verifier_for": job.worker_session_id},
@@ -419,7 +419,7 @@ async def test_verifier_fail_under_max_attempts_loops(store, runner, orchestrato
     verifier_json = json.dumps(
         {"ac_results": [{"ac_text": "pr open", "pass": False, "reason": "no PR"}], "overall_pass": False}
     )
-    await orchestrator.on_session_complete(_verifier_session(job, "verifier-1"), verifier_json)
+    await orchestrator.on_session_complete(_verifier_session(job), verifier_json)
 
     refreshed = store.get(job.id)
     assert refreshed.state == JobState.RUNNING.value
@@ -441,17 +441,17 @@ async def test_persistent_verifier_fail_marks_stuck_at_max_attempts(store, runne
     # Round 1: worker done → verifier → loop
     await orchestrator.on_session_complete(_worker_session(job, "w1"), "w1")
     job = store.get(job.id)
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail_round(1))
+    await orchestrator.on_session_complete(_verifier_session(job), fail_round(1))
     # Round 2: worker done → verifier → loop
     job = store.get(job.id)
     await orchestrator.on_session_complete(_worker_session(job, job.worker_session_id), "w2")
     job = store.get(job.id)
-    await orchestrator.on_session_complete(_verifier_session(job, "v2"), fail_round(2))
+    await orchestrator.on_session_complete(_verifier_session(job), fail_round(2))
     # Round 3: worker done → verifier → STUCK
     job = store.get(job.id)
     await orchestrator.on_session_complete(_worker_session(job, job.worker_session_id), "w3")
     job = store.get(job.id)
-    await orchestrator.on_session_complete(_verifier_session(job, "v3"), fail_round(3))
+    await orchestrator.on_session_complete(_verifier_session(job), fail_round(3))
 
     final = store.get(job.id)
     assert final.state == JobState.STUCK.value
@@ -481,7 +481,7 @@ async def test_second_malformed_verifier_output_errors_the_job(store, runner, or
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "worker output")
     await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "this is not json at all")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "verifier-2"), "still not json")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "still not json")
     refreshed = store.get(job.id)
     assert refreshed.state == JobState.ERRORED.value
     assert refreshed.error == "verifier produced no inspection"
@@ -507,12 +507,23 @@ async def test_inspection_claim_with_no_tool_calls_reruns_then_errors(store, run
     assert store.get(job.id).state == JobState.VERIFYING.value
     assert store.get(job.id).verify_attempts == 0
     assert len(_verifier_spawns(runner)) == 2
-    await orchestrator.on_session_complete(
-        _verifier_session(store.get(job.id), "verifier-2"), _verdict_with_reasons(reason)
-    )
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), _verdict_with_reasons(reason))
     refreshed = store.get(job.id)
     assert refreshed.state == JobState.ERRORED.value
     assert refreshed.error == "verifier produced no inspection"
+    assert reason in refreshed.error_detail
+
+
+@pytest.mark.asyncio
+async def test_superseded_verifier_callback_is_ignored_during_the_rerun(store, runner, orchestrator):
+    job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
+    await orchestrator.on_session_complete(_worker_session(job), "worker output")
+    first = _verifier_session(store.get(job.id))
+    await orchestrator.on_session_complete(first, "not json")
+    await orchestrator.on_session_complete(first, "still not json")
+    refreshed = store.get(job.id)
+    assert refreshed.state == JobState.VERIFYING.value
+    assert refreshed.verifier_session_id != first.id
 
 
 @pytest.mark.asyncio
@@ -525,7 +536,7 @@ async def test_unparseable_first_reply_leaves_no_stale_row_when_rerun_passes(sto
     await orchestrator.on_session_complete(_worker_session(job), "worker output")
     await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "not json")
     await orchestrator.on_session_complete(
-        _verifier_session(store.get(job.id), "verifier-2"), _verdict_with_reasons("read Output: ok")
+        _verifier_session(store.get(job.id)), _verdict_with_reasons("read Output: ok")
     )
     refreshed = store.get(job.id)
     assert refreshed.state == JobState.DONE.value
@@ -546,7 +557,7 @@ async def test_reason_starting_with_ran_but_not_a_command_claim_passes(store, ru
 async def test_inspection_claim_backed_by_a_tool_call_passes(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "worker output")
-    runner.store.code_events["verifier-1"] = 1
+    runner.store.code_events[store.get(job.id).verifier_session_id] = 1
     await orchestrator.on_session_complete(
         _verifier_session(store.get(job.id)), _verdict_with_reasons("inspected: read the file")
     )
@@ -1018,7 +1029,7 @@ async def test_persistent_verifier_fail_stuck_state_preserves_ac_results(store, 
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(job, f"w{i}"), f"w{i}")
         job = store.get(job.id)
-        await orchestrator.on_session_complete(_verifier_session(job, f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(job), fail)
         job = store.get(job.id)
     assert job.state == JobState.STUCK.value
     assert job.result is not None and job.result.get("ac_results"), (
@@ -1035,10 +1046,10 @@ async def test_verifier_complete_for_non_verifying_job_is_skipped(store, runner,
     job = store.get(job.id)
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     # First verifier-complete advances Job back to RUNNING (retry path).
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail)
+    await orchestrator.on_session_complete(_verifier_session(job), fail)
     runner_started_count_after_first = len([s for s in runner.started if (s.metadata or {}).get("loop_attempt")])
     # Duplicate verifier-complete for the same verifier session - Job is now RUNNING.
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail)
+    await orchestrator.on_session_complete(_verifier_session(job), fail)
     runner_started_count_after_duplicate = len([s for s in runner.started if (s.metadata or {}).get("loop_attempt")])
     assert runner_started_count_after_first == runner_started_count_after_duplicate, (
         "duplicate verifier-complete on a non-VERIFYING Job must NOT spawn a second worker"
@@ -1052,7 +1063,7 @@ async def test_loop_attempt_metadata_matches_verify_attempts(store, runner, orch
     await orchestrator.on_session_complete(_worker_session(job, "w0"), "w0")
     job = store.get(job.id)
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
-    await orchestrator.on_session_complete(_verifier_session(job, "v0"), fail)
+    await orchestrator.on_session_complete(_verifier_session(job), fail)
     job = store.get(job.id)
     loop_workers = [s for s in runner.started if (s.metadata or {}).get("loop_attempt")]
     assert loop_workers, "loop-back worker must spawn"
@@ -1539,7 +1550,7 @@ def test_worktree_kept_on_stuck_for_inspection(store, runner, orchestrator, tmp_
 
     for i in range(MAX_VERIFY_ATTEMPTS):
         asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
-        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail))
     assert store.get(job.id).state == JobState.STUCK.value
     assert Path(wt).exists(), "worktree must be kept on STUCK for inspection"
 
@@ -1565,7 +1576,7 @@ def test_worktree_pruned_on_mark_done_manual(store, runner, orchestrator, tmp_pa
 
     for i in range(MAX_VERIFY_ATTEMPTS):
         asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
-        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail))
     assert store.get(job.id).state == JobState.STUCK.value
     assert Path(wt).exists(), "worktree should still be on disk while STUCK"
 
@@ -1594,7 +1605,7 @@ def test_dirty_worktree_kept_on_mark_done_manual(store, runner, orchestrator, tm
 
     for i in range(MAX_VERIFY_ATTEMPTS):
         asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
-        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail))
     assert store.get(job.id).state == JobState.STUCK.value
     (Path(wt) / "pruning.txt").write_text("notes the worker never committed\n")
 
@@ -1634,7 +1645,7 @@ async def test_mark_done_manual_from_stuck(store, runner, orchestrator):
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     await orchestrator.mark_done_manual(job.id, reason="verifier was wrong, looks fine to me")
     final = store.get(job.id)
@@ -1655,7 +1666,7 @@ async def test_retry_with_hint_spawns_worker_does_not_reset_counter(store, runne
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     pre = store.get(job.id).verify_attempts
 
@@ -1880,7 +1891,7 @@ async def test_retry_loop_appends_attempts_with_verdicts(store, runner, orchestr
     job = store.get(job.id)
     assert job.attempts[-1]["verifier_session_id"] is not None
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), fail)
+    await orchestrator.on_session_complete(_verifier_session(job), fail)
     job = store.get(job.id)
     # Now there should be 2 attempts; first one has verdict=False, second is fresh.
     assert len(job.attempts) >= 2
@@ -1895,7 +1906,7 @@ async def test_retry_with_hint_appends_hint_attempt(store, runner, orchestrator)
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     pre_count = len(store.get(job.id).attempts)
     await orchestrator.retry_with_hint(job.id, hint="the real issue is X")
@@ -1927,7 +1938,7 @@ async def test_retry_with_hint_reset_counter_zeroes_verify_attempts(store, runne
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     assert store.get(job.id).verify_attempts == MAX_VERIFY_ATTEMPTS
 
@@ -1945,7 +1956,7 @@ async def test_retry_with_hint_fresh_workspace_no_op_when_no_repo(store, runner,
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     # Should not raise.
     await orchestrator.retry_with_hint(job.id, hint="x", fresh_workspace=True)
@@ -1972,11 +1983,11 @@ async def test_max_attempts_respected_by_verifier_loop(store, runner, orchestrat
     fail = json.dumps({"ac_results": [{"ac_text": "x", "pass": False, "reason": "n"}], "overall_pass": False})
     # Round 0: worker → verifier → loop (still under cap of 2).
     await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w0"), "w0")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v0"), fail)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.RUNNING.value
     # Round 1: worker → verifier → STUCK (hit cap of 2).
     await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
     assert store.get(job.id).verify_attempts == 2
 
@@ -1998,10 +2009,10 @@ async def test_max_attempts_higher_than_default_allows_more_rounds(store, runner
     # 5 rounds: rounds 1..4 should loop, round 5 should stick.
     for i in range(4):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
         assert store.get(job.id).state == JobState.RUNNING.value, f"round {i} should still loop"
     await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w4"), "w4")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v4"), fail)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     assert store.get(job.id).state == JobState.STUCK.value
 
 
@@ -2143,7 +2154,7 @@ async def test_verifier_result_stored_per_criterion(store, runner, orchestrator)
             "overall_pass": False,
         }
     )
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), verifier_json)
+    await orchestrator.on_session_complete(_verifier_session(job), verifier_json)
     fresh = store.get(job.id)
     assert fresh.ac_results is not None
     assert len(fresh.ac_results) == 2
@@ -2161,10 +2172,10 @@ async def test_ac_results_accumulate_across_attempts(store, runner, orchestrator
     fail = json.dumps({"ac_results": [{"ac_text": "a", "pass": False, "reason": "n"}], "overall_pass": False})
     # Round 1
     await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w1"), "w1")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), fail)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     # Round 2
     await orchestrator.on_session_complete(_worker_session(store.get(job.id), "w2"), "w2")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v2"), fail)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail)
     fresh = store.get(job.id)
     attempts_recorded = sorted({e["attempt"] for e in fresh.ac_results})
     assert attempts_recorded == [1, 2], f"expected attempts 1 and 2 in ac_results, got {attempts_recorded}"
@@ -2196,8 +2207,8 @@ async def test_ac_results_recorded_on_unparseable_verifier_output(store, runner,
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     await orchestrator.on_session_complete(_worker_session(job), "w1")
     job = store.get(job.id)
-    await orchestrator.on_session_complete(_verifier_session(job, "v1"), "definitely not json")
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v2"), "definitely not json")
+    await orchestrator.on_session_complete(_verifier_session(job), "definitely not json")
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "definitely not json")
     fresh = store.get(job.id)
     assert fresh.ac_results, "unparseable verifier output must still produce an ac_results entry"
     assert fresh.ac_results[0]["pass"] is False
@@ -2321,7 +2332,7 @@ def test_retry_with_hint_fresh_workspace_prunes_and_recreates_worktree(store, ru
 
     for i in range(MAX_VERIFY_ATTEMPTS):
         asyncio.run(orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}"))
-        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), fail))
+        asyncio.run(orchestrator.on_session_complete(_verifier_session(store.get(job.id)), fail))
     assert store.get(job.id).state == JobState.STUCK.value
 
     from pathlib import Path
@@ -2717,7 +2728,7 @@ async def test_unparseable_verifier_output_error_includes_excerpt(store, runner,
         _verifier_session(store.get(job.id)), "I could not decide, sorry about the format"
     )
     await orchestrator.on_session_complete(
-        _verifier_session(store.get(job.id), "verifier-2"), "I could not decide, sorry about the format"
+        _verifier_session(store.get(job.id)), "I could not decide, sorry about the format"
     )
     fresh = store.get(job.id)
     assert fresh.state == JobState.ERRORED.value
@@ -2737,7 +2748,7 @@ async def test_unparseable_verifier_excerpt_is_bounded(store, runner, orchestrat
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
     await orchestrator.on_session_complete(_worker_session(store.get(job.id)), "did it")
     await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "y" * 5000)
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "verifier-2"), "y" * 5000)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), "y" * 5000)
     fresh = store.get(job.id)
     assert fresh.state == JobState.ERRORED.value
     assert len(fresh.error_detail or "") < 500, f"detail must stay bounded; got {len(fresh.error_detail or '')} chars"

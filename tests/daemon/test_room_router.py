@@ -1250,7 +1250,7 @@ class TestOpenerReports:
         adapter.hooks[_lead_session(opened)] = hold
         rooms.post_user_message(opened.id, "status?")
         await started.wait()
-        await orchestrator._handle_verifier_complete(job, _verdict(True))
+        await orchestrator._handle_verifier_complete(job, "verifier-1", _verdict(True))
         release.set()
         await _settle(rooms, opened.id)
 

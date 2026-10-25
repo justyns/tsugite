@@ -911,6 +911,12 @@ class JobsOrchestrator:
                     job.id,
                     job.state,
                 )
+            elif job.verifier_session_id and self._runner.live_id(session.id) != self._runner.live_id(
+                job.verifier_session_id
+            ):
+                logger.warning(
+                    "Verifier callback for job '%s' from superseded session '%s' - ignoring", job.id, session.id
+                )
             elif session_failed:
                 # Verifier crashed or got cancelled - infrastructure failure, NOT a
                 # verdict against the worker. Don't burn a verify attempt.
@@ -1242,8 +1248,8 @@ class JobsOrchestrator:
                     merge_with_existing_attempt=merge_with_existing_attempt,
                 )
             return await self._rerun_verifier_or_error(job, detail=reason)
-        if self._unbacked_inspection_claim(parsed, verifier_session_id):
-            reason = "verifier claimed an inspection but recorded no tool calls"
+        if claim := self._unbacked_inspection_claim(parsed, verifier_session_id):
+            reason = f"verifier claimed an inspection but recorded no tool calls: {claim}"
             return await self._rerun_verifier_or_error(job, detail=reason)
         # Strict True: a string like "false" / "no" is truthy in Python but
         # explicitly NOT a pass. Treat anything other than literal True as failure.
@@ -1289,17 +1295,19 @@ class JobsOrchestrator:
             failed_acs=_extract_failed_acs(ac_results_raw),
         )
 
-    def _unbacked_inspection_claim(self, parsed: dict, verifier_session_id: str) -> bool:
-        """True when a verdict reason opens with `inspected:` or `ran <cmd>:` but the
+    def _unbacked_inspection_claim(self, parsed: dict, verifier_session_id: str) -> Optional[str]:
+        """The first verdict reason that opens with `inspected:` or `ran <cmd>:`, when the
         verifier session recorded no code_execution event."""
         ac_results = parsed.get("ac_results")
         if not isinstance(ac_results, list):
-            return False
-        claims = any(
-            isinstance(r, dict) and re.match(r"(inspected|ran [^:]+):", str(r.get("reason") or "").strip().lower())
-            for r in ac_results
-        )
-        return claims and self._runner.store.count_events_by_type(verifier_session_id, "code_execution") == 0
+            return None
+        for r in ac_results:
+            reason = str(r.get("reason") or "").strip() if isinstance(r, dict) else ""
+            if re.match(r"(inspected|ran [^:]+):", reason, re.IGNORECASE):
+                break
+        else:
+            return None
+        return reason if self._runner.store.count_events_by_type(verifier_session_id, "code_execution") == 0 else None
 
     async def _rerun_verifier_or_error(self, job: Job, *, detail: str) -> None:
         """Discard an empty verdict: re-run the verifier once for this attempt

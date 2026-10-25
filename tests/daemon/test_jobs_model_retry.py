@@ -31,7 +31,7 @@ async def test_retry_with_model_only_no_hint_required(store, runner, orchestrato
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), FAIL_VERDICT)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), FAIL_VERDICT)
     assert store.get(job.id).state == JobState.STUCK.value
 
     await orchestrator.retry_with_hint(job.id, hint="", model="anthropic:claude-opus-4-8")
@@ -47,7 +47,7 @@ async def test_retry_requires_hint_or_model(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), FAIL_VERDICT)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), FAIL_VERDICT)
 
     with pytest.raises(ValueError, match="hint or model"):
         await orchestrator.retry_with_hint(job.id, hint="")
@@ -58,7 +58,7 @@ async def test_retry_with_verifier_model_persists(store, runner, orchestrator):
     job = _seed_running_job(store, orchestrator, runner, acceptance_criteria=["x"])
     for i in range(MAX_VERIFY_ATTEMPTS):
         await orchestrator.on_session_complete(_worker_session(store.get(job.id), f"w{i}"), f"w{i}")
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), FAIL_VERDICT)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), FAIL_VERDICT)
 
     await orchestrator.retry_with_hint(job.id, hint="try again", verifier_model="anthropic:claude-haiku-4-5")
     assert store.get(job.id).verifier_model == "anthropic:claude-haiku-4-5"
@@ -117,7 +117,7 @@ async def test_ladder_escalates_on_verifier_exhaustion(store, runner, orchestrat
             ),
             f"w{i}",
         )
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v{i}"), FAIL_VERDICT)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), FAIL_VERDICT)
 
     refreshed = store.get(job.id)
     assert refreshed.state == JobState.RUNNING.value, "rung exhaustion must escalate, not go stuck"
@@ -139,7 +139,7 @@ async def test_ladder_escalates_on_verifier_exhaustion(store, runner, orchestrat
             ),
             f"w2{i}",
         )
-        await orchestrator.on_session_complete(_verifier_session(store.get(job.id), f"v2{i}"), FAIL_VERDICT)
+        await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), FAIL_VERDICT)
     assert store.get(job.id).state == JobState.STUCK.value
 
 

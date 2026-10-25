@@ -112,9 +112,9 @@ def _worker_session(job, session_id="worker-1", status=SessionStatus.COMPLETED.v
     )
 
 
-def _verifier_session(job, session_id="verifier-1", status=SessionStatus.COMPLETED.value):
+def _verifier_session(job, session_id=None, status=SessionStatus.COMPLETED.value):
     return Session(
-        id=session_id,
+        id=session_id or job.verifier_session_id,
         source="spawned",
         status=status,
         metadata={"job_id": job.id, "verifier_for": job.worker_session_id},
@@ -529,7 +529,7 @@ async def test_mixed_predicate_and_prose_acs(store, runner, orchestrator, tmp_pa
             "overall_pass": True,
         }
     )
-    await orchestrator.on_session_complete(_verifier_session(store.get(job.id), "v1"), verifier_json)
+    await orchestrator.on_session_complete(_verifier_session(store.get(job.id)), verifier_json)
 
     final = store.get(job.id)
     assert final.state == JobState.DONE.value, "all predicates + all prose pass → DONE"
