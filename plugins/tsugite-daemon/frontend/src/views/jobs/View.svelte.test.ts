@@ -43,6 +43,7 @@ function job(job_id: string, parent_session_id: string | null, prompt: string): 
     pending_question: null,
     attempts: [],
     acceptance_criteria: [],
+    ac_texts: [],
     ac_results: [],
     result: null,
     agent: 'coder',

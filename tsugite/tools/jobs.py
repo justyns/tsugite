@@ -64,19 +64,40 @@ def spawn_job(
 
     Args:
         prompt: Task instruction for the spawned Job.
-        acceptance_criteria: List of criterion strings. A criterion starting
-            with cmd:<command>, exit_code:<command>:<n> or file_exists:<path>
-            is checked by exit status in the Job's working directory and the
-            verifier grades the rest. Empty list short-circuits verification
-            (Job goes straight to done).
+        acceptance_criteria: List of criteria; an empty list skips verification (the
+            Job goes straight to done). Checks run cheapest first and the first
+            failing tier stops the run: command checks, then verdict criteria, then
+            reviews. A failure loops the worker back with the reasons or blocking
+            findings. Each entry is a string or a dict.
+            Strings: cmd:<command>, exit_code:<command>:<n> and file_exists:<path>
+            are checked by exit status in the Job's working directory; any other
+            string is a claim a verifier model grades.
+            Dicts:
+              {"cmd": "uv run pytest -q", "timeout": 600} runs a command; `timeout`
+                seconds (default 30, at most 1800) replaces the default.
+              {"exit_code": "grep -q x f", "code": 1, "timeout": 60} expects exit code `code`.
+              {"file_exists": "out/report.md"} checks a path.
+              {"check": "<claim>", "models": ["claude_code:opus", "claude_code:sonnet"]}
+                is a verdict criterion graded by each model; it passes only if all pass.
+              {"prompt": "Find correctness and security problems", "agent": "<template>",
+               "models": [...], "block_on": "major"} is a findings review (`prompt`
+                and/or `agent` required; `models` defaults to the verifier model).
+                Each model reads the diff since the worktree was created (repo jobs) or
+                the worker's result and written files, and returns findings with a
+                severity of blocker, major, minor or note. The review fails when any
+                finding is at or above `block_on`; without `block_on` it is advisory.
+                A blocking finding of kind "decision" parks the Job as `stuck` for
+                you to answer with a retry hint instead of looping the worker.
+            Unknown dict keys are rejected when the Job is spawned.
         repo: Repo path (workspace-relative or absolute). The worker runs in a
             fresh git worktree provisioned under `<repo>/.tsugite-jobs/<job_id>`,
             isolated from the parent checkout; it's pruned on done/cancelled and
             kept on stuck/errored for inspection.
         model: Optional model override for the worker; defaults to the
             spawning session's model.
-        verifier_model: Optional separate model for the verifier round. Defaults
-            to the worker's model for agent jobs, else the workspace default.
+        verifier_model: Optional separate model for the verifier round and for
+            reviews without `models`. Defaults to the worker's model for agent jobs,
+            else the workspace default.
             Handy to pin verification to a cheaper/more-available model than
             the worker.
         model_ladder: Ordered "cheap first" model list, e.g.

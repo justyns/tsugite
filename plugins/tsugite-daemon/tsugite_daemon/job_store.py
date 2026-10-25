@@ -10,6 +10,7 @@ from typing import Callable, Optional
 from uuid import uuid4
 
 from tsugite.core.record_store import RecordStore, now_iso
+from tsugite_daemon.job_criteria import ac_text, normalize_criteria
 
 logger = logging.getLogger(__name__)
 
@@ -83,25 +84,6 @@ class JobKeyConflictError(ValueError):
 _KEY_FREE_STATES = frozenset({JobState.DONE.value, JobState.ERRORED.value, JobState.CANCELLED.value})
 
 
-def _coerce_ac_list(items) -> list[str]:
-    """Coerce an AC list to plain strings, dropping empties.
-
-    Tolerates the legacy `{text, kind}` dict shape persisted by older daemon
-    versions; takes the `.text` value and discards `kind`.
-    """
-    if not items:
-        return []
-    out: list[str] = []
-    for item in items:
-        if isinstance(item, dict):
-            text = str(item.get("text", "")).strip()
-        else:
-            text = str(item).strip()
-        if text:
-            out.append(text)
-    return out
-
-
 @dataclass
 class Job:
     id: str
@@ -109,15 +91,15 @@ class Job:
     prompt: str
     state: str = JobState.QUEUED.value
     worker_session_id: Optional[str] = None
-    # Plain list of criterion strings the verifier grades the worker against.
-    # Pre-existing persisted records may carry a legacy `{text, kind}` dict shape;
-    # the coercion in __post_init__ flattens to strings on load.
-    acceptance_criteria: list[str] = field(default_factory=list)
+    # Criterion strings, or dicts for timeouts, per-model checks and reviews (see job_criteria).
+    acceptance_criteria: list = field(default_factory=list)
     repo: Optional[str] = None
     model: Optional[str] = None
     # Optional separate model for the verifier round. Falls back to `model`
     # (then the workspace default) when unset.
     verifier_model: Optional[str] = None
+    # HEAD of the worktree when it was provisioned. A review's diff starts here.
+    base_sha: Optional[str] = None
     # Optional per-job reasoning effort (low/medium/high/xhigh/max). For a cc
     # executor job this maps to claude's `--effort`; None uses the executor's
     # own default. Not applied to the tsugite verifier.
@@ -181,6 +163,8 @@ class Job:
     attempts: list[dict] = field(default_factory=list)
     # Per-criterion verifier verdicts, one entry per AC per attempt. Each entry:
     #   {ac_index, ac_text, pass, reason, attempt}
+    # plus `models`/`verdicts` for a per-model check and `models`/`findings`/`block_on`
+    # for a review.
     # Accumulates across retry attempts (the orchestrator replaces only the current
     # attempt's entries when the verifier responds). None when no verifier has run.
     ac_results: Optional[list] = None
@@ -233,8 +217,7 @@ class Job:
             self.created_at = now
         if not self.updated_at:
             self.updated_at = now
-        # Coerce to plain strings - tolerates legacy dict shape from older saves.
-        self.acceptance_criteria = _coerce_ac_list(self.acceptance_criteria)
+        self.acceptance_criteria = normalize_criteria(self.acceptance_criteria)
         if not self.notify_when:
             self.notify_when = "never"
 
@@ -259,6 +242,7 @@ class Job:
             "pending_question": self.pending_question,
             "attempts": list(self.attempts or []),
             "acceptance_criteria": list(self.acceptance_criteria or []),
+            "ac_texts": [ac_text(ac) for ac in self.acceptance_criteria or []],
             "ac_results": list(self.ac_results or []),
             "result": self.result,
             "agent": self.agent,
@@ -345,7 +329,7 @@ class JobStore(RecordStore):
             if value not in valid:
                 raise ValueError(f"Invalid Job state value: {value!r}; expected one of {sorted(valid)}")
         elif key == "acceptance_criteria":
-            return _coerce_ac_list(value)
+            return normalize_criteria(value)
         return value
 
     def update_state(self, record_id: str, new_state: str):

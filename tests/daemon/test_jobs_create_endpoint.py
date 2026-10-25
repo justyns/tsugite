@@ -114,6 +114,30 @@ class TestCreateJobAuth:
         assert resp.status_code == 503
 
 
+class TestCreateJobDictCriteria:
+    def test_forwards_dict_criteria(self, client, test_token, server):
+        criteria = ["cmd:ls", {"cmd": "make", "timeout": 600}, {"check": "claim", "models": ["m1"]}]
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
+            resp = client.post(
+                "/api/jobs",
+                headers=_auth(test_token),
+                json={"user_id": "u1", "task": "x", "acceptance_criteria": criteria},
+            )
+        assert resp.status_code == 201
+        assert server.jobs_orchestrator.calls[-1]["acceptance_criteria"] == criteria
+
+    def test_unknown_criterion_key_is_a_400(self, client, test_token, server):
+        with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):
+            resp = client.post(
+                "/api/jobs",
+                headers=_auth(test_token),
+                json={"user_id": "u1", "task": "x", "acceptance_criteria": [{"cmd": "ls", "retries": 2}]},
+            )
+        assert resp.status_code == 400
+        assert "unknown key" in resp.json()["error"]
+        assert server.jobs_orchestrator.calls == []
+
+
 class TestCreateJobHappyPath:
     def test_returns_201_with_job_payload(self, client, test_token, server):
         with patch("tsugite_daemon.commands.create_job_host_session", return_value="sess-host-1"):

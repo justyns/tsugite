@@ -10,8 +10,9 @@ import signal
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
+from tsugite_daemon.job_criteria import ac_text, dict_kind
 from tsugite_daemon.job_store import Job
 
 logger = logging.getLogger(__name__)
@@ -84,8 +85,8 @@ def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_overri
     raise JobCommandError(error, output)
 
 
-def _parse_ac_predicate(text: str) -> Optional[dict]:
-    """Recognise a predicate AC prefix and return a structured dict.
+def _parse_ac_predicate(text) -> Optional[dict]:
+    """Recognise a predicate AC (prefixed string or dict) and return a structured dict.
 
     Returns None for free-text ACs (which then go to the LLM verifier as today).
     Recognised prefixes:
@@ -93,7 +94,19 @@ def _parse_ac_predicate(text: str) -> Optional[dict]:
       `exit_code:<cmd>:<n>`   → {kind: "exit_code", cmd, expected: <n>}
       `cmd:<command>`         → {kind: "cmd", cmd} (sugar for exit_code:<cmd>:0)
       `file_exists:<path>`    → {kind: "file_exists", path}
+    A dict form (`{"cmd": ...}`, `{"exit_code": ..., "code": n}`, `{"file_exists": ...}`)
+    maps to the same structure and may add `timeout` seconds.
     """
+    if isinstance(text, dict):
+        kind = dict_kind(text)
+        timeout = {"timeout": text["timeout"]} if "timeout" in text else {}
+        if kind == "cmd":
+            return {"kind": "cmd", "cmd": text["cmd"], **timeout}
+        if kind == "exit_code":
+            return {"kind": "exit_code", "cmd": text["exit_code"], "expected": text.get("code", 0), **timeout}
+        if kind == "file_exists":
+            return {"kind": "file_exists", "path": text["file_exists"]}
+        return None
     if not text:
         return None
     s = text.strip()
@@ -130,23 +143,34 @@ def _parse_ac_predicate(text: str) -> Optional[dict]:
     return None
 
 
-def partition_acs(acs: list[str]) -> tuple[list[dict], list[dict]]:
-    """Split an AC list into (predicates, prose), preserving original indices.
+class AcTiers(NamedTuple):
+    predicates: list[dict]
+    verdicts: list[dict]
+    reviews: list[dict]
+
+
+def partition_acs(acs: list) -> AcTiers:
+    """Split an AC list into (predicates, verdicts, reviews), preserving original indices.
 
     Each predicate entry: {ac_index, ac_text, predicate}.
-    Each prose entry:     {ac_index, ac_text}.
-    Original ac_index is preserved so predicate and LLM results can be merged
-    back into a single ac_results list spanning the full AC index space.
+    Each verdict entry:   {ac_index, ac_text} plus `models` when the criterion lists them.
+    Each review entry:    {ac_index, ac_text, review}.
+    Original ac_index is preserved so every tier's results can be merged back into
+    a single ac_results list spanning the full AC index space.
     """
     predicates: list[dict] = []
-    prose: list[dict] = []
+    verdicts: list[dict] = []
+    reviews: list[dict] = []
     for i, ac in enumerate(acs or []):
-        parsed = _parse_ac_predicate(ac)
-        if parsed is not None:
-            predicates.append({"ac_index": i, "ac_text": ac, "predicate": parsed})
+        entry = {"ac_index": i, "ac_text": ac_text(ac)}
+        if (parsed := _parse_ac_predicate(ac)) is not None:
+            predicates.append({**entry, "predicate": parsed})
+        elif isinstance(ac, dict) and dict_kind(ac) == "review":
+            reviews.append({**entry, "review": ac})
         else:
-            prose.append({"ac_index": i, "ac_text": ac})
-    return predicates, prose
+            models = ac.get("models") if isinstance(ac, dict) else None
+            verdicts.append({**entry, **({"models": models} if models else {})})
+    return AcTiers(predicates, verdicts, reviews)
 
 
 def _resolve_predicate_cwd(job: Job) -> Optional[str]:
@@ -166,7 +190,7 @@ def _evaluate_predicate(
     ac_text: str,
     attempt: int,
     sandbox_override: Optional[dict] = None,
-    timeout: float = _PREDICATE_TIMEOUT_SECONDS,
+    timeout: Optional[float] = None,
 ) -> dict:
     """Run a predicate locally and return an ac_results entry.
 
@@ -176,6 +200,7 @@ def _evaluate_predicate(
     predicate cwd (the worktree) and with no network - so a sandboxed agent's
     predicate ACs can't execute outside the sandbox. Otherwise they run with
     `shell=True` against the worktree, same surface as the worker session.
+    A caller `timeout` caps the criterion's own `timeout`.
     """
 
     def verdict(passed: bool, reason: str) -> dict:
@@ -212,6 +237,10 @@ def _evaluate_predicate(
             argv = _command_argv(cmd, cwd, sandbox_override)
             if argv is None:
                 return verdict(False, "command predicate requires a sandbox but no backend is installed")
+            if timeout is None:
+                timeout = predicate.get("timeout", _PREDICATE_TIMEOUT_SECONDS)
+            else:
+                timeout = min(predicate.get("timeout", timeout), timeout)
             completed = subprocess.run(argv, capture_output=True, timeout=timeout, cwd=cwd)
             if completed.returncode == expected:
                 return verdict(True, f"exit code {completed.returncode}")

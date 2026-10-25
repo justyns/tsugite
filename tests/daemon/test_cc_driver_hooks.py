@@ -5,6 +5,7 @@ with a fake orchestrator recording complete_worker/fail_worker. Payload shapes m
 hook-payloads-reference.md.
 """
 
+import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 from tsugite_cc_driver.adapter import CCDriverAdapter, CCDriverConfig
@@ -395,10 +396,11 @@ def test_route_stop_criteria_blocks_stop_after_three(tmp_path):
     assert len(orch.completed) == 1
 
 
-def test_route_stop_criteria_timeout_falls_through_to_completion(tmp_path, monkeypatch):
+@pytest.mark.parametrize("criterion", ["cmd:sleep 5; false", {"cmd": "sleep 5; false", "timeout": 600}])
+def test_route_stop_criteria_timeout_falls_through_to_completion(tmp_path, monkeypatch, criterion):
     monkeypatch.setattr("tsugite_cc_driver.adapter._CRITERIA_TIMEOUT_SECONDS", 0)
     adapter, orch = _wired_adapter()
-    st = _seed_with_criteria(adapter, orch, tmp_path, ["cmd:sleep 5"])
+    st = _seed_with_criteria(adapter, orch, tmp_path, [criterion])
     resp = _client(adapter).post("/hook/tok-1", json=_stop_payload(last_assistant_message=f"done {MARKER}"))
     assert resp.json() == {}
     assert len(orch.completed) == 1

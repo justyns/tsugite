@@ -1,12 +1,11 @@
-"""Reading a verifier's answer: parse its JSON verdict, pull out the failed
-acceptance criteria, and classify infrastructure failures.
+"""Reading a verifier's answer: parse its JSON verdict and classify infrastructure failures.
 
 Pure parsing - no orchestrator state, no I/O.
 """
 
 import json
 import re
-from typing import Optional
+from typing import Iterator, Optional
 
 _VERIFIER_EXCERPT_LIMIT = 200
 
@@ -15,25 +14,6 @@ _INFRA_FAILURE_RE = re.compile(
     r"insufficient credit|resource.?exhausted|capacity",
     re.IGNORECASE,
 )
-
-
-def _extract_failed_acs(ac_results) -> list[dict]:
-    """Return failing-AC dicts from the verifier's ac_results list.
-
-    Tolerates malformed entries (string, None, non-dict): each non-dict element
-    becomes a synthetic failed AC so the orchestrator never crashes and the user
-    sees a useful retry / stuck reason.
-    """
-    out: list[dict] = []
-    if not isinstance(ac_results, list):
-        return out
-    for item in ac_results:
-        if isinstance(item, dict):
-            if not item.get("pass"):
-                out.append(item)
-        else:
-            out.append({"ac_text": "(malformed verifier output)", "pass": False, "reason": repr(item)})
-    return out
 
 
 def _is_infra_failure(text: str) -> bool:
@@ -71,25 +51,26 @@ def _parse_verifier_output(raw: str) -> Optional[dict]:
     or non-object JSON like `42` / `[]`) - `_handle_verifier_complete` must be
     able to do `parsed.get(...)` on the return value.
     """
-    if not raw:
-        return None
-    decoder = json.JSONDecoder()
     first_obj: Optional[dict] = None
     last_verdict: Optional[dict] = None
+    for value in _json_objects(raw):
+        if first_obj is None:
+            first_obj = value
+        if "ac_results" in value or "overall_pass" in value:
+            last_verdict = value
+    return last_verdict if last_verdict is not None else first_obj
+
+
+def _json_objects(raw: str) -> Iterator[dict]:
+    """Every top-level JSON object embedded in `raw`, in order."""
+    decoder = json.JSONDecoder()
     idx = 0
-    while True:
-        start = raw.find("{", idx)
-        if start == -1:
-            break
+    while raw and (start := raw.find("{", idx)) != -1:
         try:
             value, end = decoder.raw_decode(raw, start)
         except json.JSONDecodeError:
             idx = start + 1
             continue
         if isinstance(value, dict):
-            if first_obj is None:
-                first_obj = value
-            if "ac_results" in value or "overall_pass" in value:
-                last_verdict = value
+            yield value
         idx = end
-    return last_verdict if last_verdict is not None else first_obj

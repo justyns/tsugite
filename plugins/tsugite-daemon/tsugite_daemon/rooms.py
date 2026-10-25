@@ -18,6 +18,7 @@ from tsugite.prompt_xml import El
 from tsugite.tools.jobs import get_jobs_orchestrator
 from tsugite_daemon.agent_store import UnknownAgentError
 from tsugite_daemon.attention_store import SOURCE_ROOM, AttentionRecord
+from tsugite_daemon.job_criteria import ac_text
 from tsugite_daemon.job_store import Job, JobState, JobStore
 from tsugite_daemon.room_store import DEFAULT_MAX_ROUNDS, NOTIFY_EVENTS, Participant, Room
 from tsugite_daemon.session_store import (
@@ -826,7 +827,7 @@ class Rooms:
         if job is None:
             return None
         note = El("note", ["The room closes when these acceptance criteria verify."])
-        criteria = [El("criterion", [c], inline=True) for c in job.acceptance_criteria]
+        criteria = [El("criterion", [ac_text(c)], inline=True) for c in job.acceptance_criteria]
         return El("job", [note, *criteria], {"id": job.id, "state": job.state})
 
     def _attention_records(self, room: Room) -> list[AttentionRecord]:

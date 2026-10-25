@@ -177,7 +177,8 @@ def test_partition_acs_separates_predicates_and_prose():
         "exit_code:make lint",
         "code is readable",
     ]
-    predicates, prose = partition_acs(acs)
+    predicates, prose, reviews = partition_acs(acs)
+    assert reviews == []
     # Predicates carry their original index from the AC list.
     assert len(predicates) == 2
     assert predicates[0]["ac_index"] == 0

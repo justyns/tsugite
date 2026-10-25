@@ -23,6 +23,7 @@ from xml.sax.saxutils import quoteattr
 from tsugite.core.record_store import now_iso
 from tsugite.providers import list_all_providers
 from tsugite_daemon.attention_store import SOURCE_JOB
+from tsugite_daemon.job_criteria import ac_text
 from tsugite_daemon.job_predicates import (
     JobCommandError,
     _evaluate_predicate,
@@ -39,6 +40,14 @@ from tsugite_daemon.job_prompts import (
     _build_verifier_prompt,
     build_worker_prompt,
 )
+from tsugite_daemon.job_reviews import (
+    REVIEWER_AGENT,
+    brief_findings,
+    build_reviewer_prompt,
+    parse_findings,
+    review_entry,
+    review_target,
+)
 from tsugite_daemon.job_store import (
     _TERMINAL_STATES,
     Job,
@@ -48,12 +57,11 @@ from tsugite_daemon.job_store import (
     UnknownJobError,
 )
 from tsugite_daemon.job_verdicts import (
-    _extract_failed_acs,
     _is_infra_failure,
     _parse_verifier_output,
     _sanitize_output_excerpt,
 )
-from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
+from tsugite_daemon.job_worktrees import _head_sha, _provision_worktree, _prune_worktree
 from tsugite_daemon.session_store import (
     FINISHED_STATUSES,
     METADATA_JOB_HOST,
@@ -67,6 +75,9 @@ logger = logging.getLogger(__name__)
 
 VERIFIER_AGENT = "job_verifier"
 WORKER_AGENT = "job_worker"
+
+_SKIPPED_REASON = "skipped: an earlier check failed"
+_ROLES = {"verdict": "verifier", "review": "reviewer"}
 
 # Terminal Job state -> the status its placeholder host session is reconciled to.
 # ERRORED/STUCK map to FAILED (ERROR isn't a FINISHED_STATUSES, so it would still
@@ -105,6 +116,10 @@ def _run_teardown(job: Job) -> None:
         _run_job_command(job, job.teardown)
     except JobCommandError as e:
         logger.warning("Teardown for job '%s' failed: %s%s", job.id, e, f"\n{e.output}" if e.output else "")
+
+
+def _round(job: Optional[Job]) -> dict:
+    return (job.attempts[-1].get("round") if job and job.attempts else None) or {}
 
 
 def _job_workspace(job: Job) -> Optional[str]:
@@ -385,7 +400,7 @@ class JobsOrchestrator:
                 id="",
                 parent_session_id=parent_session_id,
                 prompt=prompt,
-                acceptance_criteria=acceptance_criteria or [],
+                acceptance_criteria=acceptance_criteria,
                 repo=repo,
                 model=model,
                 verifier_model=verifier_model,
@@ -423,13 +438,15 @@ class JobsOrchestrator:
                 # can't stall the daemon's single event loop (the retry/prune paths
                 # already do this).
                 worktree_path = await asyncio.to_thread(_provision_worktree, repo, job.id, workspace_root)
-                job = self._jobs.update(job.id, worktree_path=worktree_path)
+                job = self._jobs.update(
+                    job.id, worktree_path=worktree_path, base_sha=await asyncio.to_thread(_head_sha, worktree_path)
+                )
             except Exception as e:
                 logger.exception("Failed to provision worktree for job '%s': %s", job.id, e)
                 self._finalize(job, JobState.ERRORED, error=f"worktree provisioning failed: {e}")
                 raise
 
-        worker_prompt = build_worker_prompt(prompt, acceptance_criteria or [], repo)
+        worker_prompt = build_worker_prompt(prompt, job.acceptance_criteria, repo)
         if setup:
             self._after_job_commands(job.id, lambda: self._setup_then_start(job, worker_prompt))
             return job, None
@@ -558,67 +575,6 @@ class JobsOrchestrator:
         attempts[-1] = {**attempts[-1], **patch}
         self._jobs.update(job_id, attempts=attempts)
 
-    def _record_ac_results(
-        self,
-        job_id: str,
-        raw_ac_results,
-        attempt_num: int,
-        *,
-        ac_index_map: Optional[list[int]] = None,
-        merge_with_existing_attempt: bool = False,
-    ) -> None:
-        """Append per-criterion verdicts for one verifier round to Job.ac_results.
-
-        Replaces any prior entries tagged with the same attempt_num (defensive in
-        case a verifier completion is delivered twice). The list itself grows by
-        one batch per attempt so the UI can render historical verdicts.
-
-        Args:
-            ac_index_map: optional list mapping each raw entry's positional index
-                to its original AC index in the Job's full AC list. Used by the
-                mixed-mode predicate+prose path: the verifier sees only prose
-                ACs at positions 0..M, but their ac_index_map values point to
-                the original positions (e.g. [1, 3]).
-            merge_with_existing_attempt: when True, do NOT wipe existing entries
-                from the same attempt_num. Used after pre-recording predicate
-                results: the verifier completion then adds prose results without
-                clobbering the already-stored predicate ones.
-        """
-        job = self._jobs.get(job_id)
-        if job is None:
-            return
-        if merge_with_existing_attempt:
-            prior = list(job.ac_results or [])
-        else:
-            prior = [e for e in (job.ac_results or []) if e.get("attempt") != attempt_num]
-        new_entries: list[dict] = []
-        if isinstance(raw_ac_results, list):
-            for i, item in enumerate(raw_ac_results):
-                ac_idx = ac_index_map[i] if ac_index_map is not None and i < len(ac_index_map) else i
-                if isinstance(item, dict):
-                    new_entries.append(
-                        {
-                            "ac_index": ac_idx,
-                            "ac_text": item.get("ac_text", ""),
-                            "pass": bool(item.get("pass")),
-                            "reason": item.get("reason"),
-                            "attempt": attempt_num,
-                        }
-                    )
-                else:
-                    # Malformed verifier output (string, None, etc) - keep a
-                    # placeholder so the UI still shows something.
-                    new_entries.append(
-                        {
-                            "ac_index": ac_idx,
-                            "ac_text": "(malformed verifier output)",
-                            "pass": False,
-                            "reason": repr(item),
-                            "attempt": attempt_num,
-                        }
-                    )
-        self._jobs.update(job_id, ac_results=prior + new_entries)
-
     def register_worker(self, job_id: str, worker_session_id: Optional[str], timeout_minutes: int) -> None:
         """Record the worker session id and schedule the wall-clock timeout.
 
@@ -669,12 +625,7 @@ class JobsOrchestrator:
         job = self._jobs.require(job_id)
         if job.state in (JobState.DONE.value, JobState.CANCELLED.value):
             return job
-        for sid in (job.worker_session_id, job.verifier_session_id):
-            if sid and not self._session_already_terminal(sid):
-                try:
-                    self._runner.cancel_session(sid)
-                except Exception:
-                    logger.exception("cancel_job: failed to cancel session '%s'", sid)
+        self._cancel_live_sessions(job)
         self._finalize(job, JobState.CANCELLED, error=reason)
         return self._jobs.get(job_id)
 
@@ -833,7 +784,12 @@ class JobsOrchestrator:
                             job = self._jobs.update(job_id, worktree_path=None)
                     workspace_root = self._resolve_workspace_root(job.parent_session_id)
                     worktree_path = await asyncio.to_thread(_provision_worktree, job.repo, job.id, workspace_root)
-                    job = self._jobs.update(job_id, worktree_path=worktree_path, setup_done=False)
+                    job = self._jobs.update(
+                        job_id,
+                        worktree_path=worktree_path,
+                        base_sha=await asyncio.to_thread(_head_sha, worktree_path),
+                        setup_done=False,
+                    )
                 except Exception as e:
                     logger.exception("retry_with_hint: fresh_workspace failed for job '%s': %s", job_id, e)
                     raise RuntimeError(f"failed to recreate worktree: {e}") from e
@@ -935,17 +891,17 @@ class JobsOrchestrator:
                     job.id,
                     job.state,
                 )
-            elif job.verifier_session_id and self._runner.live_id(session.id) != self._runner.live_id(
-                job.verifier_session_id
-            ):
+            elif self._round_session_id(_round(job), session.id) is None:
                 logger.warning(
                     "Verifier callback for job '%s' from superseded session '%s' - ignoring", job.id, session.id
                 )
             elif session_failed:
                 # Verifier crashed or got cancelled - infrastructure failure, NOT a
                 # verdict against the worker. Don't burn a verify attempt.
-                reason = session.error or result_str or f"verifier session ended with status '{session.status}'"
-                self._finalize(job, JobState.ERRORED, error=f"verifier infra failure: {reason}")
+                role = _ROLES[_round(job).get("kind", "verdict")]
+                reason = session.error or result_str or f"{role} session ended with status '{session.status}'"
+                self._cancel_live_sessions(job)
+                self._finalize(job, JobState.ERRORED, error=f"{role} infra failure: {reason}")
             else:
                 await self._handle_verifier_complete(job, session.id, result_str)
         elif session_failed:
@@ -999,11 +955,9 @@ class JobsOrchestrator:
         if self._finalize_if_workspace_missing(job):
             return
 
-        # Partition into predicates (mechanically decided) vs prose (sent to LLM).
-        # Predicates evaluate locally first; their results are pre-recorded onto
-        # Job.ac_results before any verifier spawn so the UI sees verdicts even
-        # if the verifier never runs.
-        predicates, prose_entries = partition_acs(job.acceptance_criteria)
+        # Tiers run cheapest first and the first failing tier stops the run.
+        # Predicates run locally and are pre-recorded onto Job.ac_results.
+        predicates, verdicts, reviews = partition_acs(job.acceptance_criteria)
         attempt_num = job.verify_attempts + 1
         predicate_results: list[dict] = []
         if predicates:
@@ -1040,51 +994,85 @@ class JobsOrchestrator:
                 return
             if self._finalize_if_workspace_missing(job):
                 return
-            # Pre-record predicate verdicts. Even on predicate failure the UI
-            # should be able to render them; on the prose-spawn path the
-            # verifier completion will merge against these.
-            self._record_predicate_results(job.id, predicate_results, attempt_num)
+            self._record_entries(job.id, predicate_results, attempt_num)
             failed_predicates = [r for r in predicate_results if not r["pass"]]
             if failed_predicates:
-                # Short-circuit BEFORE spawning the verifier - there's no point
-                # spending tokens on prose ACs when a predicate already failed.
+                self._record_skipped(job.id, [*verdicts, *reviews], attempt_num)
                 self._update_latest_attempt(job.id, verifier_pass=False)
                 await self._handle_verifier_failure(job, failed_acs=failed_predicates)
                 return
 
-        prose_acs = [e["ac_text"] for e in prose_entries]
-        if not prose_acs:
+        if not (verdicts or reviews):
             # All-predicate job, all predicates passed → straight to DONE.
-            self._update_latest_attempt(job.id, verifier_pass=True)
-            fresh = self._jobs.get(job.id)
-            result = dict(fresh.result or {})
-            result["ac_results"] = predicate_results
-            self._finalize(job, JobState.DONE, result=result)
+            self._finish_done(job, attempt_num)
             return
 
-        # Mixed (predicates passed + prose remaining) or pure-prose path -
-        # spawn the verifier with prose ACs only.
-        self._spawn_verifier(job, worker_id=worker_id, result_str=result_str, prose_acs=prose_acs)
+        kind, entries = ("verdict", verdicts) if verdicts else ("review", reviews)
+        await self._start_round(job, kind, entries, worker_id=worker_id, result_str=result_str)
 
-    def _spawn_verifier(self, job: Job, *, worker_id: Optional[str], result_str: str, prose_acs: list[str]) -> None:
-        # Arm a fresh timer covering the verifier round; a hung verifier would
-        # otherwise leave the Job pinned in VERIFYING forever.
+    async def _start_round(
+        self, job: Job, kind: str, entries: list[dict], *, worker_id: Optional[str], result_str: str
+    ) -> None:
+        """Spawn the sessions of one verification tier: a verifier per model for verdict
+        criteria, a reviewer per review and model for findings. Their callbacks collect
+        in `attempts[-1]["round"]` until every session has reported."""
+        if kind == "review":
+            specs = [
+                {"model": m, "indices": [e["ac_index"]]} for e in entries for m in e["review"].get("models") or [None]
+            ]
+            target = await asyncio.to_thread(review_target, job, result_str, _job_workspace(job))
+            current = self._jobs.get(job.id)
+            if current is None or current.state != JobState.VERIFYING.value:
+                return
+        else:
+            by_model: dict[Optional[str], list[int]] = {}
+            for e in entries:
+                for m in e.get("models") or [None]:
+                    by_model.setdefault(m, []).append(e["ac_index"])
+            specs = [{"model": m, "indices": indices} for m, indices in by_model.items()]
+            target = None
+
+        # Arm a fresh timer covering the round so a hung verifier cannot pin the Job in VERIFYING.
         self._schedule_timeout(job.id, job.timeout_minutes)
+        sessions: dict[str, dict] = {}
+        for spec in specs:
+            try:
+                sessions[self._spawn_session(job, kind, spec, worker_id, result_str, target)] = spec
+            except Exception as e:
+                logger.exception("Failed to spawn %s session for job '%s': %s", kind, job.id, e)
+                for sid in sessions:
+                    try:
+                        self._runner.cancel_session(sid)
+                    except Exception:
+                        logger.exception("Failed to cancel session '%s' of job '%s'", sid, job.id)
+                self._finalize(job, JobState.ERRORED, error=f"{_ROLES[kind]} spawn failed: {e}")
+                return
+        first = next(iter(sessions))
+        # verifier_session_id lets _on_timeout and the UI reach the round.
+        self._jobs.update(job.id, verifier_session_id=first)
+        self._update_latest_attempt(job.id, verifier_session_id=first, round={"kind": kind, "sessions": sessions})
 
-        verifier_prompt = _build_verifier_prompt(job, worker_output=result_str, prose_acs=prose_acs)
-        verifier_session = Session(
+    def _spawn_session(
+        self, job: Job, kind: str, spec: dict, worker_id: Optional[str], result_str: str, target: Optional[str]
+    ) -> str:
+        """Start one verifier or reviewer session for `spec` and return its id."""
+        criteria = [job.acceptance_criteria[i] for i in spec["indices"]]
+        if kind == "review":
+            review = criteria[0]
+            prompt = build_reviewer_prompt(review, target, _job_workspace(job))
+            agent_file = review.get("agent") or REVIEWER_AGENT
+        else:
+            prompt = _build_verifier_prompt(job, worker_output=result_str, prose_acs=[ac_text(c) for c in criteria])
+            agent_file = VERIFIER_AGENT
+        session = Session(
             id="",
             source=SessionSource.SPAWNED.value,
-            prompt=verifier_prompt,
-            title=f"{job.id} · verifier",
-            agent_file=VERIFIER_AGENT,
-            # Verifier uses its own model override when set, else inherits the
-            # job's model (same override as the worker) for an agent job, else the
-            # workspace default. A non-agent (e.g. cc) job's `model` is the driven
-            # tool's own model string (a claude CLI alias like "sonnet"), NOT a
-            # tsugite provider:model - so the verifier must never inherit it.
-            model=job.verifier_model or (job.model if job.executor == "agent" else None),
-            # Same directory as the worker - the verifier inspects the files the
+            prompt=prompt,
+            title=f"{job.id} · {_ROLES[kind]}",
+            agent_file=agent_file,
+            # A non-agent job's `model` is the driven tool's own string and must not reach the verifier.
+            model=spec["model"] or job.verifier_model or (job.model if job.executor == "agent" else None),
+            # Same directory as the worker - the session inspects the files the
             # worker wrote (and `git diff` for repo jobs), which only exist there.
             workspace_override=_job_workspace(job),
             # verifier_for must stay truthy so on_session_complete detects this as a
@@ -1094,15 +1082,13 @@ class JobsOrchestrator:
                 job, {"job_id": job.id, "verifier_for": worker_id or job.id, "skip_hooks": job.skip_hooks}
             ),
         )
-        try:
-            started_verifier = self._runner.start_session(verifier_session, inherit_from=job.parent_session_id)
-        except Exception as e:
-            logger.exception("Failed to spawn verifier for job '%s': %s", job.id, e)
-            self._finalize(job, JobState.ERRORED, error=f"verifier spawn failed: {e}")
-            return
-        # Store verifier session id so _on_timeout can cancel a hung verifier.
-        self._jobs.update(job.id, verifier_session_id=started_verifier.id)
-        self._update_latest_attempt(job.id, verifier_session_id=started_verifier.id)
+        return self._runner.start_session(session, inherit_from=job.parent_session_id).id
+
+    def _result_with_attempt_results(self, job_id: str, attempt_num: int, fallback: list = ()) -> dict:
+        """The job's result with this attempt's ac_results snapshot (or `fallback` when empty)."""
+        result = dict(self._jobs.get(job_id).result or {})
+        result["ac_results"] = self._snapshot_attempt_results(job_id, attempt_num) or list(fallback)
+        return result
 
     def _snapshot_attempt_results(self, job_id: str, attempt_num: int) -> list[dict]:
         """This attempt's ac_results with the attempt tag stripped - the audit
@@ -1114,18 +1100,30 @@ class JobsOrchestrator:
             if entry.get("attempt") == attempt_num
         ]
 
-    def _record_predicate_results(self, job_id: str, predicate_results: list[dict], attempt_num: int) -> None:
-        """Append predicate-evaluated ac_results onto Job.ac_results.
-
-        Predicate results already carry their original ac_index, attempt, etc -
-        we just need to wipe any prior entries from the same attempt (defensive
-        against a duplicate worker-complete) and append.
-        """
+    def _record_entries(self, job_id: str, entries: list[dict], attempt_num: int) -> None:
+        """Put one attempt's ac_results rows onto Job.ac_results, replacing any earlier
+        row of the same attempt and criterion (a duplicate completion lands twice)."""
         job = self._jobs.get(job_id)
         if job is None:
             return
-        prior = [e for e in (job.ac_results or []) if e.get("attempt") != attempt_num]
-        self._jobs.update(job_id, ac_results=prior + list(predicate_results))
+        replaced = {e["ac_index"] for e in entries}
+        prior = [
+            e for e in (job.ac_results or []) if not (e.get("attempt") == attempt_num and e["ac_index"] in replaced)
+        ]
+        self._jobs.update(job_id, ac_results=prior + entries)
+
+    def _record_skipped(self, job_id: str, skipped: list[dict], attempt_num: int) -> None:
+        rows = [
+            {
+                "ac_index": e["ac_index"],
+                "ac_text": e["ac_text"],
+                "pass": False,
+                "reason": _SKIPPED_REASON,
+                "attempt": attempt_num,
+            }
+            for e in skipped
+        ]
+        self._record_entries(job_id, rows, attempt_num)
 
     def _next_ladder_model(self, job: Job) -> Optional[str]:
         ladder = job.model_ladder or []
@@ -1239,87 +1237,180 @@ class JobsOrchestrator:
             return
         self._finalize(job, JobState.ERRORED, error=reason, error_detail=detail)
 
+    def _round_session_id(self, round_: dict, session_id: str) -> Optional[str]:
+        live = self._runner.live_id
+        return next((sid for sid in round_.get("sessions", {}) if live(sid) == live(session_id)), None)
+
     async def _handle_verifier_complete(self, job: Job, verifier_session_id: str, result_str: str) -> None:
-        # Attempt counter is 1-indexed (matches the UX of "attempt #N"). Captured
-        # before _handle_verifier_failure bumps job.verify_attempts.
-        attempt_num = job.verify_attempts + 1
+        job = self._jobs.get(job.id) or job
+        round_ = _round(job)
+        kind = round_.get("kind", "verdict")
+        in_round = round_.get("sessions", {})
+        verifier_session_id = self._round_session_id(round_, verifier_session_id)
+        if verifier_session_id is None:
+            logger.warning("Ignoring a completion for job '%s' from a session outside its current verification", job.id)
+            return
+        if "outcome" in in_round[verifier_session_id]:
+            logger.warning("Ignoring a repeated completion for job '%s' in its current %s round", job.id, kind)
+            return
+        spec = in_round[verifier_session_id]
+        outcome = (
+            await self._grade_review(job, verifier_session_id, spec, result_str)
+            if kind == "review"
+            else await self._grade_verdicts(job, verifier_session_id, spec, result_str)
+        )
+        if outcome is None:
+            return
+        sessions = self._store_outcome(job.id, kind, verifier_session_id, spec, outcome)
+        if all("outcome" in s for s in sessions.values()):
+            await self._finish_round(job.id, kind, sessions)
 
-        # Recompute predicate / prose partition so the verifier's positional
-        # ac_results can be mapped back to original AC indices. A Job with no
-        # predicates gets a plain 1-to-1 mapping (None map + no merge).
-        predicates, prose_entries = partition_acs(job.acceptance_criteria)
-        if predicates:
-            prose_ac_indices: Optional[list[int]] = [e["ac_index"] for e in prose_entries]
-            merge_with_existing_attempt = True
-        else:
-            prose_ac_indices = None
-            merge_with_existing_attempt = False
+    def _store_outcome(self, job_id: str, kind: str, session_id: str, spec: dict, outcome: dict) -> dict:
+        """Record one session's outcome in the attempt's round and return the round's sessions."""
+        job = self._jobs.get(job_id)
+        round_ = _round(job)
+        sessions = {k: v for k, v in round_.get("sessions", {}).items() if k != session_id}
+        sessions[session_id] = {**spec, "outcome": outcome}
+        if round_:
+            self._update_latest_attempt(job_id, round={"kind": kind, "sessions": sessions})
+        return sessions
 
+    async def _grade_verdicts(self, job: Job, session_id: str, spec: dict, result_str: str) -> Optional[dict]:
+        """One verifier's per-criterion verdicts, positional to spec["indices"]. None when the
+        session is re-run or the job errored."""
         parsed = _parse_verifier_output(result_str)
         if parsed is None:
             reason = (
                 "verifier output unparseable (no JSON verdict object found); "
                 f"excerpt: {_sanitize_output_excerpt(result_str)}"
             )
-            if job.attempts[-1].get("verifier_rerun"):
-                # Rerun exhausted. The synthetic one-entry batch gives the UI a
-                # row for this attempt, and its excerpt makes the formatting
-                # failure readable from the tile.
-                self._update_latest_attempt(job.id, verifier_pass=False)
-                synthetic = [{"ac_text": "(verifier output)", "pass": False, "reason": reason}]
-                self._record_ac_results(
-                    job.id,
-                    synthetic,
-                    attempt_num,
-                    merge_with_existing_attempt=merge_with_existing_attempt,
-                )
-            return await self._rerun_verifier_or_error(job, detail=reason)
-        if claim := self._unbacked_inspection_claim(parsed, verifier_session_id):
+            self._record_exhausted_output(job, spec, "(verifier output)", reason)
+            await self._rerun_or_error(job, "verdict", session_id, spec, detail=reason)
+            return None
+        if claim := self._unbacked_inspection_claim(parsed, session_id):
             reason = f"verifier claimed an inspection but recorded no tool calls: {claim}"
-            return await self._rerun_verifier_or_error(job, detail=reason)
-        # Strict True: a string like "false" / "no" is truthy in Python but
-        # explicitly NOT a pass. Treat anything other than literal True as failure.
-        ac_results_raw = parsed.get("ac_results", [])
-        # Coverage guard: a verifier that grades only a subset of the prose ACs
-        # must not yield DONE for the ungraded remainder - ungraded is not
-        # verified. Pad the missing tail (positional, matching ac_index_map) as
-        # failed so the UI shows it and the retry prompt names it.
-        if isinstance(ac_results_raw, list) and len(ac_results_raw) < len(prose_entries):
-            ac_results_raw = list(ac_results_raw) + [
-                {"ac_text": e["ac_text"], "pass": False, "reason": "verifier did not grade this criterion"}
-                for e in prose_entries[len(ac_results_raw) :]
-            ]
-        self._record_ac_results(
-            job.id,
-            ac_results_raw,
-            attempt_num,
-            ac_index_map=prose_ac_indices,
-            merge_with_existing_attempt=merge_with_existing_attempt,
+            await self._rerun_or_error(job, "verdict", session_id, spec, detail=reason)
+            return None
+        raw = parsed.get("ac_results", [])
+        raw = raw if isinstance(raw, list) else []
+        # Coverage guard: a verifier that grades only a subset of its criteria must
+        # not yield DONE for the ungraded remainder - ungraded is not verified.
+        raw = raw + [{"pass": False, "reason": "verifier did not grade this criterion"}] * (
+            len(spec["indices"]) - len(raw)
         )
         # The per-criterion verdicts are the ground truth; `overall_pass` is a
         # derived summary the model can omit or get wrong. Derive it when absent
-        # (an all-pass round must not be retried into STUCK on a missing key)
-        # and veto a contradictory True when any entry explicitly fails - both
-        # directions fail closed. An explicit non-True value (False, "false",
-        # etc.) is still honoured as failure.
+        # and veto a contradictory True when any entry explicitly fails. An explicit
+        # non-True value counts as failure.
         overall_pass = parsed.get("overall_pass")
-        if isinstance(ac_results_raw, list) and ac_results_raw and overall_pass in (None, True):
-            overall_pass = all(isinstance(r, dict) and r.get("pass") is True for r in ac_results_raw)
-        if overall_pass is True:
-            self._update_latest_attempt(job.id, verifier_pass=True)
-            fresh = self._jobs.get(job.id)
-            result = dict(fresh.result or {})
-            # Snapshot the full ac_results (predicate + verifier merged) for the
-            # job.result audit trail. In the prose-only path this is identical
-            # to ac_results_raw; in the mixed path it includes predicate verdicts.
-            result["ac_results"] = self._snapshot_attempt_results(job.id, attempt_num) or ac_results_raw
-            self._finalize(job, JobState.DONE, result=result)
+        if raw and overall_pass in (None, True):
+            overall_pass = all(isinstance(r, dict) and r.get("pass") is True for r in raw)
+        verdicts = [
+            {"pass": r.get("pass") is True, "reason": r.get("reason")}
+            if isinstance(r, dict)
+            else {"pass": False, "reason": repr(r)}
+            for r in raw[: len(spec["indices"])]
+        ]
+        return {"verdicts": verdicts, "ok": overall_pass is True}
+
+    def _record_exhausted_output(self, job: Job, spec: dict, label: str, reason: str) -> None:
+        """After a rerun, the synthetic row gives the UI an entry for this attempt, and its
+        excerpt makes the formatting failure readable from the tile."""
+        if not spec.get("rerun"):
             return
+        attempt_num = job.verify_attempts + 1
         self._update_latest_attempt(job.id, verifier_pass=False)
-        await self._handle_verifier_failure(
-            job,
-            failed_acs=_extract_failed_acs(ac_results_raw),
-        )
+        synthetic = {
+            "ac_index": spec["indices"][0],
+            "ac_text": label,
+            "pass": False,
+            "reason": reason,
+            "attempt": attempt_num,
+        }
+        self._record_entries(job.id, [synthetic], attempt_num)
+
+    async def _grade_review(self, job: Job, session_id: str, spec: dict, result_str: str) -> Optional[dict]:
+        findings = parse_findings(result_str)
+        if findings is None:
+            reason = f"reviewer output unparseable (no valid findings object); excerpt: {_sanitize_output_excerpt(result_str)}"
+            self._record_exhausted_output(job, spec, "(reviewer output)", reason)
+            await self._rerun_or_error(job, "review", session_id, spec, detail=reason)
+            return None
+        return {"findings": findings}
+
+    async def _finish_round(self, job_id: str, kind: str, sessions: dict) -> None:
+        job = self._jobs.get(job_id)
+        attempt_num = job.verify_attempts + 1
+        _, verdicts, reviews = partition_acs(job.acceptance_criteria)
+
+        def per_session(ac_index: int):
+            for spec in sessions.values():
+                if ac_index in spec["indices"]:
+                    yield spec["model"] or "default", spec["outcome"], spec["indices"].index(ac_index)
+
+        if kind == "review":
+            await self._finish_review_round(job, reviews, per_session, attempt_num)
+            return
+
+        entries = []
+        for e in verdicts:
+            results = [(model, outcome["verdicts"][pos]) for model, outcome, pos in per_session(e["ac_index"])]
+            row = {
+                "ac_index": e["ac_index"],
+                "ac_text": e["ac_text"],
+                "pass": all(v["pass"] for _, v in results),
+                "attempt": attempt_num,
+            }
+            if e.get("models"):
+                row["reason"] = "; ".join(f"{model}: {v['reason']}" for model, v in results)
+                row["models"] = [model for model, _ in results]
+                row["verdicts"] = [{"model": model, **v} for model, v in results]
+            else:
+                row["reason"] = results[0][1]["reason"]
+            entries.append(row)
+        self._record_entries(job.id, entries, attempt_num)
+        failed = [row for row in entries if not row["pass"]]
+        if not failed and all(s["outcome"]["ok"] for s in sessions.values()):
+            if reviews:
+                await self._start_round(
+                    job,
+                    "review",
+                    reviews,
+                    worker_id=job.attempts[-1]["worker_session_id"],
+                    result_str=job.result["summary"],
+                )
+                return
+            self._finish_done(job, attempt_num)
+            return
+        self._record_skipped(job.id, reviews, attempt_num)
+        self._update_latest_attempt(job.id, verifier_pass=False)
+        await self._handle_verifier_failure(job, failed_acs=failed)
+
+    async def _finish_review_round(self, job: Job, reviews: list[dict], per_session, attempt_num: int) -> None:
+        rows, failed, decisions = [], [], []
+        for e in reviews:
+            per_model = [(model, outcome["findings"]) for model, outcome, _ in per_session(e["ac_index"])]
+            row, blocking = review_entry(e, e["review"], per_model, attempt_num)
+            rows.append(row)
+            if not row["pass"]:
+                failed.append({**row, "findings": blocking})
+                decisions += [f for f in blocking if f["kind"] == "decision"]
+        self._record_entries(job.id, rows, attempt_num)
+        if decisions:
+            # A decision is the user's to make: park instead of looping the worker.
+            self._update_latest_attempt(job.id, verifier_pass=False)
+            self._jobs.update(job.id, result=self._result_with_attempt_results(job.id, attempt_num))
+            lines = ["Review needs a decision:", *brief_findings(decisions, indent="- ")]
+            self._finalize(job, JobState.STUCK, error="\n".join(lines))
+        elif failed:
+            self._update_latest_attempt(job.id, verifier_pass=False)
+            await self._handle_verifier_failure(job, failed_acs=failed)
+        else:
+            self._finish_done(job, attempt_num)
+
+    def _finish_done(self, job: Job, attempt_num: int) -> None:
+        self._update_latest_attempt(job.id, verifier_pass=True)
+        self._finalize(job, JobState.DONE, result=self._result_with_attempt_results(job.id, attempt_num))
 
     def _unbacked_inspection_claim(self, parsed: dict, verifier_session_id: str) -> Optional[str]:
         """The first verdict reason that opens with `inspected:` or `ran <cmd>:`, when the
@@ -1335,21 +1426,41 @@ class JobsOrchestrator:
             return None
         return reason if self._runner.store.count_events_by_type(verifier_session_id, "code_execution") == 0 else None
 
-    async def _rerun_verifier_or_error(self, job: Job, *, detail: str) -> None:
-        """Discard an empty verdict: re-run the verifier once for this attempt
-        without consuming a verify attempt, then error the job."""
-        attempt = job.attempts[-1]
-        if attempt.get("verifier_rerun"):
-            self._finalize(job, JobState.ERRORED, error="verifier produced no inspection", error_detail=detail)
+    async def _rerun_or_error(self, job: Job, kind: str, session_id: str, spec: dict, *, detail: str) -> None:
+        """Discard an empty verdict or unparseable findings: re-run the session once for
+        this attempt without consuming a verify attempt, then error the job."""
+        if spec.get("rerun"):
+            self._cancel_live_sessions(job)
+            error = "reviewer produced no parseable findings" if kind == "review" else "verifier produced no inspection"
+            self._finalize(job, JobState.ERRORED, error=error, error_detail=detail)
             return
-        self._update_latest_attempt(job.id, verifier_rerun=True)
-        _, prose_entries = partition_acs(job.acceptance_criteria)
-        self._spawn_verifier(
-            job,
-            worker_id=attempt["worker_session_id"],
-            result_str=job.result["summary"],
-            prose_acs=[e["ac_text"] for e in prose_entries],
-        )
+        rerun = {**spec, "rerun": True}
+        result_str = job.result["summary"]
+        target = None
+        if kind == "review":
+            attempt_count, verify_attempts = len(job.attempts), job.verify_attempts
+            target = await asyncio.to_thread(review_target, job, result_str, _job_workspace(job))
+            current = self._jobs.get(job.id)
+            if (
+                current is None
+                or current.state != JobState.VERIFYING.value
+                or (len(current.attempts), current.verify_attempts) != (attempt_count, verify_attempts)
+                or session_id not in (_round(current).get("sessions") or {})
+            ):
+                logger.warning("Job '%s' left its review round while the target was built - no re-run", job.id)
+                return
+        self._schedule_timeout(job.id, job.timeout_minutes)
+        try:
+            new_id = self._spawn_session(job, kind, rerun, job.attempts[-1]["worker_session_id"], result_str, target)
+        except Exception as e:
+            logger.exception("Failed to re-run %s session for job '%s': %s", kind, job.id, e)
+            self._finalize(job, JobState.ERRORED, error=f"{_ROLES[kind]} spawn failed: {e}")
+            return
+        fresh = self._jobs.get(job.id)
+        sessions = {k: v for k, v in _round(fresh).get("sessions", {}).items() if k != session_id}
+        sessions[new_id] = rerun
+        self._jobs.update(job.id, verifier_session_id=new_id)
+        self._update_latest_attempt(job.id, verifier_session_id=new_id, round={"kind": kind, "sessions": sessions})
 
     async def _handle_verifier_failure(self, job: Job, failed_acs: list[dict]) -> None:
         # Empty failed_acs gives the retry worker zero signal and the STUCK error
@@ -1379,10 +1490,7 @@ class JobsOrchestrator:
             # summary so UI/API consumers can render per-AC verdicts (mirrors DONE).
             # Snapshot the full per-attempt ac_results when available so mixed-mode
             # jobs preserve the predicate-pass verdicts alongside the verifier failures.
-            fresh = self._jobs.get(job.id)
-            snapshot = self._snapshot_attempt_results(job.id, job.verify_attempts + 1)
-            result = dict(fresh.result or {})
-            result["ac_results"] = snapshot or failed_acs
+            result = self._result_with_attempt_results(job.id, job.verify_attempts + 1, failed_acs)
             self._jobs.update(job.id, verify_attempts=new_attempts, result=result)
             self._finalize(job, JobState.STUCK, error="\n".join(error_lines))
             return
@@ -1757,16 +1865,19 @@ class JobsOrchestrator:
         job = self._jobs.get(job_id)
         if job is None or job.state in _TERMINAL_STATES:
             return
-        # Cancel whichever sessions are still live. Both can leak: the worker if
-        # the timeout fires during the RUNNING phase, the verifier if it hangs
-        # during VERIFYING after the worker has already completed.
-        for sid in (job.worker_session_id, job.verifier_session_id):
+        # The worker is live if the timeout fires during RUNNING, the verifier or
+        # reviewers if they hang during VERIFYING.
+        self._cancel_live_sessions(job)
+        self._finalize(job, JobState.STUCK, error=f"timeout after {job.timeout_minutes} minutes")
+
+    def _cancel_live_sessions(self, job: Job) -> None:
+        round_sessions = _round(job).get("sessions", {})
+        for sid in dict.fromkeys([job.worker_session_id, job.verifier_session_id, *round_sessions]):
             if sid and not self._session_already_terminal(sid):
                 try:
                     self._runner.cancel_session(sid)
                 except Exception:
-                    logger.exception("Timeout: failed to cancel session '%s'", sid)
-        self._finalize(job, JobState.STUCK, error=f"timeout after {job.timeout_minutes} minutes")
+                    logger.exception("Failed to cancel session '%s' of job '%s'", sid, job.id)
 
     def _session_already_terminal(self, session_id: str) -> bool:
         """Race guard: if the session already reached a terminal status, don't

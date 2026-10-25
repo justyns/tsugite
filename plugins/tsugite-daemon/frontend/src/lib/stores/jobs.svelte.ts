@@ -44,7 +44,8 @@ export interface Job extends JobLike {
   error_detail: string | null;
   pending_question: string | null;
   attempts: JobAttempt[];
-  acceptance_criteria: string[];
+  acceptance_criteria: (string | Record<string, unknown>)[];
+  ac_texts: string[];
   ac_results: JobAcResult[];
   result: Record<string, unknown> | null;
   agent: string;

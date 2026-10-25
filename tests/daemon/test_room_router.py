@@ -834,6 +834,10 @@ def _job(orchestrator, parent_session_id, **fields):
         Job(id="", parent_session_id=parent_session_id, prompt="free up disk", acceptance_criteria=_CRITERIA, **fields)
     )
     orchestrator.register_worker(job.id, "worker-1", timeout_minutes=30)
+    orchestrator._jobs.update(job.id, verifier_session_id="verifier-1")
+    orchestrator._update_latest_attempt(
+        job.id, round={"kind": "verdict", "sessions": {"verifier-1": {"model": None, "indices": [0, 1]}}}
+    )
     orchestrator._jobs.update_state(job.id, "verifying")
     return orchestrator.get_job(job.id)
 

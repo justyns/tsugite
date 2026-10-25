@@ -21,6 +21,7 @@ function job(partial: Partial<Job>): Job {
     pending_question: null,
     attempts: [],
     acceptance_criteria: [],
+    ac_texts: [],
     ac_results: [],
     result: null,
     agent: 'code-worker',
@@ -96,7 +97,7 @@ test('the acceptance-criteria checklist shows pass/fail with the verifier reason
   await render(JobDrawer, {
     job: job({
       state: 'awaiting_input',
-      acceptance_criteria: ['backup completes', 'disk below 80%'],
+      ac_texts: ['backup completes', 'disk below 80%'],
       ac_results: [
         { ac_index: 0, ac_text: 'backup completes', pass: true, reason: '', attempt: 1 },
         {

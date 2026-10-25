@@ -150,7 +150,7 @@ async def cmd_bg(adapter: BaseAdapter, prompt: str, agent: str | None = None, se
         CommandParam(
             "acceptance_criteria",
             str,
-            "Pipe-separated free-text criteria the verifier grades against (e.g. 'tests pass|PR open'). Or a JSON array.",
+            "Pipe-separated free-text criteria the verifier grades against (e.g. 'tests pass|PR open'). Or a JSON array of strings and criterion dicts.",
             required=False,
         ),
         CommandParam("repo", str, "Workspace-relative repo path (persisted; enforcement deferred)", required=False),
@@ -200,7 +200,7 @@ async def cmd_job(
     user_id: str,
     prompt: str,
     session_id: str | None = None,
-    acceptance_criteria: str | list[str] | None = None,
+    acceptance_criteria: str | list | None = None,
     repo: str | None = None,
     model: str | None = None,
     model_ladder: str | list[str] | None = None,
@@ -321,18 +321,18 @@ def _broadcast_settings(adapter: "BaseAdapter", session_id: str) -> None:
         pass
 
 
-def parse_acceptance_criteria(raw: str | list | None) -> list[str]:
-    """Normalise the slash-command AC param into a plain list of strings.
+def parse_acceptance_criteria(raw: str | list | None) -> list:
+    """Normalise the slash-command AC param into a list of criteria (strings or dicts).
 
     Accepts: None, an existing list, JSON-array string, or pipe-separated
     string. Pipe is chosen over comma so AC texts can contain commas naturally.
     """
-    from tsugite_daemon.job_store import _coerce_ac_list
+    from tsugite_daemon.job_criteria import normalize_criteria
 
     if not raw:
         return []
     if isinstance(raw, list):
-        return _coerce_ac_list(raw)
+        return normalize_criteria(raw)
     text = raw.strip()
     if text.startswith("["):
         try:
@@ -340,10 +340,10 @@ def parse_acceptance_criteria(raw: str | list | None) -> list[str]:
 
             parsed = json.loads(text)
             if isinstance(parsed, list):
-                return _coerce_ac_list(parsed)
+                return normalize_criteria(parsed)
         except json.JSONDecodeError:
             pass
-    return _coerce_ac_list([part for part in text.split("|") if part.strip()])
+    return normalize_criteria([part for part in text.split("|") if part.strip()])
 
 
 @adapter_command(

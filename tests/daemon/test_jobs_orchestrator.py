@@ -1497,6 +1497,7 @@ async def test_initial_worktree_provision_runs_off_the_event_loop_thread(store, 
         return f"/tmp/fake-worktree/{job_id}"
 
     monkeypatch.setattr(orch_mod, "_provision_worktree", recording_provision)
+    monkeypatch.setattr(orch_mod, "_head_sha", lambda path: "base-sha")
 
     await orchestrator.create_and_start_job(
         parent_session_id="parent-1", prompt="do", acceptance_criteria=[], repo="some-repo"
@@ -2429,6 +2430,7 @@ async def test_concurrent_retry_with_hint_spawns_only_one_worker(store, runner, 
         return f"/tmp/fake-worktree/{job_id}"
 
     monkeypatch.setattr(orch_mod, "_provision_worktree", blocking_provision)
+    monkeypatch.setattr(orch_mod, "_head_sha", lambda path: "base-sha")
     monkeypatch.setattr(orch_mod, "_prune_worktree", lambda *a, **k: None)
 
     c1 = asyncio.create_task(orchestrator.retry_with_hint(job.id, hint="a", fresh_workspace=True))

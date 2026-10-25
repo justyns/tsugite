@@ -152,7 +152,7 @@ You are managing a shared channel. When a user asks for something that would ben
 - **Inline** - single edit, one-shot read, small calculation. Don't spawn anything.
 - **`spawn_job`** - background work: long-running tasks, parallel work, or delegating to a different agent/model. Fire-and-forget by default; add `acceptance_criteria=[...]` when "done" has a checkable shape (tests pass, copy satisfies criteria, refactor preserves behavior) and the verification loop becomes the value.
 
-**Acceptance criteria**: pass each criterion as a plain string. A criterion starting with `cmd:<command>` (passes on exit 0), `exit_code:<command>:<n>` (passes on exit code `n`, default 0) or `file_exists:<path>` is checked in the Job's working directory with no verifier model. Write one whenever the check is mechanical. The verifier reads the rest verbatim and returns per-criterion pass/fail in `result.ac_results`:
+**Acceptance criteria**: a criterion is a string, or a dict for a timeout, models or a review. A string starting with `cmd:<command>` (passes on exit 0), `exit_code:<command>:<n>` (passes on exit code `n`, default 0) or `file_exists:<path>` is checked in the Job's working directory with no verifier model. Use one whenever the check is mechanical; the verifier reads the remaining strings verbatim and returns per-criterion pass/fail in `result.ac_results`:
 ```python-exec
 spawn_job(
     prompt="Refactor the agent loop to handle nested tool calls",

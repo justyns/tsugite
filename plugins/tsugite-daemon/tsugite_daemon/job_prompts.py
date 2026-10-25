@@ -6,22 +6,22 @@ Pure string building - no orchestrator state, no I/O.
 from collections import Counter
 from typing import Optional
 
+from tsugite_daemon.job_criteria import ac_text
+from tsugite_daemon.job_reviews import brief_findings
 from tsugite_daemon.job_store import Job, JobState
 
 
 def build_worker_prompt(prompt: str, acceptance_criteria: list, repo: Optional[str]) -> str:
     """Compose the worker's initial user_prompt with AC and repo context inlined.
 
-    Accepts AC as either legacy list[str] or normalised list[dict]; the worker
-    prompt only needs the text, so both shapes render the same.
+    The worker prompt only needs each criterion's display text.
     """
     parts = [prompt]
     if acceptance_criteria:
         parts.append("")
         parts.append("Acceptance criteria (the verifier will grade your work against these):")
         for i, ac in enumerate(acceptance_criteria, 1):
-            text = ac.get("text", "") if isinstance(ac, dict) else ac
-            parts.append(f"{i}. {text}")
+            parts.append(f"{i}. {ac_text(ac)}")
     if repo:
         parts.append("")
         parts.append(f"Working in repo: {repo}")
@@ -59,7 +59,7 @@ def _build_verifier_prompt(job: Job, worker_output: str, prose_acs: Optional[lis
     acs_to_render = prose_acs if prose_acs is not None else job.acceptance_criteria
     parts = ["Acceptance criteria:"]
     for i, ac in enumerate(acs_to_render, 1):
-        parts.append(f"{i}. {ac}")
+        parts.append(f"{i}. {ac_text(ac)}")
     parts.append("")
     parts.append("Worker output:")
     parts.append(worker_output.strip() or "(empty)")
@@ -93,7 +93,7 @@ def _build_hint_prompt(job: Job, hint: str) -> str:
     parts.append("")
     parts.append("Acceptance criteria the verifier will check:")
     for i, ac in enumerate(job.acceptance_criteria, 1):
-        parts.append(f"{i}. {ac}")
+        parts.append(f"{i}. {ac_text(ac)}")
     parts.append("")
     parts.append("Address the hint, then produce the structured summary required by your instructions.")
     return "\n".join(parts)
@@ -105,6 +105,7 @@ def _build_followup_prompt(job: Job, failed_acs: list[dict]) -> str:
     parts.append("The verifier flagged these acceptance criteria as not met:")
     for ac in failed_acs:
         parts.append(f"- {ac.get('ac_text', '?')}: {ac.get('reason', '?')}")
+        parts.extend(brief_findings(ac.get("findings", []), indent="  - "))
     parts.append("")
     parts.append("Address them, then produce the structured summary required by your instructions.")
     return "\n".join(parts)

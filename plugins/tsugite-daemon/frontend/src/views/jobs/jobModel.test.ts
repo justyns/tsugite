@@ -8,6 +8,7 @@ function job(partial: Partial<Job>): Job {
     state: 'running',
     prompt: 'p',
     acceptance_criteria: [],
+    ac_texts: [],
     ac_results: [],
     attempts: [],
     verify_attempts: 0,
@@ -28,7 +29,7 @@ describe('acRows', () => {
   it('folds a recorded verdict into pass/fail and carries the fail reason', () => {
     const rows = acRows(
       job({
-        acceptance_criteria: ['a', 'b'],
+        ac_texts: ['a', 'b'],
         ac_results: [res(0, true), res(1, false, 1, 'disk at 84%')],
       }),
     );
@@ -38,20 +39,20 @@ describe('acRows', () => {
 
   it('uses the latest attempt when a criterion was re-graded', () => {
     const rows = acRows(
-      job({ acceptance_criteria: ['a'], ac_results: [res(0, false, 1, 'no'), res(0, true, 2)] }),
+      job({ ac_texts: ['a'], ac_results: [res(0, false, 1, 'no'), res(0, true, 2)] }),
     );
     expect(rows[0]?.state).toBe('pass');
   });
 
   it('marks only the first ungraded criterion active while verifying', () => {
     const rows = acRows(
-      job({ state: 'verifying', acceptance_criteria: ['a', 'b', 'c'], ac_results: [res(0, true)] }),
+      job({ state: 'verifying', ac_texts: ['a', 'b', 'c'], ac_results: [res(0, true)] }),
     );
     expect(rows.map((r) => r.state)).toEqual(['pass', 'active', 'pending']);
   });
 
   it('leaves ungraded criteria pending when not verifying', () => {
-    const rows = acRows(job({ state: 'queued', acceptance_criteria: ['a', 'b'], ac_results: [] }));
+    const rows = acRows(job({ state: 'queued', ac_texts: ['a', 'b'], ac_results: [] }));
     expect(rows.map((r) => r.state)).toEqual(['pending', 'pending']);
   });
 
@@ -59,7 +60,7 @@ describe('acRows', () => {
     const rows = acRows(
       job({
         state: 'done',
-        acceptance_criteria: ['a'],
+        ac_texts: ['a'],
         ac_results: [],
         result: { ac_results: [res(0, true)] },
       }),
@@ -73,7 +74,7 @@ describe('acCounts', () => {
     const rows = acRows(
       job({
         state: 'verifying',
-        acceptance_criteria: ['a', 'b', 'c', 'd'],
+        ac_texts: ['a', 'b', 'c', 'd'],
         ac_results: [res(0, true), res(1, false, 1, 'x')],
       }),
     );

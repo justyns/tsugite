@@ -37,7 +37,7 @@ def _criteria_failures(job) -> list[dict]:
 
     Returns the failed verdicts, leaving out timeouts, which verification grades instead.
     """
-    predicates, _ = partition_acs(job.acceptance_criteria)
+    predicates, _, _ = partition_acs(job.acceptance_criteria)
     cwd = _resolve_predicate_cwd(job)
     deadline = time.monotonic() + _CRITERIA_TIMEOUT_SECONDS
     results = [

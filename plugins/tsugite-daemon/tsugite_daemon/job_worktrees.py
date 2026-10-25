@@ -19,6 +19,13 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True)
 
 
+def _head_sha(worktree: str) -> str:
+    proc = _git(["rev-parse", "HEAD"], Path(worktree))
+    if proc.returncode != 0:
+        raise RuntimeError(f"git rev-parse HEAD failed in {worktree}: {proc.stderr.strip()}")
+    return proc.stdout.strip()
+
+
 def _worktree_is_dirty(worktree: Path) -> bool:
     return bool(_git(["status", "--porcelain"], worktree).stdout.strip())
 

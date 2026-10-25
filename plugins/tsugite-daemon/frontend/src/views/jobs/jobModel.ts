@@ -3,8 +3,8 @@
  * counts, and the attempt counter. Kept out of the .svelte files so the
  * reducer is directly node-testable.
  *
- * AC data comes from the backend already: `acceptance_criteria`
- * is the ordered prompt list; `ac_results` accumulates one verdict per criterion
+ * AC data comes from the backend already: `ac_texts`
+ * is the ordered display list of the criteria; `ac_results` accumulates one verdict per criterion
  * per verifier round ({ac_index, ac_text, pass, reason, attempt}). Terminal
  * snapshots also mirror the verdicts into `result.ac_results`, so that is the
  * fallback source when the top-level list is empty.
@@ -48,7 +48,7 @@ function latestByIndex(results: JobAcResult[]): Map<number, JobAcResult> {
  *   - otherwise -> pending
  */
 export function acRows(job: Job): AcRow[] {
-  const criteria = job.acceptance_criteria ?? [];
+  const criteria = job.ac_texts ?? [];
   const latest = latestByIndex(resultsFor(job));
   const verifying = job.state === 'verifying';
   let activeUsed = false;
