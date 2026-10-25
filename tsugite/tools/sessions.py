@@ -448,8 +448,8 @@ def room_open(
 
 @tool(require_daemon=True)
 def room_invite(agent: str, brief: str, room_id: Optional[str] = None) -> dict:
-    """Invite an agent to the room, with a brief summarizing the room so far."""
-    return _status(_call(_session_runner.rooms.invite, _lead_room(room_id).id, agent, brief))
+    """Invite an agent to a room you lead or opened (pass room_id as the opener), with a brief summarizing the room so far."""
+    return _status(_call(_session_runner.rooms.invite_as, _current_room(room_id).id, agent, brief, _caller()))
 
 
 @tool(require_daemon=True)

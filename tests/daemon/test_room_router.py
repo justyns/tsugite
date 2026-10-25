@@ -520,6 +520,27 @@ class TestRouterTurnContext:
 
 class TestTurnOutcomes:
     @pytest.mark.asyncio
+    async def test_only_the_lead_sees_a_failed_turn_in_its_next_context(self, rooms, store, adapter, lead_chat, room):
+        async def boom():
+            raise RuntimeError("peer closed connection")
+
+        adapter.hooks[_session_of(rooms, room, "homelab")] = boom
+        await _handoff_from_lead_turn(
+            rooms,
+            store,
+            lead_chat,
+            room,
+            [{"agent": "homelab", "message": "a"}, {"agent": "research", "message": "b"}],
+        )
+
+        [research_prompt] = [prompt for agent, prompt in adapter.calls if agent == "research"]
+        assert "failed_turn" not in _context(research_prompt)
+        lead_prompt = adapter.calls[-1][1]
+        assert adapter.calls[-1][0] == "main"
+        assert 'agent="homelab" untrusted="true">' in _context(lead_prompt)
+        assert "peer closed connection" in _context(lead_prompt)
+
+    @pytest.mark.asyncio
     async def test_a_failing_turn_posts_a_card_and_the_batch_continues(self, rooms, store, adapter, lead_chat, room):
         async def boom():
             raise RuntimeError("disk on fire")
@@ -1176,6 +1197,23 @@ def _as_caller(monkeypatch, runner, session_id):
 
 def _lead_session(room):
     return room.participant("main").session_id
+
+
+class TestOpenerInvites:
+    def test_the_opener_invites_into_its_room(self, rooms, runner, monkeypatch, opener):
+        room = rooms.create("PROJ-7", user_id="web-anonymous", lead_agent_id="main", opener_session_id=opener.id)
+        _as_caller(monkeypatch, runner, opener.id)
+
+        sessions_tools.room_invite("homelab", "Check the NAS.", room_id=room.id)
+
+        assert rooms.get(room.id).participant("homelab").brief == "Check the NAS."
+
+    def test_a_stranger_cannot_invite(self, rooms, runner, monkeypatch, opened, store):
+        stranger = store.create_session(Session(id="", user_id="web-anonymous"))
+        _as_caller(monkeypatch, runner, stranger.id)
+
+        with pytest.raises(ValueError, match="lead.*opener"):
+            sessions_tools.room_invite("research", "hi", room_id=opened.id)
 
 
 class TestRoomOpenFreshLead:
