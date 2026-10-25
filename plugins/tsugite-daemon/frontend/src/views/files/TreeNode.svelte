@@ -45,6 +45,7 @@
         type="button"
         data-act="wk-dir"
         class:is-ignored={node.ignored}
+        title={node.path}
         aria-expanded={open}
         onclick={() => onToggle(node.path)}
       >
@@ -72,6 +73,7 @@
       class:is-active={node.path === activePath}
       class:is-ignored={node.ignored}
       data-testid={TESTID.fileNode(node.path)}
+      title={node.path}
       aria-current={node.path === activePath ? 'true' : undefined}
       draggable="true"
       ondragstart={(e) => onDragStart(e, node)}

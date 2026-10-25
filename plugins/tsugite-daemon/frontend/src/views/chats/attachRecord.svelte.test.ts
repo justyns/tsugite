@@ -24,6 +24,13 @@ test('parseRefMarker round-trips a copied marker', () => {
   });
 });
 
+test('a file reference round-trips a path with html-special characters', () => {
+  const path = 'notes/a & b "draft" <v2>.md';
+  const html = refMarkerHtml('file', path);
+  expect(html).not.toContain('<v2>');
+  expect(parseRefMarker(html)).toEqual({ kind: 'file', id: path });
+});
+
 test('parseRefMarker ignores html that carries no marker', () => {
   expect(parseRefMarker('<b>just some pasted html</b>')).toBeNull();
   expect(parseRefMarker('')).toBeNull();

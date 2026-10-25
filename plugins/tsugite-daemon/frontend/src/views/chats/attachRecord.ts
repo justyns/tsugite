@@ -13,7 +13,7 @@ import { captureServerContext } from '$lib/context/serverProviders';
 import { isFinishedSession } from './sessionModel';
 import { contextAttach } from './contextAttach.svelte';
 
-export type RecordKind = 'session' | 'job' | 'terminal';
+export type RecordKind = 'session' | 'job' | 'terminal' | 'file';
 
 /** The chat a captured record attaches to: the focused chat if one is open, else
  *  the default agent's primary session, else the most-recent still-open chat.
@@ -63,14 +63,20 @@ export async function attachRecordToChat(kind: RecordKind, id: string): Promise<
 function refText(kind: RecordKind, id: string): string {
   return `${kind} ${id}`;
 }
+// A file path can hold `&`, `"` or `<`, so the marker is entity-escaped both ways.
+const ESCAPES: Record<string, string> = { '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' };
+const UNESCAPES = Object.fromEntries(Object.entries(ESCAPES).map(([c, e]) => [e, c]));
+const escapeHtml = (s: string) => s.replace(/[&"<>]/g, (c) => ESCAPES[c]!);
+const unescapeHtml = (s: string) => s.replace(/&(amp|quot|lt|gt);/g, (e) => UNESCAPES[e]!);
+
 export function refMarkerHtml(kind: RecordKind, id: string): string {
-  return `<span data-tsugite-ref="${kind}:${id}">${refText(kind, id)}</span>`;
+  return `<span data-tsugite-ref="${kind}:${escapeHtml(id)}">${escapeHtml(refText(kind, id))}</span>`;
 }
 
 /** Read a reference marker out of pasted html; null when it isn't one. */
 export function parseRefMarker(html: string): { kind: string; id: string } | null {
   const m = /data-tsugite-ref="([a-z]+):([^"]+)"/.exec(html);
-  return m && m[1] && m[2] ? { kind: m[1], id: m[2] } : null;
+  return m && m[1] && m[2] ? { kind: m[1], id: unescapeHtml(m[2]) } : null;
 }
 
 // Fallback when ClipboardItem / clipboard.write is unavailable: copy the human

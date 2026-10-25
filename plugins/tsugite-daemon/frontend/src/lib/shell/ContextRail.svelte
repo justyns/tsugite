@@ -5,6 +5,7 @@
   // whole rail (the work-shell drops to a single column and shows the expand strip
   // in the work-main), so the expand affordance lives in CollapsedRail, not here.
   import Icon from '$lib/components/icon/Icon.svelte';
+  import { RAIL_MIN_PX, railWidth } from '$lib/stores/railWidth.svelte';
   import type { WorkspaceView } from '$lib/stores/shellView.svelte';
   import ChatsRail from '../../views/chats/ChatsRail.svelte';
   import TerminalsRail from '../../views/terminals/TerminalsRail.svelte';
@@ -14,6 +15,7 @@
     view,
     onCollapse,
     peeking = false,
+    resizable = false,
     focusedSessionId,
     focusedTerminalId,
     focusedFilePath,
@@ -26,6 +28,8 @@
     onCollapse: () => void;
     /** Rendered inside a hover peek, where the control pins the rail open. */
     peeking?: boolean;
+    /** Show the right-edge drag handle that sets the rail width. */
+    resizable?: boolean;
     focusedSessionId: string | null;
     focusedTerminalId: string | null;
     focusedFilePath: string | null;
@@ -41,9 +45,36 @@
     terminals: 'Terminals',
     files: 'Files',
   };
+
+  let railEl = $state<HTMLElement | null>(null);
+
+  function startResize(e: PointerEvent) {
+    if (!railEl) return;
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = railEl.getBoundingClientRect().width;
+    const move = (ev: PointerEvent) => railWidth.set(startW + ev.clientX - startX);
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  function onResizeKey(e: KeyboardEvent) {
+    const step = e.key === 'ArrowLeft' ? -16 : e.key === 'ArrowRight' ? 16 : 0;
+    if (!step || !railEl) return;
+    e.preventDefault();
+    railWidth.set(railEl.getBoundingClientRect().width + step);
+  }
 </script>
 
-<aside class="work-rail" aria-label="Sidebar">
+<aside class="work-rail" aria-label="Sidebar" bind:this={railEl}>
   <div class="rail-top">
     <strong class="rail-title">{TITLES[view]}</strong>
     <div class="grow"></div>
@@ -70,6 +101,22 @@
       <FilesRail {focusedFilePath} {onOpenFile} {onPinFile} />
     {/if}
   </div>
+  {#if resizable}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="rail-resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuemin={RAIL_MIN_PX}
+      aria-valuenow={railWidth.px ?? undefined}
+      tabindex="0"
+      onpointerdown={startResize}
+      ondblclick={() => railWidth.reset()}
+      onkeydown={onResizeKey}
+    ></div>
+  {/if}
 </aside>
 
 <style>
@@ -135,11 +182,27 @@
     display: flex;
     flex-direction: column;
   }
+  .rail-resize {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 5px;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 5;
+  }
+  .rail-resize:hover,
+  .rail-resize:focus-visible {
+    outline: none;
+    box-shadow: inset -2px 0 var(--acc);
+  }
   /* Phone is a full-screen drilldown, not a collapsible drawer, so the collapse
      control has nothing to collapse to - and tapping it would corrupt the persisted
      desktop rail state. */
   @media (max-width: 640px) {
-    .railc {
+    .railc,
+    .rail-resize {
       display: none;
     }
   }

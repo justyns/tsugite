@@ -19,6 +19,7 @@
   import { filesShowIgnored } from '$lib/stores/filesShowIgnored.svelte';
   import Switch from '$lib/components/inputs/Switch.svelte';
   import { TESTID } from '$lib/testids';
+  import { copyReference } from '../chats/attachRecord';
   import TreeNode from './TreeNode.svelte';
   import { isMarkdown } from './load';
   import { filesWorkspace } from './workspace.svelte';
@@ -127,6 +128,7 @@
             .then(() => toasts.push('ok', 'Path copied', { body: path }))
             .catch(() => toasts.push('err', 'Could not copy path')),
       },
+      { label: 'Copy reference', run: () => void copyReference('file', path) },
       {
         label: 'Download',
         run: () =>
@@ -223,6 +225,7 @@
               class:is-active={e.path === focusedFilePath}
               class:is-ignored={e.ignored}
               data-testid={TESTID.fileNode(e.path)}
+              title={e.path}
               draggable="true"
               ondragstart={(ev) => fileDragStart(ev, e.path, e.name)}
               onclick={() => open(e.path)}

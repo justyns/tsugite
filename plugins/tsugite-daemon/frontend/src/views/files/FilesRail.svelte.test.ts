@@ -6,6 +6,7 @@ import { WORKSPACE } from './__fixtures__/workspace';
 import { buildTree } from './wiki';
 
 vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api }));
+vi.mock('../chats/attachRecord', () => ({ copyReference: vi.fn() }));
 
 beforeEach(async () => {
   await page.viewport(1440, 900);
@@ -150,4 +151,20 @@ test('a directory row has no file menu', async () => {
   await expect.element(page.getByRole('button', { name: 'ops', exact: true })).toBeInTheDocument();
   await page.getByRole('button', { name: 'ops', exact: true }).click({ button: 'right' });
   expect(page.getByRole('menuitem', { name: 'Download' }).elements()).toHaveLength(0);
+});
+
+test('a tree row shows its full path on hover', async () => {
+  await mountRail();
+  await expect.element(page.getByTestId('file-node-index.md')).toHaveAttribute('title', 'index.md');
+  await expect
+    .element(page.getByRole('button', { name: 'ops', exact: true }))
+    .toHaveAttribute('title', 'ops');
+});
+
+test('right-click Copy reference copies a file reference', async () => {
+  const { copyReference } = await import('../chats/attachRecord');
+  await mountRail();
+  await page.getByTestId('file-node-index.md').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy reference' }).click();
+  expect(copyReference).toHaveBeenCalledWith('file', 'index.md');
 });

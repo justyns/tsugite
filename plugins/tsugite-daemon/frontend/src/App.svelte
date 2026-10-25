@@ -70,6 +70,7 @@
   import TopBar from '$lib/shell/TopBar.svelte';
   import NavRail from '$lib/shell/NavRail.svelte';
   import ContextRail from '$lib/shell/ContextRail.svelte';
+  import { railWidth } from '$lib/stores/railWidth.svelte';
   import CollapsedRail from '$lib/shell/CollapsedRail.svelte';
   import TokenPane from '$lib/shell/TokenPane.svelte';
   import SettingsDrawer from '$lib/shell/SettingsDrawer.svelte';
@@ -560,6 +561,8 @@
           <div
             class="work-shell"
             class:rail-collapsed={railCollapsed && !narrow}
+            class:rail-sized={railWidth.px != null}
+            style:--w-work={railWidth.px != null ? `${railWidth.px}px` : undefined}
             class:phone-list={phoneScreen === 'list'}
             class:phone-content={phoneScreen === 'content'}
           >
@@ -582,6 +585,7 @@
               <ContextRail
                 view={shellView.workspaceView}
                 onCollapse={pinRail}
+                resizable
                 {focusedSessionId}
                 {focusedTerminalId}
                 {focusedFilePath}
@@ -708,12 +712,16 @@
      rail drops to a single column; the expand strip then rides the work-main edge. */
   .work-shell {
     --w-work: 262px;
+    --w-work-max: 30%;
     flex: 1;
     display: grid;
-    grid-template-columns: clamp(200px, var(--w-work), 30%) minmax(0, 1fr);
+    grid-template-columns: clamp(200px, var(--w-work), var(--w-work-max)) minmax(0, 1fr);
     min-height: 0;
     position: relative;
     background: var(--bg0);
+  }
+  .work-shell.rail-sized {
+    --w-work-max: 60%;
   }
   .work-shell.rail-collapsed {
     grid-template-columns: minmax(0, 1fr);
@@ -736,7 +744,8 @@
     .app-shell {
       flex-direction: column;
     }
-    .work-shell {
+    .work-shell,
+    .work-shell.rail-sized {
       grid-template-columns: minmax(0, 1fr);
     }
     .work-shell.phone-list > :global(.work-rail) {

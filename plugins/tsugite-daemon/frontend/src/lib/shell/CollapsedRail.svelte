@@ -121,7 +121,7 @@
   .rail-peek {
     position: absolute;
     inset: 0 auto 0 0;
-    width: clamp(200px, var(--w-work), 30%);
+    width: clamp(200px, var(--w-work), var(--w-work-max));
     z-index: 26;
     display: flex;
     box-shadow: var(--sh-2);
