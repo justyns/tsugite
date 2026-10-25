@@ -4,6 +4,7 @@
   // `onOpenFile`. The tree + backlink index are shared with the open document
   // surfaces through the filesWorkspace store, so the expensive whole-workspace
   // walk happens once.
+  import { untrack } from 'svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import SearchInput from '$lib/components/inputs/SearchInput.svelte';
   import Input from '$lib/components/inputs/Input.svelte';
@@ -34,7 +35,7 @@
   } = $props();
 
   let query = $state('');
-  let collapsed = $state<Set<string>>(new Set());
+  let expanded = $state<Set<string>>(new Set());
 
   const ws = $derived(filesWorkspace.ws);
   const idx = $derived(ws?.index ?? null);
@@ -42,6 +43,15 @@
 
   $effect(() => {
     void filesWorkspace.ensure();
+  });
+
+  // Expand the focused file's ancestors so the tree shows it.
+  $effect(() => {
+    const parts = focusedFilePath?.split('/').slice(0, -1) ?? [];
+    const dirs = parts.map((_, i) => parts.slice(0, i + 1).join('/'));
+    untrack(() => {
+      if (dirs.some((d) => !expanded.has(d))) expanded = new Set([...expanded, ...dirs]);
+    });
   });
 
   // Rail filter: empty -> tree; `#tag` -> files carrying that tag; else path substring.
@@ -71,10 +81,10 @@
   }
 
   function toggleDir(path: string) {
-    const next = new Set(collapsed);
+    const next = new Set(expanded);
     if (next.has(path)) next.delete(path);
     else next.add(path);
-    collapsed = next;
+    expanded = next;
   }
 
   function open(path: string) {
@@ -227,7 +237,7 @@
         <TreeNode
           nodes={ws.tree}
           activePath={focusedFilePath ?? ''}
-          {collapsed}
+          {expanded}
           onToggle={toggleDir}
           onOpenFile={open}
           onPinFile={pin}

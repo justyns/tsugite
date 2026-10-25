@@ -27,15 +27,34 @@ async function mountRail() {
   });
 }
 
-test('lists the workspace tree (dirs expanded, files as nodes)', async () => {
+async function openDir(name: string) {
+  await page.getByRole('button', { name, exact: true }).click();
+}
+
+test('lists the workspace tree with directories collapsed', async () => {
   await mountRail();
   await expect.element(page.getByTestId('file-node-index.md')).toBeInTheDocument();
+  expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
+
+  await openDir('ops');
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+});
+
+test('focusing a file expands its parent directories', async () => {
+  const { default: FilesRail } = await import('./FilesRail.svelte');
+  const { rerender } = await render(FilesRail, {
+    props: { focusedFilePath: null, onOpenFile: () => {}, onPinFile: () => {} },
+  });
+  await expect.element(page.getByTestId('file-node-index.md')).toBeInTheDocument();
+  expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
+
+  await rerender({ focusedFilePath: 'ops/alpha.md' });
   await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
 });
 
 test('a #tag search kicks the on-demand index scan and filters to notes carrying that tag', async () => {
   await mountRail();
-  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+  await expect.element(page.getByTestId('file-node-index.md')).toBeInTheDocument();
 
   await page.getByRole('searchbox', { name: 'Search workspace' }).fill('#x');
   await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
@@ -53,6 +72,7 @@ test('a file click asks the shell to open it as a surface', async () => {
       onPinFile: () => {},
     },
   });
+  await openDir('ops');
   await page.getByTestId('file-node-ops/alpha.md').click();
   expect(opened).toContain('ops/alpha.md');
 });
@@ -67,16 +87,15 @@ test('a file double-click asks the shell to pin it (preview-tab keep)', async ()
       onPinFile: (path: string) => pinned.push(path),
     },
   });
+  await openDir('ops');
   await userEvent.dblClick(page.getByTestId('file-node-ops/alpha.md'));
   expect(pinned).toContain('ops/alpha.md');
 });
 
-test('a workspace reload keeps a collapsed directory collapsed', async () => {
+test('a workspace reload keeps an expanded directory expanded', async () => {
   await mountRail();
+  await openDir('ops');
   await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
-
-  await page.getByRole('button', { name: 'ops', exact: true }).click();
-  await expect.element(page.getByTestId('file-node-ops/alpha.md')).not.toBeInTheDocument();
 
   const { filesWorkspace } = await import('./workspace.svelte');
   const before = filesWorkspace.ws!;
@@ -89,8 +108,11 @@ test('a workspace reload keeps a collapsed directory collapsed', async () => {
   ];
   filesWorkspace.ws = { ...before, entries, tree: buildTree(entries) };
 
-  await expect.element(page.getByTestId('file-node-notes/todo.md')).toBeInTheDocument();
-  expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
+  await expect
+    .element(page.getByRole('button', { name: 'notes', exact: true }))
+    .toBeInTheDocument();
+  expect(page.getByTestId('file-node-notes/todo.md').elements()).toHaveLength(0);
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
 });
 
 test('the Show ignored files switch reloads the tree with ignored entries, dimmed', async () => {
@@ -115,8 +137,7 @@ test('right-click Download on a file saves it through the files store', async ()
   const { files } = await import('$lib/stores/files.svelte');
   const download = vi.spyOn(files, 'download').mockResolvedValue();
   await mountRail();
-  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
-
+  await openDir('ops');
   await page.getByTestId('file-node-ops/alpha.md').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Download' }).click();
 
