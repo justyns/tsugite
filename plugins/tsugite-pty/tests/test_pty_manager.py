@@ -152,9 +152,9 @@ def test_snapshot_and_subscribe_no_chunk_lost_across_the_boundary():
     # Slow emitter: ~10ms/line keeps output pending for ~2s, guaranteeing the
     # reader is actively appending when we subscribe partway through. Monotonic
     # line numbers let us detect a lost chunk as a missing line.
-    p = PtyProcess.spawn(["/bin/sh", "-c", "for i in $(seq 1 200); do printf 'L%03d\\n' $i; sleep 0.01; done"])
-    # Let the first lines accumulate into the buffer before we snapshot+subscribe.
-    time.sleep(0.2)
+    script = "for i in $(seq 1 200); do printf 'L%03d\\n' $i; sleep 0.01; done"
+    p = PtyProcess.spawn(["/bin/sh", "-c", script])
+    assert "L001" in _wait_for_text(p, "L001", timeout=10.0)
 
     delivered: list[bytes] = []
     snapshot, unsub = p.snapshot_and_subscribe(lambda chunk: delivered.append(chunk))
