@@ -106,3 +106,21 @@ test('an expanded rail has nothing to peek, so hovering it asks for nothing', as
   await userEvent.hover(container.querySelector('[data-testid="nav-rail"]') as HTMLElement);
   expect(onHoverStart).not.toHaveBeenCalled();
 });
+
+test('in a short window the nav list scrolls and the footer stays inside the rail', async () => {
+  const many: ViewDef[] = Array.from({ length: 14 }, (_, i) => ({
+    id: `view-${i}`,
+    label: `View ${i}`,
+    icon: 'chat',
+    mode: 'full' as const,
+  }));
+  const { container } = await render(NavRail, { ...base, views: many, activeId: 'view-0' });
+  const nav = container.querySelector('[data-testid="nav-rail"]') as HTMLElement;
+  nav.style.height = '200px';
+  const list = container.querySelector('.t-navlist') as HTMLElement;
+  const footer = container.querySelector('[data-testid="keystrip"]') as HTMLElement;
+  expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+  expect(footer.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+    nav.getBoundingClientRect().bottom,
+  );
+});

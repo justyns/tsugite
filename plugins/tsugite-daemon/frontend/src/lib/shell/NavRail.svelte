@@ -220,6 +220,8 @@
     padding: 0;
     margin: 0;
     list-style: none;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   /* Narrow: the rail drops to a fixed bottom bar of the first five views (the
