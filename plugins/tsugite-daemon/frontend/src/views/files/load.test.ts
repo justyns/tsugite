@@ -7,7 +7,7 @@ vi.mock('$lib/api/client', () => ({
 }));
 
 import { api } from '$lib/api/client';
-import { loadWorkspace } from './load';
+import { addEntries, loadIgnoredDir, loadWorkspace } from './load';
 
 const apiGet = api.get as ReturnType<typeof vi.fn>;
 
@@ -69,5 +69,35 @@ describe('loadWorkspace', () => {
     expect(vendor?.children[0]?.ignored).toBe(true);
     expect(ws.tree.find((n) => n.path === 'top.md')?.ignored).toBeUndefined();
     expect(ws.index.files).toEqual(['top.md']);
+  });
+});
+
+describe('loadIgnoredDir', () => {
+  beforeEach(() => apiGet.mockReset());
+
+  test('lists one level of the directory and adds it to the tree', async () => {
+    apiGet.mockResolvedValueOnce({
+      entries: [
+        { path: 'top.md', name: 'top.md', is_dir: false },
+        { path: 'vendor', name: 'vendor', is_dir: true, ignored: true },
+      ],
+      workspace_dir: '/ws',
+    });
+    const ws = await loadWorkspace({ includeIgnored: true });
+    apiGet.mockResolvedValueOnce({
+      entries: [{ path: 'vendor/lib.bin', name: 'lib.bin', is_dir: false, ignored: true }],
+      workspace_dir: '/ws',
+    });
+
+    const next = addEntries(ws, await loadIgnoredDir('vendor'));
+
+    const url = apiGet.mock.calls[1]?.[0] as string;
+    expect(url).toContain('subdir=vendor');
+    expect(url).toContain('include_ignored=1');
+    expect(url).not.toContain('recursive');
+    expect(next.tree.find((n) => n.path === 'vendor')?.children.map((n) => n.path)).toEqual([
+      'vendor/lib.bin',
+    ]);
+    expect(next.index.files).toEqual(['top.md']);
   });
 });

@@ -73,6 +73,19 @@ export async function loadWorkspace(opts: { includeIgnored?: boolean } = {}): Pr
   };
 }
 
+/** List one level of an ignored directory. The recursive load lists ignored
+ *  directories without their contents. */
+export async function loadIgnoredDir(path: string): Promise<WorkspaceEntry[]> {
+  return (await readDir(path, { includeIgnored: true })).entries;
+}
+
+/** Add entries to a loaded workspace, skipping paths it already lists. */
+export function addEntries(ws: Workspace, entries: WorkspaceEntry[]): Workspace {
+  const known = new Set(ws.entries.map((e) => e.path));
+  const all = [...ws.entries, ...entries.filter((e) => !known.has(e.path))];
+  return { ...ws, entries: all, tree: buildTree(all) };
+}
+
 /** Read every markdown file once (capped) and build the full backlink/tag
  *  index. On-demand only - this is the whole-workspace download. */
 export async function loadContentIndex(entries: WorkspaceEntry[]): Promise<WikiIndex> {

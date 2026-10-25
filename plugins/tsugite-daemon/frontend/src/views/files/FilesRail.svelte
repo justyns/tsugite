@@ -84,7 +84,10 @@
   function toggleDir(path: string) {
     const next = new Set(expanded);
     if (next.has(path)) next.delete(path);
-    else next.add(path);
+    else {
+      next.add(path);
+      void filesWorkspace.loadIgnoredDir(path);
+    }
     expanded = next;
   }
 

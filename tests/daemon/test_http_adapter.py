@@ -1811,8 +1811,24 @@ class TestWorkspaceListEndpoint:
         self._seed_ignored(tmp_workspace)
         entries = self._get(client, test_token, "?recursive=1&include_ignored=1").json()["entries"]
         by_path = {e["path"]: e for e in entries}
-        assert set(by_path) == {".gitignore", "keep.md", "debug.log", "build", "build/out.md"}
-        assert {p for p, e in by_path.items() if e.get("ignored")} == {"debug.log", "build", "build/out.md"}
+        assert set(by_path) == {".gitignore", "keep.md", "debug.log", "build"}
+        assert {p for p, e in by_path.items() if e.get("ignored")} == {"debug.log", "build"}
+
+    def test_recursive_walk_lists_ignored_dirs_without_descending(self, client, test_token, tmp_workspace, monkeypatch):
+        import tsugite_daemon.adapters.http.workspace_files as ws_mod
+
+        (tmp_workspace / ".gitignore").write_text("big/\nsmall/\n")
+        (tmp_workspace / "big").mkdir()
+        for i in range(10):
+            (tmp_workspace / "big" / f"f{i}.bin").write_text("x\n")
+        (tmp_workspace / "small").mkdir()
+        (tmp_workspace / "small" / "kept.bin").write_text("x\n")
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 6)
+        body = self._get(client, test_token, "?recursive=1&include_ignored=1").json()
+        assert {"big", "small"} <= {e["path"] for e in body["entries"]}
+        assert "truncated" not in body
+        sub = self._get(client, test_token, "?subdir=small&include_ignored=1").json()["entries"]
+        assert [e["path"] for e in sub] == ["small/kept.bin"]
 
     def test_include_ignored_never_lists_git(self, client, test_token, tmp_workspace):
         self._seed_ignored(tmp_workspace)

@@ -88,10 +88,11 @@ class WorkspaceFilesMixin:
         followed or listed (S_ISLNK skip), so a symlink can neither escape the
         workspace nor cycle the walk; gitignored directories are pruned before
         descent, keeping .git and other ignored trees out of the recursive walk
-        (`include_ignored` keeps them, marked `ignored`, but never lists .git);
+        (`include_ignored` lists them, marked `ignored`, but never descends into
+        them or lists .git; clients list an ignored directory with `subdir`);
         and the total is capped at MAX_WORKSPACE_ENTRIES, returning a truncated
-        flag rather than an unbounded response. Normal directories are walked
-        before ignored ones and ignored entries only fill the budget left over.
+        flag rather than an unbounded response. Ignored entries only fill the
+        budget left over.
         """
         import stat as stat_mod
 
@@ -102,11 +103,9 @@ class WorkspaceFilesMixin:
         if gitignore_spec and target != workspace_dir:
             rel_target = target.relative_to(workspace_dir)
             start_ignored = any(gitignore_spec.match_file(f"{p}/") for p in (rel_target, *rel_target.parents)[:-1])
-        pending: deque[tuple[Path, bool]] = deque()
-        pending_ignored: deque[tuple[Path, bool]] = deque()
-        (pending_ignored if start_ignored else pending).append((target, start_ignored))
-        while pending or pending_ignored:
-            current, parent_ignored = (pending or pending_ignored).popleft()
+        pending: deque[tuple[Path, bool]] = deque([(target, start_ignored)])
+        while pending:
+            current, parent_ignored = pending.popleft()
             try:
                 children = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
             except OSError:
@@ -132,21 +131,18 @@ class WorkspaceFilesMixin:
                 if ignored:
                     if len(ignored_entries) >= MAX_WORKSPACE_ENTRIES:
                         truncated = True
-                        pending_ignored.clear()
                         continue
-                    bucket, queue = ignored_entries, pending_ignored
                 else:
                     if len(entries) >= MAX_WORKSPACE_ENTRIES:
                         truncated = True
                         pending.clear()
-                        pending_ignored.clear()
                         break
-                    bucket, queue = entries, pending
+                bucket = ignored_entries if ignored else entries
                 mark = {"ignored": True} if ignored else {}
                 if is_dir:
                     bucket.append({"path": rel, "name": item.name, "is_dir": True, **mark})
-                    if recursive:
-                        queue.append((item, ignored))
+                    if recursive and not ignored:
+                        pending.append((item, ignored))
                 elif stat_mod.S_ISREG(st.st_mode):
                     bucket.append(
                         {

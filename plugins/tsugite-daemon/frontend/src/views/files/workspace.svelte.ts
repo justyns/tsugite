@@ -8,7 +8,13 @@
  * built. Exported as a class instance - never a reassigned binding.
  */
 import { filesShowIgnored } from '$lib/stores/filesShowIgnored.svelte';
-import { loadContentIndex, loadWorkspace, type Workspace } from './load';
+import {
+  addEntries,
+  loadContentIndex,
+  loadIgnoredDir,
+  loadWorkspace,
+  type Workspace,
+} from './load';
 
 export type IndexState = 'none' | 'building' | 'ready';
 
@@ -19,6 +25,7 @@ export class FilesWorkspaceStore {
   /** Lifecycle of the content-derived backlink/tag index. */
   indexState = $state<IndexState>('none');
   private inflight: Promise<void> | null = null;
+  private ignoredLoaded = new Set<string>();
   // Keyed by the workspace object it scans, so a reload mid-scan starts a fresh
   // scan for the new tree instead of adopting (or blocking on) the stale one.
   private indexInflight: { ws: Workspace; run: Promise<void> } | null = null;
@@ -34,15 +41,21 @@ export class FilesWorkspaceStore {
 
   /** Force a fresh walk (after a save changes the tree or link graph). A
    *  content index that was already built or requested is rebuilt for the new
-   *  tree; one never requested stays unbuilt. */
+   *  tree; one never requested stays unbuilt. Ignored directories that were
+   *  opened are listed again. */
   async reload(): Promise<void> {
     const rebuildIndex = this.indexState !== 'none';
     this.loading = true;
     this.error = null;
     this.indexState = 'none';
+    // While ignored entries are hidden, the opened set is kept for when they are shown again.
+    const reopen = filesShowIgnored.enabled ? [...this.ignoredLoaded] : [];
+    if (filesShowIgnored.enabled) this.ignoredLoaded.clear();
     const run = (async () => {
       try {
         this.ws = await loadWorkspace({ includeIgnored: filesShowIgnored.enabled });
+        // In insertion order, so a parent is listed before its nested ignored dirs.
+        for (const path of reopen) await this.loadIgnoredDir(path);
         if (rebuildIndex) void this.ensureIndex();
       } catch (err) {
         this.error = err instanceof Error ? err.message : String(err);
@@ -53,6 +66,21 @@ export class FilesWorkspaceStore {
     })();
     this.inflight = run;
     await run;
+  }
+
+  /** List an ignored directory's children the first time it is opened. */
+  async loadIgnoredDir(path: string): Promise<void> {
+    const ws = this.ws;
+    if (!ws || this.ignoredLoaded.has(path)) return;
+    if (!ws.entries.find((e) => e.path === path)?.ignored) return;
+    this.ignoredLoaded.add(path);
+    try {
+      const entries = await loadIgnoredDir(path);
+      if (this.ws?.entries.some((e) => e.path === path)) this.ws = addEntries(this.ws, entries);
+    } catch (err) {
+      this.ignoredLoaded.delete(path);
+      this.error = err instanceof Error ? err.message : String(err);
+    }
   }
 
   /** Build the full backlink/tag index on demand (reads every markdown file
