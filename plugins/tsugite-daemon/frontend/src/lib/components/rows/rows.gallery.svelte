@@ -1,6 +1,5 @@
 <script lang="ts">
   import SessionRow from './SessionRow.svelte';
-  import SpacesRow from './SpacesRow.svelte';
   import CheckItem from './CheckItem.svelte';
 
   const noop = () => {};
@@ -158,77 +157,6 @@
           state="running"
           sourceType="code"
           activeJobCount={1}
-          onSelect={noop}
-        />
-      </div>
-    </figure>
-  </div>
-
-  <h3>SpacesRow: per-space rollup states</h3>
-  <div class="list">
-    <figure>
-      <figcaption>state: working</figcaption>
-      <div class="frame">
-        <SpacesRow
-          title="refactor: sse reconnect backoff"
-          who="hollis · sonnet-4.6"
-          state="working"
-          contextPct={3}
-          contextTokens="34k"
-          onSelect={noop}
-        />
-      </div>
-    </figure>
-    <figure>
-      <figcaption>state: blocked</figcaption>
-      <div class="frame">
-        <SpacesRow
-          title="nightly backup prune policy"
-          who="ops-runner · waiting 12m"
-          state="blocked"
-          contextPct={41}
-          contextTokens="82k"
-          contextWarn
-          onSelect={noop}
-        />
-      </div>
-    </figure>
-    <figure>
-      <figcaption>state: idle</figcaption>
-      <div class="frame">
-        <SpacesRow
-          title="research: local whisper models"
-          who="hollis · opus-4.6"
-          state="idle"
-          contextPct={12}
-          contextTokens="24k"
-          onSelect={noop}
-        />
-      </div>
-    </figure>
-    <figure>
-      <figcaption>state: done</figcaption>
-      <div class="frame">
-        <SpacesRow
-          title="add jitter to backoff"
-          who="code-worker · 5/5 criteria"
-          state="done"
-          contextPct={9}
-          contextTokens="18k"
-          onSelect={noop}
-        />
-      </div>
-    </figure>
-    <figure>
-      <figcaption>variant: primary (open in the multiplexer)</figcaption>
-      <div class="frame">
-        <SpacesRow
-          title="refactor: sse reconnect backoff"
-          who="hollis · sonnet-4.6"
-          state="working"
-          contextPct={3}
-          contextTokens="34k"
-          isActive
           onSelect={noop}
         />
       </div>

@@ -2,10 +2,7 @@
   import Toast from './Toast.svelte';
   import Toasts from './Toasts.svelte';
   import Spin from './Spin.svelte';
-  import Skel from './Skel.svelte';
-  import Prog from './Prog.svelte';
   import Work from './Work.svelte';
-  import Caret from './Caret.svelte';
   import { toasts } from './toast-store.svelte';
 
   const noop = () => {};
@@ -110,30 +107,6 @@
   </div>
 
   <div class="variant">
-    <span class="vlabel">prog</span>
-    <div class="items items--col">
-      <figure>
-        <figcaption>determinate · 64%</figcaption>
-        <Prog value={64} label="attempt progress" />
-      </figure>
-      <figure>
-        <figcaption>indeterminate</figcaption>
-        <Prog label="working" />
-      </figure>
-    </div>
-  </div>
-
-  <div class="variant">
-    <span class="vlabel">caret · token stream</span>
-    <div class="items">
-      <figure>
-        <figcaption>appended to in-flight streamed text</figcaption>
-        <span class="caret-demo">{"emit('stale', { age })"}<Caret /></span>
-      </figure>
-    </div>
-  </div>
-
-  <div class="variant">
     <span class="vlabel">work</span>
     <div class="items items--col">
       <figure>
@@ -157,20 +130,6 @@
           reconnecting
           onStop={noop}
         />
-      </figure>
-    </div>
-  </div>
-
-  <div class="variant">
-    <span class="vlabel">skel</span>
-    <div class="items items--col">
-      <figure>
-        <figcaption>default · 4 rows</figcaption>
-        <div class="framed"><Skel /></div>
-      </figure>
-      <figure>
-        <figcaption>rows=2</figcaption>
-        <div class="framed"><Skel rows={2} /></div>
       </figure>
     </div>
   </div>
@@ -202,11 +161,11 @@
     align-items: stretch;
     /* Wide enough that Work's widest row (reconnecting: icon + flag +
        operation + elapsed + Stop, ~488px of unwrapped content) still fits on
-       one line - prog/skel just stretch their full-width bars to match. */
+       one line. */
     max-width: 560px;
   }
   /* Sized for toast cards, which want a readable measure - the col groups
-     (prog/work/skel) stretch to fill .items--col's own max-width instead,
+     (work) stretch to fill .items--col's own max-width instead,
      since their content (e.g. Work's operation + elapsed + Stop button) is a
      single row that isn't meant to wrap. */
   .items:not(.items--col) figure {
@@ -222,16 +181,6 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--tx3);
-  }
-  .framed {
-    border: 1px solid var(--bd0);
-    border-radius: var(--r-md);
-    padding: 10px 12px;
-  }
-  .caret-demo {
-    font-family: var(--font-mono);
-    font-size: var(--fs-sm);
-    color: var(--tx1);
   }
 
   /* Real <Toasts> is position:fixed to the viewport corner, which would float

@@ -3,8 +3,7 @@
   // (no GET-single-value route exists anywhere), so this view never holds or
   // renders a value after the moment it's typed into SetSecretModal. There is
   // no server-side unlock/lock concept and no reference-tracking data - see the
-  // capability note in the empty state and the caption under the table rather
-  // than a LockCard gate or fabricated "referenced by" chips.
+  // capability note in the empty state and the caption under the table.
   import { TESTID } from '$lib/testids';
   import { secrets } from '$lib/stores/secrets.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';

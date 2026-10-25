@@ -2,10 +2,8 @@
   // Schedules view: a sortable table of cron / one-off tasks with inline
   // enable-disable + run-now, a create/edit drawer (agent vs script, cron vs
   // once), and a cleanup action for auto-disabled entries. The table markup is
-  // its own `.t-table` rather than the shared <Table>:
-  // its rows are click-to-open and carry rich interactive cells (switch, pill,
-  // sparkline, run button) that <Table>'s zero-arg string/snippet cell model and
-  // non-interactive rows can't express.
+  // its own `.t-table` rather than the shared <Table>, which has no
+  // click-to-open rows.
   import { TESTID } from '$lib/testids';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';

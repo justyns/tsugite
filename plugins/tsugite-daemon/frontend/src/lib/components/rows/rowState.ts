@@ -65,34 +65,6 @@ export function buildSessionRowAriaLabel(opts: {
   return parts.join(', ');
 }
 
-// ---------- SpacesRow ----------
-
-export type SpaceState = 'working' | 'blocked' | 'idle' | 'done';
-
-export type SpaceStateMeta = {
-  label: string;
-  spin: boolean;
-  icon?: IconName;
-};
-
-const SPACE_STATE_META: Record<SpaceState, SpaceStateMeta> = {
-  working: { label: 'working', spin: true },
-  blocked: { label: 'blocked', spin: false, icon: 'q' },
-  idle: { label: 'idle', spin: false, icon: 'ring' },
-  done: { label: 'done', spin: false, icon: 'check' },
-};
-
-export function spaceStateMeta(state: SpaceState): SpaceStateMeta {
-  return SPACE_STATE_META[state];
-}
-
-/** Defensive clamp so a bad/out-of-range backend value can't blow out the
- * meter bar width or render `NaN%`. */
-export function clampPct(value: number): number {
-  if (Number.isNaN(value)) return 0;
-  return Math.min(100, Math.max(0, value));
-}
-
 // ---------- CheckItem ----------
 
 export type CheckState = 'pending' | 'active' | 'pass' | 'fail';

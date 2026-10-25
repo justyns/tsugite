@@ -44,6 +44,7 @@
     sessionTopic,
   } from './sessionModel';
   import { sessionStateMeta } from '$lib/components/rows/rowState';
+  import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { attachRecordToChat, copyReference } from './attachRecord';
 
   let {
@@ -475,7 +476,7 @@
       </p>
     {/if}
     {#if loading && rows.length === 0}
-      <p class="rail-note">loading sessions…</p>
+      <div class="rail-note"><PaneState kind="loading" lines={5} label="Loading sessions" /></div>
     {:else if rows.length === 0}
       <p class="rail-note">No sessions yet. Start one with the + button.</p>
     {:else if !anyResults}

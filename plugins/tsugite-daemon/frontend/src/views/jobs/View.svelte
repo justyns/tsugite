@@ -5,7 +5,7 @@
   import Select from '$lib/components/inputs/Select.svelte';
   import SearchInput from '$lib/components/inputs/SearchInput.svelte';
   import Modal from '$lib/components/overlays/Modal.svelte';
-  import Spin from '$lib/components/feedback/Spin.svelte';
+  import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { TESTID } from '$lib/testids';
   import { api } from '$lib/api/client';
   import { auth } from '$lib/stores/auth.svelte';
@@ -275,7 +275,7 @@
 
   <div class="jobs-view" class:drawer-open={selectedJob !== null || newJobOpen}>
     {#if jobs.loading && jobs.jobs.length === 0}
-      <div class="state"><Spin /> <span>loading jobs…</span></div>
+      <div class="pad"><PaneState kind="loading" lines={6} label="Loading jobs" /></div>
     {:else if jobs.error}
       <div class="state err">
         <Icon name="alert" /> <span>{jobs.error}</span>
@@ -478,6 +478,9 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
+  }
+  .pad {
+    padding: 14px;
   }
   .state {
     flex: 1;

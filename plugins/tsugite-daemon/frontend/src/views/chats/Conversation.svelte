@@ -52,6 +52,7 @@
   import RawSessionMetadata from './RawSessionMetadata.svelte';
   import { metaLinks } from './metaLinks';
   import PhoneBack from '$lib/shell/PhoneBack.svelte';
+  import PaneState from '$lib/components/connstates/PaneState.svelte';
 
   let {
     ctrl,
@@ -676,7 +677,7 @@
     onscroll={() => (quote = null)}
   >
     {#if ctrl.loading && timeline.turns.length === 0}
-      <p class="convo-empty">loading conversation…</p>
+      <div class="convo-loading"><PaneState kind="loading" label="Loading conversation" /></div>
     {:else if ctrl.error && timeline.turns.length === 0}
       <p class="convo-empty is-err">{ctrl.error}</p>
     {:else if timeline.turns.length === 0}
@@ -1348,6 +1349,9 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .convo-loading {
+    padding: 16px 20px;
   }
   .convo-empty {
     margin: auto;

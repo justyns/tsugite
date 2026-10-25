@@ -3,12 +3,6 @@
   // (role=meter); range picker as segmented control; totals row pinned. No
   // cost-trend bar chart - the per-day Meter bars carry that job.
   //
-  // Hand-rolls `.t-table` for all three tables rather than datadisplay/Table.svelte,
-  // matching the precedent in views/tools/View.svelte and connstates/SecTable.svelte:
-  // that component's cell content is a zero-arg Snippet, which can't parametrize a
-  // per-row widget (here, a <Meter> scaled to that row's value) - it only fits a
-  // small fixed set of hand-written snippets, not a dynamic API-driven list.
-  //
   // No aria-label/aria-labelledby on the root section: the mux Pane already
   // landmarks this region via its tab title, so a second same-named region would
   // just duplicate the landmark (see views/tools/View.svelte).
@@ -17,6 +11,7 @@
   import { usage, type UsageCacheSplit } from '$lib/stores/usage.svelte';
   import Seg from '$lib/components/inputs/Seg.svelte';
   import Meter from '$lib/components/datadisplay/Meter.svelte';
+  import Table, { type TableColumn } from '$lib/components/datadisplay/Table.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
@@ -56,6 +51,39 @@
   );
   const maxTokens = $derived(Math.max(1, ...usage.summary.map((r) => r.total_tokens ?? 0)));
   const maxCost = $derived(Math.max(1, ...usage.summary.map((r) => r.total_cost ?? 0)));
+
+  const CACHE_COLS: TableColumn[] = [
+    { key: 'cache_read', label: 'cache rd', align: 'right' },
+    { key: 'cache_write', label: 'cache wr', align: 'right' },
+  ];
+  const COST_COL: TableColumn = { key: 'cost', label: 'cost', align: 'right' };
+  const agentColumns: TableColumn[] = [
+    { key: 'agent', label: 'agent' },
+    { key: 'runs', label: 'runs', align: 'right' },
+    ...CACHE_COLS,
+    COST_COL,
+  ];
+  const modelColumns: TableColumn[] = [
+    { key: 'model', label: 'model' },
+    { key: 'tokens', label: 'tokens', align: 'right' },
+    ...CACHE_COLS,
+    COST_COL,
+  ];
+  const scheduleColumns: TableColumn[] = [
+    { key: 'schedule', label: 'schedule' },
+    { key: 'runs', label: 'runs', align: 'right' },
+    { key: 'tokens', label: 'tokens', align: 'right' },
+    ...CACHE_COLS,
+    COST_COL,
+    { key: 'last_run', label: 'last run', align: 'right' },
+  ];
+  const dayColumns: TableColumn[] = [
+    { key: 'day', label: 'day' },
+    { key: 'runs', label: 'runs', align: 'right' },
+    { key: 'tokens', label: 'tokens' },
+    ...CACHE_COLS,
+    { key: 'cost', label: 'cost' },
+  ];
 
   function retry() {
     usage.load();
@@ -113,13 +141,6 @@
         >{/snippet}
     </PaneState>
   {:else}
-    <!-- Cache split header + cells, shared by all four tables so "cache rd" /
-         "cache wr" read identically (same compact labels, same tooltips)
-         whether the row is a day, agent, model, or schedule. -->
-    {#snippet cacheHead()}
-      <th scope="col" class="tr">cache rd</th>
-      <th scope="col" class="tr">cache wr</th>
-    {/snippet}
     {#snippet cacheCells(row: UsageCacheSplit)}
       <td class="tr mono c2" title="cache reads (cheap cache hits)">
         {formatTokensCompact(row.cache_read_tokens)}
@@ -133,51 +154,37 @@
       <div>
         <h4 class="d-sec-h">top agents</h4>
         <div class="tbl-wrap">
-          <table class="t-table" aria-label="Top agents by cost">
-            <thead>
-              <tr>
-                <th scope="col">agent</th>
-                <th scope="col" class="tr">runs</th>
-                {@render cacheHead()}
-                <th scope="col" class="tr">cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each usage.agents as row (row.agent)}
-                <tr>
-                  <td>{row.agent}</td>
-                  <td class="tr mono c2">{formatRuns(row.runs)}</td>
-                  {@render cacheCells(row)}
-                  <td class="tr mono">{formatUsd(row.total_cost)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <Table
+            columns={agentColumns}
+            rows={usage.agents}
+            key={(row) => row.agent}
+            ariaLabel="Top agents by cost"
+          >
+            {#snippet cells(row)}
+              <td>{row.agent}</td>
+              <td class="tr mono c2">{formatRuns(row.runs)}</td>
+              {@render cacheCells(row)}
+              <td class="tr mono">{formatUsd(row.total_cost)}</td>
+            {/snippet}
+          </Table>
         </div>
       </div>
       <div>
         <h4 class="d-sec-h">top models</h4>
         <div class="tbl-wrap">
-          <table class="t-table" aria-label="Top models by cost">
-            <thead>
-              <tr>
-                <th scope="col">model</th>
-                <th scope="col" class="tr">tokens</th>
-                {@render cacheHead()}
-                <th scope="col" class="tr">cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each usage.models as row (row.model)}
-                <tr>
-                  <td class="mono">{row.model}</td>
-                  <td class="tr mono c2">{formatTokensCompact(row.total_tokens)}</td>
-                  {@render cacheCells(row)}
-                  <td class="tr mono">{formatUsd(row.total_cost)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <Table
+            columns={modelColumns}
+            rows={usage.models}
+            key={(row) => row.model}
+            ariaLabel="Top models by cost"
+          >
+            {#snippet cells(row)}
+              <td class="mono">{row.model}</td>
+              <td class="tr mono c2">{formatTokensCompact(row.total_tokens)}</td>
+              {@render cacheCells(row)}
+              <td class="tr mono">{formatUsd(row.total_cost)}</td>
+            {/snippet}
+          </Table>
         </div>
       </div>
     </div>
@@ -186,30 +193,21 @@
       <div>
         <h4 class="d-sec-h">scheduled tasks</h4>
         <div class="tbl-wrap">
-          <table class="t-table" aria-label="Usage by scheduled task">
-            <thead>
-              <tr>
-                <th scope="col">schedule</th>
-                <th scope="col" class="tr">runs</th>
-                <th scope="col" class="tr">tokens</th>
-                {@render cacheHead()}
-                <th scope="col" class="tr">cost</th>
-                <th scope="col" class="tr">last run</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each usage.schedules as row (row.schedule_name ?? 'unattributed')}
-                <tr>
-                  <td class="mono">{row.schedule_name ?? '(unattributed)'}</td>
-                  <td class="tr mono c2">{formatRuns(row.runs)}</td>
-                  <td class="tr mono c2">{formatTokensCompact(row.total_tokens)}</td>
-                  {@render cacheCells(row)}
-                  <td class="tr mono">{formatUsd(row.total_cost)}</td>
-                  <td class="tr mono c2">{formatLastRun(row.last_run)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
+          <Table
+            columns={scheduleColumns}
+            rows={usage.schedules}
+            key={(row) => row.schedule_name ?? 'unattributed'}
+            ariaLabel="Usage by scheduled task"
+          >
+            {#snippet cells(row)}
+              <td class="mono">{row.schedule_name ?? '(unattributed)'}</td>
+              <td class="tr mono c2">{formatRuns(row.runs)}</td>
+              <td class="tr mono c2">{formatTokensCompact(row.total_tokens)}</td>
+              {@render cacheCells(row)}
+              <td class="tr mono">{formatUsd(row.total_cost)}</td>
+              <td class="tr mono c2">{formatLastRun(row.last_run)}</td>
+            {/snippet}
+          </Table>
         </div>
       </div>
     {/if}
@@ -217,43 +215,35 @@
     <div>
       <h4 class="d-sec-h">detail · per day</h4>
       <div class="tbl-wrap u-day-wrap">
-        <table class="t-table" aria-label="Usage per day">
-          <thead>
-            <tr>
-              <th scope="col">day</th>
-              <th scope="col" class="tr">runs</th>
-              <th scope="col">tokens</th>
-              {@render cacheHead()}
-              <th scope="col">cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each usage.summary as row (row.period)}
-              {@const dayLabel = formatDayLabel(row.period)}
-              <tr>
-                <td class="mono">{dayLabel}</td>
-                <td class="tr mono c2">{formatRuns(row.runs)}</td>
-                <td>
-                  <Meter
-                    value={row.total_tokens ?? 0}
-                    max={maxTokens}
-                    label="{dayLabel} tokens"
-                    displayText={formatTokensCompact(row.total_tokens)}
-                  />
-                </td>
-                {@render cacheCells(row)}
-                <td>
-                  <Meter
-                    value={row.total_cost ?? 0}
-                    max={maxCost}
-                    label="{dayLabel} cost"
-                    displayText={formatUsd(row.total_cost)}
-                  />
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <Table
+          columns={dayColumns}
+          rows={usage.summary}
+          key={(row) => row.period}
+          ariaLabel="Usage per day"
+        >
+          {#snippet cells(row)}
+            {@const dayLabel = formatDayLabel(row.period)}
+            <td class="mono">{dayLabel}</td>
+            <td class="tr mono c2">{formatRuns(row.runs)}</td>
+            <td>
+              <Meter
+                value={row.total_tokens ?? 0}
+                max={maxTokens}
+                label="{dayLabel} tokens"
+                displayText={formatTokensCompact(row.total_tokens)}
+              />
+            </td>
+            {@render cacheCells(row)}
+            <td>
+              <Meter
+                value={row.total_cost ?? 0}
+                max={maxCost}
+                label="{dayLabel} cost"
+                displayText={formatUsd(row.total_cost)}
+              />
+            </td>
+          {/snippet}
+        </Table>
       </div>
     </div>
   {/if}
@@ -333,9 +323,6 @@
     color: var(--tx3);
   }
 
-  /* .t-table - matching
-     datadisplay/Table.svelte, connstates/SecTable.svelte and views/tools/View.svelte
-     (each consumer that hand-rolls a table keeps its own copy of this contract). */
   .tbl-wrap {
     overflow-x: auto;
     border: 1px solid var(--bd0);
@@ -344,47 +331,6 @@
   .u-day-wrap {
     max-height: 480px;
     overflow-y: auto;
-  }
-  .t-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--fs-sm);
-  }
-  .t-table th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg1);
-    text-align: left;
-    font: 600 var(--fs-2xs) var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--tx3);
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--bd1);
-    white-space: nowrap;
-  }
-  .t-table th.tr {
-    text-align: right;
-  }
-  .t-table td {
-    padding: 5px 10px;
-    border-bottom: 1px solid var(--bd0);
-    height: 34px;
-    vertical-align: middle;
-    white-space: nowrap;
-  }
-  .t-table tbody tr:hover {
-    background: color-mix(in oklab, var(--bg3) 45%, transparent);
-  }
-  .t-table td.tr {
-    text-align: right;
-  }
-  .t-table .c2 {
-    color: var(--tx2);
-  }
-  .t-table .mono {
-    font-family: var(--font-mono);
   }
   .mono {
     font-family: var(--font-mono);

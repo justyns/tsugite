@@ -6,9 +6,6 @@
   import Icon from '$lib/components/icon/Icon.svelte';
   import Kv from './Kv.svelte';
   import type { KvItem } from './Kv.svelte';
-  import Stat from './Stat.svelte';
-  import StatGrid from './StatGrid.svelte';
-  import type { StatItem } from './Stat.svelte';
   import Meter from './Meter.svelte';
   import Spark from './Spark.svelte';
   import type { SparkPoint } from './Spark.svelte';
@@ -21,6 +18,32 @@
   const descSort: SortState = { key: 'updated', dir: 'descending' };
   const ascSort: SortState = { key: 'updated', dir: 'ascending' };
 
+  const stateRows = [
+    { id: 1, name: 'usage-rollup', st: 'done', icon: 'check', pill: 'done', updated: '2m' },
+    {
+      id: 2,
+      name: 'nightly-backup (selected)',
+      st: 'errored',
+      icon: 'x',
+      pill: 'errored',
+      updated: '6h',
+      selected: true,
+    },
+    {
+      id: 3,
+      name: 'model-cache-warm (disabled)',
+      st: 'idle',
+      icon: 'ring',
+      pill: 'off',
+      updated: '3d',
+      off: true,
+    },
+  ] as const;
+  const plainRows = [
+    { id: 1, name: 'inbox-triage', state: 'running', updated: 'now' },
+    { id: 2, name: 'usage-rollup', state: 'done', updated: '4s' },
+  ];
+
   const kvPlain: KvItem[] = [
     { term: 'assignee', value: 'you' },
     { term: 'priority', value: 'High' },
@@ -30,12 +53,6 @@
     { term: 'store', value: '~/.tsugite/secrets.age', mono: true },
     { term: 'cipher', value: 'age · x25519 + scrypt', mono: true },
     { term: 'entries', value: '9 keys' },
-  ];
-
-  const statGrid: StatItem[] = [
-    { value: '12', label: 'open' },
-    { value: '4', label: 'in prog' },
-    { value: '1', label: 'blocked', tone: 'warn' },
   ];
 
   const sparkAllOk: SparkPoint[] = [7, 9, 6, 8, 7, 10, 6, 8, 7, 9].map((height) => ({ height }));
@@ -59,54 +76,25 @@
     <div class="demo">
       <p class="lbl">descending sort · normal / selected / off rows</p>
       <div class="frame">
-        {#snippet pillDone()}
-          <span class="t-pill" data-st="done"><Icon name="check" size={11} />done</span>
-        {/snippet}
-        {#snippet pillErrored()}
-          <span class="t-pill" data-st="errored"><Icon name="x" size={11} />errored</span>
-        {/snippet}
-        {#snippet pillOff()}
-          <span class="t-pill" data-st="idle"><Icon name="ring" size={11} />off</span>
-        {/snippet}
-        {#snippet nameSelected()}
-          nightly-backup <span class="c3 mono">(selected)</span>
-        {/snippet}
-        {#snippet nameOff()}
-          model-cache-warm <span class="c3 mono">(disabled)</span>
-        {/snippet}
         <Table
           ariaLabel="Table demo: descending sort with row states"
           columns={tableColumns}
           sort={descSort}
-          rows={[
-            {
-              id: 1,
-              cells: [
-                { content: 'usage-rollup' },
-                { content: pillDone },
-                { content: '2m', tone: 'c3', mono: true },
-              ],
-            },
-            {
-              id: 2,
-              selected: true,
-              cells: [
-                { content: nameSelected },
-                { content: pillErrored },
-                { content: '6h', tone: 'c3', mono: true },
-              ],
-            },
-            {
-              id: 3,
-              off: true,
-              cells: [
-                { content: nameOff },
-                { content: pillOff },
-                { content: '3d', tone: 'c3', mono: true },
-              ],
-            },
-          ]}
-        />
+          rows={stateRows}
+          key={(row) => row.id}
+          selected={(row) => 'selected' in row}
+          off={(row) => 'off' in row}
+        >
+          {#snippet cells(row)}
+            <td>{row.name}</td>
+            <td>
+              <span class="t-pill" data-st={row.st}
+                ><Icon name={row.icon} size={11} />{row.pill}</span
+              >
+            </td>
+            <td class="c3 mono">{row.updated}</td>
+          {/snippet}
+        </Table>
       </div>
     </div>
     <div class="demo">
@@ -116,25 +104,15 @@
           ariaLabel="Table demo: ascending sort"
           columns={tableColumns}
           sort={ascSort}
-          rows={[
-            {
-              id: 1,
-              cells: [
-                { content: 'inbox-triage' },
-                { content: 'running' },
-                { content: 'now', tone: 'c3', mono: true },
-              ],
-            },
-            {
-              id: 2,
-              cells: [
-                { content: 'usage-rollup' },
-                { content: 'done' },
-                { content: '4s', tone: 'c3', mono: true },
-              ],
-            },
-          ]}
-        />
+          rows={plainRows}
+          key={(row) => row.id}
+        >
+          {#snippet cells(row)}
+            <td>{row.name}</td>
+            <td>{row.state}</td>
+            <td class="c3 mono">{row.updated}</td>
+          {/snippet}
+        </Table>
       </div>
     </div>
   </div>
@@ -148,18 +126,6 @@
     <div class="demo">
       <p class="lbl">mono values</p>
       <div class="frame pad"><Kv items={kvMono} /></div>
-    </div>
-  </div>
-
-  <h3>Stat / StatGrid</h3>
-  <div class="demo-row">
-    <div class="demo">
-      <p class="lbl">StatGrid · default + warn tone</p>
-      <div class="frame pad"><StatGrid stats={statGrid} /></div>
-    </div>
-    <div class="demo">
-      <p class="lbl">Stat · with delta</p>
-      <div class="frame pad"><Stat value="42" label="done today" delta="+6 vs yesterday" /></div>
     </div>
   </div>
 
@@ -250,15 +216,6 @@
   .frame.pad {
     padding: var(--sp-3);
     background: var(--bg1);
-  }
-  /* row-annotation utilities used by the name-cell snippets above - the
-     table's own .c3/.mono only cover cells it renders itself, not these
-     demo-only snippet spans. */
-  .c3 {
-    color: var(--tx3);
-  }
-  .mono {
-    font-family: var(--font-mono);
   }
   /* .t-pill copied inline for the demo only - kept inline (not folded into
      the shared Pill component): Pill only models the runtime PillState vocabulary

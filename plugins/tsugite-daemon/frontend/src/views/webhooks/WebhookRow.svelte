@@ -9,10 +9,8 @@
 </script>
 
 <script lang="ts">
-  // One configured webhook. Hand-rolled <tr> (not the shared Table.svelte)
-  // because every cell here needs its own local interactive state (reveal
-  // toggle, in-flight test-fire) - the same reason SecTable.svelte hand-rolls
-  // its own <table> instead of forcing the generic data-driven component.
+  // One configured webhook's cells, rendered inside the parent's Table row so
+  // the reveal toggle and in-flight test-fire state stay per row.
   import type { Webhook } from '$lib/stores/webhooks.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
@@ -60,97 +58,81 @@
   }
 </script>
 
-<tr data-testid={TESTID.webhookRow(webhook.token)}>
-  <td>
-    <div class="src">{webhook.source}</div>
-  </td>
-  <td>
-    <div class="wh-url">
-      {#if revealed}
-        <code class="url-val">{fullUrl}</code>
-      {:else}
-        <span class="url-mask" aria-label="Delivery URL hidden">••••••••••••••••</span>
-      {/if}
-      <Button
-        size="sm"
-        aria-pressed={revealed}
-        onclick={() => (revealed = !revealed)}
-        data-testid={TESTID.webhookReveal(webhook.token)}
-      >
-        {revealed ? 'hide' : 'show'}
-      </Button>
-      <Button
-        size="sm"
-        iconOnly
-        variant="ghost"
-        aria-label="Copy delivery URL for {webhook.source}"
-        data-testid={TESTID.webhookCopy(webhook.token)}
-        onclick={copyUrl}
-      >
-        {#snippet icon()}<Icon name="copy" />{/snippet}
-      </Button>
-    </div>
-  </td>
-  <td>
-    {#if lastTest}
-      <span
-        class="test-result"
-        class:is-err={!lastTest.ok}
-        title={lastTest.detail}
-        aria-label="{lastTest.ok ? 'Test succeeded' : 'Test failed'}: {lastTest.detail}"
-      >
-        <Icon name={lastTest.ok ? 'check' : 'x'} size={11} />
-        {lastTest.status || 'error'}
-        <span class="t-sub">{formatAgo(new Date(lastTest.at).toISOString(), now, 'bare')}</span>
-      </span>
+<td>
+  <div class="src">{webhook.source}</div>
+</td>
+<td>
+  <div class="wh-url">
+    {#if revealed}
+      <code class="url-val">{fullUrl}</code>
     {:else}
-      <span class="test-result is-idle">
-        <Icon name="ring" size={11} />
-        not tested this session
-      </span>
+      <span class="url-mask" aria-label="Delivery URL hidden">••••••••••••••••</span>
     {/if}
-  </td>
-  <td class="c3 mono">{formatAgo(webhook.created_at, now, 'bare')}</td>
-  <td>
-    <div class="acts">
-      <Button
-        size="sm"
-        loading={testing}
-        onclick={fire}
-        data-testid={TESTID.webhookTest(webhook.token)}
-      >
-        {#snippet icon()}<Icon name="send" />{/snippet}
-        test fire
-      </Button>
-      <Button
-        size="sm"
-        iconOnly
-        variant="ghost"
-        aria-label="Delete webhook {webhook.source}"
-        data-testid={TESTID.webhookDelete(webhook.token)}
-        onclick={() => onDelete(webhook)}
-      >
-        {#snippet icon()}<Icon name="x" />{/snippet}
-      </Button>
-    </div>
-  </td>
-</tr>
+    <Button
+      size="sm"
+      aria-pressed={revealed}
+      onclick={() => (revealed = !revealed)}
+      data-testid={TESTID.webhookReveal(webhook.token)}
+    >
+      {revealed ? 'hide' : 'show'}
+    </Button>
+    <Button
+      size="sm"
+      iconOnly
+      variant="ghost"
+      aria-label="Copy delivery URL for {webhook.source}"
+      data-testid={TESTID.webhookCopy(webhook.token)}
+      onclick={copyUrl}
+    >
+      {#snippet icon()}<Icon name="copy" />{/snippet}
+    </Button>
+  </div>
+</td>
+<td>
+  {#if lastTest}
+    <span
+      class="test-result"
+      class:is-err={!lastTest.ok}
+      title={lastTest.detail}
+      aria-label="{lastTest.ok ? 'Test succeeded' : 'Test failed'}: {lastTest.detail}"
+    >
+      <Icon name={lastTest.ok ? 'check' : 'x'} size={11} />
+      {lastTest.status || 'error'}
+      <span class="t-sub">{formatAgo(new Date(lastTest.at).toISOString(), now, 'bare')}</span>
+    </span>
+  {:else}
+    <span class="test-result is-idle">
+      <Icon name="ring" size={11} />
+      not tested this session
+    </span>
+  {/if}
+</td>
+<td class="c3 mono">{formatAgo(webhook.created_at, now, 'bare')}</td>
+<td>
+  <div class="acts">
+    <Button
+      size="sm"
+      loading={testing}
+      onclick={fire}
+      data-testid={TESTID.webhookTest(webhook.token)}
+    >
+      {#snippet icon()}<Icon name="send" />{/snippet}
+      test fire
+    </Button>
+    <Button
+      size="sm"
+      iconOnly
+      variant="ghost"
+      aria-label="Delete webhook {webhook.source}"
+      data-testid={TESTID.webhookDelete(webhook.token)}
+      onclick={() => onDelete(webhook)}
+    >
+      {#snippet icon()}<Icon name="x" />{/snippet}
+    </Button>
+  </div>
+</td>
 
 <style>
-  td {
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--bd0);
-    vertical-align: middle;
-  }
-  tr:hover td {
-    background: color-mix(in oklab, var(--bg3) 45%, transparent);
-  }
-  .c3 {
-    color: var(--tx3);
-  }
-  .mono {
-    font-family: var(--font-mono);
-  }
   .src {
     font: 600 var(--fs-md) var(--font-ui);
     color: var(--tx0);

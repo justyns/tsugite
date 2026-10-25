@@ -35,6 +35,7 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { TESTID } from '$lib/testids';
   import { clampIntoView } from '$lib/actions/clampIntoView';
+  import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { modelPickerRequest } from './modelPickerSignal.svelte';
   import { groupModelsByProvider, formatContext, formatPrice } from './modelGrouping';
 
@@ -276,7 +277,9 @@
         </div>
         <div class="mp-ls" id={listId} role="listbox" aria-label="Models" bind:this={listEl}>
           {#if loading}
-            <div class="mp-empty">loading models…</div>
+            <div class="mp-empty">
+              <PaneState kind="loading" lines={3} label="Loading models" />
+            </div>
           {:else if options.length === 0}
             <div class="mp-empty">no models match “{query.trim()}”</div>
           {:else}

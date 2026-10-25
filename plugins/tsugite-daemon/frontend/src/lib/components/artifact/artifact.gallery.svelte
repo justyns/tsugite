@@ -3,7 +3,6 @@
   import AnnPopover from './AnnPopover.svelte';
   import AnnThread from './AnnThread.svelte';
   import VerdictBar from './VerdictBar.svelte';
-  import WikiLink from './WikiLink.svelte';
   import Backlinks from './Backlinks.svelte';
   import TagPill from './TagPill.svelte';
 
@@ -169,15 +168,6 @@ See [[sse-reconnect]] for the backoff table.</textarea
       </div>
     </div>
 
-    <!-- ============ WikiLink ============ -->
-    <div class="cell wide">
-      <span class="lbl">WikiLink · resolved / missing</span>
-      <p class="prose">
-        Retention interacts with <WikiLink page="backup-retention" href="#" /> and the missing
-        <WikiLink page="household-systems" missing href="#" /> page.
-      </p>
-    </div>
-
     <!-- ============ TagPill ============ -->
     <div class="cell wide">
       <span class="lbl">TagPill · link / removable</span>
@@ -263,12 +253,6 @@ See [[sse-reconnect]] for the backoff table.</textarea
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .prose {
-    margin: 0;
-    font-size: var(--fs-md);
-    line-height: 1.6;
-    color: var(--tx1);
   }
   .doc-edit {
     width: 100%;

@@ -3,18 +3,12 @@
   // surface as the plugins registry. A daemon predating that endpoint answers
   // 404, which the store degrades to `available:false` - rendered here as a
   // truthful "not exposed" state, not an error.
-  //
-  // Hand-rolls the `.t-table` markup (see connstates/SecTable.svelte for the
-  // established precedent) rather than the generic datadisplay/Table.svelte:
-  // that component's cell content is a zero-arg Snippet, which can't carry a
-  // per-row value like `tool` into a reusable category-chip/source-icon cell -
-  // it only fits demos with a small fixed set of hand-written snippets, not a
-  // dynamic API-driven list.
   import { tools } from '$lib/stores/tools.svelte';
   import { filterTools } from './filterTools';
   import Chip from '$lib/components/buttons/Chip.svelte';
   import SearchInput from '$lib/components/inputs/SearchInput.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
+  import Table, { type TableColumn } from '$lib/components/datadisplay/Table.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Icon from '$lib/components/icon/Icon.svelte';
   import { TESTID } from '$lib/testids';
@@ -26,6 +20,12 @@
   });
 
   const filtered = $derived(filterTools(tools.tools, query));
+  const columns: TableColumn[] = [
+    { key: 'tool', label: 'tool' },
+    { key: 'category', label: 'category' },
+    { key: 'description', label: 'description' },
+    { key: 'source', label: 'source' },
+  ];
 </script>
 
 <!-- No aria-label here: the mux Pane already landmarks this region via its tab
@@ -76,38 +76,26 @@
     </PaneState>
   {:else}
     <div class="tbl-wrap">
-      <table class="t-table" aria-label="Tools">
-        <thead>
-          <tr>
-            <th scope="col">tool</th>
-            <th scope="col">category</th>
-            <th scope="col">description</th>
-            <th scope="col">source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filtered as tool (tool.name)}
-            <tr>
-              <td class="mono">{tool.name}</td>
-              <td><Chip>{tool.category ?? '—'}</Chip></td>
-              <td class="c2 desc" title={tool.description || undefined}>
-                {#if tool.description}
-                  {tool.description}
-                {:else}
-                  <span class="c3">no description</span>
-                {/if}
-              </td>
-              <td class="c2">
-                {#if tool.source === 'plugin'}
-                  <span class="src"><Icon name="plug" size={11} />plugin</span>
-                {:else}
-                  {tool.source ?? 'builtin'}
-                {/if}
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+      <Table {columns} rows={filtered} key={(tool) => tool.name} ariaLabel="Tools">
+        {#snippet cells(tool)}
+          <td class="mono">{tool.name}</td>
+          <td><Chip>{tool.category ?? '—'}</Chip></td>
+          <td class="c2 desc" title={tool.description || undefined}>
+            {#if tool.description}
+              {tool.description}
+            {:else}
+              <span class="c3">no description</span>
+            {/if}
+          </td>
+          <td class="c2">
+            {#if tool.source === 'plugin'}
+              <span class="src"><Icon name="plug" size={11} />plugin</span>
+            {:else}
+              {tool.source ?? 'builtin'}
+            {/if}
+          </td>
+        {/snippet}
+      </Table>
     </div>
   {/if}
 </section>
@@ -159,52 +147,12 @@
     color: var(--tx3);
   }
 
-  /* .t-table - matching
-     datadisplay/Table.svelte and connstates/SecTable.svelte (each consumer
-     that hand-rolls a table keeps its own copy of this scoped contract). */
   .tbl-wrap {
     flex: 1;
     min-height: 0;
     overflow: auto;
     border: 1px solid var(--bd0);
     border-radius: var(--r-lg);
-  }
-  .t-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--fs-sm);
-  }
-  .t-table th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg1);
-    text-align: left;
-    font: 600 var(--fs-2xs) var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--tx3);
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--bd1);
-    white-space: nowrap;
-  }
-  .t-table td {
-    padding: 5px 10px;
-    border-bottom: 1px solid var(--bd0);
-    height: 34px;
-    vertical-align: middle;
-  }
-  .t-table tbody tr:hover {
-    background: color-mix(in oklab, var(--bg3) 45%, transparent);
-  }
-  .t-table .c2 {
-    color: var(--tx2);
-  }
-  .t-table .c3 {
-    color: var(--tx3);
-  }
-  .t-table .mono {
-    font-family: var(--font-mono);
   }
   .desc {
     max-width: 46ch;

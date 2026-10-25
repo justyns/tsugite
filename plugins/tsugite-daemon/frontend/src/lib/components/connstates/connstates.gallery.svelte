@@ -4,7 +4,6 @@
   import Conn from './Conn.svelte';
   import StaleStamp from './StaleStamp.svelte';
   import PaneState from './PaneState.svelte';
-  import LockCard from './LockCard.svelte';
   import SecTable from './SecTable.svelte';
   import type { SecretRow } from './SecTable.svelte';
   import SetSecretModal from './SetSecretModal.svelte';
@@ -111,14 +110,6 @@
             <span class="mono">ro</span> — editing disabled.{/snippet}
         </PaneState>
       </div>
-    </div>
-  </div>
-
-  <h3>LockCard</h3>
-  <div class="demo-row">
-    <div class="demo">
-      <p class="lbl">locked</p>
-      <div class="frame pad"><LockCard onUnlock={noop} /></div>
     </div>
   </div>
 

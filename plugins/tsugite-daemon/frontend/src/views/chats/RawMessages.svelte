@@ -5,6 +5,7 @@
   // scrolls inside its own frame and long tokens wrap, so nothing widens the page.
   import { onMount } from 'svelte';
   import RawOverlay from './RawOverlay.svelte';
+  import PaneState from '$lib/components/connstates/PaneState.svelte';
   import { auth } from '$lib/stores/auth.svelte';
   import { fetchRawMessages, type RawMessage, type RawMessages, type RawTurn } from './rawMessages';
 
@@ -86,7 +87,7 @@
   {/snippet}
 
   {#if loading}
-    <p class="raw-note">loading…</p>
+    <PaneState kind="loading" />
   {:else if error}
     <p class="raw-note">couldn't load raw messages: {error}</p>
   {:else if data}

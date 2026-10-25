@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSessionRowAriaLabel,
   checkStatePrefix,
-  clampPct,
   NEEDS_YOU_META,
   sessionStateMeta,
   sourceTypeLabel,
-  spaceStateMeta,
 } from './rowState';
 
 describe('sessionStateMeta', () => {
@@ -74,40 +72,6 @@ describe('buildSessionRowAriaLabel', () => {
     expect(buildSessionRowAriaLabel({ title: 'chat: naming things', state: 'idle' })).toBe(
       'chat: naming things, idle',
     );
-  });
-});
-
-describe('spaceStateMeta', () => {
-  it('maps each of the four states to its label', () => {
-    expect(spaceStateMeta('working').label).toBe('working');
-    expect(spaceStateMeta('blocked').label).toBe('blocked');
-    expect(spaceStateMeta('idle').label).toBe('idle');
-    expect(spaceStateMeta('done').label).toBe('done');
-  });
-
-  it('only working spins; the rest carry a static icon', () => {
-    expect(spaceStateMeta('working')).toMatchObject({ spin: true });
-    expect(spaceStateMeta('working').icon).toBeUndefined();
-    expect(spaceStateMeta('blocked')).toMatchObject({ spin: false, icon: 'q' });
-    expect(spaceStateMeta('idle')).toMatchObject({ spin: false, icon: 'ring' });
-    expect(spaceStateMeta('done')).toMatchObject({ spin: false, icon: 'check' });
-  });
-});
-
-describe('clampPct', () => {
-  it('passes normal percentages through', () => {
-    expect(clampPct(41)).toBe(41);
-    expect(clampPct(0)).toBe(0);
-    expect(clampPct(100)).toBe(100);
-  });
-
-  it('clamps below zero and above 100', () => {
-    expect(clampPct(-5)).toBe(0);
-    expect(clampPct(140)).toBe(100);
-  });
-
-  it('treats NaN as 0 instead of poisoning the bar width', () => {
-    expect(clampPct(NaN)).toBe(0);
   });
 });
 

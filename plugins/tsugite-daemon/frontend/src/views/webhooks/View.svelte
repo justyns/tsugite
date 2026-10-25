@@ -14,6 +14,7 @@
   //    real round trip - not a fabricated history the backend can't provide.
   import { onMount } from 'svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
+  import Table, { type TableColumn } from '$lib/components/datadisplay/Table.svelte';
   import Modal from '$lib/components/overlays/Modal.svelte';
   import Field from '$lib/components/inputs/Field.svelte';
   import Input from '$lib/components/inputs/Input.svelte';
@@ -67,6 +68,13 @@
   const sorted = $derived(
     [...webhooks.list].sort((a, b) => b.created_at.localeCompare(a.created_at)),
   );
+  const columns: TableColumn[] = [
+    { key: 'webhook', label: 'webhook' },
+    { key: 'url', label: 'delivery URL' },
+    { key: 'test', label: 'last test' },
+    { key: 'created', label: 'created' },
+    { key: 'actions', label: 'actions', hideLabel: true },
+  ];
   const failingCount = $derived(
     sorted.filter((w) => {
       const t = lastTestByToken[w.token];
@@ -203,28 +211,24 @@
     </PaneState>
   {:else}
     <div class="tablewrap">
-      <table class="t-table" aria-label="Configured webhooks" data-testid={TESTID.webhooksTable}>
-        <thead>
-          <tr>
-            <th scope="col">webhook</th>
-            <th scope="col">delivery URL</th>
-            <th scope="col">last test</th>
-            <th scope="col">created</th>
-            <th scope="col"><span class="vh">actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each sorted as webhook (webhook.token)}
-            <WebhookRow
-              {webhook}
-              lastTest={lastTestByToken[webhook.token] ?? null}
-              {now}
-              onTest={testFire}
-              onDelete={(w) => (pendingDelete = w)}
-            />
-          {/each}
-        </tbody>
-      </table>
+      <Table
+        {columns}
+        rows={sorted}
+        key={(webhook) => webhook.token}
+        rowTestid={(webhook) => TESTID.webhookRow(webhook.token)}
+        ariaLabel="Configured webhooks"
+        testid={TESTID.webhooksTable}
+      >
+        {#snippet cells(webhook)}
+          <WebhookRow
+            {webhook}
+            lastTest={lastTestByToken[webhook.token] ?? null}
+            {now}
+            onTest={testFire}
+            onDelete={(w) => (pendingDelete = w)}
+          />
+        {/snippet}
+      </Table>
     </div>
 
     <div class="testlog">
@@ -329,40 +333,10 @@
     flex: 1;
     min-width: 0;
   }
-  .vh {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-  }
   .tablewrap {
     overflow-x: auto;
     border: 1px solid var(--bd0);
     border-radius: var(--r-lg);
-  }
-  .t-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--fs-sm);
-  }
-  .t-table th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: var(--bg1);
-    text-align: left;
-    font: 600 var(--fs-2xs) var(--font-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--tx3);
-    padding: 7px 10px;
-    border-bottom: 1px solid var(--bd1);
-    white-space: nowrap;
   }
   .testlog h3 {
     margin: 0 0 6px;

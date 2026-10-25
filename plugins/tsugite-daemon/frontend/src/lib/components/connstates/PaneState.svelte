@@ -12,6 +12,7 @@
     icon,
     actions,
     lines = 4,
+    label = 'Loading',
   }: {
     kind: 'empty' | 'loading' | 'error' | 'permission';
     /** ignored for kind="loading" */
@@ -24,13 +25,15 @@
     actions?: Snippet;
     /** kind="loading" only - number of skeleton bars */
     lines?: number;
+    /** kind="loading" only */
+    label?: string;
   } = $props();
 
   const widths = $derived(paneSkeletonWidths(lines));
 </script>
 
 {#if kind === 'loading'}
-  <div class="pane-loading" aria-busy="true" aria-label="Loading">
+  <div class="pane-loading" role="status" aria-busy="true" aria-label={label}>
     <div class="t-skel">
       {#each widths as w, i (i)}
         <i style="--w:{w}%"></i>
