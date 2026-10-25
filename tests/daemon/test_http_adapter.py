@@ -1234,6 +1234,17 @@ class TestWorkspaceContentTextGate:
         assert resp.json()["is_text"] is False
         assert resp.json()["content"] is None
 
+    def test_a_binary_over_the_text_cap_reads_as_not_text(self, client, test_token, tmp_workspace):
+        (tmp_workspace / "report.docx").write_bytes(b"PK" + b"\0" * (2 * 1024 * 1024))
+        resp = client.get(
+            "/api/workspace/content",
+            params={"path": "report.docx"},
+            headers={"Authorization": f"Bearer {test_token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["is_text"] is False
+        assert resp.json()["size"] == 2 * 1024 * 1024 + 2
+
 
 class TestWorkspaceSaveEndpoint:
     def _put(self, client, test_token, path, content):
@@ -1468,6 +1479,12 @@ class TestWorkspaceListEndpoint:
         assert by_path["sub/deeper/leaf.md"]["is_dir"] is False
         assert "truncated" not in resp.json()
 
+    def test_lists_binary_files(self, client, test_token, tmp_workspace):
+        for name in ("report.docx", "scan.pdf", "photo.png", "blob.bin"):
+            (tmp_workspace / name).write_bytes(b"\x89\x00\xff")
+        paths = {e["path"] for e in self._get(client, test_token).json()["entries"]}
+        assert {"report.docx", "scan.pdf", "photo.png", "blob.bin"} <= paths
+
     def test_recursive_refuses_subdir_traversal(self, client, test_token, tmp_workspace):
         resp = self._get(client, test_token, "?recursive=1&subdir=..")
         assert resp.status_code == 403
@@ -1509,14 +1526,14 @@ class TestWorkspaceListEndpoint:
     def test_ignored_paths_are_hidden_by_default(self, client, test_token, tmp_workspace):
         self._seed_ignored(tmp_workspace)
         entries = self._get(client, test_token, "?recursive=1").json()["entries"]
-        assert {e["path"] for e in entries} == {"keep.md"}
+        assert {e["path"] for e in entries} == {".gitignore", "keep.md"}
         assert not any("ignored" in e for e in entries)
 
     def test_include_ignored_lists_and_marks_ignored_paths(self, client, test_token, tmp_workspace):
         self._seed_ignored(tmp_workspace)
         entries = self._get(client, test_token, "?recursive=1&include_ignored=1").json()["entries"]
         by_path = {e["path"]: e for e in entries}
-        assert set(by_path) == {"keep.md", "debug.log", "build", "build/out.md"}
+        assert set(by_path) == {".gitignore", "keep.md", "debug.log", "build", "build/out.md"}
         assert {p for p, e in by_path.items() if e.get("ignored")} == {"debug.log", "build", "build/out.md"}
 
     def test_include_ignored_never_lists_git(self, client, test_token, tmp_workspace):
@@ -1564,7 +1581,7 @@ class TestWorkspaceListEndpoint:
         (tmp_workspace / "d").mkdir()
         (tmp_workspace / "d" / "a.md").write_text("x\n")
         (tmp_workspace / "d" / "b.md").write_text("x\n")
-        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 3)
+        monkeypatch.setattr(ws_mod, "MAX_WORKSPACE_ENTRIES", 4)
         body = self._get(client, test_token, "?recursive=1&include_ignored=1").json()
         assert {"d/a.md", "d/b.md"} <= {e["path"] for e in body["entries"]}
         assert body["truncated"] is True

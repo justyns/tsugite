@@ -285,3 +285,44 @@ test('a plain text file still opens raw, with no rendered segment offered', asyn
     .element(page.getByRole('button', { name: 'rendered', exact: true }))
     .not.toBeInTheDocument();
 });
+
+function stubRawFetch(type: string) {
+  const fetchMock = vi.fn(async () => new Response(new Blob(['%PDF'], { type })));
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+test('a pdf opens in an inline viewer with a download button and no view toggle', async () => {
+  const fetchMock = stubRawFetch('application/pdf');
+  await mountSurface('docs/scan.pdf');
+
+  const viewer = page.getByTitle('Preview docs/scan.pdf');
+  await expect.element(viewer).toBeInTheDocument();
+  expect(viewer.element().getAttribute('src')).toMatch(/^blob:/);
+  expect(fetchMock).toHaveBeenCalledWith('/api/workspace/raw?path=docs%2Fscan.pdf', {
+    headers: {},
+  });
+  await expect.element(page.getByRole('button', { name: 'Download' })).toBeInTheDocument();
+  expect(page.getByTestId(TESTID.filesModeSeg).elements()).toHaveLength(0);
+  vi.unstubAllGlobals();
+});
+
+test('an image file displays inline', async () => {
+  stubRawFetch('image/png');
+  await mountSurface('docs/photo.png');
+  const img = page.getByRole('img', { name: 'docs/photo.png' });
+  await expect.element(img).toBeInTheDocument();
+  expect(img.element().getAttribute('src')).toMatch(/^blob:/);
+  vi.unstubAllGlobals();
+});
+
+test('a file with no preview shows a download panel that saves it', async () => {
+  const { files } = await import('$lib/stores/files.svelte');
+  const download = vi.spyOn(files, 'download').mockResolvedValue();
+  await mountSurface('docs/report.docx');
+
+  await expect.element(page.getByText(/no preview for this file type/)).toBeInTheDocument();
+  await page.getByRole('button', { name: 'Download', exact: true }).first().click();
+  expect(download).toHaveBeenCalledWith('docs/report.docx');
+  download.mockRestore();
+});

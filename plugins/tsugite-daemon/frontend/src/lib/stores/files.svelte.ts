@@ -1,8 +1,8 @@
 /**
  * Files store: the workspace tree (GET /api/workspace), text read/write,
- * attach-into-chat and download. The listing is gitignore-filtered and
- * text-only server-side (binaries never appear); a binary read comes back
- * {content:null, is_text:false}. Exported as a class instance.
+ * attach-into-chat and download. The listing is gitignore-filtered and lists
+ * every regular file; a binary read comes back {content:null, is_text:false}.
+ * Exported as a class instance.
  */
 import { api } from '$lib/api/client';
 import { writtenPath } from './fileWrites';

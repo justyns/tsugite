@@ -21,6 +21,7 @@
   import { writeTargetsDoc } from '$lib/stores/fileWrites';
   import HtmlPreview from '$lib/components/media/HtmlPreview.svelte';
   import { isHtml } from '$lib/media/htmlPreview';
+  import { loadWorkspaceObjectURL } from '$lib/media/workspaceImage';
   import { isMarkdown } from './load';
   import { filesWorkspace } from './workspace.svelte';
   import {
@@ -40,6 +41,15 @@
     markdown: boolean;
     /** .html/.htm - "rendered" means the sandboxed preview, not marked-up text. */
     html: boolean;
+    /** Set for a file that is not text: `pdf` and `image` preview inline. */
+    binary?: 'pdf' | 'image' | 'file';
+  }
+
+  const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+
+  function binaryKind(path: string): 'pdf' | 'image' | 'file' {
+    if (/\.pdf$/i.test(path)) return 'pdf';
+    return IMAGE_EXT.test(path) ? 'image' : 'file';
   }
 
   let { params }: { params?: Record<string, string> } = $props();
@@ -53,6 +63,8 @@
   let editArea = $state<HTMLTextAreaElement | null>(null);
   let saving = $state(false);
   let staleOnDisk = $state(false);
+  let previewUrl = $state<string | null>(null);
+  let previewError = $state<string | null>(null);
 
   let docEl = $state<HTMLElement | null>(null);
   let pop = $state<{ open: boolean; x: number; y: number; text: string }>({
@@ -71,6 +83,8 @@
   /** Markdown and HTML both have a rendered view; everything else opens raw. */
   const renderable = $derived(doc != null && (doc.markdown || doc.html));
   const showingHtml = $derived(doc != null && doc.html && mode === 'rendered');
+  const showingPdf = $derived(doc?.binary === 'pdf' && previewUrl != null);
+  const docSize = $derived(doc ? ws?.entries.find((e) => e.path === doc!.path)?.size : undefined);
   const wsName = $derived(ws?.workspaceDir.split('/').filter(Boolean).pop() ?? 'workspace');
 
   const renderedHtml = $derived(
@@ -134,7 +148,8 @@
       const file = await files.read(path);
       const markdown = isMarkdown(path);
       const html = isHtml(path);
-      doc = { path, content: file.content ?? '', markdown, html };
+      const binary = file.is_text === false ? binaryKind(path) : undefined;
+      doc = { path, content: file.content ?? '', markdown, html, binary };
       activePath = path;
       editBuffer = file.content ?? '';
       staleOnDisk = false;
@@ -192,6 +207,41 @@
       });
     }
   }
+
+  async function downloadDoc() {
+    if (!doc) return;
+    try {
+      await files.download(doc.path);
+    } catch (err) {
+      toasts.push('err', 'Download failed', {
+        body: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // The raw route needs the Bearer header, so the preview is a blob URL, revoked
+  // when the document changes or the surface unmounts.
+  $effect(() => {
+    const d = doc;
+    if (d?.binary !== 'pdf' && d?.binary !== 'image') return;
+    let url: string | null = null;
+    let cancelled = false;
+    previewError = null;
+    loadWorkspaceObjectURL(d.path).then(
+      (u) => {
+        if (cancelled) URL.revokeObjectURL(u);
+        else previewUrl = url = u;
+      },
+      (err) => {
+        if (!cancelled) previewError = err instanceof Error ? err.message : String(err);
+      },
+    );
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+      previewUrl = null;
+    };
+  });
 
   async function attachToChat() {
     if (!activePath) return;
@@ -373,13 +423,18 @@
       </span>
       <div class="grow"></div>
       {#if doc}
-        <span data-testid={TESTID.filesModeSeg}>
-          <Seg
-            options={renderable ? ['rendered', 'raw', 'edit'] : ['raw', 'edit']}
-            bind:value={mode}
-            ariaLabel="Document view"
-          />
-        </span>
+        {#if !doc.binary}
+          <span data-testid={TESTID.filesModeSeg}>
+            <Seg
+              options={renderable ? ['rendered', 'raw', 'edit'] : ['raw', 'edit']}
+              bind:value={mode}
+              ariaLabel="Document view"
+            />
+          </span>
+        {/if}
+        <button type="button" class="hd-btn" aria-label="Download" onclick={downloadDoc}>
+          <Icon name="down" />
+        </button>
         <button
           type="button"
           class="hd-btn"
@@ -403,7 +458,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="wk-doc"
-      class:is-frame={showingHtml}
+      class:is-frame={showingHtml || showingPdf}
       data-view={mode}
       data-testid={TESTID.filesDoc}
       bind:this={docEl}
@@ -419,7 +474,28 @@
       {:else if filesWorkspace.loading && !doc}
         <PaneState kind="loading" lines={7} />
       {:else if doc}
-        {#if showingHtml}
+        {#if doc.binary}
+          {#if showingPdf}
+            <iframe class="wk-pdf" src={previewUrl} title={`Preview ${doc.path}`}></iframe>
+          {:else if doc.binary === 'image' && previewUrl}
+            <img class="wk-img" src={previewUrl} alt={doc.path} />
+          {:else if doc.binary !== 'file' && !previewError}
+            <PaneState kind="loading" lines={4} />
+          {:else}
+            <PaneState kind="empty" title={doc.path.split('/').pop()}>
+              {#snippet hint()}
+                <span class="mono"
+                  >{docSize != null ? formatSize(docSize) : ''}{previewError
+                    ? ' · too large or unreadable to preview'
+                    : ' · no preview for this file type'}</span
+                >
+              {/snippet}
+              {#snippet actions()}
+                <Button size="sm" onclick={downloadDoc}>Download</Button>
+              {/snippet}
+            </PaneState>
+          {/if}
+        {:else if showingHtml}
           <HtmlPreview
             html={doc.content}
             docPath={doc.path}
@@ -686,6 +762,16 @@
     display: flex;
     padding: 0;
     overflow: hidden;
+  }
+  .wk-pdf {
+    flex: 1;
+    border: 0;
+    width: 100%;
+  }
+  .wk-img {
+    display: block;
+    max-width: 100%;
+    margin: 0 auto;
   }
   .wk-doc :global(.doc-md) {
     font-size: var(--fs-md);

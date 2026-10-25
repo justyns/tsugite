@@ -147,7 +147,7 @@ class WorkspaceFilesMixin:
                     bucket.append({"path": rel, "name": item.name, "is_dir": True, **mark})
                     if recursive:
                         queue.append((item, ignored))
-                elif stat_mod.S_ISREG(st.st_mode) and _is_text_mime(item):
+                elif stat_mod.S_ISREG(st.st_mode):
                     bucket.append(
                         {
                             "path": rel,
@@ -218,6 +218,9 @@ class WorkspaceFilesMixin:
             return JSONResponse({"error": "path is a directory"}, status_code=400)
 
         st = resolved.stat()
+        not_text = {"path": path_str, "content": None, "is_text": False, "size": st.st_size}
+        if mimetypes.guess_type(resolved.name)[0] and not _is_text_mime(resolved):
+            return JSONResponse(not_text)
 
         max_size = self.config.max_workspace_file_size
         if st.st_size > max_size:
@@ -228,7 +231,7 @@ class WorkspaceFilesMixin:
         try:
             content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
         except UnicodeDecodeError:
-            return JSONResponse({"path": path_str, "content": None, "is_text": False, "size": st.st_size})
+            return JSONResponse(not_text)
         except OSError as e:
             return JSONResponse({"error": f"read failed: {e}"}, status_code=500)
 

@@ -106,6 +106,7 @@ export const WORKSPACE = {
       const url = new URL(path, 'http://x');
       if (url.pathname.endsWith('/workspace/content')) {
         const p = url.searchParams.get('path') ?? '';
+        if (/\.(pdf|docx|png)$/.test(p)) return { path: p, content: null, is_text: false, size: 3 };
         return { path: p, content: CONTENT[p] ?? '', is_text: true };
       }
       if (url.pathname.endsWith('/workspace')) {
