@@ -277,6 +277,47 @@ def test_fetch_text_extract_article_raises_on_empty_page(mock_httpx_client):
         fetch_text("https://example.com", extract_article=True)
 
 
+@pytest.mark.parametrize("extract_article", [False, True])
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<html><head><title>App</title></head><body>\n  \n</body></html>",
+        "<html><head><title>App</title>"
+        + "<meta name='x' content='y'>" * 500
+        + "</head><body><div id='root'></div></body></html>",
+        "<html><body><p>Just a moment...</p></body></html>",
+        "<html><body><p>Please Enable JavaScript to continue.</p></body></html>",
+        "<html><body><p>Click the button below to continue shopping</p></body></html>",
+        "<html><body><p>Checking your browser before accessing the site.</p></body></html>",
+    ],
+    ids=["whitespace", "js-shell", "just-a-moment", "enable-javascript", "continue-shopping", "checking-browser"],
+)
+def test_fetch_text_raises_on_unreadable_page(mock_httpx_client, html, extract_article):
+    mock_httpx_client.request.return_value = _mock_response(200, text=html, headers={"content-type": "text/html"})
+
+    with pytest.raises(RuntimeError, match="bot-gated or rendered client-side"):
+        fetch_text("https://example.com", extract_article=extract_article)
+
+
+def test_fetch_text_keeps_long_page_mentioning_interstitial_text(mock_httpx_client):
+    body = "<p>Visit us to continue shopping or enable javascript for more. " + "Real sentence here. " * 30 + "</p>"
+    mock_httpx_client.request.return_value = _mock_response(
+        200, text=f"<html><body>{body}</body></html>", headers={"content-type": "text/html"}
+    )
+
+    assert "Real sentence here" in fetch_text("https://example.com")
+
+
+def test_fetch_text_keeps_short_page_with_small_html(mock_httpx_client):
+    mock_httpx_client.request.return_value = _mock_response(
+        200,
+        text="<html><body><h1>Example Domain</h1><p>Short but real.</p></body></html>",
+        headers={"content-type": "text/html"},
+    )
+
+    assert "Short but real." in fetch_text("https://example.com")
+
+
 def test_fetch_text_extract_article_takes_precedence(mock_httpx_client):
     """When both flags set, extract_article takes precedence (the nav and footer are dropped)."""
     paragraph = (
@@ -460,3 +501,16 @@ def test_fetch_text_extract_article_without_readability_is_unavailable(mock_http
     with patch.dict(sys.modules, {"readability": None}):
         with pytest.raises(ToolUnavailableError, match="Article extraction requires readability-lxml"):
             fetch_text("https://example.com", extract_article=True)
+
+
+def test_fetch_text_unreadable_error_includes_the_short_text(mock_httpx_client):
+    """A real short page that trips the check still reaches the agent through the error."""
+    html = (
+        "<html><head>"
+        + "<style>.a{color:red}</style>" * 500
+        + "</head><body><p>All systems operational.</p></body></html>"
+    )
+    mock_httpx_client.request.return_value = _mock_response(200, text=html, headers={"content-type": "text/html"})
+
+    with pytest.raises(RuntimeError, match="All systems operational"):
+        fetch_text("https://example.com")

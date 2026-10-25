@@ -25,6 +25,11 @@ _MAX_REDIRECTS = 5
 _MIN_ARTICLE_CHARS = 200
 _ARTICLE_PAGE_RATIO = 10
 
+# A stripped page this short beside raw HTML this large is a JS-rendered shell, and a short
+# page containing one of these strings is a bot interstitial.
+_SHELL_RAW_CHARS = 10_000
+_INTERSTITIAL_MARKERS = ("just a moment", "enable javascript", "continue shopping", "checking your browser")
+
 
 def _extract_article(html: str) -> str:
     """Extract the main article body from HTML using readability (optional dep)."""
@@ -180,21 +185,25 @@ def fetch_text(
     if "text/html" not in content_type or (not strip_html and not extract_article):
         return text
 
+    page = convert_html_to_markdown(text)
+    page_len = len(page.strip())
+    if (
+        not page_len
+        or (page_len < _MIN_ARTICLE_CHARS and len(text) >= _SHELL_RAW_CHARS)
+        or (page_len < _MIN_ARTICLE_CHARS and any(m in page.lower() for m in _INTERSTITIAL_MARKERS))
+    ):
+        raise RuntimeError(
+            f"{url} has no readable text; the page is likely bot-gated or rendered client-side: {page.strip()!r}"
+        )
+
     if not extract_article:
-        return convert_html_to_markdown(text)
+        return page
 
     article = convert_html_to_markdown(_extract_article(text))
     article_len = len(article.strip())
-    if article_len >= _MIN_ARTICLE_CHARS:
+    if article_len >= _MIN_ARTICLE_CHARS or article_len * _ARTICLE_PAGE_RATIO >= page_len:
         return article
-
-    page = convert_html_to_markdown(text)
-    page_len = len(page.strip())
-    if not page_len:
-        raise RuntimeError(f"{url} has no readable text; the page is likely rendered client-side")
-    if article_len * _ARTICLE_PAGE_RATIO < page_len:
-        return page
-    return article
+    return page
 
 
 # No sensitive_args: the built-in key rules already redact Authorization,
