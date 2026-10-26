@@ -24,7 +24,7 @@
   import { goBackToWorkspaceList } from '$lib/shell/phoneNav';
   import type { RefItem } from '$lib/components/composer/types';
   import { ScrollFollow } from './scrollFollow.svelte';
-  import { fetchEventsPage } from './conversation.svelte';
+  import { fetchEventsPage } from './conversationController.svelte';
   import { isFinishedSession, liveSessionId } from './sessionModel';
   import {
     USER_AUTHOR,

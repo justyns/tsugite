@@ -16,7 +16,7 @@ vi.mock('$lib/api/client', async (importOriginal) => {
 
 import { api } from '$lib/api/client';
 import Conversation from './Conversation.svelte';
-import { ConversationController } from './conversation.svelte';
+import { ConversationController } from './conversationController.svelte';
 import { sessions, type SessionRow } from '$lib/stores/sessions.svelte';
 import { TESTID } from '$lib/testids';
 import { sessionRow } from './__fixtures__/sessionRow';

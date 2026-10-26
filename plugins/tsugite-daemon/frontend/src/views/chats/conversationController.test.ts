@@ -36,7 +36,7 @@ vi.mock('$lib/components/feedback/toast-store.svelte', () => ({ toasts: { push: 
 
 vi.mock('$lib/stores/auth.svelte', () => ({ auth: { userId: 'u1', requireAuth: vi.fn() } }));
 
-import { ConversationController } from './conversation.svelte';
+import { ConversationController } from './conversationController.svelte';
 
 type Ev = Record<string, unknown>;
 

@@ -80,6 +80,7 @@ jobs:
     if: github.server_url == 'https://github.com'
     needs: build-and-publish
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest

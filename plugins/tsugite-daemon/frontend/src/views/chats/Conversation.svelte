@@ -21,7 +21,7 @@
   import { sessions } from '$lib/stores/sessions.svelte';
   import type { SessionRow } from '$lib/stores/sessions.svelte';
   import { TESTID } from '$lib/testids';
-  import type { ConversationController } from './conversation.svelte';
+  import type { ConversationController } from './conversationController.svelte';
   import { ScrollFollow } from './scrollFollow.svelte';
   import {
     retryTarget,

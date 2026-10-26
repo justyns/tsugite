@@ -15,7 +15,7 @@
   import type { SessionRow } from '$lib/stores/sessions.svelte';
   import Conversation from './Conversation.svelte';
   import ChatComposer from './ChatComposer.svelte';
-  import { ConversationController, type SendOpts } from './conversation.svelte';
+  import { ConversationController, type SendOpts } from './conversationController.svelte';
   import { resolveDefaultSession } from './defaultSession';
   import { liveSessionId } from './sessionModel';
   import { isJobArtifact } from './jobArtifact';
