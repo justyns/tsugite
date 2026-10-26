@@ -141,6 +141,43 @@ test('a daemon that exits while its token is minted reports the exit, not the fa
   assert.deepEqual(errors, ['Daemon exited (SIGKILL)']);
 });
 
+test('a daemon that exits just after the token request fails still reports the exit', async () => {
+  const errors = [];
+  const s = new Supervisor({
+    connect: async ({ adopt }) => {
+      const d = await makeDaemon();
+      adopt(d);
+      await d.start();
+      setTimeout(() => process.kill(d.child.pid, 'SIGKILL'), 50);
+      throw new Error('fetch failed');
+    },
+    onReady: () => {},
+    onError: (m) => errors.push(m),
+  });
+  await s.launch();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(errors, ['Daemon exited (SIGKILL)']);
+  await s.quit();
+});
+
+test('a connect failure with a daemon that stays up reports the connect error after the grace period', async () => {
+  const errors = [];
+  const s = new Supervisor({
+    connect: async ({ adopt }) => {
+      const d = await makeDaemon();
+      adopt(d);
+      await d.start();
+      throw new Error('fetch failed');
+    },
+    onReady: () => {},
+    onError: (m) => errors.push(m),
+    exitGraceMs: 100,
+  });
+  await s.launch();
+  assert.deepEqual(errors, ['fetch failed']);
+  await s.quit();
+});
+
 test('after a failed quit, launch works again', async () => {
   let failing = true;
   let connects = 0;

@@ -1,10 +1,13 @@
 // Serializes daemon lifecycle transitions. `connect({ adopt, superseded })` starts what the current
 // mode needs and returns the target { origin, token }. Call `adopt(daemon)` right before `daemon.start()`
 // with no await between them. The supervisor owns an adopted daemon until it has exited. A stale run
-// cannot adopt.
+// cannot adopt. When connect fails, an adopted daemon gets `exitGraceMs` to report its exit, which then replaces the
+// connect error.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 class Supervisor {
-  constructor({ connect, onReady, onError }) {
-    Object.assign(this, { connect, onReady, onError });
+  constructor({ connect, onReady, onError, exitGraceMs = 1000 }) {
+    Object.assign(this, { connect, onReady, onError, exitGraceMs });
     this.target = { origin: '', token: '' };
     this.generation = 0;
     this.chain = Promise.resolve();
@@ -60,11 +63,14 @@ class Supervisor {
     this.target = { origin: '', token: '' };
     let ready = false;
     let crashed = '';
+    let noteExit;
+    const exited = new Promise((r) => (noteExit = r));
     const adopt = (daemon) => {
       if (stale()) throw new Error('Launch superseded');
       this.owned.add(daemon);
       daemon.on('exit', (reason) => {
         crashed = reason;
+        noteExit();
         if (ready && !stale()) this.onError(reason);
       });
     };
@@ -72,6 +78,7 @@ class Supervisor {
     try {
       target = await this.connect({ adopt, superseded: stale });
     } catch (err) {
+      if (!crashed && this.owned.size) await Promise.race([exited, sleep(this.exitGraceMs)]);
       if (!stale()) this.onError(crashed || err.message);
       return;
     }
