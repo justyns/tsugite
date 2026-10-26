@@ -86,7 +86,7 @@ jobs:
           - os: ubuntu-latest
             target: linux-x86_64
             dist: dist:linux
-            files: desktop/out/*.AppImage desktop/out/*.tar.gz
+            files: desktop/out/*.AppImage
           - os: macos-14
             target: macos-aarch64
             dist: dist:mac
@@ -132,7 +132,6 @@ jobs:
           name: desktop-${{ matrix.target }}
           path: |
             desktop/out/*.AppImage
-            desktop/out/*.tar.gz
             desktop/out/*.zip
 
       - name: Attach to the GitHub release

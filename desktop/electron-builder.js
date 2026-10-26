@@ -23,7 +23,6 @@ module.exports = {
   linux: {
     target: [
       { target: 'AppImage', arch: ['x64'] },
-      { target: 'tar.gz', arch: ['x64'] },
       { target: 'dir', arch: ['x64'] },
     ],
     category: 'Development',
