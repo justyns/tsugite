@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Tsugite</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; padding: 24px; background: #1d1f21; color: #ddd; }
+  pre { background: #111; padding: 12px; overflow: auto; max-height: 60vh; font-size: 12px; white-space: pre-wrap; }
+  button { font-size: 14px; padding: 6px 16px; }
+</style>
+<h2>Tsugite daemon is not running</h2>
+<p id="message"></p>
+<pre id="log"></pre>
+<button id="retry">Retry</button>
+<script>
+  desktop.info().then((i) => {
+    document.getElementById('message').textContent = i.message;
+    document.getElementById('log').textContent = i.logTail;
+  });
+  document.getElementById('retry').onclick = () => desktop.retry();
+</script>

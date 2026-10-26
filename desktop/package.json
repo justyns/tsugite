@@ -1,0 +1,18 @@
+{
+  "name": "tsugite-desktop",
+  "version": "0.1.0",
+  "description": "Tsugite desktop app: supervises a local tsugite daemon and shows its web UI",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "integration": "node scripts/integration.js",
+    "dist:mac": "electron-builder --mac --arm64",
+    "dist:linux": "electron-builder --linux --x64"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.17.0"
+  }
+}

@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Remote daemon</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; padding: 24px; background: #1d1f21; color: #ddd; }
+  label { display: block; margin: 12px 0 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font-size: 14px; }
+  button { font-size: 14px; padding: 6px 16px; margin-top: 16px; }
+  #error { color: #f66; }
+</style>
+<form id="form">
+  <label for="url">Daemon URL</label>
+  <input id="url" type="url" placeholder="https://tsugite.example.com" required>
+  <label for="token">Access token</label>
+  <input id="token" type="password" required>
+  <button type="submit">Connect</button>
+  <button type="button" id="local">Use local daemon</button>
+  <p id="error"></p>
+</form>
+<script>
+  document.getElementById('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const err = await desktop.saveRemote(document.getElementById('url').value, document.getElementById('token').value);
+    if (err) document.getElementById('error').textContent = err;
+  };
+  document.getElementById('local').onclick = () => desktop.useLocal();
+</script>

@@ -1,5 +1,6 @@
 /**
- * Auth store: bearer token + user id, mirrored to localStorage. `gated` drives
+ * Auth store: bearer token + user id, mirrored to localStorage. A token from the
+ * desktop app's `window.tsugiteDesktop` bridge is never written there. `gated` drives
  * the token-entry pane; the API client flips it via `requireAuth()` on a 401 so
  * an expired token re-prompts without wiping what's stored. Exported as a class
  * instance - never a reassigned $state binding. localStorage keys are a wire
@@ -11,7 +12,14 @@ const TOKEN_KEY = 'tsugite_token';
 const USER_KEY = 'tsugite_user_id';
 const DEFAULT_USER = 'web-user-1';
 
-const initialToken = readLocal(TOKEN_KEY) ?? '';
+declare global {
+  interface Window {
+    tsugiteDesktop?: { token: string };
+  }
+}
+
+const desktopToken = globalThis.window?.tsugiteDesktop?.token;
+const initialToken = desktopToken || (readLocal(TOKEN_KEY) ?? '');
 
 class AuthStore {
   token = $state(initialToken);
@@ -28,7 +36,7 @@ class AuthStore {
     this.token = next;
     this.gated = false;
     this.gateReason = '';
-    writeLocal(TOKEN_KEY, next);
+    if (!desktopToken) writeLocal(TOKEN_KEY, next);
   }
 
   setUserId(next: string): void {
