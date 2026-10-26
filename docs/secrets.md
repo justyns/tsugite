@@ -63,6 +63,8 @@ sqlite-backed storage where each secret is encrypted.  NOTE: Using a key_file or
 
 The passphrase can also come from the `TSUGITE_SECRETS_KEY` env var, or it'll prompt interactively if neither is set.  The database defaults to `~/.local/share/tsugite/secrets/secrets.db`.
 
+With `"keychain": true`, the passphrase comes from the OS keychain (service `tsugite`, account `secrets` or the `keychain_account` value), through `security` on macOS and `secret-tool` on Linux.  If the item is missing and the database is empty, a random key is generated and stored there.  `TSUGITE_SECRETS_KEY` and `key_file` still take precedence, and `passphrase` and the interactive prompt are ignored.  The desktop app turns this on with the `desktop` account and its own database when a keychain tool is available.
+
 ### file
 
 Stores each secret as a plaintext file in a directory.

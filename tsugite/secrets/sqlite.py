@@ -3,9 +3,17 @@
 import base64
 import getpass
 import os
+import secrets
+import shutil
 import sqlite3
+import subprocess
 import sys
+import threading
 from pathlib import Path
+
+KEYCHAIN_SERVICE = "tsugite"
+# `security find-generic-password` exit status for errSecItemNotFound.
+MACOS_ITEM_NOT_FOUND = 44
 
 
 class SqliteSecretBackend:
@@ -18,14 +26,15 @@ class SqliteSecretBackend:
         self._db_path = Path(path)
         self._conn: sqlite3.Connection | None = None
         self._key_cache: dict[bytes, bytes] = {}
-        self._passphrase = self._resolve_passphrase(
-            config_passphrase=config.get("passphrase"),
-            key_file=config.get("key_file"),
-        )
-        if not self._passphrase:
+        self._keychain_account = (config.get("keychain_account") or "secrets") if config.get("keychain") else None
+        if self._keychain_account and any(c in self._keychain_account for c in '"\\\r\n'):
+            raise ValueError("keychain_account must not contain quotes, backslashes or line breaks")
+        self._keychain_lock = threading.Lock()
+        self._passphrase_value = self._resolve_passphrase(config)
+        if not self._passphrase_value and not self._keychain_account:
             raise ValueError(
                 "sqlite secrets backend requires a passphrase. Set TSUGITE_SECRETS_KEY env var, "
-                "configure key_file in secrets config, or use an interactive terminal."
+                "configure key_file or keychain in secrets config, or use an interactive terminal."
             )
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -40,24 +49,49 @@ class SqliteSecretBackend:
             self._conn.commit()
         return self._conn
 
-    @staticmethod
-    def _resolve_passphrase(
-        config_passphrase: str | None = None,
-        key_file: str | None = None,
-    ) -> str | None:
+    def _resolve_passphrase(self, config: dict) -> str | None:
         env_key = os.environ.get("TSUGITE_SECRETS_KEY")
         if env_key:
             return env_key
+        key_file = config.get("key_file")
         if key_file:
             kf = Path(key_file).expanduser()
             if kf.is_file():
                 return kf.read_text().strip()
-        if config_passphrase:
-            return config_passphrase
+        if config.get("keychain"):
+            return None
+        if config.get("passphrase"):
+            return config["passphrase"]
         if sys.stdin.isatty():
             passphrase = getpass.getpass("Secrets passphrase: ")
             return passphrase or None
         return None
+
+    @property
+    def _passphrase(self) -> str:
+        with self._keychain_lock:
+            if self._passphrase_value is None:
+                self._passphrase_value = self._keychain_passphrase()
+            return self._passphrase_value
+
+    def _keychain_passphrase(self) -> str:
+        account = self._keychain_account
+        key = _keychain_lookup(account)
+        if key:
+            return key
+        if self._get_conn().execute("SELECT 1 FROM secrets LIMIT 1").fetchone():
+            raise ValueError(
+                f"The OS keychain has no secrets key (service '{KEYCHAIN_SERVICE}', account '{account}'), "
+                f"but {self._db_path} already holds encrypted secrets. Restore the key to the keychain "
+                "or set TSUGITE_SECRETS_KEY."
+            )
+        key = secrets.token_urlsafe(32)
+        _keychain_store(account, key)
+        if _keychain_lookup(account) != key:
+            raise ValueError(
+                f"Stored the secrets key in the OS keychain (account '{account}') but could not read it back"
+            )
+        return key
 
     def _derive_key(self, salt: bytes) -> bytes:
         cached = self._key_cache.get(salt)
@@ -119,3 +153,45 @@ class SqliteSecretBackend:
     def list_names(self) -> list[str]:
         rows = self._get_conn().execute("SELECT name FROM secrets ORDER BY name").fetchall()
         return [r[0] for r in rows]
+
+
+def _keychain_tool() -> str:
+    if sys.platform == "darwin":
+        return "/usr/bin/security"
+    tool = shutil.which("secret-tool")
+    if not tool:
+        raise ValueError(
+            "secrets keychain is enabled but secret-tool was not found. Install libsecret-tools "
+            "and run a Secret Service (gnome-keyring, KeePassXC or KWallet)."
+        )
+    return tool
+
+
+def _keychain_lookup(account: str) -> str | None:
+    tool = _keychain_tool()
+    if sys.platform == "darwin":
+        cmd = [tool, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"]
+    else:
+        cmd = [tool, "lookup", "service", KEYCHAIN_SERVICE, "account", account]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode == 0:
+        return result.stdout.strip()
+    # secret-tool exits 1 with empty stderr for a missing item.
+    missing = result.returncode == MACOS_ITEM_NOT_FOUND if sys.platform == "darwin" else not result.stderr.strip()
+    if missing:
+        return None
+    raise ValueError(f"Could not read the secrets key from the OS keychain: {result.stderr.strip()}")
+
+
+def _keychain_store(account: str, key: str) -> None:
+    tool = _keychain_tool()
+    if sys.platform == "darwin":
+        # argv is visible to other local users through `ps`.
+        cmd = [tool, "-i"]
+        stdin = f'add-generic-password -s "{KEYCHAIN_SERVICE}" -a "{account}" -w "{key}"\n'
+    else:
+        cmd = [tool, "store", "--label=Tsugite secrets key", "service", KEYCHAIN_SERVICE, "account", account]
+        stdin = key
+    result = subprocess.run(cmd, input=stdin, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise ValueError(f"Could not store the secrets key in the OS keychain: {result.stderr.strip()}")

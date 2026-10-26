@@ -1,8 +1,12 @@
 """Tests for the secrets system: backends, registry, masking, tools, CLI."""
 
 import logging
+import shlex
+import shutil
 import sqlite3
 import stat
+import subprocess
+import sys
 
 import pytest
 import typer.testing
@@ -211,6 +215,153 @@ class TestSqliteSecretBackend:
         SqliteSecretBackend({"path": str(db_path)}).set("k", "v")
         mode = stat.S_IMODE(db_path.stat().st_mode)
         assert mode == 0o600
+
+
+class FakeKeychain:
+    """Stands in for `secret-tool` (Linux) and `security` (macOS) via subprocess.run."""
+
+    def __init__(self, items=None, error=""):
+        self.items = dict(items or {})
+        self.error = error
+        self.calls = []
+
+    def __call__(self, cmd, input=None, capture_output=False, text=False):
+        self.calls.append((cmd, input))
+        if self.error:
+            return subprocess.CompletedProcess(cmd, 1, "", self.error)
+        if cmd[0].endswith("security"):
+            args = shlex.split(input) if cmd[1] == "-i" else cmd[1:]
+            item = (args[args.index("-s") + 1], args[args.index("-a") + 1])
+            if args[0] == "add-generic-password":
+                self.items[item] = args[args.index("-w") + 1]
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if item in self.items:
+                return subprocess.CompletedProcess(cmd, 0, self.items[item] + "\n", "")
+            return subprocess.CompletedProcess(cmd, 44, "", "The specified item could not be found in the keychain.\n")
+        item = (cmd[cmd.index("service") + 1], cmd[cmd.index("account") + 1])
+        if cmd[1] == "store":
+            self.items[item] = input
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        if item in self.items:
+            return subprocess.CompletedProcess(cmd, 0, self.items[item], "")
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    def stores(self):
+        return [c for c in self.calls if c[0][1] in ("store", "-i")]
+
+
+@pytest.fixture
+def keychain(monkeypatch):
+    monkeypatch.delenv("TSUGITE_SECRETS_KEY", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    fake = FakeKeychain()
+    monkeypatch.setattr(subprocess, "run", fake)
+    return fake
+
+
+def _keychain_backend(tmp_path, **config):
+    from tsugite.secrets.sqlite import SqliteSecretBackend
+
+    return SqliteSecretBackend({"path": str(tmp_path / "secrets.db"), "keychain": True, **config})
+
+
+class TestSqliteKeychainPassphrase:
+    def test_reads_existing_keychain_item(self, keychain, tmp_path):
+        keychain.items[("tsugite", "secrets")] = "stored-key"
+        backend = _keychain_backend(tmp_path)
+        assert backend._passphrase == "stored-key"
+        assert keychain.stores() == []
+
+    def test_first_use_generates_and_stores_key(self, keychain, tmp_path):
+        backend = _keychain_backend(tmp_path)
+        backend._passphrase
+        key = keychain.items[("tsugite", "secrets")]
+        assert len(key) >= 40
+        assert backend._passphrase == key
+        [(cmd, stdin)] = keychain.stores()
+        assert stdin == key
+        assert key not in " ".join(cmd)
+
+        backend.set("token", "abc")
+        assert _keychain_backend(tmp_path).get("token") == "abc"
+        assert len(keychain.stores()) == 1
+
+    def test_keychain_is_not_read_until_first_use(self, keychain, tmp_path):
+        keychain.error = "secret-tool: The name is not activatable\n"
+        backend = _keychain_backend(tmp_path)
+        assert keychain.calls == []
+        with pytest.raises(ValueError, match="not activatable"):
+            backend.set("token", "abc")
+
+    def test_keychain_account_override(self, keychain, tmp_path):
+        _keychain_backend(tmp_path, keychain_account="desktop")._passphrase
+        assert list(keychain.items) == [("tsugite", "desktop")]
+
+    @pytest.mark.parametrize("account", ['a"b', "a\\b", "a\nb"])
+    def test_keychain_account_with_quote_backslash_or_newline_is_rejected(self, keychain, tmp_path, account):
+        with pytest.raises(ValueError, match="keychain_account"):
+            _keychain_backend(tmp_path, keychain_account=account)
+
+    def test_missing_item_with_existing_secrets_raises(self, keychain, tmp_path, monkeypatch):
+        from tsugite.secrets.sqlite import SqliteSecretBackend
+
+        monkeypatch.setenv("TSUGITE_SECRETS_KEY", "old-key")
+        SqliteSecretBackend({"path": str(tmp_path / "secrets.db")}).set("token", "abc")
+        monkeypatch.delenv("TSUGITE_SECRETS_KEY")
+
+        with pytest.raises(ValueError, match="already holds encrypted secrets"):
+            _keychain_backend(tmp_path)._passphrase
+        assert keychain.stores() == []
+
+    def test_missing_tool_raises(self, keychain, tmp_path, monkeypatch):
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        with pytest.raises(ValueError, match="secret-tool"):
+            _keychain_backend(tmp_path)._passphrase
+        assert keychain.calls == []
+
+    def test_unreachable_secret_service_raises(self, keychain, tmp_path):
+        keychain.error = "secret-tool: The name is not activatable\n"
+        with pytest.raises(ValueError, match="not activatable"):
+            _keychain_backend(tmp_path)._passphrase
+        assert keychain.stores() == []
+
+    def test_env_key_and_key_file_take_precedence(self, keychain, tmp_path, monkeypatch):
+        monkeypatch.setenv("TSUGITE_SECRETS_KEY", "env-key")
+        assert _keychain_backend(tmp_path)._passphrase == "env-key"
+        monkeypatch.delenv("TSUGITE_SECRETS_KEY")
+        key_file = tmp_path / "key"
+        key_file.write_text("file-key\n")
+        assert _keychain_backend(tmp_path, key_file=str(key_file))._passphrase == "file-key"
+        assert keychain.calls == []
+
+    def test_keychain_takes_precedence_over_config_passphrase(self, keychain, tmp_path):
+        keychain.items[("tsugite", "secrets")] = "stored-key"
+        assert _keychain_backend(tmp_path, passphrase="plain")._passphrase == "stored-key"
+
+    def test_macos_reads_existing_item(self, keychain, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        keychain.items[("tsugite", "secrets")] = "stored-key"
+        assert _keychain_backend(tmp_path)._passphrase == "stored-key"
+        assert keychain.calls[0][0][:2] == ["/usr/bin/security", "find-generic-password"]
+
+    def test_macos_first_use_keeps_key_out_of_argv(self, keychain, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        backend = _keychain_backend(tmp_path)
+        backend._passphrase
+        key = keychain.items[("tsugite", "secrets")]
+        assert backend._passphrase == key
+        [(cmd, stdin)] = keychain.stores()
+        assert cmd == ["/usr/bin/security", "-i"]
+        assert key in stdin
+        assert "-U" not in stdin
+
+    def test_macos_lookup_error_raises(self, keychain, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        keychain.error = "security: SecKeychainSearchCopyNext: User interaction is not allowed.\n"
+        with pytest.raises(ValueError, match="User interaction is not allowed"):
+            _keychain_backend(tmp_path)._passphrase
+        assert keychain.stores() == []
 
 
 # -- SecretRegistry --

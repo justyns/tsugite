@@ -50,3 +50,64 @@ test('a taken port is replaced in the config', async () => {
     blocker.close();
   }
 });
+
+const SECRETS = (stateDir) =>
+  `plugins:\n  secrets:\n    provider: sqlite\n    path: ${JSON.stringify(path.join(stateDir, 'secrets.db'))}\n    keychain: true\n    keychain_account: desktop\n`;
+
+test('first run on macOS keeps secrets in sqlite with the key in the keychain', async () => {
+  const dir = tmp();
+  const { configPath } = await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'darwin' });
+  const { stateDir } = desktopDirs({ env: {}, home: dir });
+  assert.ok(fs.readFileSync(configPath, 'utf8').endsWith(SECRETS(stateDir)));
+});
+
+test('Linux gets the keychain secrets section only when secret-tool is on PATH', async () => {
+  const without = tmp();
+  const a = await ensureConfig({ userData: without, home: without, env: { PATH: without }, platform: 'linux' });
+  assert.doesNotMatch(fs.readFileSync(a.configPath, 'utf8'), /secrets:/);
+
+  const dir = tmp();
+  const bin = path.join(dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'secret-tool'), '', { mode: 0o755 });
+  const b = await ensureConfig({ userData: dir, home: dir, env: { PATH: bin }, platform: 'linux' });
+  assert.match(fs.readFileSync(b.configPath, 'utf8'), /keychain: true/);
+});
+
+test('an existing config without a secrets section gets one appended', async () => {
+  const dir = tmp();
+  const { configPath } = await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'linux' });
+  fs.appendFileSync(configPath, 'log_level: debug\n');
+  await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'darwin' });
+  const text = fs.readFileSync(configPath, 'utf8');
+  assert.match(text, /log_level: debug\n/);
+  assert.ok(text.endsWith(SECRETS(desktopDirs({ env: {}, home: dir }).stateDir)));
+});
+
+test('an existing plugins section gets secrets added under it', async () => {
+  const dir = tmp();
+  const { configPath } = await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'linux' });
+  fs.appendFileSync(configPath, 'plugins:\n  other:\n    enabled: true\n');
+  await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'darwin' });
+  const text = fs.readFileSync(configPath, 'utf8');
+  assert.equal(text.match(/^plugins:/gm).length, 1);
+  assert.match(text, /^plugins:\n  secrets:\n    provider: sqlite\n[\s\S]*  other:\n    enabled: true\n/m);
+});
+
+test('a plugins line with an inline value stops instead of adding a second plugins key', async () => {
+  const dir = tmp();
+  const { configPath } = await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'linux' });
+  fs.appendFileSync(configPath, 'plugins: {}\n');
+  await assert.rejects(ensureConfig({ userData: dir, home: dir, env: {}, platform: 'darwin' }), /plugins/);
+  assert.equal(fs.readFileSync(configPath, 'utf8').match(/^plugins:/gm).length, 1);
+});
+
+test('a user-edited secrets section is kept', async () => {
+  const dir = tmp();
+  const { configPath } = await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'linux' });
+  fs.appendFileSync(configPath, 'plugins:\n  secrets:\n    provider: env\n');
+  await ensureConfig({ userData: dir, home: dir, env: {}, platform: 'darwin' });
+  const text = fs.readFileSync(configPath, 'utf8');
+  assert.match(text, /provider: env\n$/);
+  assert.doesNotMatch(text, /sqlite/);
+});
