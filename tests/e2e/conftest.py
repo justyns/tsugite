@@ -55,6 +55,9 @@ def e2e_auth_token(e2e_token_store):
 @pytest.fixture(scope="session")
 def e2e_adapter(e2e_workspace, e2e_session_store):
     runtime = RuntimeDefaults(workspace_dir=e2e_workspace, agent_file="default")
+    # The autouse adapters_start_with_a_default_agent patch is function-scoped and
+    # not yet applied when this session-scoped fixture runs.
+    e2e_session_store.agents.ensure_default(runtime.workspace_dir, runtime.agent_file)
 
     with patch("tsugite.workspace.Workspace") as mock_ws:
         from tsugite.workspace import WorkspaceNotFoundError

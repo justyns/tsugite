@@ -83,6 +83,16 @@ test('arrow keys on the resize handle step the width, never below the minimum', 
   railWidth.reset();
 });
 
+test('the resize handle reports the rendered width before any resize', async () => {
+  const { railWidth } = await import('$lib/stores/railWidth.svelte');
+  railWidth.reset();
+  const { container } = await render(ContextRail, props({ resizable: true }));
+  (container.querySelector('.work-rail') as HTMLElement).style.width = '262px';
+  await expect
+    .element(page.getByRole('separator', { name: 'Resize sidebar' }))
+    .toHaveAttribute('aria-valuenow', '262');
+});
+
 test('without resizable there is no resize handle', async () => {
   await render(ContextRail, props());
   expect(page.getByRole('separator', { name: 'Resize sidebar' }).elements()).toHaveLength(0);

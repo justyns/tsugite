@@ -47,6 +47,7 @@
   };
 
   let railEl = $state<HTMLElement | null>(null);
+  let renderedPx = $state<number>();
 
   function startResize(e: PointerEvent) {
     if (!railEl) return;
@@ -74,7 +75,7 @@
   }
 </script>
 
-<aside class="work-rail" aria-label="Sidebar" bind:this={railEl}>
+<aside class="work-rail" aria-label="Sidebar" bind:this={railEl} bind:offsetWidth={renderedPx}>
   <div class="rail-top">
     <strong class="rail-title">{TITLES[view]}</strong>
     <div class="grow"></div>
@@ -110,7 +111,7 @@
       aria-orientation="vertical"
       aria-label="Resize sidebar"
       aria-valuemin={RAIL_MIN_PX}
-      aria-valuenow={railWidth.px ?? undefined}
+      aria-valuenow={renderedPx}
       tabindex="0"
       onpointerdown={startResize}
       ondblclick={() => railWidth.reset()}
