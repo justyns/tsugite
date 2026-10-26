@@ -15,12 +15,12 @@ for f in bin/tsu bin/python3; do
 done
 
 native=$(find "$root" -type f \( -name '*.so' -o -name '*.dylib' \) | wc -l)
-macho=$(find "$root" -type f \( -name '*.so' -o -name '*.dylib' \) -exec file {} + | grep -c 'Mach-O 64-bit.*arm64' || true)
-echo "native libraries: $native, Mach-O arm64: $macho"
-[ "$native" -eq "$macho" ] || {
-    bad "non-arm64 native libraries:"
-    find "$root" -type f \( -name '*.so' -o -name '*.dylib' \) -exec file {} + | grep -v 'Mach-O 64-bit.*arm64' >&2
-}
+# macOS `file` prints one line per slice of a universal binary.
+nonarm=$(find "$root" -type f \( -name '*.so' -o -name '*.dylib' \) | while read -r f; do
+    file -b "$f" | grep -q 'Mach-O 64-bit.*arm64' || echo "$f"
+done)
+echo "native libraries: $native"
+[ -z "$nonarm" ] || bad "non-arm64 native libraries: $nonarm"
 
 elf=$(find "$root" -type f -exec file {} + | grep -c 'ELF ' || true)
 echo "ELF files: $elf"
