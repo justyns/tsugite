@@ -387,11 +387,13 @@ class HTTPServer(
         if self.adapter is None:
             return JSONResponse({"error": "daemon runtime unavailable"}, status_code=503)
         running = {session_id for _user_id, session_id in self._active_chats}
+        effective_model = self.adapter.resolve_model()
         return JSONResponse(
             {
                 "agent_file": self.adapter.runtime.agent_file,
                 "workspace_dir": str(self.adapter.runtime.workspace_dir),
                 "model": self.adapter.runtime.model,
+                "effective_model": effective_model if effective_model != "unknown" else None,
                 "context_limit": self.adapter.runtime.context_limit,
                 "running_tasks": len(running),
             }

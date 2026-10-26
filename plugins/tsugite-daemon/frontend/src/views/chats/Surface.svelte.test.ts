@@ -25,6 +25,7 @@ function roster(...names: string[]) {
         model: null,
         context_limit: null,
         running_tasks: 0,
+        effective_model: null,
       }
     : null;
 }

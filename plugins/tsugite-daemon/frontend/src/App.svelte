@@ -74,6 +74,7 @@
   import CollapsedRail from '$lib/shell/CollapsedRail.svelte';
   import TokenPane from '$lib/shell/TokenPane.svelte';
   import SettingsDrawer from '$lib/shell/SettingsDrawer.svelte';
+  import Welcome from '$lib/shell/Welcome.svelte';
   import Mux from '$lib/shell/mux/Mux.svelte';
   import Palette from '$lib/components/palette/Palette.svelte';
   import HelpOverlay from '$lib/components/overlays/HelpOverlay.svelte';
@@ -84,6 +85,7 @@
   let settingsOpen = $state(false);
   let paletteOpen = $state(false);
   let helpOpen = $state(false);
+  let welcomeOpen = $state(false);
 
   const activeView = $derived(viewById(shellView.activeViewId));
   // The view registry owns which region an id gets, so a plugin surface can ask
@@ -651,7 +653,15 @@
         {/if}
       </main>
     </div>
-    <SettingsDrawer open={settingsOpen} onclose={() => (settingsOpen = false)} />
+    <SettingsDrawer
+      open={settingsOpen}
+      onclose={() => (settingsOpen = false)}
+      onOpenWelcome={() => {
+        settingsOpen = false;
+        welcomeOpen = true;
+      }}
+    />
+    <Welcome bind:open={welcomeOpen} />
   </div>
 {/if}
 

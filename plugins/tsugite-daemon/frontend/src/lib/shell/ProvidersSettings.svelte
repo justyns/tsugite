@@ -1,3 +1,12 @@
+<script module lang="ts">
+  export interface ProviderStatus {
+    name: string;
+    binary: { default: string; configured: string | null; resolved: string | null } | null;
+    key: { env: string; secret: string; set: boolean; source: 'secret' | 'env' | null } | null;
+    error?: string;
+  }
+</script>
+
 <script lang="ts">
   import Field from '$lib/components/inputs/Field.svelte';
   import Input from '$lib/components/inputs/Input.svelte';
@@ -8,16 +17,17 @@
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { TESTID } from '$lib/testids';
 
-  interface ProviderStatus {
-    name: string;
-    binary: { default: string; configured: string | null; resolved: string | null } | null;
-    key: { env: string; secret: string; set: boolean; source: 'secret' | 'env' | null } | null;
-    error?: string;
-  }
+  let {
+    only,
+    providers = $bindable([]),
+  }: {
+    only?: string;
+    providers?: ProviderStatus[];
+  } = $props();
+
   type TestResult =
     { ok: true; model: string; reply: string } | { ok: false; model: string | null; error: string };
 
-  let providers = $state<ProviderStatus[]>([]);
   let loadError = $state<string | null>(null);
   let binaryDrafts = $state<Record<string, string>>({});
   let keyDrafts = $state<Record<string, string>>({});
@@ -117,12 +127,12 @@
   }
 </script>
 
-<p class="sub">Saved changes apply without restarting the daemon.</p>
+{#if only === undefined}<p class="sub">Saved changes apply without restarting the daemon.</p>{/if}
 {#if loadError}
   <p class="err" role="alert">{loadError}</p>
 {/if}
 <div class="provs">
-  {#each providers as p (p.name)}
+  {#each only === undefined ? providers : providers.filter((p) => p.name === only) as p (p.name)}
     {@const st = status(p)}
     {@const result = results[p.name]}
     <div class="prov" data-testid={TESTID.settingsProvider(p.name)}>

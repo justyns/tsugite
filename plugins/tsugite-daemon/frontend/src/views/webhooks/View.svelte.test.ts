@@ -19,6 +19,7 @@ function agent(name: string): RuntimeInfo {
     model: null,
     context_limit: null,
     running_tasks: 0,
+    effective_model: null,
   };
 }
 
@@ -49,6 +50,7 @@ test('shows the empty state, with the single New webhook action in the header', 
     model: null,
     context_limit: null,
     running_tasks: 0,
+    effective_model: null,
   };
   await render(View, {});
   await expect.element(page.getByText('No webhooks yet')).toBeVisible();
@@ -91,6 +93,7 @@ test('create: validates the source client-side before calling the store', async 
     model: null,
     context_limit: null,
     running_tasks: 0,
+    effective_model: null,
   };
   const createSpy = vi.spyOn(webhooks, 'create');
   await render(View, {});
@@ -117,6 +120,7 @@ test('create: a valid submit calls the store with the source, then closes', asyn
     model: null,
     context_limit: null,
     running_tasks: 0,
+    effective_model: null,
   };
   vi.spyOn(webhooks, 'create').mockResolvedValue(hook({ source: 'gh-events' }));
   await render(View, {});
@@ -140,6 +144,7 @@ test('create: a store rejection surfaces inline and leaves the modal open', asyn
     model: null,
     context_limit: null,
     running_tasks: 0,
+    effective_model: null,
   };
   vi.spyOn(webhooks, 'create').mockRejectedValue(new Error('source already exists'));
   await render(View, {});

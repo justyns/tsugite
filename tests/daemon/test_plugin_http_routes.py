@@ -74,7 +74,9 @@ def test_token(token_store):
 def server(tmp_path, token_store):
     return HTTPServer(
         config=HTTPConfig(enabled=True, host="127.0.0.1", port=8374),
-        adapter=SimpleNamespace(runtime=RuntimeDefaults(workspace_dir=tmp_path, agent_file="default")),
+        adapter=SimpleNamespace(
+            runtime=RuntimeDefaults(workspace_dir=tmp_path, agent_file="default"), resolve_model=lambda: "unknown"
+        ),
         webhook_store=WebhookStore(tmp_path / "webhooks.json"),
         token_store=token_store,
     )

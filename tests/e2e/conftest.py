@@ -24,6 +24,18 @@ def _free_port():
         return s.getsockname()[1]
 
 
+@pytest.fixture
+def context(browser, context):
+    """Every page starts with the first-run welcome dismissed.
+
+    ``browser`` is requested so it launches before the autouse fixture that moves HOME.
+    """
+    context.add_init_script(
+        "if (location.origin !== 'null') localStorage.setItem('tsugite_welcome_dismissed', 'true');"
+    )
+    return context
+
+
 @pytest.fixture(scope="session")
 def e2e_tmp(tmp_path_factory):
     return tmp_path_factory.mktemp("e2e")

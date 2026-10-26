@@ -30,6 +30,7 @@ export const TESTID = {
   /** Per-provider auto-attach toggle in Settings → Context (keyed by provider). */
   settingsContextAutoattach: (key: string) => `settings-context-autoattach-${key}`,
   settingsProvider: (name: string) => `settings-provider-${name}`,
+  welcome: 'welcome',
   skillsDrawer: 'skills-drawer',
   viewHost: 'view-host',
   tokenInput: 'token-input',

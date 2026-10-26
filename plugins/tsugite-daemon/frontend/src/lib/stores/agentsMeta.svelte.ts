@@ -10,6 +10,8 @@ export interface RuntimeInfo {
   agent_file: string;
   workspace_dir: string;
   model: string | null;
+  /** The model new chats use: the daemon default, else the agent file's, else the global config's. */
+  effective_model: string | null;
   context_limit: number | null;
   running_tasks: number;
 }

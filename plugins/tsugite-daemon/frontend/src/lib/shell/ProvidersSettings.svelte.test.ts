@@ -133,3 +133,11 @@ test('Test shows the error text from a failed request', async () => {
     .element(row('openai').getByRole('status'))
     .toHaveTextContent('gpt-5-nano: 401 invalid api key');
 });
+
+test('an empty filter shows no rows', async () => {
+  await render(ProvidersSettings, { only: '' });
+  await vi.waitFor(() => expect(api.get).toHaveBeenCalled());
+  await new Promise((resolve) => setTimeout(resolve));
+  expect(row('claude_code').query()).toBeNull();
+  expect(page.getByText('Saved changes apply without restarting the daemon.').query()).toBeNull();
+});

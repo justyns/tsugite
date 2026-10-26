@@ -15,6 +15,7 @@
   import { auth } from '$lib/stores/auth.svelte';
   import { togglePush } from '$lib/push';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
+  import { messageOf } from '$lib/errors';
   import { contextProviders } from '$lib/context/contextProviders';
   import { autoAttachStore } from '$lib/stores/autoAttach.svelte';
   import { expandThinking } from '$lib/stores/expandThinking.svelte';
@@ -22,13 +23,23 @@
   import { autoFollow } from '$lib/stores/autoFollow.svelte';
   import { TESTID } from '$lib/testids';
 
-  let { open = false, onclose }: { open?: boolean; onclose: () => void } = $props();
+  let {
+    open = false,
+    onclose,
+    onOpenWelcome,
+  }: { open?: boolean; onclose: () => void; onOpenWelcome: () => void } = $props();
 
   // Context providers that offer a per-device "auto-attach to every send" toggle.
   const autoAttachProviders = contextProviders.filter((p) => p.autoAttachStoreKey);
 
   let tokenDraft = $state(auth.token);
   let userIdDraft = $state(auth.userId);
+
+  $effect(() => {
+    if (!open) return;
+    tokenDraft = auth.token;
+    userIdDraft = auth.userId;
+  });
 
   function commitCredentials(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -62,7 +73,7 @@
       pushSubscribed = await togglePush(pushSubscribed);
       toasts.push('ok', pushSubscribed ? 'Notifications enabled' : 'Notifications disabled');
     } catch (err) {
-      toasts.push('err', 'Notification toggle failed', { body: (err as Error).message });
+      toasts.push('err', 'Notification toggle failed', { body: messageOf(err) });
     } finally {
       pushBusy = false;
     }
@@ -84,7 +95,7 @@
         body: [changes || 'no changes', restart].filter(Boolean).join(' — '),
       });
     } catch (err) {
-      toasts.push('err', 'Config reload failed', { body: (err as Error).message });
+      toasts.push('err', 'Config reload failed', { body: messageOf(err) });
     } finally {
       reloading = false;
     }
@@ -216,6 +227,13 @@
 
       <section class="d-sec">
         <h4>Daemon</h4>
+        <div class="d-toggle">
+          <Button onclick={onOpenWelcome}>Open welcome</Button>
+          <div class="d-toggle-lb">
+            <span class="tt">Welcome</span>
+            <span class="sub">Pick the default model, your user ID and a theme.</span>
+          </div>
+        </div>
         <div class="d-toggle">
           <Button loading={reloading} onclick={onReloadConfig}>Reload config</Button>
           <div class="d-toggle-lb">
