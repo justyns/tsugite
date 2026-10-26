@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, screen, shell } 
 const path = require('node:path');
 const { desktopDirs, ensureConfig } = require('./config');
 const { Daemon, killStale, waitForHealth } = require('./daemon');
+const { daemonEnv } = require('./env');
 const { daemonItems } = require('./menu');
 const { RotatingLog } = require('./log');
 const { resolveRuntime } = require('./runtime');
@@ -25,12 +26,6 @@ let remoteWin = null;
 let supervisor;
 let localTokenStore;
 let onBeforeQuit = () => {};
-
-function daemonEnv() {
-  const env = { ...process.env };
-  if (process.platform === 'darwin') env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH || '/usr/bin:/bin'}`;
-  return env;
-}
 
 function visibleBounds(bounds) {
   const fits = screen.getAllDisplays().some(({ workArea: a }) => bounds.x >= a.x && bounds.y >= a.y && bounds.x < a.x + a.width && bounds.y < a.y + a.height);
@@ -100,7 +95,9 @@ async function connect({ adopt, superseded }) {
   const { url, workspaceDir } = await ensureConfig({ userData });
   const runtime = resolveRuntime({ resourcesPath: process.resourcesPath, isPackaged: app.isPackaged });
   log.write(Buffer.from(`\n--- starting daemon via ${runtime.source} at ${url} ---\n`));
-  const daemon = new Daemon({ runtime, configPath, url, log, pidFile, env: daemonEnv(), cwd: workspaceDir });
+  const env = await daemonEnv({ log: (msg) => log.write(Buffer.from(`${msg}\n`)) });
+  if (superseded()) throw new Error('Launch superseded');
+  const daemon = new Daemon({ runtime, configPath, url, log, pidFile, env, cwd: workspaceDir });
   adopt(daemon);
   await daemon.start();
   if (superseded()) throw new Error('Launch superseded');

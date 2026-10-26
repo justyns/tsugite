@@ -171,7 +171,10 @@ class ClaudeCodeProcess:
             RuntimeError: If claude CLI is not found or fails to start
         """
         if not shutil.which("claude"):
-            raise RuntimeError("Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code")
+            raise RuntimeError(
+                f"Claude Code CLI not found on PATH ({os.environ.get('PATH', '')}). "
+                "Install it with: npm install -g @anthropic-ai/claude-code"
+            )
 
         # Write system prompt to temp file
         fd, self._system_prompt_file = tempfile.mkstemp(suffix=".txt", prefix="tsugite_sysprompt_")
