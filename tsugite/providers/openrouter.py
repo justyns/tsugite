@@ -59,11 +59,10 @@ class OpenRouterProvider(OpenAICompatProvider):
 
 
 def create_provider(name: str = "openrouter", **kwargs: Any) -> OpenRouterProvider:
-    import os
-
     return OpenRouterProvider(
         name=name,
         api_base=kwargs.get("api_base") or "https://openrouter.ai/api/v1",
-        api_key=kwargs.get("api_key") or os.getenv("OPENROUTER_API_KEY"),
+        api_key=kwargs.get("api_key"),
         extra_headers=kwargs.get("extra_headers", {}),
+        api_key_env="OPENROUTER_API_KEY",
     )

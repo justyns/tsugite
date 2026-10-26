@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Any, AsyncIterator
 
@@ -13,7 +12,7 @@ import httpx
 
 from tsugite.user_agent import set_user_agent_header
 
-from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
+from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens, resolve_api_key
 from .model_registry import calculate_cost, register_models
 from .model_registry import get_model_info as _get_model_info
 
@@ -63,9 +62,11 @@ _ANTHROPIC_MODELS: dict[str, ModelInfo] = {
 class AnthropicProvider:
     """Provider for the Anthropic Messages API."""
 
+    api_key_env = "ANTHROPIC_API_KEY"
+
     def __init__(self, name: str = "anthropic", api_key: str | None = None, api_base: str | None = None):
         self.name = name
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = api_key
         self.api_base = (api_base or API_BASE).rstrip("/")
         self._client: httpx.AsyncClient | None = None
         self._client_loop = None
@@ -92,8 +93,9 @@ class AnthropicProvider:
             "anthropic-version": API_VERSION,
         }
         set_user_agent_header(headers)
-        if self.api_key:
-            headers["x-api-key"] = self.api_key
+        api_key = self.api_key or resolve_api_key(self.api_key_env)
+        if api_key:
+            headers["x-api-key"] = api_key
         return headers
 
     async def acompletion(

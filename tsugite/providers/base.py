@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import logging
+import os
+import shutil
+import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
 _O200K_PREFIXES = ("gpt-4o", "o1", "o3", "o4", "chatgpt-4o")
 _tiktoken_cache: dict[str, Any] = {}
+API_KEY_CACHE_TTL_SECONDS = 60
+_secret_api_keys: dict[str, tuple[float, str | None]] = {}
+_backend_errors_logged: set[str] = set()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -100,3 +109,42 @@ def default_count_tokens(text: str, model: str) -> int:
         return len(_tiktoken_cache[encoding_name].encode(text))
     except Exception:
         return len(text) // 4
+
+
+def api_key_secret_name(env_var: str) -> str:
+    """Secrets-backend name for the key read from ``env_var``."""
+    return env_var.lower().replace("_", "-")
+
+
+def resolve_api_key(env_var: str) -> str | None:
+    """Key from the secrets backend, else ``env_var``. Backend lookups are cached for ``API_KEY_CACHE_TTL_SECONDS``."""
+    now = time.monotonic()
+    cached = _secret_api_keys.get(env_var)
+    if cached is None or now - cached[0] >= API_KEY_CACHE_TTL_SECONDS:
+        from tsugite.secrets import get_backend
+
+        try:
+            _secret_api_keys[env_var] = (now, get_backend().get(api_key_secret_name(env_var)))
+        except Exception as e:
+            if env_var not in _backend_errors_logged:
+                _backend_errors_logged.add(env_var)
+                logger.warning("Secrets backend failed reading the key for %s, using the env var: %s", env_var, e)
+            return os.getenv(env_var)
+    return _secret_api_keys[env_var][1] or os.getenv(env_var)
+
+
+def invalidate_api_key_cache() -> None:
+    _secret_api_keys.clear()
+    _backend_errors_logged.clear()
+
+
+def configured_binary(provider: str) -> str | None:
+    from tsugite.config import load_config
+
+    return load_config().plugins.get(provider, {}).get("binary") or None
+
+
+def resolve_binary(provider: str, default: str) -> str | None:
+    """Path of a CLI provider's executable from config ``plugins.<provider>.binary``, else ``default`` on PATH."""
+    configured = configured_binary(provider)
+    return shutil.which(os.path.expanduser(configured) if configured else default)

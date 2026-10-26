@@ -17,6 +17,7 @@
   } from '$lib/components/connstates/SetSecretModal.svelte';
   import Scrim from '$lib/components/overlays/Scrim.svelte';
   import Modal from '$lib/components/overlays/Modal.svelte';
+  import { messageOf } from '$lib/errors';
 
   $effect(() => {
     secrets.load();
@@ -31,10 +32,6 @@
   const rows = $derived<SecretRow[]>(
     secrets.names.map((name) => ({ name, provenance: '', scope: 'global' })),
   );
-
-  function messageOf(err: unknown): string {
-    return err instanceof Error ? err.message : String(err);
-  }
 
   function openAdd() {
     setModal = { mode: 'add' };

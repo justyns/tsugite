@@ -4,6 +4,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from tsugite.providers.base import invalidate_api_key_cache
 from tsugite_daemon.adapters.http.helpers import mounted_api_routes
 
 
@@ -42,6 +43,7 @@ class SecretsMixin:
             get_backend().set(name, value)
         except NotImplementedError:
             return JSONResponse({"error": "backend does not support writing"}, status_code=400)
+        invalidate_api_key_cache()
         return JSONResponse({"status": "ok", "name": name})
 
     async def _secrets_delete(self, request: Request) -> JSONResponse:
@@ -54,6 +56,7 @@ class SecretsMixin:
             deleted = get_backend().delete(name)
         except NotImplementedError:
             return JSONResponse({"error": "backend does not support deletion"}, status_code=400)
+        invalidate_api_key_cache()
         if not deleted:
             return JSONResponse({"error": "secret not found"}, status_code=404)
         return JSONResponse({"status": "ok", "name": name})

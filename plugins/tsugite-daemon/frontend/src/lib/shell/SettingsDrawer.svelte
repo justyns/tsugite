@@ -10,6 +10,7 @@
   import Switch from '$lib/components/inputs/Switch.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import ThemeSeg from './ThemeSeg.svelte';
+  import ProvidersSettings from './ProvidersSettings.svelte';
   import { api } from '$lib/api/client';
   import { auth } from '$lib/stores/auth.svelte';
   import { togglePush } from '$lib/push';
@@ -206,6 +207,11 @@
             <span class="sub">Job answers and completions arrive as web-push alerts.</span>
           </div>
         </div>
+      </section>
+
+      <section class="d-sec">
+        <h4>Providers</h4>
+        {#if open}<ProvidersSettings />{/if}
       </section>
 
       <section class="d-sec">

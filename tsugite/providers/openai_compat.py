@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import Any, AsyncIterator
 
 import httpx
 
 from tsugite.user_agent import set_user_agent_header
 
-from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens
+from .base import CompletionResponse, ModelInfo, StreamChunk, Usage, default_count_tokens, resolve_api_key
 from .model_registry import calculate_cost, register_models
 from .model_registry import get_model_info as _get_model_info
 
@@ -122,10 +121,12 @@ class OpenAICompatProvider:
         api_base: str,
         api_key: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        api_key_env: str | None = None,
     ):
         self.name = name
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
+        self.api_key_env = api_key_env
         self.extra_headers = extra_headers or {}
         self._client: httpx.AsyncClient | None = None
         self._client_loop = None
@@ -148,8 +149,9 @@ class OpenAICompatProvider:
         headers: dict[str, str] = {"Content-Type": "application/json"}
         set_user_agent_header(headers)
         headers.update(self.extra_headers)
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+        api_key = self.api_key or (resolve_api_key(self.api_key_env) if self.api_key_env else None)
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
     async def acompletion(
@@ -282,16 +284,12 @@ def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider
 
     api_base = kwargs.get("api_base") or config.get("api_base") or "https://api.openai.com/v1"
 
-    api_key = kwargs.get("api_key")
-    if not api_key:
-        env_key = config.get("api_key_env")
-        api_key = os.getenv(env_key) if env_key else None
-
     extra_headers = {**config.get("extra_headers", {}), **kwargs.get("extra_headers", {})}
 
     return OpenAICompatProvider(
         name=name,
         api_base=api_base,
-        api_key=api_key,
+        api_key=kwargs.get("api_key"),
         extra_headers=extra_headers,
+        api_key_env=config.get("api_key_env"),
     )

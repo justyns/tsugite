@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import tempfile
 import time
 import uuid
@@ -19,6 +18,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from tsugite.cli.helpers import get_workspace_dir
+from tsugite.providers.base import configured_binary, resolve_binary
 from tsugite_claude_code.usage import record_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -170,10 +170,12 @@ class ClaudeCodeProcess:
         Raises:
             RuntimeError: If claude CLI is not found or fails to start
         """
-        if not shutil.which("claude"):
+        binary = resolve_binary("claude_code", "claude")
+        if not binary:
+            looked = configured_binary("claude_code") or f"claude on PATH: {os.environ.get('PATH', '')}"
             raise RuntimeError(
-                f"Claude Code CLI not found on PATH ({os.environ.get('PATH', '')}). "
-                "Install it with: npm install -g @anthropic-ai/claude-code"
+                f"Claude Code CLI not found ({looked}). Install it with `npm install -g @anthropic-ai/claude-code` "
+                "or set plugins.claude_code.binary in config.json (Settings > Providers in the web UI)."
             )
 
         # Write system prompt to temp file
@@ -182,7 +184,7 @@ class ClaudeCodeProcess:
             f.write(system_prompt)
 
         cmd = [
-            "claude",
+            binary,
             "--print",
             "--input-format",
             "stream-json",

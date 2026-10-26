@@ -1752,3 +1752,39 @@ class TestClaudeCodeStallWarning:
 
         monkeypatch.setenv("TSUGITE_CLAUDE_CODE_STALL_WARN_SECONDS", "12.5")
         assert ClaudeCodeProcess()._stall_warn_seconds == 12.5
+
+
+@pytest.fixture
+def claude_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config = tmp_path / "config" / "tsugite" / "config.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config.parent.parent))
+    return config
+
+
+@pytest.mark.asyncio
+async def test_start_launches_the_configured_binary(tmp_path, claude_config):
+    from tsugite_claude_code.process import ClaudeCodeProcess
+
+    binary = tmp_path / "claude-custom"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    claude_config.write_text(json.dumps({"plugins": {"claude_code": {"binary": str(binary)}}}))
+
+    process = ClaudeCodeProcess()
+    mock_proc = TestClaudeCodeProcess()._mock_proc()
+    with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+        await process.start(model="sonnet", system_prompt="test")
+    assert mock_exec.call_args[0][0] == str(binary)
+    await process.stop()
+
+
+@pytest.mark.asyncio
+async def test_missing_binary_error_points_at_the_setting(tmp_path, claude_config):
+    from tsugite_claude_code.process import ClaudeCodeProcess
+
+    claude_config.write_text(json.dumps({"plugins": {"claude_code": {"binary": str(tmp_path / "nope")}}}))
+    with pytest.raises(RuntimeError, match=r"nope.*Settings > Providers"):
+        await ClaudeCodeProcess().start(model="sonnet", system_prompt="test")

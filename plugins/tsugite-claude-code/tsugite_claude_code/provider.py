@@ -97,6 +97,7 @@ class ClaudeCodeProvider:
 
     cacheable = False
     models_are_definitive = True  # CLI exposes a fixed model set; unlisted ids are typos
+    binary = "claude"
 
     def __init__(self, name: str = "claude_code"):
         self.name = name

@@ -21,6 +21,7 @@ from tsugite_daemon.adapters.http.helpers import (
 from tsugite_daemon.adapters.http.hooks_config import HooksConfigMixin
 from tsugite_daemon.adapters.http.introspection import IntrospectionMixin
 from tsugite_daemon.adapters.http.jobs import JobsMixin
+from tsugite_daemon.adapters.http.providers import ProvidersMixin
 from tsugite_daemon.adapters.http.push import PushMixin
 from tsugite_daemon.adapters.http.rooms import RoomsMixin
 from tsugite_daemon.adapters.http.schedules import SchedulesMixin
@@ -56,6 +57,7 @@ class HTTPServer(
     FilesMixin,
     PushMixin,
     SecretsMixin,
+    ProvidersMixin,
     UsageMixin,
     ActivityMixin,
     IntrospectionMixin,
@@ -203,6 +205,7 @@ class HTTPServer(
             *self._file_routes(),
             *self._push_routes(),
             *self._secrets_routes(),
+            *self._providers_routes(),
             *self._usage_routes(),
             *self._activity_routes(),
             *self._introspection_routes(),
