@@ -307,6 +307,16 @@ def _build_bare_python_notice_xml() -> str:
     )
 
 
+def _build_missing_exec_fence_notice_xml() -> str:
+    """Model-visible correction for a scheduled run's reply that has no executable block."""
+    return (
+        "\n<tsugite_missing_exec_fence_notice>"
+        "Your response contained no ```python-exec block and no code has run. "
+        "If it was meant to run, re-emit it as exactly one ```python-exec block."
+        "</tsugite_missing_exec_fence_notice>"
+    )
+
+
 @dataclass
 class ParsedResponse:
     """Result from parsing an LLM response."""
@@ -496,6 +506,7 @@ class TsugiteAgent:
         turn_num = 0
         cancelled = False
         corrected_tool_call_markup = False
+        corrected_missing_fence = False
         unexecuted_tool_call_run = False
         executed_code = False
 
@@ -617,10 +628,18 @@ class TsugiteAgent:
                     # it wasn't executed. Nudge it toward the exec fence for next turn.
                     if turn.has_bare_python:
                         trailing_notice += _build_bare_python_notice_xml()
-                    # Correct the model once rather than accept a fabricated summary.
                     unexecuted_tool_call = _has_tool_call_markup(last_response_text)
                     if unexecuted_tool_call:
                         trailing_notice += _build_unexecuted_tool_call_notice_xml()
+                    missing_fence = (
+                        self.expects_action
+                        and not executed_code
+                        and not unexecuted_tool_call
+                        and not corrected_missing_fence
+                        and turn_num + 1 < self.max_turns
+                    )
+                    if missing_fence:
+                        trailing_notice += _build_missing_exec_fence_notice_xml()
                     self.memory.add_step(
                         thought=thought,
                         code="",
@@ -644,6 +663,20 @@ class TsugiteAgent:
                                 )
                             )
                         continue
+                    if missing_fence:
+                        corrected_missing_fence = True
+                        if self.event_bus:
+                            self.event_bus.emit(
+                                WarningEvent(
+                                    message=(
+                                        "Response had no python-exec block and nothing has run; "
+                                        "asking the model to re-emit it as a python-exec block."
+                                    ),
+                                    category="missing_exec_fence",
+                                    step=turn_num + 1,
+                                )
+                            )
+                        continue
                     unexecuted_tool_call_run = unexecuted_tool_call
                     final_value = last_response_text
                     break
@@ -662,6 +695,7 @@ class TsugiteAgent:
                 # `code` is the raw LLM string; never substitute an escaped observation (that's model input, not exec input).
                 exec_result = await self.executor.execute(code)
                 executed_code = True
+                corrected_tool_call_markup = False
                 exec_duration_ms = int((time.perf_counter() - exec_start) * 1000)
 
                 self._record_code_execution(

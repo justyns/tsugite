@@ -215,3 +215,37 @@ async def test_a_non_empty_envelope_still_gets_the_correction(storage):
     await agent.run("say hello")
 
     assert mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_markup_after_executed_code_is_corrected_again(storage):
+    agent = _agent(storage, max_turns=6)
+    mock = _patch(
+        agent,
+        side_effect=[
+            _resp(TOOL_CALL_REPLY),
+            _resp('```python-exec\nprint("checked")\n```'),
+            _resp(TOOL_CALL_REPLY),
+            _resp('```python-exec\nreturn_value("done")\n```'),
+        ],
+    )
+
+    result = await agent.run("commit anything outstanding")
+
+    assert mock.await_count == 4
+    assert result == "done"
+    assert _end_status(storage) == "success"
+
+
+@pytest.mark.asyncio
+async def test_markup_after_code_gets_one_re_ask_then_errors(storage):
+    agent = _agent(storage, max_turns=6)
+    mock = _patch(
+        agent,
+        side_effect=[_resp('```python-exec\nprint("checked")\n```'), _resp(TOOL_CALL_REPLY), _resp(TOOL_CALL_REPLY)],
+    )
+
+    await agent.run("commit anything outstanding")
+
+    assert mock.await_count == 3
+    assert _end_status(storage) == "error"

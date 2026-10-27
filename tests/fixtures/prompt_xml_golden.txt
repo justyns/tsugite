@@ -231,3 +231,7 @@ This skill will auto-unload in 2 turn(s) unless referenced. Call load_skill("fad
 ======== agent/bare-python
 
 <tsugite_bare_python_notice>Your response contained a ```python block. Bare ```python blocks are shown but NOT executed. If you meant to run that code, re-emit it as a ```python-exec block.</tsugite_bare_python_notice>
+
+======== agent/missing-exec-fence
+
+<tsugite_missing_exec_fence_notice>Your response contained no ```python-exec block and no code has run. If it was meant to run, re-emit it as exactly one ```python-exec block.</tsugite_missing_exec_fence_notice>

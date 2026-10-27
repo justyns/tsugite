@@ -13,10 +13,10 @@ from tsugite.history import get_history_backend
 from tsugite.providers.base import CompletionResponse, Usage
 
 
-def _agent(replies: list[str], **kwargs):
+def _agent(replies: list[str], max_turns: int = 5, **kwargs):
     storage = get_history_backend().create(agent_name="t", model="openai:gpt-4o-mini")
     agent = TsugiteAgent(
-        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=5, storage=storage, **kwargs
+        model_string="openai:gpt-4o-mini", tools=[], instructions="", max_turns=max_turns, storage=storage, **kwargs
     )
     agent._provider = MagicMock()
     agent._provider.acompletion = AsyncMock(
@@ -38,7 +38,7 @@ PROSE = "I'm sorry, but I couldn't complete the check in this run."
 
 @pytest.mark.asyncio
 async def test_scheduled_run_that_executes_nothing_ends_no_action():
-    agent, storage = _agent([PROSE], expects_action=True)
+    agent, storage = _agent([PROSE, PROSE], expects_action=True)
 
     result = await agent.run("weekly review", return_full_result=True)
 
@@ -75,3 +75,58 @@ async def test_interactive_prose_answer_is_success():
     await agent.run("what is 2+2?")
 
     assert _end(storage)["status"] == "success"
+
+
+UNFENCED = 'import json\nrun_out = run(command="git status")\nprint(json.dumps(run_out))'
+FENCED = '```python-exec\nreturn_value("done")\n```'
+
+
+@pytest.mark.asyncio
+async def test_unfenced_python_is_re_asked_then_executes():
+    agent, storage = _agent([UNFENCED, FENCED], expects_action=True)
+
+    await agent.run("weekly review")
+
+    assert agent._provider.acompletion.await_count == 2
+    notice = agent._provider.acompletion.await_args_list[1].kwargs["messages"][-1]["content"]
+    assert "python-exec" in notice
+    assert _end(storage)["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_two_unfenced_replies_end_no_action_after_one_re_ask():
+    agent, storage = _agent([UNFENCED, UNFENCED], expects_action=True)
+
+    await agent.run("weekly review")
+
+    assert agent._provider.acompletion.await_count == 2
+    assert _end(storage)["status"] == "no_action"
+
+
+@pytest.mark.asyncio
+async def test_last_turn_prose_is_not_re_asked():
+    agent, storage = _agent([PROSE], max_turns=1, expects_action=True)
+
+    await agent.run("weekly review")
+
+    assert agent._provider.acompletion.await_count == 1
+    assert _end(storage)["status"] == "no_action"
+
+
+@pytest.mark.asyncio
+async def test_prose_after_executed_code_is_not_re_asked():
+    agent, storage = _agent(['```python-exec\nprint("checked")\n```', UNFENCED], expects_action=True)
+
+    await agent.run("weekly review")
+
+    assert agent._provider.acompletion.await_count == 2
+    assert _end(storage)["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_interactive_prose_is_not_re_asked():
+    agent, _ = _agent([UNFENCED])
+
+    await agent.run("what is 2+2?")
+
+    assert agent._provider.acompletion.await_count == 1

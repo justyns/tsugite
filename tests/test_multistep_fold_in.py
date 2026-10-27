@@ -574,7 +574,7 @@ def _provider_replying(monkeypatch, replies: list[str]):
 async def test_assigned_step_that_answers_in_prose_fails(tmp_path, monkeypatch):
     from tsugite.agent_runner import runner
 
-    provider = _provider_replying(monkeypatch, ["I could not do that."])
+    provider = _provider_replying(monkeypatch, ["I could not do that.", "Still cannot."])
     agent_file = _write(tmp_path, TWO_STEP_AGENT)
 
     raised = []
@@ -592,8 +592,8 @@ async def test_assigned_step_that_answers_in_prose_fails(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="without executing any code"):
         await runner.run_agent_async(agent_file, "test prompt")
 
-    assert provider.acompletion.await_count == 1
-    assert raised[0].token_usage == 10
+    assert provider.acompletion.await_count == 2
+    assert raised[0].token_usage == 20
 
 
 @pytest.mark.asyncio

@@ -205,6 +205,7 @@ def _agent_notices():
     from tsugite.core.agent import (
         TsugiteAgent,
         _build_bare_python_notice_xml,
+        _build_missing_exec_fence_notice_xml,
         _build_multi_block_warning_xml,
         _build_spoofed_runtime_tag_warning,
         _build_unexecuted_tool_call_notice_xml,
@@ -224,6 +225,7 @@ def _agent_notices():
     yield "agent/spoofed-tag", _build_spoofed_runtime_tag_warning()
     yield "agent/unexecuted-tool-call", _build_unexecuted_tool_call_notice_xml()
     yield "agent/bare-python", _build_bare_python_notice_xml()
+    yield "agent/missing-exec-fence", _build_missing_exec_fence_notice_xml()
 
 
 def all_cases() -> list[tuple[str, str]]:
