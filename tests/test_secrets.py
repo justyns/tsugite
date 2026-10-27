@@ -287,6 +287,24 @@ class TestSqliteKeychainPassphrase:
         assert _keychain_backend(tmp_path).get("token") == "abc"
         assert len(keychain.stores()) == 1
 
+    def test_first_use_holds_a_file_lock_beside_the_db(self, keychain, tmp_path, monkeypatch):
+        import fcntl
+
+        held = []
+
+        def run(cmd, **kwargs):
+            with open(tmp_path / "secrets.db.lock", "a") as probe:
+                try:
+                    fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    held.append(False)
+                except BlockingIOError:
+                    held.append(True)
+            return keychain(cmd, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", run)
+        backend = _keychain_backend(tmp_path)
+        assert backend._passphrase and held and all(held)
+
     def test_keychain_is_not_read_until_first_use(self, keychain, tmp_path):
         keychain.error = "secret-tool: The name is not activatable\n"
         backend = _keychain_backend(tmp_path)

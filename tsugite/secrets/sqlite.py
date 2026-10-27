@@ -75,6 +75,14 @@ class SqliteSecretBackend:
             return self._passphrase_value
 
     def _keychain_passphrase(self) -> str:
+        import fcntl
+
+        self._db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with open(self._db_path.with_name(self._db_path.name + ".lock"), "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            return self._lookup_or_create_key()
+
+    def _lookup_or_create_key(self) -> str:
         account = self._keychain_account
         key = _keychain_lookup(account)
         if key:
