@@ -7,7 +7,13 @@
   }
   export interface TokenBreakdown {
     categories: BreakdownCategory[];
+    /** Provider-billed context of the last call. An estimate when `estimated` is set. */
     total: number;
+    estimated?: boolean;
+    /** Billed total minus the categories' estimate. */
+    unaccounted?: number;
+    cache_read?: number;
+    cache_creation?: number;
   }
 </script>
 
@@ -114,7 +120,7 @@
             <span class="ctx-ttl">context breakdown</span>
             {#if staleness}<span class="ctx-stale">{staleness}</span>{/if}
           </div>
-          <span class="ctx-total">{formatTokens(total)}</span>
+          <span class="ctx-total">{breakdown.estimated ? '~' : ''}{formatTokens(total)}</span>
         </div>
         <div class="ctx-rows">
           {#each cats as c (c.name)}
@@ -126,6 +132,24 @@
               <span class="ctx-tok">{formatTokens(c.tokens)}</span>
             </div>
           {/each}
+          {#if breakdown.unaccounted && breakdown.unaccounted > 0}
+            <div class="ctx-row">
+              <span class="ctx-name">unaccounted</span>
+              <span class="ctx-bar"><i style="--w:{share(breakdown.unaccounted)}%"></i></span>
+              <span class="ctx-tok">{formatTokens(breakdown.unaccounted)}</span>
+            </div>
+          {/if}
+          {#if breakdown.cache_read || breakdown.cache_creation}
+            <div class="ctx-row">
+              <span class="ctx-name">cache read / write</span>
+              <span></span>
+              <span class="ctx-tok"
+                >{formatTokens(breakdown.cache_read ?? 0)} / {formatTokens(
+                  breakdown.cache_creation ?? 0,
+                )}</span
+              >
+            </div>
+          {/if}
         </div>
         <div class="ctx-ft">
           <span>last prompt · ~{windowPct}% of {formatTokens(max)} window</span>

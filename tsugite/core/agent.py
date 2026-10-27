@@ -457,6 +457,9 @@ class TsugiteAgent:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.last_input_tokens = 0
+        self._last_cache_read = 0
+        self._last_cache_creation = 0
+        self._last_breakdown: Dict = {}
         self.cache_creation_tokens = 0
         self.cache_read_tokens = 0
         self._previous_turn_had_error = False
@@ -1012,6 +1015,8 @@ class TsugiteAgent:
         parsed = self._parse_response_from_text(response.content)
 
         step_cost = self._accumulate_usage(response.usage, response.cost)
+        if response.usage and self._last_breakdown:
+            self._emit_prompt_snapshot([], turn_num, self._with_billed_total(self._last_breakdown))
 
         if response.reasoning_content:
             self.memory.add_reasoning(response.reasoning_content)
@@ -1061,10 +1066,31 @@ class TsugiteAgent:
         along so the inspector can show how current the breakdown is.
         """
         breakdown = self._safe_token_breakdown(messages)
+        self._last_breakdown = breakdown
+        self._emit_prompt_snapshot(messages, turn_num, self._with_billed_total(breakdown))
+
+    def _emit_prompt_snapshot(self, messages, turn_num: int, breakdown: Dict) -> None:
         if breakdown and self.storage:
             self.storage.record("prompt_snapshot", token_breakdown=breakdown, turn=turn_num)
         if self.event_bus:
             self.event_bus.emit(PromptSnapshotEvent(messages=messages, token_breakdown=breakdown))
+
+    def _with_billed_total(self, breakdown: Dict) -> Dict:
+        """Set the total to the last call's billed context (prompt + cache read + cache write).
+
+        Before any call has reported usage the total stays the estimate and is marked `estimated`.
+        """
+        if not breakdown:
+            return breakdown
+        if self.last_input_tokens <= 0:
+            return {**breakdown, "estimated": True}
+        return {
+            **breakdown,
+            "total": self.last_input_tokens,
+            "unaccounted": self.last_input_tokens - sum(c["tokens"] for c in breakdown["categories"]),
+            "cache_read": self._last_cache_read,
+            "cache_creation": self._last_cache_creation,
+        }
 
     def _record_model_request(self, messages, turn_num: int) -> None:
         if not self.storage:
@@ -1477,10 +1503,9 @@ class TsugiteAgent:
         self.total_tokens += usage.total_tokens
         self.prompt_tokens += usage.prompt_tokens
         self.completion_tokens += usage.completion_tokens
-        self.last_input_tokens = (
-            usage.prompt_tokens + (usage.cache_creation_input_tokens or 0) + (usage.cache_read_input_tokens or 0)
-        )
-        self.cache_creation_tokens += usage.cache_creation_input_tokens or 0
+        self._last_cache_creation = usage.cache_creation_input_tokens or 0
+        self.last_input_tokens = usage.prompt_tokens + self._last_cache_creation + (usage.cache_read_input_tokens or 0)
+        self.cache_creation_tokens += self._last_cache_creation
         # OpenAI-family providers (openai_compat, codex_cli) report cached prompt
         # reads on the unified `cached_tokens` field, not Anthropic's
         # cache_read_input_tokens. Prefer the explicit Anthropic read (Anthropic
@@ -1491,7 +1516,8 @@ class TsugiteAgent:
         cache_read = usage.cache_read_input_tokens
         if cache_read is None:
             cache_read = usage.cached_tokens
-        self.cache_read_tokens += cache_read or 0
+        self._last_cache_read = cache_read or 0
+        self.cache_read_tokens += self._last_cache_read
         if cost is not None:
             self.cost_reported = True
         self.total_cost += cost or 0.0

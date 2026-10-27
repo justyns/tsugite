@@ -184,7 +184,7 @@ class TestPromptSnapshotDurability:
 
         reqs = [e for e in storage.iter_events() if e.type == "model_request"]
         assert len(reqs) == 2
-        assert len(_snaps(storage)) == len(reqs)
+        assert len(_snaps(storage)) == 2 * len(reqs)
 
     @pytest.mark.asyncio
     async def test_breakdown_failure_never_crashes_the_turn(self, tmp_path: Path):
