@@ -8,13 +8,14 @@ import { untrack } from 'svelte';
 import { navigate, router } from '$lib/router.svelte';
 import { spaces } from '$lib/stores/spaces.svelte';
 import { views } from '../../views';
+import { SOLO_VIEW } from './solo';
 
 export function followSpaceNav(): () => void {
   return $effect.root(() => {
     $effect(() => {
       const view = router.view;
       untrack(() => {
-        if (view) spaces.setNav(spaces.activeSpaceId, view);
+        if (view && view !== SOLO_VIEW) spaces.setNav(spaces.activeSpaceId, view);
       });
     });
 

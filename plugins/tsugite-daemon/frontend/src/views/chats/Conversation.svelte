@@ -57,6 +57,7 @@
     ctrl,
     row,
     dense = false,
+    solo = false,
     fallbackContext = null,
     railCollapsed,
     onToggleRail,
@@ -72,6 +73,7 @@
     onUnpin,
     onSetPrimary,
     onCopyId,
+    soloLinks,
     onOpenSession,
     onRetry,
     onDismissAttention,
@@ -80,6 +82,7 @@
     row: SessionRow | null;
     /** Compact: a tighter header, and on a phone a single header row. */
     dense?: boolean;
+    solo?: boolean;
     /** Durable context truth (session record) for freshly loaded conversations -
      *  session_info frames are live-only, so replay alone never sets timeline.context. */
     fallbackContext?: { tokens: number; limit: number } | null;
@@ -98,6 +101,7 @@
     onUnpin: () => void;
     onSetPrimary: () => void;
     onCopyId: () => void;
+    soloLinks?: { open: () => void; copy: () => void };
     onOpenSession: (id: string) => void;
     onRetry: (text: string) => void;
     onDismissAttention: (deliveryId?: string) => void;
@@ -435,18 +439,20 @@
   aria-label="Conversation"
 >
   <header class="convo-hd" class:is-editing={editing === 'topic' || editing === 'alias'}>
-    <PhoneBack {onBack} label="Back to chats" />
-    <Button
-      variant="ghost"
-      size="sm"
-      iconOnly
-      aria-label={railCollapsed ? 'Show sessions' : 'Hide sessions'}
-      aria-pressed={!railCollapsed}
-      data-testid={TESTID.chatRailToggle}
-      onclick={onToggleRail}
-    >
-      {#snippet icon()}<Icon name="chat" />{/snippet}
-    </Button>
+    {#if !solo}
+      <PhoneBack {onBack} label="Back to chats" />
+      <Button
+        variant="ghost"
+        size="sm"
+        iconOnly
+        aria-label={railCollapsed ? 'Show sessions' : 'Hide sessions'}
+        aria-pressed={!railCollapsed}
+        data-testid={TESTID.chatRailToggle}
+        onclick={onToggleRail}
+      >
+        {#snippet icon()}<Icon name="chat" />{/snippet}
+      </Button>
+    {/if}
 
     {#if editing === 'title'}
       <!-- svelte-ignore a11y_autofocus -->
@@ -565,6 +571,7 @@
         {onUnpin}
         {onSetPrimary}
         {onCopyId}
+        {soloLinks}
         onViewMetadata={() => (rawMetadataOpen = true)}
         {onComplete}
         {onCancel}

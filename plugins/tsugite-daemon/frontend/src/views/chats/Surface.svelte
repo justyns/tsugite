@@ -21,17 +21,20 @@
   import { isJobArtifact } from './jobArtifact';
   import { goBackToWorkspaceList, isPhoneWidth } from '$lib/shell/phoneNav';
   import { hasFiles, extractFiles } from './dropFiles';
+  import { soloHash } from '$lib/shell/solo';
 
   let {
     params,
     setParams,
     dense = false,
     focused = true,
+    solo = false,
   }: {
     params?: Record<string, string>;
     setParams?: (params: Record<string, string>) => void;
     dense?: boolean;
     focused?: boolean;
+    solo?: boolean;
   } = $props();
 
   const ctrl = new ConversationController();
@@ -210,14 +213,29 @@
     }
   }
 
-  async function copySessionId() {
-    if (!selectedId) return;
+  async function copyToClipboard(text: string, label: string) {
     try {
-      await navigator.clipboard?.writeText(selectedId);
-      toasts.push('ok', 'Session id copied', { body: selectedId });
+      await navigator.clipboard?.writeText(text);
+      toasts.push('ok', `${label} copied`, { body: text });
     } catch {
-      toasts.push('err', 'Could not copy session id');
+      toasts.push('err', `Could not copy ${label.toLowerCase()}`);
     }
+  }
+
+  function copySessionId() {
+    if (selectedId) return copyToClipboard(selectedId, 'Session id');
+  }
+
+  function soloUrl(id: string): string {
+    return `${location.origin}${location.pathname}${soloHash({ id, alias: selectedRow?.alias ?? null })}`;
+  }
+
+  function openSolo() {
+    if (selectedId) window.open(soloUrl(selectedId), '_blank', 'noopener');
+  }
+
+  function copySoloLink() {
+    if (selectedId) void copyToClipboard(soloUrl(selectedId), 'Solo link');
   }
 
   async function dequeueMessage(sessionId: string, queueId: string) {
@@ -291,6 +309,7 @@
   <Conversation
     {ctrl}
     {dense}
+    {solo}
     row={selectedRow}
     fallbackContext={sessionInfo?.contextLimit
       ? { tokens: sessionInfo.cumulativeTokens ?? 0, limit: sessionInfo.contextLimit }
@@ -319,6 +338,7 @@
     onUnpin={() => selectedId && void sessions.unpin(selectedId)}
     onSetPrimary={() => selectedId && void sessions.setPrimary(selectedId).then(afterMutation)}
     onCopyId={() => void copySessionId()}
+    soloLinks={solo ? undefined : { open: openSolo, copy: copySoloLink }}
     onOpenSession={selectSession}
     onRetry={(text) => void onSend(text, { uploadedFiles: [] })}
     onDismissAttention={(deliveryId) =>

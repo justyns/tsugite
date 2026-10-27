@@ -10,6 +10,7 @@ import { api } from '$lib/api/client';
 import { routeHistory } from '$lib/router.svelte';
 import { sessionRow as row } from './__fixtures__/sessionRow';
 import { toasts } from '$lib/components/feedback/toast-store.svelte';
+import { TESTID } from '$lib/testids';
 
 const realGetInfo = sessions.getInfo.bind(sessions);
 
@@ -402,4 +403,29 @@ test('clicking the transcript of an unread open chat marks it read', async () =>
   await vi.waitFor(() =>
     expect(post).toHaveBeenCalledWith('/api/sessions/session-open/mark-viewed'),
   );
+});
+
+async function clickSoloEntry(label: string) {
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await page.getByRole('menuitem', { name: label }).click();
+}
+
+test.each([
+  ['an aliased row opens by alias', { alias: 'daily' }, '#solo?alias=daily'],
+  ['an unaliased row opens by sessionId', {}, '#solo?sessionId=s-solo'],
+])('the solo window entries use the URL form: %s', async (_name, extra, hash) => {
+  roster('smoke');
+  stubInfo('smoke', {});
+  sessions.rows = [row('s-solo', extra)];
+  const open = vi.spyOn(window, 'open').mockReturnValue(null);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeText);
+  render(Surface, { params: { sessionId: 's-solo' } });
+
+  await clickSoloEntry('Open in solo window');
+  const url = `${location.origin}${location.pathname}${hash}`;
+  expect(open).toHaveBeenCalledWith(url, '_blank', 'noopener');
+
+  await clickSoloEntry('Copy solo link');
+  expect(writeText).toHaveBeenCalledWith(url);
 });

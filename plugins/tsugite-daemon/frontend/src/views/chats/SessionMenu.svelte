@@ -35,6 +35,7 @@
     onUnpin,
     onSetPrimary,
     onCopyId,
+    soloLinks,
     onViewMetadata,
     onComplete,
     onCancel,
@@ -60,6 +61,8 @@
     onSetPrimary: () => void;
     /** Copy the session id to the clipboard. */
     onCopyId: () => void;
+    /** Unset inside the solo window. */
+    soloLinks?: { open: () => void; copy: () => void };
     /** Open a read-only raw JSON view of session.metadata. */
     onViewMetadata: () => void;
     onComplete: () => void;
@@ -79,6 +82,22 @@
       : []),
     { id: 'topic', label: 'Edit topic', icon: 'link', run: onEditTopic },
     { id: 'copyid', label: 'Copy session id', icon: 'copy', run: onCopyId },
+    ...(soloLinks
+      ? [
+          {
+            id: 'solo',
+            label: 'Open in solo window',
+            icon: 'out' as IconName,
+            run: soloLinks.open,
+          },
+          {
+            id: 'sololink',
+            label: 'Copy solo link',
+            icon: 'copy' as IconName,
+            run: soloLinks.copy,
+          },
+        ]
+      : []),
     { id: 'metadata', label: 'View metadata', icon: 'file', run: onViewMetadata },
     pinned
       ? { id: 'unpin', label: 'Unpin', icon: 'pin', run: onUnpin }

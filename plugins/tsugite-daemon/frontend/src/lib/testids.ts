@@ -33,6 +33,10 @@ export const TESTID = {
   welcome: 'welcome',
   skillsDrawer: 'skills-drawer',
   viewHost: 'view-host',
+  /** Single-chat window (#solo). */
+  solo: 'solo',
+  soloArtifact: 'solo-artifact',
+  soloNote: 'solo-note',
   tokenInput: 'token-input',
   tokenConnect: 'token-connect',
   // Picker (generic searchable-list overlay)

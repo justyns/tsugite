@@ -67,6 +67,8 @@
   import { resolveDefaultSession } from './views/chats/defaultSession';
   import { composerPrefill } from './views/chats/composerPrefill.svelte';
   import { modelPickerRequest } from './views/chats/modelPickerSignal.svelte';
+  import SoloWindow from '$lib/shell/SoloWindow.svelte';
+  import { SOLO_VIEW } from '$lib/shell/solo';
   import TopBar from '$lib/shell/TopBar.svelte';
   import NavRail from '$lib/shell/NavRail.svelte';
   import ContextRail from '$lib/shell/ContextRail.svelte';
@@ -87,6 +89,7 @@
   let helpOpen = $state(false);
   let welcomeOpen = $state(false);
 
+  const solo = $derived(router.view === SOLO_VIEW);
   const activeView = $derived(viewById(shellView.activeViewId));
   // The view registry owns which region an id gets, so a plugin surface can ask
   // for the workspace the same way the built-in chats/terminals/files views do.
@@ -439,6 +442,7 @@
   $effect(() => {
     const sessionId = focusedSessionId;
     void artifactSignature;
+    if (solo) return;
     untrack(() => syncAgentArtifactPane(sessionId));
   });
 
@@ -461,7 +465,7 @@
 
   function openAgentArtifact(data: Record<string, unknown>) {
     const opened = artifacts.applySessionEvent(data);
-    if (!opened) return;
+    if (!opened || solo) return;
     if (!opened.openedByAgent || opened.sessionId === focusedSessionId) openArtifactPane(opened);
     else syncAgentArtifactPane(focusedSessionId);
   }
@@ -492,6 +496,7 @@
   );
 
   function onKeydown(event: KeyboardEvent) {
+    if (solo) return;
     if (event.key === 'Escape') {
       if (paletteOpen) paletteOpen = false;
       else if (settingsOpen) settingsOpen = false;
@@ -527,6 +532,8 @@
 
 {#if auth.gated}
   <TokenPane />
+{:else if solo}
+  <SoloWindow params={router.params} />
 {:else}
   <div class="app">
     <TopBar
@@ -665,14 +672,16 @@
   </div>
 {/if}
 
-<Palette
-  bind:open={paletteOpen}
-  items={paletteItems}
-  {sessionItems}
-  viewItems={paletteViewItems}
-  onSelect={(item, replace) => runPaletteHref(item.href, paletteCtx, replace)}
-/>
-<HelpOverlay bind:open={helpOpen} />
+{#if !solo}
+  <Palette
+    bind:open={paletteOpen}
+    items={paletteItems}
+    {sessionItems}
+    viewItems={paletteViewItems}
+    onSelect={(item, replace) => runPaletteHref(item.href, paletteCtx, replace)}
+  />
+  <HelpOverlay bind:open={helpOpen} />
+{/if}
 <Toasts />
 <div data-testid={TESTID.appReady} hidden></div>
 
