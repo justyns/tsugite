@@ -1,5 +1,6 @@
 """Usage tracking for token and cost analytics."""
 
+from .anomalies import detect_spend_anomalies
 from .quota import (
     QuotaReport,
     QuotaWindow,
@@ -13,6 +14,7 @@ __all__ = [
     "QuotaWindow",
     "UsageStore",
     "collect_quota_reports",
+    "detect_spend_anomalies",
     "get_usage_store",
     "register_quota_source",
 ]

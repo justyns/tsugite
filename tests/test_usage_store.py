@@ -146,8 +146,8 @@ class TestCacheSplit:
 
         row = store.top_models()[0]
 
-        assert row["cache_creation_tokens"] == 100
-        assert row["cache_read_tokens"] == 900
+        assert row["cache_write_tokens"] == 100
+        assert row["cached_read_tokens"] == 900
 
     def test_cache_defaults_to_zero_when_provider_reports_none(self, store):
         # A provider that doesn't report cache fields records the column default

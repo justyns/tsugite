@@ -4,6 +4,7 @@ import json
 import tempfile
 from unittest.mock import MagicMock, patch
 
+from rich.console import Console
 from typer.testing import CliRunner
 
 from tsugite.cli import app
@@ -209,3 +210,79 @@ class TestUsageProviders:
 
         assert result.exit_code == 0
         assert "No provider" in result.stdout
+
+
+class TestUsageAnomalies:
+    """`tsu usage anomalies` reports per-model outliers from usage.db."""
+
+    def _invoke(self, tmp_path, *args, seed=()):
+        from tsugite.usage.store import UsageStore
+
+        store = UsageStore(db_path=tmp_path / "usage.db")
+        for day, cost in seed:
+            store.record(model="anthropic:opus", cost_usd=cost, timestamp=f"{day}T12:00:00+00:00")
+        with patch("tsugite.usage.get_usage_store", return_value=store):
+            return runner.invoke(app, ["usage", "anomalies", *args])
+
+    def test_invalid_day_exits_1(self, tmp_path):
+        result = self._invoke(tmp_path, "--day", "not-a-date")
+
+        assert result.exit_code == 1
+        assert "Invalid --day value" in result.output
+
+    def test_clean_day_prints_nothing(self, tmp_path):
+        result = self._invoke(tmp_path, "--day", "2026-09-20")
+
+        assert result.exit_code == 0
+        assert result.output == ""
+
+    def test_clean_day_json_is_an_empty_list(self, tmp_path):
+        result = self._invoke(tmp_path, "--day", "2026-09-20", "--json")
+
+        assert result.exit_code == 0
+        assert json.loads(result.output) == []
+
+    def test_json_output_lists_the_flagged_model(self, tmp_path):
+        seed = [(f"2026-09-{d:02d}", 1.0) for d in (17, 18, 19)] + [("2026-09-20", 10.0)]
+
+        result = self._invoke(tmp_path, "--day", "2026-09-20", "--json", seed=seed)
+
+        assert result.exit_code == 0
+        [row] = json.loads(result.output)
+        assert row["model"] == "anthropic:opus"
+        assert row["rule"] == "multiple"
+        assert row["ratio"] == 10.0
+
+
+class TestUsageModels:
+    """`tsu usage models` shows the cache breakdown columns."""
+
+    def _invoke(self, tmp_path, records):
+        from tsugite.usage.store import UsageStore
+
+        store = UsageStore(db_path=tmp_path / "usage.db")
+        for kwargs in records:
+            store.record(**kwargs)
+        with (
+            patch("tsugite.usage.get_usage_store", return_value=store),
+            patch("tsugite.cli.usage.console", Console(width=200)),
+        ):
+            return runner.invoke(app, ["usage", "models", "--since", "2000-01-01"])
+
+    def test_renders_cache_columns(self, tmp_path):
+        result = self._invoke(
+            tmp_path,
+            [{"model": "anthropic:opus", "input_tokens": 100, "cache_creation_tokens": 50, "cache_read_tokens": 900}],
+        )
+
+        assert result.exit_code == 0
+        for header in ("Cached Read", "Cache Write", "Uncached In", "Hit Rate"):
+            assert header in result.output
+        assert "85.7%" in result.output
+
+    def test_non_additive_model_shows_dash_for_cache_write(self, tmp_path):
+        result = self._invoke(tmp_path, [{"model": "openai:gpt-4o", "input_tokens": 1000, "cache_read_tokens": 900}])
+
+        [line] = [ln for ln in result.output.splitlines() if "openai:gpt-4o" in ln]
+        cells = [c.strip() for c in line.strip("│ ").split("│")]
+        assert cells[5] == "-"

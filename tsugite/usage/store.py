@@ -9,6 +9,8 @@ from pathlib import Path
 
 from tsugite.config import get_xdg_data_path
 
+from .cache import derive_cache_breakdown
+
 _DEFAULT_DB_DIR = "usage"
 _DEFAULT_DB_NAME = "usage.db"
 
@@ -202,8 +204,9 @@ class UsageStore:
         sql = f"""
             SELECT {column}, COUNT(*) as runs,
                    SUM(total_tokens) as total_tokens, SUM(cost_usd) as total_cost,
-                   SUM(cache_creation_tokens) as cache_creation_tokens,
-                   SUM(cache_read_tokens) as cache_read_tokens
+                   COALESCE(SUM(input_tokens), 0) as input_tokens,
+                   COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+                   COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens
             FROM usage {where}
             GROUP BY {column} ORDER BY total_cost DESC LIMIT ?
         """
@@ -214,7 +217,18 @@ class UsageStore:
         return self._top_by("agent", since=since, limit=limit)
 
     def top_models(self, *, since: str | None = None, limit: int = 10) -> list[dict]:
-        return self._top_by("model", since=since, limit=limit)
+        """Top models by cost, each row enriched with its cache breakdown."""
+        rows = self._top_by("model", since=since, limit=limit)
+        for row in rows:
+            row.update(
+                derive_cache_breakdown(
+                    row["model"],
+                    row["input_tokens"],
+                    row["cache_creation_tokens"],
+                    row["cache_read_tokens"],
+                )
+            )
+        return rows
 
     def by_schedule(self, *, since: str | None = None, limit: int = 100) -> list[dict]:
         """Aggregate scheduled-task usage, one row per schedule.
@@ -253,6 +267,23 @@ class UsageStore:
             LIMIT ?
         """
         params.append(limit)
+        return [dict(row) for row in self._get_conn().execute(sql, params).fetchall()]
+
+    def daily_cost_by_model(self, *, since: str | None = None, until: str | None = None) -> list[dict]:
+        """Per-model daily cost in [since, until), one row per (model, day) with usage.
+
+        A day with no usage for a model is absent rather than zero-filled, so
+        callers building a trailing history see actual days of history, not
+        calendar days.
+        """
+        where, params = self._build_where(since=since, until=until)
+        where = f"{where} AND model IS NOT NULL" if where else "WHERE model IS NOT NULL"
+        sql = f"""
+            SELECT model, date(timestamp) as day, SUM(cost_usd) as cost
+            FROM usage {where}
+            GROUP BY model, date(timestamp)
+            ORDER BY model, day
+        """
         return [dict(row) for row in self._get_conn().execute(sql, params).fetchall()]
 
     def total(self, *, since: str | None = None) -> dict:
