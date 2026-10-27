@@ -336,9 +336,13 @@ def terminal_backend(e2e_server, e2e_tmp):
     manager = PtyManager()
     server.terminal_store = store
     server.pty_manager = manager
+    server.terminal_state_change_callback = lambda terminal_id, state: server.event_bus.emit(
+        "terminal_state", {"terminal_id": terminal_id, "state": state}
+    )
     yield store, manager
     server.terminal_store = None
     server.pty_manager = None
+    server.terminal_state_change_callback = None
     manager.shutdown()
 
 
