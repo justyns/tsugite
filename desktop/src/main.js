@@ -15,6 +15,7 @@ const { isShellFile, originOf, tokenFor } = require('./urls');
 app.setPath('userData', path.join(app.getPath('appData'), 'Tsugite'));
 
 const userData = app.getPath('userData');
+const ICON = path.join(__dirname, 'assets', 'icon.png');
 const logDir = path.join(userData, 'logs');
 const configPath = path.join(userData, 'daemon.yaml');
 const pidFile = path.join(userData, 'daemon.pid');
@@ -36,6 +37,7 @@ function createWindow() {
   const w = new BrowserWindow({
     ...visibleBounds(settings.data.bounds),
     title: 'Tsugite',
+    icon: ICON,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') },
   });
   win = w;
@@ -108,6 +110,7 @@ function openRemoteWindow() {
   if (remoteWin) return remoteWin.focus();
   remoteWin = new BrowserWindow({
     width: 440, height: 340, parent: win || undefined, modal: !!win, title: 'Remote daemon',
+    icon: ICON,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.js') },
   });
   remoteWin.setMenuBarVisibility(false);

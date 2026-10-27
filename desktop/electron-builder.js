@@ -18,6 +18,7 @@ module.exports = {
     ],
     identity: null,
     category: 'public.app-category.developer-tools',
+    icon: 'resources/icon.png',
     extraResources: extraResources('darwin'),
   },
   linux: {
@@ -26,6 +27,7 @@ module.exports = {
       { target: 'dir', arch: ['x64'] },
     ],
     category: 'Development',
+    icon: 'resources/icons',
     extraResources: extraResources('linux'),
   },
   beforePack: async (context) => {

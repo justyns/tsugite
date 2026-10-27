@@ -18,6 +18,9 @@ packaging/runtime/smoke.sh dist/runtime/linux-x86_64
 packaging/runtime/check-macos.sh dist/runtime/macos-aarch64
 npm --prefix desktop run dist:linux                           # or dist:mac
 
+# Regenerate the app icons from desktop/resources/logo/*.svg (needs rsvg-convert)
+desktop/scripts/icons.sh
+
 # Open an unsigned macOS build
 xattr -dr com.apple.quarantine /Applications/Tsugite.app
 codesign --force --deep --sign - /Applications/Tsugite.app
