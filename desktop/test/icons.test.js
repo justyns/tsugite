@@ -29,3 +29,14 @@ test('every Linux icon matches the size in its file name', () => {
 test('the window icon ships inside the app files', () => {
   assert.deepEqual(pngSize(path.join(root, 'src', 'assets', 'icon.png')), [512, 512]);
 });
+
+test('every web icon matches its declared size', () => {
+  const pub = path.join(root, '..', 'plugins', 'tsugite-daemon', 'frontend', 'public');
+  const manifest = JSON.parse(fs.readFileSync(path.join(pub, 'manifest.json'), 'utf8'));
+  for (const icon of manifest.icons) {
+    const n = Number(icon.sizes.split('x')[0]);
+    assert.deepEqual(pngSize(path.join(pub, icon.src)), [n, n], icon.src);
+  }
+  assert.deepEqual(pngSize(path.join(pub, 'icons', 'favicon-32.png')), [32, 32]);
+  assert.deepEqual(pngSize(path.join(pub, 'icons', 'apple-touch-icon.png')), [180, 180]);
+});
