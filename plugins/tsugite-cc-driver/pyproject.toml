@@ -1,13 +1,13 @@
 [project]
 name = "tsugite-cc-driver"
-version = "0.25.3"
+version = "0.25.4"
 description = "Tsugite plugin: drive interactive Claude Code sessions as verified jobs via HTTP hooks (daemon-only)"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.25.3",
-  "tsugite-daemon==0.25.3",
-  "tsugite-pty==0.25.3",
+  "tsugite-cli==0.25.4",
+  "tsugite-daemon==0.25.4",
+  "tsugite-pty==0.25.4",
 ]
 
 [project.entry-points."tsugite.adapters"]
