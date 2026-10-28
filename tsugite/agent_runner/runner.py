@@ -609,13 +609,14 @@ async def _execute_agent_with_prompt(
             )
 
         try:
+            from tsugite.models import resolve_usage_model
             from tsugite.usage import get_usage_store
 
             meta = channel_metadata or {}
             get_usage_store().record(
                 session_id=continue_conversation_id,
                 agent=prepared.agent_config.name,
-                model=model_string,
+                model=resolve_usage_model(model_string),
                 source=meta.get("source") or "cli",
                 schedule_name=meta.get("schedule_id"),
                 input_tokens=agent.prompt_tokens,

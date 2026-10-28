@@ -18,6 +18,7 @@ from tsugite_daemon.session_store import SessionStore
 
 from tests.history_helpers import load_history_session
 from tests.test_post_compaction_counters import _patches, _seed_session_events, _StubAdapter
+from tsugite.providers.model_registry import _ALIASES
 
 
 @pytest.fixture
@@ -288,7 +289,7 @@ def test_compact_session_preserves_topic_and_type_metadata(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_compaction_records_summary_token_usage_to_usage_store(workspace_dir, history_dir, tmp_path):
+async def test_compaction_records_summary_token_usage_to_usage_store(workspace_dir, history_dir, tmp_path, monkeypatch):
     """Compaction summarization spend must be recorded in the UsageStore (what
     `tsugite usage` reads) under source="compaction" - the same sink normal
     turns use - so compaction cost is visible instead of untracked.
@@ -313,6 +314,7 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     )
     provider.count_tokens = MagicMock(return_value=10)
     usage_store = MagicMock()
+    monkeypatch.setitem(_ALIASES, "openai/mini", "gpt-4o-mini")
 
     agent_config = RuntimeDefaults(workspace_dir=workspace_dir, agent_file="default")
     agent_config.context_limit = 1_000_000
@@ -320,7 +322,7 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
 
     with (
         patch("tsugite_daemon.memory.get_context_limit", return_value=1_000_000),
-        patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:gpt-4o-mini"),
+        patch("tsugite_daemon.memory.infer_compaction_model", return_value="openai:mini"),
         patch("tsugite_daemon.memory.split_events_for_compaction", return_value=(old_events, recent_events)),
         patch("tsugite.models.get_provider_and_model", return_value=("openai:gpt-4o-mini", provider, "gpt-4o-mini")),
         patch("tsugite.usage.get_usage_store", return_value=usage_store),
@@ -334,6 +336,7 @@ async def test_compaction_records_summary_token_usage_to_usage_store(workspace_d
     usage_store.record.assert_called_once()
     kwargs = usage_store.record.call_args.kwargs
     assert kwargs["source"] == "compaction"
+    assert kwargs["model"] == "openai:gpt-4o-mini"
     assert kwargs["session_id"] == conv_id
     assert kwargs["input_tokens"] == 500
     assert kwargs["output_tokens"] == 40

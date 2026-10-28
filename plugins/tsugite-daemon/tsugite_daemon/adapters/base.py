@@ -1520,12 +1520,13 @@ class BaseAdapter(ABC):
             )
             # Summarization spend goes in the same UsageStore as normal turns (see _save_history).
             try:
+                from tsugite.models import resolve_usage_model
                 from tsugite.usage import get_usage_store
 
                 get_usage_store().record(
                     session_id=old_conv_id,
                     agent=self.agent_label,
-                    model=summary_model,
+                    model=resolve_usage_model(summary_model),
                     source="compaction",
                     input_tokens=summary_usage["prompt_tokens"],
                     output_tokens=summary_usage["completion_tokens"],

@@ -14,6 +14,7 @@ from tsugite_daemon.session_store import SessionStore
 
 from tsugite.exceptions import AgentExecutionError
 from tsugite.providers.base import Usage
+from tsugite.providers.model_registry import _ALIASES
 
 AGENT_MODEL = "codex_cli:gpt-5.5"
 SESSION_MODEL = "anthropic:claude-opus-4"
@@ -112,6 +113,15 @@ async def test_usage_row_records_the_model_the_turn_ran_on(
     row = await _run_turn(adapter, monkeypatch, session_override=session_override, turn_override=turn_override)
 
     assert row["model"] == expected
+
+
+@pytest.mark.asyncio
+async def test_usage_row_records_the_model_a_provider_alias_resolves_to(adapter, monkeypatch):
+    monkeypatch.setitem(_ALIASES, "codex_cli/mini", "gpt-5.5-mini")
+
+    row = await _run_turn(adapter, monkeypatch, session_override="codex_cli:mini")
+
+    assert row["model"] == "codex_cli:gpt-5.5-mini"
 
 
 @pytest.mark.asyncio

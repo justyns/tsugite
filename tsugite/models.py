@@ -119,6 +119,18 @@ def get_model_id(model_string: str) -> str:
     return resolve_alias(provider, model_name)
 
 
+def resolve_usage_model(model_string: str) -> str:
+    """Expand a provider alias in a model string, so usage is keyed on the model that ran.
+
+    ``claude_code:sonnet`` becomes ``claude_code:claude-sonnet-5-5``. Aliases register when the
+    provider is first loaded.
+    """
+    from tsugite.providers.model_registry import resolve_alias
+
+    provider, model_name, variant = parse_model_string(model_string)
+    return ":".join(part for part in (provider, resolve_alias(provider, model_name), variant) if part)
+
+
 def get_provider_and_model(model_string: str) -> tuple[str, Provider, str]:
     """Parse a model string and return (provider_name, provider_instance, model_id).
 
