@@ -174,3 +174,44 @@ async def test_a_python_exec_element_is_caught(storage, reply):
     await agent.run("commit anything outstanding")
 
     assert mock.await_count == 2
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    ['<invoke name="python-exec"></invoke>', '<invoke name="python-exec">\n</invoke>\n'],
+    ids=["adjacent", "whitespace-between"],
+)
+@pytest.mark.asyncio
+async def test_an_empty_envelope_prefix_is_stripped_from_the_answer(storage, prefix):
+    agent = _agent(storage)
+    mock = _patch(agent, return_value=_resp(f"{prefix}\nHello"))
+
+    result = await agent.run("say hello")
+
+    assert mock.await_count == 1
+    assert result == "Hello"
+    assert _end_status(storage) == "success"
+    [response] = [e.data for e in storage.iter_events() if e.type == "model_response"]
+    assert "<invoke" not in response["thought"]
+    assert "<invoke" not in response["raw_content"]
+
+
+@pytest.mark.asyncio
+async def test_an_envelope_only_reply_gets_the_correction(storage):
+    agent = _agent(storage)
+    mock = _patch(agent, side_effect=[_resp('<invoke name="python-exec"></invoke>'), _resp("Hello")])
+
+    await agent.run("say hello")
+
+    assert mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_non_empty_envelope_still_gets_the_correction(storage):
+    agent = _agent(storage)
+    reply = '<invoke name="python-exec"><parameter name="code">print(1)</parameter></invoke>\nHello'
+    mock = _patch(agent, side_effect=[_resp(reply), _resp("Hello")])
+
+    await agent.run("say hello")
+
+    assert mock.await_count == 2

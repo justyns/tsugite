@@ -164,6 +164,13 @@ _TOOL_CALL_MARKUP = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# A reply may open with an envelope holding no parameters and no body, which
+# requests no call.
+_EMPTY_ENVELOPE_PREFIX = re.compile(
+    r"\A\s*<(?:[a-z]+:)?invoke\s+name\s*=\s*[\"'][^\"']*[\"']\s*>\s*</(?:[a-z]+:)?invoke\s*>\s*",
+    re.IGNORECASE,
+)
+
 # Fenced blocks and inline spans - markup quoted as code is shown, not issued.
 _CODE_MARKUP = re.compile(r"^```.*?^```|`[^`\n]+`", re.MULTILINE | re.DOTALL)
 
@@ -970,6 +977,9 @@ class TsugiteAgent:
         would otherwise replay what the chunk stream already showed the user.
         """
         response.content, spoofed = escape_runtime_injection_tags(response.content)
+        stripped = _EMPTY_ENVELOPE_PREFIX.sub("", response.content)
+        if stripped.strip():
+            response.content = stripped
         parsed = self._parse_response_from_text(response.content)
 
         step_cost = self._accumulate_usage(response.usage, response.cost)
