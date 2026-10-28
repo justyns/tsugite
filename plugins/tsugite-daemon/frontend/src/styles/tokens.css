@@ -64,6 +64,7 @@ body {
   /* type */
   --font-ui: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-spin: 'Tsugite Braille', var(--font-mono);
   --fs-2xs: 10px;
   --fs-xs: 11px;
   --fs-sm: 12px;

@@ -79,7 +79,7 @@
   }
 
   .t-spin {
-    font-family: var(--font-mono);
+    font-family: var(--font-spin);
     font-weight: 600;
     display: inline-block;
     width: 1.1ch;
