@@ -135,7 +135,7 @@ class HistoryConfig(BackendConfig):
 
 
 class SandboxSettings(BackendConfig):
-    backend: str = "bwrap"
+    backend: str = "hozo"
 
 
 class ExecutorConfig(BackendConfig):

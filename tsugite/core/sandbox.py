@@ -1,10 +1,9 @@
 """Sandbox seam: policy types + backend resolution.
 
-The sandbox *mechanism* (bubblewrap command building) lives in the `tsugite-sandbox`
-plugin, registered under the `tsugite.sandbox` entry-point group. This module keeps the
-policy type (`SandboxConfig`) and the "is-sandboxed" decision in core, and resolves the
-configured backend, defaulting to `bwrap`. The egress proxy (`core/proxy.py`) is generic
-and also stays in core; the executor orchestrates it.
+The sandbox *mechanism* (command building) lives in the `tsugite-sandbox` plugin,
+registered under the `tsugite.sandbox` entry-point group. This module keeps the policy
+type (`SandboxConfig`) and the "is-sandboxed" decision in core, and resolves the
+configured backend, defaulting to `hozo`.
 """
 
 import os
@@ -33,9 +32,9 @@ def _configured_backend() -> str:
         from tsugite.config import load_config
 
         cfg = load_config().sandbox
-        return (cfg.backend if cfg else None) or "bwrap"
+        return (cfg.backend if cfg else None) or "hozo"
     except Exception:
-        return "bwrap"
+        return "hozo"
 
 
 def get_sandbox_class(backend: Optional[str] = None):

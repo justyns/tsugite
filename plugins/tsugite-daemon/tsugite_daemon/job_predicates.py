@@ -30,7 +30,7 @@ class JobCommandError(Exception):
 
 
 def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optional[list[str]]:
-    """`sh -c cmd`, wrapped in bwrap (no network, `cwd` plus the override's binds) when
+    """`sh -c cmd`, wrapped in the sandbox (no network, `cwd` plus the override's binds) when
     the job is sandboxed. None when it is sandboxed but no sandbox backend is installed."""
     if not sandbox_override:
         return ["sh", "-c", cmd]
@@ -40,7 +40,7 @@ def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optio
     sandbox_cls = get_sandbox_class()
     if sandbox_cls is None:
         return None
-    bwrap = sandbox_cls(
+    sandbox = sandbox_cls(
         config=SandboxConfig(
             no_network=True,
             extra_ro_binds=[Path(p) for p in sandbox_override.get("extra_ro_binds", [])],
@@ -50,7 +50,7 @@ def _command_argv(cmd: str, cwd: str, sandbox_override: Optional[dict]) -> Optio
         workspace_dir=Path(cwd),
         state_dir=None,
     )
-    return bwrap.build_command(["sh", "-c", cmd])
+    return sandbox.build_command(["sh", "-c", cmd])
 
 
 def run_job_command(cmd: str, cwd: Optional[str], timeout: float, sandbox_override: Optional[dict]) -> None:
@@ -171,7 +171,7 @@ def _evaluate_predicate(
 
     `exit_code:` / `cmd:` predicates shell out. When the job is sandboxed
     (sandbox_override set, resolved from the agent's config or an inheriting
-    parent), the command runs inside bubblewrap - filesystem-isolated to the
+    parent), the command runs inside the sandbox - filesystem-isolated to the
     predicate cwd (the worktree) and with no network - so a sandboxed agent's
     predicate ACs can't execute outside the sandbox. Otherwise they run with
     `shell=True` against the worktree, same surface as the worker session.

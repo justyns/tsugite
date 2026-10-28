@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional  # noqa: E402
 
 from tsugite.core.agent import NO_ACTION_MESSAGE, AgentResult, TsugiteAgent  # noqa: E402
 from tsugite.core.executor_registry import get_executor_class  # noqa: E402
-from tsugite.core.proxy import _parse_pattern  # noqa: E402
 from tsugite.core.state import session_state_path  # noqa: E402
 from tsugite.exceptions import (  # noqa: E402
     AgentExecutionError,
@@ -497,7 +496,7 @@ async def _execute_agent_with_prompt(
     )
 
     if sandbox_config is not None:
-        # bwrap sandboxing is a subprocess feature, so a sandboxed run always uses
+        # Sandboxing is a subprocess feature, so a sandboxed run always uses
         # the subprocess executor regardless of the configured default backend.
         from tsugite.core.subprocess_executor import SubprocessExecutor
 
@@ -751,8 +750,8 @@ def resolve_effective_sandbox(
     desired = set(fm_network.get("domains") or []) | set(fm_sandbox.get("allow_domains") or [])
     base = list(daemon_domains or [])
     if desired:
-        # Keep each desired pattern only if the daemon ceiling permits it, using the
-        # proxy's glob semantics (so agent "api.github.com" is kept under daemon
+        # Keep each desired pattern only if the daemon ceiling permits it, using
+        # glob semantics (so agent "api.github.com" is kept under daemon
         # "*.github.com"). An empty ceiling permits everything.
         effective = sorted(d for d in desired if _domain_within_ceiling(d, base))
         if not effective:
@@ -765,10 +764,25 @@ def resolve_effective_sandbox(
     return enabled, allow_domains, no_network
 
 
+def _parse_pattern(pattern: str) -> tuple[str, set[int]]:
+    """No port means {80, 443} and `:*` means any port (empty set). IPv6 takes a port
+    only in brackets (`[fd00::/8]:443`), as Hozo's proxy does."""
+    if pattern.startswith("["):
+        domain, _, port_str = pattern[1:].partition("]")
+        port_str = port_str.removeprefix(":")
+    elif pattern.count(":") == 1:
+        domain, port_str = pattern.split(":")
+    else:
+        domain, port_str = pattern, ""
+    if not port_str:
+        return (domain, {80, 443})
+    return (domain, set() if port_str == "*" else {int(port_str)})
+
+
 def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
     """True if a desired domain:port pattern is permitted by the daemon ceiling.
 
-    Uses the proxy's glob + port semantics so e.g. 'api.github.com' is within
+    Uses glob + port semantics so e.g. 'api.github.com' is within
     '*.github.com', but 'github.com:22' is NOT within 'github.com' (which only allows
     the default 80/443). The ceiling is a union: the desired ports must be covered by
     the union of port sets from ALL ceiling patterns whose domain glob matches (so
@@ -778,9 +792,6 @@ def _domain_within_ceiling(desired_pattern: str, ceiling: list) -> bool:
     if not ceiling:
         return True
     d_domain, d_ports = _parse_pattern(desired_pattern.lower())
-    # The proxy treats the allowlist as a union, so collect the ports from EVERY
-    # ceiling pattern whose domain glob matches and check the desired ports against
-    # their union (e.g. ["github.com:80","github.com:443"] together cover 80/443).
     matched = False
     allowed_ports: set = set()
     for c in ceiling:

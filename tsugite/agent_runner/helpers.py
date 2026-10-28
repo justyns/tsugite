@@ -105,7 +105,7 @@ def build_sandbox_policy(
     `tsu exec` so the two never drift. Agent frontmatter (network/sandbox) can only
     tighten the CLI/daemon ceiling, never loosen it.
 
-    Raises RuntimeError if the sandbox is requested but bwrap is unavailable.
+    Raises RuntimeError if the sandbox is requested but no backend is available.
     """
     from tsugite.agent_runner.runner import resolve_effective_sandbox
     from tsugite.core.sandbox import SandboxConfig, sandbox_available
@@ -121,7 +121,9 @@ def build_sandbox_policy(
         return None, None
 
     if not sandbox_available():
-        raise RuntimeError("No sandbox backend available. Install tsugite-sandbox and bubblewrap, or use --no-sandbox.")
+        raise RuntimeError(
+            "No sandbox backend available. Install tsugite-sandbox (and bubblewrap on Linux), or use --no-sandbox."
+        )
 
     ctx = SandboxContext(
         allow_domains=allow_domains,

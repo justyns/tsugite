@@ -41,8 +41,6 @@ def _success_note(directive: ExecDirective) -> str:
 def execute_exec_directives(
     content: str,
     existing_context: Optional[Dict[str, Any]] = None,
-    sandbox_config: Optional[Any] = None,
-    workspace_dir: Optional[str] = None,
     event_bus: Optional[Any] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Execute exec directives in `content` and return (modified_content, exec_context).
@@ -52,8 +50,6 @@ def execute_exec_directives(
         existing_context: Vars from prior pipeline stages (prefetch, tool directives,
             caller). Made available to each exec block as Python locals. Vars assigned
             by an earlier exec block in the same content are also visible to later ones.
-        sandbox_config: Optional SandboxConfig; when set, blocks run inside bubblewrap.
-        workspace_dir: Optional workspace path for sandbox bind mounts.
         event_bus: Optional EventBus for emitting warnings on continue_on_error paths.
 
     Returns:
@@ -89,8 +85,6 @@ def execute_exec_directives(
                 locals_dict=block_locals,
                 timeout=directive.timeout,
                 continue_on_error=directive.continue_on_error,
-                sandbox_config=sandbox_config,
-                workspace_dir=workspace_dir,
             )
         except Exception as e:
             if not directive.continue_on_error:

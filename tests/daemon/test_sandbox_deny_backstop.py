@@ -2,7 +2,7 @@
 
 The deny backstop guarantees that while an agent runs sandboxed, no host-exec /
 spawn tool reaches the host via an unsandboxed path: covered paths are allowed
-(they wrap in bwrap or inherit the sandbox), everything else is refused.
+(they wrap in the sandbox or inherit it), everything else is refused.
 """
 
 from pathlib import Path
@@ -111,14 +111,12 @@ class TestPtySandboxing:
         argv = ["/bin/sh", "-c", "ls"]
         assert maybe_sandbox_argv(argv, None, None) == argv
 
-    def test_sandboxed_wraps_in_bwrap(self, tmp_path):
+    def test_sandboxed_wraps_in_hozo(self, tmp_path):
         from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
         wrapped = maybe_sandbox_argv(["/bin/sh", "-c", "ls"], None, SandboxContext(workspace_dir=tmp_path))
-        assert wrapped[0] == "bwrap"
-        assert str(tmp_path) in wrapped
-        # Sandboxed PTYs get no network (no filtering proxy is wired for PTYs).
-        assert "--unshare-net" in wrapped
+        assert wrapped[1:5] == ["-m", "hozo", "--project", str(tmp_path)]
+        assert not any(tok.startswith("--allow-net") for tok in wrapped)
         # The original command is still present at the tail.
         assert wrapped[-3:] == ["/bin/sh", "-c", "ls"]
 

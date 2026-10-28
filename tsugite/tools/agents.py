@@ -19,7 +19,7 @@ def _build_subagent_cmd(agent_file: Path, model_override: Optional[str], sandbox
 
     When the spawning agent runs sandboxed (sandbox_ctx is set), the child gets
     `--sandbox` plus the same network policy so it re-enters the sandbox branch
-    with its own bwrap, so spawn_agent cannot be used to escape.
+    with its own sandbox, so spawn_agent cannot be used to escape.
     """
     cmd = ["uv", "run", "tsu", "run", str(agent_file), "--subagent-mode"]
     if model_override:

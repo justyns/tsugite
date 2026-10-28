@@ -38,7 +38,7 @@ by typing at any time.
 | `claude_binary` | `claude` | path/name of the CLI |
 | `model` | `sonnet` | default `--model` (alias or full name); a per-job `model` overrides it, `null` uses claude's own default |
 | `permission_mode` | `bypassPermissions` | passed to `--permission-mode` |
-| `sandbox` | `true` | run claude under bubblewrap (see below) |
+| `sandbox` | `true` | run claude in the sandbox (see below) |
 | `provision_trust` | `true` | auto-write Claude Code trust for a job's workspace (see below); `false` = require pre-trusted workspaces |
 | `max_consecutive_continues` | `5` | Stop nudges before an attempt is handed to the verifier anyway |
 | `wrap_up_lead_minutes` | `null` | minutes before a job's phase deadline to nudge the worker to commit and summarize; `null` uses a tenth of the timeout (min 3), `0` disables it |

@@ -40,7 +40,7 @@ def exec_cmd(
     workspace: Optional[str] = typer.Option(
         None, "--workspace", "-w", help="Working directory for the snippet and its tools"
     ),
-    sandbox: bool = typer.Option(False, "--sandbox", help="Run the snippet in a bubblewrap sandbox"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Run the snippet in a sandbox"),
     no_sandbox: bool = typer.Option(False, "--no-sandbox", help="Disable sandbox (overrides config)"),
     allow_domain: Optional[List[str]] = typer.Option(
         None, "--allow-domain", help="Domain(s) allowed in sandbox (implies --sandbox)"

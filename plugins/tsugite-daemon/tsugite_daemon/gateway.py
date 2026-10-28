@@ -137,7 +137,7 @@ def terminal_state_callback(event_bus, terminal_store, rooms) -> Callable[[str, 
 
 
 def check_sandbox_prerequisites(config: DaemonConfig) -> None:
-    """Fail closed if sandboxing is enabled but bwrap is unavailable.
+    """Fail closed if sandboxing is enabled but no sandbox backend is available.
 
     Run once at daemon startup so a misconfigured host surfaces immediately
     instead of every sandboxed turn failing (or, worse, running unsandboxed).
@@ -146,9 +146,9 @@ def check_sandbox_prerequisites(config: DaemonConfig) -> None:
 
     if config.sandbox and config.sandbox.enabled and not sandbox_available():
         raise RuntimeError(
-            "Sandbox enabled but 'bwrap' was not found on PATH. "
-            "Install bubblewrap, or set sandbox.enabled: false. "
-            "(Sandboxing is Linux-only and needs user-namespace support.)"
+            "Sandbox enabled but no sandbox backend is available. "
+            "On Linux, install bubblewrap (needs user-namespace support); macOS uses the "
+            "built-in sandbox-exec. Or set sandbox.enabled: false."
         )
 
 

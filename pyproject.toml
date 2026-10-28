@@ -238,7 +238,7 @@ ignore_names = [
   "get_completions",   # prompt_toolkit Completer API, dispatched by the session
   "complete_event",    # mandatory prompt_toolkit get_completions() parameter
   "language",          # CodeExecutionEvent field, read by the web UI via serialized events
-  "BubblewrapSandbox", # plugin entry point (tsugite.sandbox: bwrap), loaded via get_sandbox_class
+  "HozoSandbox",       # plugin entry point (tsugite.sandbox: hozo), loaded via get_sandbox_class
   # Public API / test-infra reached only from tests (vulture excludes tests).
   "subscribe_filtered",         # imperative EventBus filtered-subscription API (docs/plugin-events.md)
   "unsubscribe_filtered",

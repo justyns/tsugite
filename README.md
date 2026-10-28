@@ -55,7 +55,7 @@ pip install tsugite-cli                  # or plain pip
 | --- | --- |
 | `tsugite-cli[daemon]` | Daemon: HTTP API, web UI, scheduler, jobs, terminals (pty), sandbox, Discord |
 | `tsugite-cli[web]` | `web_search` + YouTube transcripts |
-| `tsugite-cli[sandbox]` | bwrap sandbox backend (also needs the `bwrap` binary) |
+| `tsugite-cli[sandbox]` | [Hozo](https://github.com/justyns/hozo) sandbox backend (needs `bwrap` on Linux; macOS uses the built-in `sandbox-exec`) |
 | `tsugite-cli[all]` | Everything above plus the optional tmux + provider plugins |
 
 ```bash
@@ -100,7 +100,7 @@ in nested tmux / non-Rich-friendly shells. Pick a richer or quieter mode when yo
 - **Sub-agents** that can spawn other agents for specific subtasks
 - **Skills** directory-based knowledge modules (mostly) following the [agentskills.io](https://agentskills.io/) SKILL.md format
 - **Hooks** that fire shell commands on lifecycle events (post-tool, pre-message, pre/post-compact)
-- **Sandbox** (linux only) via bubblewrap with filesystem and network isolation
+- **Sandbox** (Linux and macOS) via [Hozo](https://github.com/justyns/hozo) with filesystem and network isolation
 
 ## Agents in more detail
 
@@ -133,7 +133,7 @@ For a complete example, check the built-in [default agent](tsugite/builtin_agent
 
 ## Sandbox
 
-On Linux only (for now), agent code runs inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox when you pass `--sandbox`:
+Agent code runs inside a [Hozo](https://github.com/justyns/hozo) sandbox (bubblewrap on Linux, `sandbox-exec` on macOS) when you pass `--sandbox`:
 
 ```bash
 tsu run +default "task" --sandbox --allow-domain "github.com"

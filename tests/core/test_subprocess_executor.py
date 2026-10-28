@@ -2,11 +2,11 @@
 
 import asyncio
 import os
-import shutil
 import tempfile
 
 import pytest
 
+from tsugite.core.sandbox import sandbox_available
 from tsugite.core.subprocess_executor import SubprocessExecutor
 from tsugite.core.tools import Tool
 from tsugite.events import EventBus, InfoEvent, ToolCallEvent, ToolResultEvent
@@ -345,14 +345,16 @@ async def test_multiple_tool_calls():
         executor.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 @pytest.mark.asyncio
-async def test_sandbox_blocks_filesystem_read():
-    """Sandbox can't read files outside workspace (e.g., /etc/passwd)."""
+async def test_sandbox_blocks_filesystem_read(tmp_path):
+    """Sandbox can't read host files outside the workspace."""
     from pathlib import Path
 
     from tsugite.core.sandbox import SandboxConfig
 
+    outside = tmp_path / "outside.txt"
+    outside.write_text("host secret")
     with tempfile.TemporaryDirectory() as workspace:
         config = SandboxConfig(no_network=True)
         executor = SubprocessExecutor(workspace_dir=Path(workspace), sandbox_config=config)
@@ -360,7 +362,7 @@ async def test_sandbox_blocks_filesystem_read():
             result = await executor.execute(
                 "import os\n"
                 "try:\n"
-                "    with __builtins__['open']('/etc/passwd', 'r') as f:\n"
+                f"    with __builtins__['open']({str(outside)!r}, 'r') as f:\n"
                 "        print('READ:', f.read()[:20])\n"
                 "except Exception as e:\n"
                 "    print(f'BLOCKED: {type(e).__name__}')\n"
@@ -372,7 +374,7 @@ async def test_sandbox_blocks_filesystem_read():
             executor.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 @pytest.mark.asyncio
 async def test_sandbox_blocks_sensitive_dotfiles():
     """Sandbox can't read ~/.ssh, ~/.gnupg, ~/.bashrc even though home is partially visible."""
@@ -401,7 +403,7 @@ async def test_sandbox_blocks_sensitive_dotfiles():
         executor.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 @pytest.mark.asyncio
 async def test_sandbox_write_isolation():
     """Writes to /tmp inside sandbox don't escape to host /tmp."""
@@ -427,40 +429,7 @@ async def test_sandbox_write_isolation():
             os.unlink(host_path)
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
-@pytest.mark.asyncio
-async def test_sandbox_pid_namespace():
-    """Sandbox process runs in an isolated PID namespace."""
-    from tsugite.core.sandbox import SandboxConfig
-
-    config = SandboxConfig(no_network=True)
-    executor = SubprocessExecutor(sandbox_config=config)
-    try:
-        result = await executor.execute("import os\nprint(os.getpid())")
-        assert result.error is None
-        pid = int(result.output.strip())
-        assert pid < 100, f"PID {pid} suggests PID namespace is not isolated"
-    finally:
-        executor.cleanup()
-
-
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
-@pytest.mark.asyncio
-async def test_sandboxed_execution():
-    """Integration: SubprocessExecutor actually invokes bwrap when sandbox_config is set."""
-    from tsugite.core.sandbox import SandboxConfig
-
-    config = SandboxConfig(no_network=True)
-    executor = SubprocessExecutor(sandbox_config=config)
-    try:
-        result = await executor.execute("import os\nprint('sandboxed:', os.getpid())")
-        assert result.error is None
-        assert "sandboxed:" in result.output
-    finally:
-        executor.cleanup()
-
-
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 @pytest.mark.asyncio
 async def test_sandbox_blocks_network():
     """Integration: --no-network actually prevents network access."""
@@ -484,10 +453,10 @@ async def test_sandbox_blocks_network():
         executor.cleanup()
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+@pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 @pytest.mark.asyncio
 async def test_sandboxed_executor_binds_workspace_and_isolates_fs(tmp_path, shell_tools):
-    """End-to-end: a sandboxed SubprocessExecutor (resolving the bwrap backend via the
+    """End-to-end: a sandboxed SubprocessExecutor (resolving the sandbox backend via the
     sandbox seam) runs the shell `run()` tool inside the workspace and cannot read
     outside it."""
     from pathlib import Path

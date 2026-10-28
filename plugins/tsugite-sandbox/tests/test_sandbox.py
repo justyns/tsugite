@@ -1,190 +1,119 @@
-"""Tests for bubblewrap sandbox wrapper."""
+import socket
+import subprocess
+import sys
+import threading
 
-import shutil
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-
+import hozo
 import pytest
 import tsugite_sandbox
-from tsugite_sandbox import BubblewrapSandbox
 
-from tsugite.core.sandbox import SandboxConfig
-
-
-class TestBuildCommand:
-    def test_basic_command(self):
-        config = SandboxConfig()
-        sandbox = BubblewrapSandbox(
-            config=config,
-            workspace_dir=Path("/home/user/project"),
-        )
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        assert cmd[0] == "bwrap"
-        assert "--unshare-pid" in cmd
-        assert "--die-with-parent" in cmd
-        # Workspace should be rw bind
-        idx = cmd.index("--bind")
-        assert cmd[idx + 1] == "/home/user/project"
-
-    def test_network_unshare(self, tmp_path):
-        config = SandboxConfig()
-        sandbox = BubblewrapSandbox(
-            config=config,
-            proxy_socket=Path("/tmp/proxy.sock"),
-            state_dir=tmp_path,
-        )
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        assert "--unshare-net" in cmd
-
-    def test_proxy_socket_binding(self, tmp_path):
-        config = SandboxConfig()
-        sandbox = BubblewrapSandbox(
-            config=config,
-            proxy_socket=Path("/tmp/proxy.sock"),
-            state_dir=tmp_path,
-        )
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        # Proxy socket should be bound to /run/proxy.sock
-        ro_bind_indices = [i for i, v in enumerate(cmd) if v == "--ro-bind"]
-        proxy_bound = any(
-            cmd[i + 1] == "/tmp/proxy.sock" and cmd[i + 2] == "/run/proxy.sock"
-            for i in ro_bind_indices
-            if i + 2 < len(cmd)
-        )
-        assert proxy_bound
-
-    def test_proxy_env_vars(self, tmp_path):
-        config = SandboxConfig()
-        sandbox = BubblewrapSandbox(
-            config=config,
-            proxy_socket=Path("/tmp/proxy.sock"),
-            state_dir=tmp_path,
-        )
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        setenv_indices = [i for i, v in enumerate(cmd) if v == "--setenv"]
-        http_proxy_set = any(cmd[i + 1] == "HTTP_PROXY" for i in setenv_indices if i + 1 < len(cmd))
-        https_proxy_set = any(cmd[i + 1] == "HTTPS_PROXY" for i in setenv_indices if i + 1 < len(cmd))
-        assert http_proxy_set
-        assert https_proxy_set
-
-    def test_proxy_scripts_written_to_state_dir(self, tmp_path):
-        sandbox = BubblewrapSandbox(
-            config=SandboxConfig(),
-            proxy_socket=Path("/tmp/proxy.sock"),
-            state_dir=tmp_path,
-        )
-        sandbox.build_command(["python3", "harness.py"])
-        assert (tmp_path / "_bridge.py").exists()
-        assert (tmp_path / "_ssh_proxy.py").exists()
-
-    def test_ssh_proxy_command(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = SandboxConfig()
-            sandbox = BubblewrapSandbox(
-                config=config,
-                proxy_socket=Path("/tmp/proxy.sock"),
-                state_dir=Path(tmpdir),
-            )
-            cmd = sandbox.build_command(["python3", "harness.py"])
-            setenv_indices = [i for i, v in enumerate(cmd) if v == "--setenv"]
-            git_ssh_set = any(cmd[i + 1] == "GIT_SSH_COMMAND" for i in setenv_indices if i + 1 < len(cmd))
-            assert git_ssh_set
-
-    def test_state_dir_binding(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config = SandboxConfig()
-            sandbox = BubblewrapSandbox(config=config, state_dir=Path(tmpdir))
-            cmd = sandbox.build_command(["python3", "harness.py"])
-            bind_indices = [i for i, v in enumerate(cmd) if v == "--bind"]
-            state_bound = any(cmd[i + 1] == tmpdir for i in bind_indices if i + 1 < len(cmd))
-            assert state_bound
-
-    def test_no_network_mode(self):
-        config = SandboxConfig(no_network=True)
-        sandbox = BubblewrapSandbox(config=config)
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        assert "--unshare-net" in cmd
-        assert "HTTP_PROXY" not in cmd
-
-    def test_unrestricted_network_mode(self):
-        """No proxy + no_network=False: sandbox has full network access."""
-        config = SandboxConfig(no_network=False)
-        sandbox = BubblewrapSandbox(config=config)
-        cmd = sandbox.build_command(["python3", "harness.py"])
-        assert "--unshare-net" not in cmd
-        assert "HTTP_PROXY" not in cmd
-
-    @pytest.mark.parametrize("var", ["NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"])
-    def test_ca_env_vars_pass_through(self, monkeypatch, var):
-        monkeypatch.setenv(var, "/opt/corp/ca.pem")
-        cmd = BubblewrapSandbox(config=SandboxConfig()).build_command(["true"])
-        setenvs = {cmd[i + 1]: cmd[i + 2] for i, v in enumerate(cmd) if v == "--setenv"}
-        assert setenvs.get(var) == "/opt/corp/ca.pem"
-
-    def test_every_cert_bundle_target_bound(self, monkeypatch, tmp_path):
-        links = []
-        for i, name in enumerate(("a", "b", "b")):
-            (tmp_path / name).mkdir(exist_ok=True)
-            (tmp_path / name / "bundle.pem").touch()
-            link = tmp_path / f"link{i}.pem"
-            link.symlink_to(tmp_path / name / "bundle.pem")
-            links.append(str(link))
-        monkeypatch.setattr(tsugite_sandbox, "_CA_BUNDLE_PATHS", tuple(links))
-        cmd = BubblewrapSandbox(config=SandboxConfig()).build_command(["true"])
-        ro_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--ro-bind"]
-        assert ro_binds.count(str(tmp_path / "a")) == 1
-        assert ro_binds.count(str(tmp_path / "b")) == 1
-
-    def test_extra_ro_binds(self):
-        """extra_ro_binds paths appear as --ro-bind in command."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            extra = Path(tmpdir)
-            config = SandboxConfig(extra_ro_binds=[extra])
-            sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
-            cmd = sandbox.build_command(["python3", "harness.py"])
-            ro_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--ro-bind" and i + 1 < len(cmd)]
-            assert str(extra) in ro_binds
-
-    def test_extra_rw_binds(self):
-        """extra_rw_binds paths appear as --bind (rw) in command."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            extra = Path(tmpdir)
-            config = SandboxConfig(extra_rw_binds=[extra])
-            sandbox = BubblewrapSandbox(config=config, workspace_dir=Path("/home/user/project"))
-            cmd = sandbox.build_command(["python3", "harness.py"])
-            rw_binds = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--bind" and i + 1 < len(cmd)]
-            assert str(extra) in rw_binds
-
-    def test_use_proxy_property(self):
-        """_use_proxy is True only when proxy_socket set and no_network is False."""
-        config = SandboxConfig()
-        assert BubblewrapSandbox(config=config, proxy_socket=Path("/tmp/p.sock"))._use_proxy is True
-        assert BubblewrapSandbox(config=config)._use_proxy is False
-        config_no_net = SandboxConfig(no_network=True)
-        assert BubblewrapSandbox(config=config_no_net, proxy_socket=Path("/tmp/p.sock"))._use_proxy is False
+from tsugite.core.sandbox import SandboxConfig, get_sandbox_class
 
 
-class TestCheckAvailable:
-    def test_available(self):
-        with patch("shutil.which", return_value="/usr/bin/bwrap"):
-            assert BubblewrapSandbox.check_available() is True
-
-    def test_not_available(self):
-        with patch("shutil.which", return_value=None):
-            assert BubblewrapSandbox.check_available() is False
+def _build(config=None, **kwargs):
+    return tsugite_sandbox.HozoSandbox(config=config or SandboxConfig(), **kwargs).build_command(["python3", "h.py"])
 
 
-@pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
+def _flag(cmd, name):
+    """Values of a `--name=a,b` flag, [] for a bare `--name`, None when absent."""
+    for tok in cmd[: cmd.index("--")]:
+        if tok == name:
+            return []
+        if tok.startswith(name + "="):
+            return tok.split("=", 1)[1].split(",")
+    return None
+
+
+def test_default_backend_builds_a_hozo_invocation(tmp_path):
+    cmd = get_sandbox_class()(config=SandboxConfig(), workspace_dir=tmp_path).build_command(["python3", "h.py"])
+    assert cmd[:5] == [sys.executable, "-m", "hozo", "--project", str(tmp_path)]
+    assert cmd[-3:] == ["--", "python3", "h.py"]
+
+
+class TestNetwork:
+    def test_no_network_grants_none(self):
+        assert _flag(_build(SandboxConfig(no_network=True)), "--allow-net") is None
+
+    def test_allowed_domains_become_the_proxy_allowlist(self):
+        cmd = _build(SandboxConfig(allowed_domains=["api.github.com", "*.example.com:22"]))
+        assert _flag(cmd, "--allow-net") == ["api.github.com", "*.example.com:22"]
+
+    def test_network_without_domains_proxies_everything(self):
+        assert _flag(_build(), "--allow-net") == ["*:*"]
+
+
+class TestBinds:
+    def test_python_prefix_is_read_only(self):
+        assert sys.prefix in _flag(_build(), "--allow-read")
+
+    def test_workspace_on_sys_path_stays_writable(self, tmp_path, monkeypatch):
+        monkeypatch.syspath_prepend(str(tmp_path))
+        assert str(tmp_path) not in _flag(_build(workspace_dir=tmp_path), "--allow-read")
+
+    def test_state_dir_and_extra_rw_binds_are_writable(self, tmp_path):
+        extra = tmp_path / "extra"
+        extra.mkdir()
+        cmd = _build(SandboxConfig(extra_rw_binds=[extra]), state_dir=tmp_path)
+        assert _flag(cmd, "--allow-write") == [str(tmp_path), str(extra)]
+
+    def test_missing_extra_binds_are_skipped(self, tmp_path):
+        extra = tmp_path / "extra"
+        extra.mkdir()
+        gone = tmp_path / "gone"
+        cmd = _build(SandboxConfig(extra_ro_binds=[extra, gone], extra_rw_binds=[gone]))
+        assert str(extra) in _flag(cmd, "--allow-read")
+        assert str(gone) not in _flag(cmd, "--allow-read")
+        assert _flag(cmd, "--allow-write") is None
+
+
+def test_pass_env_names_are_allowed_through():
+    names = _flag(_build(SandboxConfig(pass_env=["MY_VAR"])), "--allow-env")
+    assert {"MY_VAR", "VIRTUAL_ENV", "SSL_CERT_FILE"} <= set(names)
+
+
+@pytest.mark.skipif(not hozo.check_available(), reason="no sandbox runtime on this host")
 class TestSandboxedExecution:
-    @pytest.mark.asyncio
-    async def test_basic_sandboxed_run(self):
-        """Integration: actually run a command under bwrap."""
-        import subprocess
+    def _run(self, config, code, tmp_path):
+        cmd = tsugite_sandbox.HozoSandbox(config=config, workspace_dir=tmp_path).build_command(
+            [sys.executable, "-c", code]
+        )
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
-        config = SandboxConfig(no_network=True)
-        sandbox = BubblewrapSandbox(config=config, workspace_dir=Path.cwd())
-        cmd = sandbox.build_command(["python3", "-c", "print('hello from sandbox')"])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        assert result.returncode == 0
-        assert "hello from sandbox" in result.stdout
+    def test_runs_in_the_workspace(self, tmp_path):
+        r = self._run(SandboxConfig(no_network=True), "import os; print(os.getcwd())", tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == str(tmp_path)
+
+    def test_host_path_reaches_the_sandbox(self, tmp_path, monkeypatch):
+        # cc-driver launches `claude` by bare name from a bound PATH dir.
+        monkeypatch.setenv("PATH", f"/opt/tools/bin:{sys.prefix}/bin:/usr/bin:/bin")
+        r = self._run(SandboxConfig(no_network=True), "import os; print(os.environ['PATH'])", tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == f"/opt/tools/bin:{sys.prefix}/bin:/usr/bin:/bin"
+
+    def test_proxy_enforces_the_domain_allowlist(self, tmp_path):
+        server = socket.create_server(("127.0.0.1", 0))
+        port = server.getsockname()[1]
+        threading.Thread(target=lambda: server.accept()[0].close(), daemon=True).start()
+        code = (
+            "import os, socket, urllib.parse\n"
+            "proxy = urllib.parse.urlsplit(os.environ['HTTPS_PROXY'])\n"
+            "for host in ('localhost', 'blocked.invalid'):\n"
+            "    s = socket.create_connection((proxy.hostname, proxy.port))\n"
+            f"    s.sendall(f'CONNECT {{host}}:{port} HTTP/1.1\\r\\n\\r\\n'.encode())\n"
+            "    print(host, s.recv(64).split(b'\\r\\n')[0].decode())\n"
+        )
+        try:
+            r = self._run(SandboxConfig(allowed_domains=[f"localhost:{port}"]), code, tmp_path)
+        finally:
+            server.close()
+        assert r.returncode == 0, r.stderr
+        assert "localhost HTTP/1.1 200" in r.stdout
+        assert "blocked.invalid HTTP/1.1 403" in r.stdout
+
+    @pytest.mark.parametrize("no_network, tunneled", [(False, True), (True, False)])
+    def test_git_ssh_tunnels_through_the_proxy_only_with_network(self, tmp_path, no_network, tunneled):
+        code = "import os; print(os.environ.get('GIT_SSH_COMMAND', ''))"
+        r = self._run(SandboxConfig(no_network=no_network), code, tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert ("ProxyCommand" in r.stdout) is tunneled

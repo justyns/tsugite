@@ -362,8 +362,6 @@ class SubprocessExecutor:
         self._name_origins = BlockNameOrigins()
 
         self._tmpdir = tempfile.mkdtemp(prefix="tsugite_sub_")
-        self._proxy = None
-        self._proxy_socket: Optional[Path] = None
 
         if path_context:
             self._sticky_injections["WORKSPACE_DIR"] = (
@@ -652,7 +650,7 @@ with open(RESULT_PATH, "w") as f:
         if os.path.exists(result_path):
             os.unlink(result_path)
 
-        # Named FIFOs rather than sockets: these work through bwrap bind mounts.
+        # Named FIFOs rather than sockets: these work through sandbox bind mounts.
         req_fifo = os.path.join(self._tmpdir, "req.fifo")
         resp_fifo = os.path.join(self._tmpdir, "resp.fifo")
         for fifo in (req_fifo, resp_fifo):
@@ -680,12 +678,8 @@ with open(RESULT_PATH, "w") as f:
                     stderr="",
                 )
 
-            if not self.sandbox_config.no_network and not self._proxy:
-                await self._start_proxy()
-
             sandbox = sandbox_cls(
                 config=self.sandbox_config,
-                proxy_socket=self._proxy_socket,
                 workspace_dir=Path(self.workspace_dir) if self.workspace_dir else None,
                 state_dir=Path(self._tmpdir),
             )
@@ -974,23 +968,6 @@ with open(RESULT_PATH, "w") as f:
             return
         self.event_bus.emit(event_cls.model_validate(msg.get("fields") or {}))
 
-    async def _start_proxy(self):
-        """Start the HTTP CONNECT proxy for sandbox network access."""
-        from .proxy import ConnectProxy
-
-        self._proxy_socket = Path(self._tmpdir) / "proxy.sock"
-        allowed = self.sandbox_config.allowed_domains if self.sandbox_config else None
-        self._proxy = ConnectProxy(socket_path=self._proxy_socket, allowed_domains=allowed or None)
-        await self._proxy.start()
-        logger.info("Started proxy at %s (domains=%s)", self._proxy_socket, allowed)
-
-    async def _stop_proxy(self):
-        """Stop the proxy if running."""
-        if self._proxy:
-            await self._proxy.stop()
-            self._proxy = None
-            self._proxy_socket = None
-
     async def send_variables(self, variables: Dict[str, Any]):
         """Register harness-level variables that are re-injected at the start of every turn."""
         for k, v in variables.items():
@@ -1023,18 +1000,7 @@ with open(RESULT_PATH, "w") as f:
             self._unloaded_skills_for_turn.append(name)
 
     def cleanup(self):
-        """Stop proxy and remove temp files."""
         import shutil
-
-        if self._proxy:
-            try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._stop_proxy())
-                except RuntimeError:
-                    asyncio.run(self._stop_proxy())
-            except Exception:
-                pass
 
         try:
             shutil.rmtree(self._tmpdir, ignore_errors=True)

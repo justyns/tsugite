@@ -930,6 +930,18 @@ wheels = [
 ]
 
 [[package]]
+name = "hozo"
+version = "0.5.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/79/b8/e862f5666080b7d9385c40382a1604b1c83914d2e7de5a662d8388d0e502/hozo-0.5.2.tar.gz", hash = "sha256:e51d03529cc48ea251ec32667232b7158aa5e60496cdfd04b19848fd7f67261c", size = 73066, upload-time = "2026-10-30T08:13:11.109Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/fb/3d276577ce9ce57865959636c9c9acd7a5fd7871d269f2cdb4cec13b1e66/hozo-0.5.2-py3-none-any.whl", hash = "sha256:4aeaf1ecbe6ac5a0156b9b75a4caab112bf26eb63056bc037fefe3035a03c5ab", size = 41324, upload-time = "2026-10-30T08:13:09.727Z" },
+]
+
+[[package]]
 name = "html2text"
 version = "2025.4.15"
 source = { registry = "https://pypi.org/simple" }
@@ -2591,11 +2603,15 @@ name = "tsugite-sandbox"
 version = "0.25.4"
 source = { editable = "plugins/tsugite-sandbox" }
 dependencies = [
+    { name = "hozo" },
     { name = "tsugite-cli" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "tsugite-cli", editable = "." }]
+requires-dist = [
+    { name = "hozo", specifier = ">=0.5.2" },
+    { name = "tsugite-cli", editable = "." },
+]
 
 [[package]]
 name = "tsugite-tmux"

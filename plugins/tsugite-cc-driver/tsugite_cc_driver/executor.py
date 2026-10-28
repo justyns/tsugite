@@ -308,8 +308,8 @@ def build_sandbox_ctx(sandbox: bool, cwd: Optional[str], *, claude_binary: str =
     When set: filesystem isolation to cwd, network ON (no_network=False - the
     driven claude needs the API), and ~/.claude bound rw so credentials refresh.
 
-    bwrap does --clearenv and mounts only a fixed set of dirs (/usr /lib /bin
-    /sbin, the venv, the workspace, and our extra binds), so we MUST also bind
+    The sandbox clears the env and mounts only a fixed set of dirs plus the
+    workspace and our extra binds, so we MUST also bind
     everything the driven claude touches by absolute path - each one, if missing
     from the jail, is a hard failure at launch:
     - the claude binary's dirs, or PATH points at a file that isn't there and

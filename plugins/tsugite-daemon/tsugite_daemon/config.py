@@ -25,8 +25,6 @@ class AutoCompactConfig(BaseModel):
 
 
 class SandboxSettings(BaseModel):
-    """Bubblewrap sandbox settings for daemon code execution."""
-
     enabled: bool = False
     no_network: bool = False
     allow_domains: List[str] = Field(default_factory=list)

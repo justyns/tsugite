@@ -1,8 +1,8 @@
 # Sandbox
 
-On Linux, agent code can run inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox: the filesystem is limited to the workspace, network goes through a filtering proxy that only allows the domains you list, and the environment is cleared down to a safe set so agent code can't read the host's API keys or tokens from `os.environ` (use `pass_env` to expose specific non-secret vars).
+Agent code can run inside a [Hozo](https://github.com/justyns/hozo) sandbox: the filesystem is limited to the workspace, network goes through a filtering proxy that only allows the domains you list, and the environment is cleared down to a safe set so agent code can't read the host's API keys or tokens from `os.environ` (use `pass_env` to expose specific non-secret vars).
 
-It needs `bwrap` on the host and does nothing on other platforms.
+On Linux it needs `bwrap` on the host. macOS uses the built-in `sandbox-exec`.
 
 **Note**: Consider sandboxing experimental for now.  It may change in the future, but you could also achieve something similar with containers, vms, or [srt](https://github.com/anthropic-experimental/sandbox-runtime).
 

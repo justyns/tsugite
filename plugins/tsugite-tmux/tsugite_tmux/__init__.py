@@ -127,7 +127,7 @@ def _list_managed_sessions() -> list:
 # host privileges, so they're denied to sandboxed agents to prevent a host escape. pty is the
 # sandboxed terminal alternative today.
 # TODO: allow sandboxed agents to use tmux by running a per-agent tmux server on its own `-S`
-# socket under bwrap, lifecycle-managed like the PTY runtime, so sessions inherit the agent's
+# socket inside the sandbox, lifecycle-managed like the PTY runtime, so sessions inherit the agent's
 # sandbox. Then drop @deny_when_sandboxed. (See the parent_only sandbox rule in AGENTS.md.)
 @tool(category="tmux", parent_only=True)
 @deny_when_sandboxed

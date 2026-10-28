@@ -15,9 +15,8 @@ from tsugite.utils import convert_html_to_markdown
 
 _WEB_EXTRA_HINT = "Install it with: pip install 'tsugite-cli[web]'"
 
-# Redirect hop bound for follow_redirects=True. Sandbox network policy applies
-# at the process level (bwrap network namespace), so followed redirects can't
-# reach anything the original request couldn't.
+# Redirect hop bound for follow_redirects=True. The sandbox's network policy
+# applies at the process level, to redirects too.
 _MAX_REDIRECTS = 5
 
 # readability emits a near-empty node when it finds no article. An extraction that is

@@ -257,7 +257,7 @@ def run(
     ),
     no_workspace: bool = typer.Option(False, "--no-workspace", help="Disable workspace (ignore default workspace)"),
     new_session: bool = typer.Option(False, "--new-session", help="Start fresh session (ignore workspace session)"),
-    sandbox: bool = typer.Option(False, "--sandbox", help="Run agent code in bubblewrap sandbox"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Run agent code in a sandbox"),
     no_sandbox: bool = typer.Option(False, "--no-sandbox", help="Disable sandbox (overrides config)"),
     allow_domain: Optional[List[str]] = typer.Option(
         None,

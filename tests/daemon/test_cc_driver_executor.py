@@ -476,14 +476,10 @@ def test_build_sandbox_ctx_binds_the_settings_dir(tmp_path):
     assert settings_dir in ctx.extra_ro_binds
 
 
-def test_sandboxed_claude_and_trust_present_in_real_bwrap_argv(tmp_path, monkeypatch):
+def test_sandboxed_claude_and_trust_present_in_real_sandbox_argv(tmp_path, monkeypatch):
     # Repro guard against the exit-127 bug: the claude dirs + trust file must land
-    # as --ro-bind in the ACTUAL bwrap command, not just the SandboxContext.
+    # as grants in the ACTUAL sandbox command, not just the SandboxContext.
     pytest.importorskip("tsugite_sandbox")
-    import shutil
-
-    if shutil.which("bwrap") is None:
-        pytest.skip("bwrap not installed")
     from tsugite_pty.terminal_runtime import maybe_sandbox_argv
 
     link, bindir, install = _fake_claude_install(tmp_path)
@@ -497,12 +493,13 @@ def test_sandboxed_claude_and_trust_present_in_real_bwrap_argv(tmp_path, monkeyp
 
     ctx = build_sandbox_ctx(True, str(work), claude_binary=str(link), settings_dir=settings_dir)
     argv = maybe_sandbox_argv(["claude"], str(work), ctx, force_no_network=False)
+    grants = {tok.split("=", 1)[0]: tok.split("=", 1)[1].split(",") for tok in argv if tok.startswith("--allow-")}
 
-    assert str(bindir) in argv, "claude PATH dir missing from bwrap argv -> exit 127"
-    assert str(install) in argv, "claude install dir missing from bwrap argv"
-    assert str(settings_dir) in argv, "settings dir missing from bwrap argv -> settings file not found"
-    assert str(cfg) in argv, "trust config missing from bwrap argv -> trust-prompt hang"
-    assert "--unshare-net" not in argv, "cc-driver sandbox keeps network for the API"
+    assert str(bindir) in grants["--allow-read"], "claude PATH dir missing from sandbox argv -> exit 127"
+    assert str(install) in grants["--allow-read"], "claude install dir missing from sandbox argv"
+    assert str(settings_dir) in grants["--allow-read"], "settings dir missing -> settings file not found"
+    assert str(cfg) in grants["--allow-write"], "trust config missing from sandbox argv -> trust-prompt hang"
+    assert "--allow-net" in grants, "cc-driver sandbox keeps network for the API"
 
 
 def test_real_claude_launches_inside_the_jail(tmp_path):
@@ -804,7 +801,7 @@ async def test_initial_spawn_stamps_worker_terminal_and_writes_settings(tmp_path
     fake = tmp_path / "claude"
     fake.write_text("#!/bin/sh\nsleep 30\n")
     fake.chmod(0o755)
-    # sandbox=False keeps this hermetic (no bwrap dependency); the sandbox path is
+    # sandbox=False keeps this hermetic (no sandbox runtime dependency); the sandbox path is
     # covered by the build_sandbox_ctx tests.
     ex = _executor(tmp_path, orch, claude_binary=str(fake), base_url="http://127.0.0.1:8374", sandbox=False)
 

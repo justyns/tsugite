@@ -4,15 +4,10 @@ This is a deliberate parallel path to `tsugite.core.subprocess_executor.Subproce
 Both run user Python in a subprocess, but they differ:
 
   - `SubprocessExecutor` is async, turn-stateful, blocks `open()`, forces tool usage,
-    and manages a network proxy when sandboxed. It's designed for the LLM agent loop
-    where each turn is a long-running session.
+    and runs inside the sandbox backend when sandboxed. It's designed for the LLM agent
+    loop where each turn is a long-running session.
   - `run_python_block` (this module) is synchronous, one-shot, allows plain Python
     (`open`, `os.listdir`, etc.), and is invoked at agent-prep time before the LLM runs.
-
-Sandbox plumbing is deferred: passing `sandbox_config` raises `NotImplementedError`.
-The async path's bubblewrap+proxy lifecycle does not translate cleanly to the
-synchronous one-shot model; a future shared `build_python_subprocess_command` helper
-would converge both paths. Any sandbox-related change must update both call sites.
 """
 
 import json
@@ -126,8 +121,6 @@ def run_python_block(
     locals_dict: Dict[str, Any],
     timeout: int = 30,
     continue_on_error: bool = False,
-    sandbox_config: Optional[Any] = None,
-    workspace_dir: Optional[str] = None,
 ) -> ExecBlockResult:
     """Run a Python block synchronously in a one-shot subprocess.
 
@@ -138,8 +131,6 @@ def run_python_block(
         timeout: Wall-clock timeout in seconds.
         continue_on_error: If True, exceptions are captured to result.error and
             return_value is None instead of re-raising.
-        sandbox_config: Optional SandboxConfig; when set, blocks run in bwrap.
-        workspace_dir: Optional workspace path for sandbox bind mounts.
 
     Raises:
         TimeoutError: On timeout.
@@ -158,7 +149,7 @@ def run_python_block(
         with open(payload_path, "w") as f:
             json.dump({"locals": safe_locals, "code": code}, f)
 
-        cmd = _build_command(harness_path, payload_path, result_path, sandbox_config, workspace_dir)
+        cmd = [sys.executable, "-u", harness_path, payload_path, result_path]
 
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -205,19 +196,3 @@ def _filter_json_safe(d: Dict[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError, OverflowError):
             continue
     return safe
-
-
-def _build_command(
-    harness_path: str,
-    payload_path: str,
-    result_path: str,
-    sandbox_config: Optional[Any],
-    workspace_dir: Optional[str],
-) -> list[str]:
-    if sandbox_config is None:
-        return [sys.executable, "-u", harness_path, payload_path, result_path]
-    raise NotImplementedError(
-        "sandbox_config support for tsu:exec is not implemented yet - the existing async "
-        "SubprocessExecutor path manages a network proxy that doesn't translate cleanly to "
-        "this synchronous one-shot path. Track in a follow-up."
-    )

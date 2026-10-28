@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from tsugite_daemon.adapters.base import resolve_sandbox_exec_options
 from tsugite_daemon.config import DaemonConfig, SandboxSettings
-from tsugite_sandbox import BubblewrapSandbox
+from tsugite_sandbox import HozoSandbox
 
 from tsugite.options import ExecutionOptions
 
@@ -186,6 +186,13 @@ class TestResolveEffectiveSandbox:
         )
         assert domains == ["github.com:22"]
 
+    @pytest.mark.parametrize("pattern", ["fd00::/8", "[fd00::/8]:443", "10.0.0.0/8:22"])
+    def test_ip_pattern_within_identical_ceiling(self, pattern):
+        _, domains, _ = self._resolve(
+            daemon_enabled=True, daemon_domains=[pattern], fm_sandbox={"allow_domains": [pattern]}
+        )
+        assert domains == [pattern]
+
     def test_split_port_ceiling_union_covers_default(self):
         # The proxy unions the allowlist: :80 + :443 together == default ports, so
         # an agent requesting "github.com" (default 80/443) is within the ceiling.
@@ -217,6 +224,23 @@ class TestResolveEffectiveSandbox:
         )
         assert domains == []
         assert no_net is True
+
+
+@pytest.mark.parametrize(
+    "pattern, expected",
+    [
+        ("github.com", ("github.com", {80, 443})),
+        ("github.com:22", ("github.com", {22})),
+        ("*:*", ("*", set())),
+        ("fd00::/8", ("fd00::/8", {80, 443})),
+        ("[fd00::/8]", ("fd00::/8", {80, 443})),
+        ("[fd00::/8]:443", ("fd00::/8", {443})),
+    ],
+)
+def test_parse_pattern(pattern, expected):
+    from tsugite.agent_runner.runner import _parse_pattern
+
+    assert _parse_pattern(pattern) == expected
 
 
 class TestResolveWorkspaceDir:
@@ -313,24 +337,24 @@ class TestSandboxStartupCheck:
             sandbox=sandbox,
         )
 
-    def test_raises_when_sandbox_enabled_and_bwrap_missing(self, tmp_path, monkeypatch):
+    def test_raises_when_sandbox_enabled_and_backend_unavailable(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
-        monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
+        monkeypatch.setattr(HozoSandbox, "check_available", staticmethod(lambda: False))
         config = self._config(tmp_path, SandboxSettings(enabled=True))
-        with pytest.raises(RuntimeError, match="bwrap"):
+        with pytest.raises(RuntimeError, match="no sandbox backend"):
             check_sandbox_prerequisites(config)
 
-    def test_ok_when_bwrap_available(self, tmp_path, monkeypatch):
+    def test_ok_when_backend_available(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
-        monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: True))
+        monkeypatch.setattr(HozoSandbox, "check_available", staticmethod(lambda: True))
         config = self._config(tmp_path, SandboxSettings(enabled=True))
         check_sandbox_prerequisites(config)  # must not raise
 
     def test_ok_when_no_sandbox_enabled(self, tmp_path, monkeypatch):
         from tsugite_daemon.gateway import check_sandbox_prerequisites
 
-        monkeypatch.setattr(BubblewrapSandbox, "check_available", staticmethod(lambda: False))
+        monkeypatch.setattr(HozoSandbox, "check_available", staticmethod(lambda: False))
         config = self._config(tmp_path, SandboxSettings(enabled=False))
         check_sandbox_prerequisites(config)  # disabled sandbox => no requirement

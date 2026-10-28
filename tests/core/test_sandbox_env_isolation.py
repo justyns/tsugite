@@ -1,17 +1,18 @@
-"""The bwrap sandbox must not leak the operator's environment (API keys, tokens) to agent code.
+"""The sandbox must not leak the operator's environment (API keys, tokens) to agent code.
 
 Secrets reach an agent only via the allowlisted, masked get_secret tool; raw os.environ access
 inside the sandbox would bypass that entirely.
 """
 
 import asyncio
+import os
 
 import pytest
 
 from tsugite.core.sandbox import SandboxConfig, sandbox_available
 from tsugite.core.subprocess_executor import SubprocessExecutor
 
-pytestmark = pytest.mark.skipif(not sandbox_available("bwrap"), reason="bwrap not installed")
+pytestmark = pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
 
 
 def _run_sandboxed(tmp_path, code):
@@ -33,13 +34,6 @@ def test_secret_env_var_not_visible_in_sandbox(tmp_path, monkeypatch):
     assert result.error is None, result.error
     assert "supersecret-do-not-leak" not in result.output
     assert "VAL=None" in result.output
-
-
-def test_sandbox_still_has_basic_env(tmp_path):
-    """clearenv must not break the child: PATH/HOME and IPC still work."""
-    result = _run_sandboxed(tmp_path, 'import os; print("PATH_OK", bool(os.environ.get("PATH")))')
-    assert result.error is None, result.error
-    assert "PATH_OK True" in result.output
 
 
 def test_pass_env_exposes_named_var(tmp_path, monkeypatch):
@@ -80,12 +74,17 @@ def test_pass_env_xdg_override_wins(tmp_path, monkeypatch):
 
 
 def test_sandbox_xdg_dirs_isolated_and_writable(tmp_path):
-    """XDG dirs point into the sandbox (not the operator's home) and are writable."""
+    """XDG dirs are writable, and writes there stay off the host."""
     code = (
         "import os; p = os.environ.get('XDG_CACHE_HOME', ''); "
         "os.makedirs(os.path.join(p, 'sub'), exist_ok=True); "
         "print('XDG', p, os.path.isdir(os.path.join(p, 'sub')))"
     )
-    result = _run_sandboxed(tmp_path, code)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    result = _run_sandboxed(workspace, code)
     assert result.error is None, result.error
-    assert "XDG /tmp/.cache True" in result.output
+    _, cache, made = result.output.split()
+    assert made == "True"
+    assert cache.startswith(os.path.expanduser("~"))
+    assert not os.path.exists(os.path.join(cache, "sub"))

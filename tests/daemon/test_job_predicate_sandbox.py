@@ -1,5 +1,7 @@
 """Sandboxing of daemon job shell predicates (routes through the sandbox seam)."""
 
+import sys
+
 import pytest
 
 from tsugite.core.sandbox import sandbox_available
@@ -20,8 +22,8 @@ def test_unsandboxed_job_predicate_runs_via_shell(tmp_path):
 
 
 @pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
-def test_sandboxed_job_predicate_runs_in_bwrap(tmp_path):
-    """A sandboxed job's shell predicate runs inside bwrap: it sees the
+def test_sandboxed_job_predicate_runs_in_sandbox(tmp_path):
+    """A sandboxed job's shell predicate runs inside the sandbox: it sees the
     worktree (cwd) but cannot read outside it."""
     from tsugite_daemon.job_predicates import _evaluate_predicate
 
@@ -57,13 +59,20 @@ def test_sandboxed_job_predicate_runs_in_bwrap(tmp_path):
 
 
 @pytest.mark.skipif(not sandbox_available(), reason="sandbox backend not available")
-def test_sandboxed_job_setup_command_runs_in_bwrap(tmp_path):
+def test_sandboxed_job_setup_command_runs_in_sandbox(tmp_path):
     from tsugite_daemon.job_predicates import run_job_command
 
     override = {"enabled": True, "no_network": True, "extra_ro_binds": [], "extra_rw_binds": []}
 
     run_job_command("touch made_inside", str(tmp_path), 30, override)
     assert (tmp_path / "made_inside").exists()
+
+
+@pytest.mark.skipif(not sandbox_available() or sys.platform != "linux", reason="needs the Linux sandbox backend")
+def test_sandboxed_job_command_gets_its_own_pid_namespace(tmp_path):
+    from tsugite_daemon.job_predicates import run_job_command
+
+    override = {"enabled": True, "no_network": True, "extra_ro_binds": [], "extra_rw_binds": []}
 
     # Only a fresh pid namespace has bwrap as pid 1.
     run_job_command("grep -qx bwrap /proc/1/comm", str(tmp_path), 30, override)

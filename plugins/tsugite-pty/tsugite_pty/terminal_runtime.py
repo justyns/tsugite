@@ -71,13 +71,11 @@ def resolve_terminal_sandbox(parent_session_id: Optional[str]):
 def maybe_sandbox_argv(
     argv: list[str], cwd: Optional[str], sandbox_ctx=None, force_no_network: bool = True
 ) -> list[str]:
-    """Wrap a PTY command in bwrap when its agent runs sandboxed.
+    """Wrap a PTY command in the sandbox when its agent runs sandboxed.
 
     PTYs run in the daemon (parent) process, so without this a sandboxed agent
     could use pty_create to execute outside the sandbox. Agent-inherited sandboxed
-    PTYs are filesystem-isolated to the workspace and get no network (no filtering
-    proxy is wired for the long-lived PTY path) - the agent's own code/shell still
-    reach the network through the executor's filtered proxy.
+    PTYs are filesystem-isolated to the workspace and get no network.
 
     force_no_network=True (the agent-inherited default) forces no-network - a
     sandboxed agent's PTY must never gain network. A caller passing an explicit

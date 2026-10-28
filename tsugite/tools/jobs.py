@@ -128,7 +128,7 @@ def spawn_job(
         raise ToolUnavailableError("Jobs orchestrator not initialised")
 
     # Worker + verifier sessions stay sandboxed if this agent is, and predicate ACs
-    # are evaluated inside bwrap by the orchestrator.
+    # are evaluated inside the sandbox by the orchestrator.
     sandbox_override = sandbox_context_to_override()
 
     # Validate delegated files against this agent's workspace now. The runner

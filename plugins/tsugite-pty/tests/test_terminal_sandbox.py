@@ -24,12 +24,12 @@ class RecordingSandbox:
     last_config = None
     last_workspace = None
 
-    def __init__(self, config, proxy_socket=None, workspace_dir=None, state_dir=None):
+    def __init__(self, config, workspace_dir=None, state_dir=None):
         RecordingSandbox.last_config = config
         RecordingSandbox.last_workspace = workspace_dir
 
     def build_command(self, inner_cmd):
-        return ["FAKE-BWRAP", *inner_cmd]
+        return ["FAKE-SANDBOX", *inner_cmd]
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +72,7 @@ class TestMaybeSandboxArgvForceNoNetwork:
             force_no_network=False,
         )
         assert fake_backend.last_config.no_network is False
-        assert wrapped[0] == "FAKE-BWRAP"
+        assert wrapped[0] == "FAKE-SANDBOX"
         assert wrapped[-3:] == ["/bin/sh", "-c", "ls"]
 
     def test_explicit_ctx_honors_its_own_no_network(self, tmp_path, fake_backend):
