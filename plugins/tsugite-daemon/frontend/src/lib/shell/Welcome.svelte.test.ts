@@ -30,6 +30,10 @@ const models = [
   { id: 'claude_code:sonnet', provider: 'claude_code' },
   { id: 'openai:gpt-4o', provider: 'openai' },
 ];
+const agentList = [
+  { id: 'helper', name: 'helper', color: 'green', model: null, is_default: false },
+  { id: 'desktop', name: 'desktop', color: 'blue', model: null, is_default: true },
+];
 
 function serve(
   runtime: { model?: string | null; effective_model: string | null },
@@ -42,6 +46,7 @@ function serve(
       return { models };
     }
     if (path === '/api/providers') return { providers };
+    if (path === '/api/agents') return { agents: agentList };
     throw new Error(`unexpected GET ${path}`);
   });
 }
@@ -115,6 +120,39 @@ test('says when it replaces the effective default model, and keeps an unchanged 
   await page.getByRole('button', { name: 'Finish' }).click();
   await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
   expect(api.patch).not.toHaveBeenCalled();
+});
+
+test('Finish renames the default agent and sets its color and model', async () => {
+  serve({ effective_model: 'claude_code:sonnet' });
+  await render(Welcome, { open: true });
+
+  const name = page.getByLabelText('Agent name');
+  await expect.element(name).toHaveValue('desktop');
+  await expect.element(page.getByLabelText('Color')).toHaveValue('blue');
+  await userEvent.fill(name, ' Rook ');
+  await page.getByLabelText('Color').selectOptions('purple');
+  await userEvent.fill(page.getByLabelText('Agent model'), 'claude_code:opus');
+  await page.getByRole('button', { name: 'Finish' }).click();
+
+  await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
+  expect(api.patch).toHaveBeenCalledTimes(1);
+  expect(api.patch).toHaveBeenCalledWith('/api/agents/desktop', {
+    name: 'Rook',
+    color: 'purple',
+    model: 'claude_code:opus',
+  });
+});
+
+test('Finish sends only the agent fields that changed', async () => {
+  serve({ effective_model: 'claude_code:sonnet' });
+  await render(Welcome, { open: true });
+
+  await expect.element(page.getByLabelText('Agent name')).toHaveValue('desktop');
+  await page.getByLabelText('Color').selectOptions('teal');
+  await page.getByRole('button', { name: 'Finish' }).click();
+
+  await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
+  expect(api.patch).toHaveBeenCalledWith('/api/agents/desktop', { color: 'teal' });
 });
 
 test('Finish stays disabled when the load fails', async () => {
