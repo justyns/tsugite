@@ -35,9 +35,13 @@ const agentList = [
   { id: 'desktop', name: 'desktop', color: 'blue', model: null, is_default: true },
 ];
 
+const files = ['IDENTITY.md', 'USER.md', 'AGENTS.md', 'MEMORY.md'];
+const ready = { complete: true, missing: [] as string[], fresh: false, workspace: '/ws' };
+const fresh = { complete: false, missing: files, fresh: true, workspace: '/ws' };
+
 function serve(
   runtime: { model?: string | null; effective_model: string | null },
-  { failModels = false } = {},
+  { failModels = false, setup = ready } = {},
 ) {
   vi.mocked(api.get).mockImplementation(async (path: string) => {
     if (path === '/api/runtime') return { model: null, ...runtime };
@@ -47,6 +51,7 @@ function serve(
     }
     if (path === '/api/providers') return { providers };
     if (path === '/api/agents') return { agents: agentList };
+    if (path === '/api/setup') return setup;
     throw new Error(`unexpected GET ${path}`);
   });
 }
@@ -60,6 +65,7 @@ beforeEach(() => {
   auth.setUserId('web-user-1');
   vi.mocked(api.get).mockReset();
   vi.mocked(api.patch).mockReset().mockResolvedValue({});
+  vi.mocked(api.post).mockReset().mockResolvedValue(ready);
 });
 
 test('opens itself on a fresh daemon, loads the runtime once, and saves model and user ID', async () => {
@@ -95,13 +101,52 @@ test('stays closed when a global or agent-file default model is in effect', asyn
   await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
 });
 
-test('stays closed and skips the check in a browser that dismissed it', async () => {
+test('stays closed in a browser that dismissed it once setup is complete', async () => {
   welcomeDismissed.set(true);
   serve({ effective_model: null });
   await render(Welcome, {});
 
+  await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/api/setup'));
+  await new Promise((resolve) => setTimeout(resolve));
   await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
-  expect(api.get).not.toHaveBeenCalled();
+});
+
+test('opens in a browser that dismissed it while the workspace lacks IDENTITY.md', async () => {
+  welcomeDismissed.set(true);
+  serve(
+    { effective_model: 'claude_code:sonnet' },
+    { setup: { complete: false, missing: ['IDENTITY.md'], fresh: false, workspace: '/ws' } },
+  );
+  await render(Welcome, {});
+
+  await expect.element(page.getByTestId(TESTID.welcome)).toBeVisible();
+  await expect
+    .element(page.getByText('/ws already has files. Finish leaves them alone.'))
+    .toBeInTheDocument();
+  await page.getByRole('button', { name: 'Finish' }).click();
+  await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+test('Finish seeds a fresh workspace with the user and agent names', async () => {
+  serve({ effective_model: 'claude_code:sonnet' }, { setup: fresh });
+  await render(Welcome, {});
+
+  await expect
+    .element(page.getByText('Finish creates /ws from the workspace templates.'))
+    .toBeInTheDocument();
+  await userEvent.fill(page.getByLabelText('Agent name'), 'Rook');
+  await userEvent.fill(page.getByLabelText('About'), 'Keeps the homelab running.');
+  await userEvent.fill(page.getByLabelText('User ID'), 'sam');
+  await page.getByRole('button', { name: 'Finish' }).click();
+
+  await expect.element(page.getByTestId(TESTID.welcome)).not.toBeVisible();
+  expect(api.patch).toHaveBeenCalledWith('/api/agents/desktop', { name: 'Rook' });
+  expect(api.post).toHaveBeenCalledWith('/api/setup', {
+    user_name: 'sam',
+    agent_name: 'Rook',
+    about: 'Keeps the homelab running.',
+  });
 });
 
 test('says when it replaces the effective default model, and keeps an unchanged model', async () => {

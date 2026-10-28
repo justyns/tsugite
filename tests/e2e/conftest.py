@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import uvicorn
 from tsugite_daemon.adapters.http import HTTPAgentAdapter, HTTPServer
+from tsugite_daemon.adapters.http.agents_api import SETUP_FILES
 from tsugite_daemon.auth import TokenStore
 from tsugite_daemon.config import HTTPConfig, RuntimeDefaults
 from tsugite_daemon.session_store import SessionStore
@@ -45,6 +46,9 @@ def e2e_tmp(tmp_path_factory):
 def e2e_workspace(e2e_tmp):
     ws = e2e_tmp / "workspace"
     ws.mkdir()
+    # A workspace without these files opens the welcome over every page.
+    for name in SETUP_FILES:
+        (ws / name).touch()
     return ws
 
 

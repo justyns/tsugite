@@ -575,6 +575,8 @@ class TestAgentsApi:
             ("GET", "/api/agents/homelab"),
             ("PATCH", "/api/agents/homelab"),
             ("POST", "/api/agents/homelab/main"),
+            ("GET", "/api/setup"),
+            ("POST", "/api/setup"),
         ],
     )
     def test_requires_auth(self, client, method, path):
@@ -718,6 +720,49 @@ class TestAgentsApi:
         rows = client.get("/api/chat/sessions", headers=auth).json()["sessions"]
         assert next(r for r in rows if r["id"] == session.id)["agent_id"] == "main"
         assert client.get(f"/api/sessions/{session.id}", headers=auth).json()["agent_id"] == "main"
+
+
+SETUP_FILES = ["IDENTITY.md", "USER.md", "AGENTS.md", "MEMORY.md"]
+
+
+class TestSetupApi:
+    def test_a_fresh_workspace_is_incomplete(self, client, auth, default_ws):
+        assert client.get("/api/setup", headers=auth).json() == {
+            "complete": False,
+            "missing": SETUP_FILES,
+            "fresh": True,
+            "workspace": str(default_ws),
+        }
+
+    def test_lists_a_missing_identity(self, client, auth, default_ws):
+        for name in SETUP_FILES[1:]:
+            (default_ws / name).write_text("x")
+
+        body = client.get("/api/setup", headers=auth).json()
+
+        assert (body["complete"], body["missing"], body["fresh"]) == (False, ["IDENTITY.md"], False)
+
+    def test_seeds_a_fresh_workspace_with_the_names(self, client, auth, default_ws):
+        resp = client.post(
+            "/api/setup", headers=auth, json={"user_name": "sam", "agent_name": "Rook", "about": "A helper."}
+        )
+
+        assert resp.json()["complete"] is True
+        assert "- **Name:** sam" in (default_ws / "USER.md").read_text()
+        identity = (default_ws / "IDENTITY.md").read_text()
+        assert "- **Name:** Rook" in identity
+        assert "A helper." in identity
+        assert (default_ws / "memory").is_dir()
+
+    def test_leaves_an_existing_workspace_alone(self, client, auth, default_ws):
+        (default_ws / "USER.md").write_text("mine\n")
+        before = sorted(p.name for p in default_ws.iterdir())
+
+        body = client.post("/api/setup", headers=auth, json={"user_name": "sam", "agent_name": "Rook"}).json()
+
+        assert (default_ws / "USER.md").read_text() == "mine\n"
+        assert sorted(p.name for p in default_ws.iterdir()) == before
+        assert (body["complete"], body["fresh"]) == (False, False)
 
 
 def _chat(store, agent_id=None, user_id="web-anonymous"):

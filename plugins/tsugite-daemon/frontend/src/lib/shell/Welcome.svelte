@@ -19,6 +19,7 @@
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
   type Model = { id: string; provider?: string | null };
+  type Setup = { complete: boolean; missing: string[]; fresh: boolean; workspace: string };
 
   const AGENT_COLORS = ['blue', 'green', 'red', 'purple', 'orange', 'yellow', 'teal', 'pink'];
 
@@ -32,9 +33,11 @@
   let agentName = $state('');
   let agentColor = $state(AGENT_COLORS[0]);
   let agentModel = $state('');
+  let about = $state('');
+  let setup = $state<Setup | null>(null);
   let saving = $state(false);
 
-  const loaded = $derived(current !== null && models !== null && agent !== null);
+  const loaded = $derived(current !== null && models !== null && agent !== null && setup !== null);
   const currentModel = $derived(current?.effective_model ?? null);
   const providerNames = $derived(providers.map((p) => p.name));
   const modelOptions = $derived.by(() => {
@@ -52,10 +55,11 @@
 
   async function load() {
     try {
-      const [runtime, list, roster] = await Promise.all([
+      const [runtime, list, roster, status] = await Promise.all([
         current ?? api.get<RuntimeInfo>('/api/runtime'),
         api.get<{ models: Model[] }>('/api/models'),
         api.get<{ agents: Agent[] }>('/api/agents'),
+        setup ?? api.get<Setup>('/api/setup'),
       ]);
       if (!open) return;
       current = runtime;
@@ -67,18 +71,23 @@
       agentName = agent?.name ?? '';
       agentColor = agent?.color ?? AGENT_COLORS[0];
       agentModel = agent?.model ?? '';
+      setup = status;
     } catch (err) {
       toasts.push('err', 'Could not load the welcome', { body: messageOf(err) });
     }
   }
 
-  // App mounts this only once the shell is authed.
+  // App mounts this only once the shell is authed. An incomplete workspace
+  // opens it even if this browser dismissed it.
   onMount(async () => {
-    if (welcomeDismissed.enabled) return;
     try {
-      const runtime = await api.get<RuntimeInfo>('/api/runtime');
-      if (runtime.effective_model) return;
+      const [runtime, status] = await Promise.all([
+        api.get<RuntimeInfo>('/api/runtime'),
+        api.get<Setup>('/api/setup'),
+      ]);
+      if (status.complete && (welcomeDismissed.enabled || runtime.effective_model)) return;
       current = runtime;
+      setup = status;
       open = true;
     } catch (err) {
       toasts.push('err', 'Could not check for the welcome', { body: messageOf(err) });
@@ -105,27 +114,31 @@
     current = null;
     models = null;
     agent = null;
-  }
-
-  function agentChanges(a: Agent): Partial<Agent> {
-    const changes: Partial<Agent> = {};
-    const name = agentName.trim();
-    const agentModelId = agentModel.trim() || null;
-    if (name && name !== a.name) changes.name = name;
-    if (agentColor !== a.color) changes.color = agentColor;
-    if (agentModelId !== a.model) changes.model = agentModelId;
-    return changes;
+    setup = null;
   }
 
   async function finish() {
+    const a = agent;
+    if (!a) return;
+    const name = agentName.trim() || a.name;
+    const agentModelId = agentModel.trim() || null;
+    const changes: Partial<Agent> = {};
+    if (name !== a.name) changes.name = name;
+    if (agentColor !== a.color) changes.color = agentColor;
+    if (agentModelId !== a.model) changes.model = agentModelId;
     saving = true;
     try {
       if (model && model !== currentModel) await api.patch('/api/runtime/config', { model });
-      const changes = agent ? agentChanges(agent) : {};
-      if (agent && Object.keys(changes).length) {
-        await api.patch(`/api/agents/${encodeURIComponent(agent.id)}`, changes);
+      if (Object.keys(changes).length) {
+        await api.patch(`/api/agents/${encodeURIComponent(a.id)}`, changes);
         void agents.load();
       }
+      if (setup?.fresh)
+        await api.post('/api/setup', {
+          user_name: userId.trim(),
+          agent_name: name,
+          about: about.trim(),
+        });
       if (userId.trim()) auth.setUserId(userId.trim());
       dismiss();
     } catch (err) {
@@ -153,6 +166,13 @@
     </Field>
     <section>
       <h4>Agent</h4>
+      {#if setup}
+        <p class="hint">
+          {setup.fresh
+            ? `Finish creates ${setup.workspace} from the workspace templates.`
+            : `${setup.workspace} already has files. Finish leaves them alone.`}
+        </p>
+      {/if}
       <Field id="welcome-agent-name" label="Agent name">
         {#snippet children()}
           <Input bind:value={agentName} id="welcome-agent-name" />
@@ -174,6 +194,13 @@
           />
         {/snippet}
       </Field>
+      {#if setup?.fresh}
+        <Field id="welcome-agent-about" label="About" hint="Goes into IDENTITY.md.">
+          {#snippet children(describedBy)}
+            <Input bind:value={about} id="welcome-agent-about" ariaDescribedby={describedBy} />
+          {/snippet}
+        </Field>
+      {/if}
     </section>
     <Field id="welcome-userid" label="User ID" hint="Sent with every request as user_id.">
       {#snippet children(describedBy)}
@@ -200,6 +227,11 @@
   }
   .welcome p {
     margin: 0;
+  }
+  .hint {
+    font: 400 var(--fs-2xs) var(--font-ui);
+    color: var(--tx3);
+    overflow-wrap: anywhere;
   }
   section {
     display: grid;
