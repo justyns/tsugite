@@ -176,7 +176,7 @@ page can skin itself across all five themes without importing anything from the 
 Reply to `location.origin` rather than `'*'`: the frame is same-origin with the host, and a wildcard
 reply goes to whatever page framed the surface.
 
-`init.token` is the daemon bearer token, for calling your own `get_http_routes()` endpoints:
+`init.token` is a bearer token valid only under `/api/plugins/<your plugin>/`, for calling your own `get_http_routes()` endpoints:
 
 ```js
 fetch('/api/plugins/my_plugin/status', { headers: { Authorization: 'Bearer ' + msg.token } });
@@ -231,11 +231,16 @@ A surface's assets are served without auth, the same as the daemon's own web bun
 
 The frame is same-origin under `/api/plugins/<plugin_name>/`, sandboxed to
 `allow-scripts allow-forms allow-same-origin`. Sharing the origin is what lets a page reach its own
-authenticated routes with the token `init` hands it, so the sandbox attributes are hardening rather
-than the trust boundary. A plugin surface is code the operator installed, gated by the same
-`plugins.<name>.enabled` flag as the rest of the adapter; a hostile adapter already has
-Python-level access to the daemon. Anything a surface embeds from a third-party origin should be
-loaded from inside the plugin's own page, so the daemon only ever frames plugin-owned HTML.
+authenticated routes with the token `init` hands it. That token is minted per surface and is valid
+only under `/api/plugins/<plugin_name>/`, which limits the token handed to the page. It does not stop
+script in the frame that reads the host's stored full-access token from `localStorage`
+(`tsugite_token`), since `allow-same-origin` shares that storage. An XSS bug or third-party script in a
+surface can read it and call any daemon route.
+
+A plugin surface is code the operator installed, gated by the same `plugins.<name>.enabled` flag as
+the rest of the adapter, and plugins stay trusted code: a hostile adapter already has Python-level
+access to the daemon. Anything a surface embeds from a third-party origin should be loaded from
+inside the plugin's own page, so the daemon only ever frames plugin-owned HTML.
 
 A tab whose plugin is later disabled or uninstalled survives a reload and renders a "plugin isn't
 installed" placeholder, so an arranged layout is never silently dropped.

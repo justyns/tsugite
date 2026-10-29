@@ -27,6 +27,8 @@ TOKEN_PREFIX = "tsu_"
 TOKENS_FILENAME = "tokens.json"
 
 SCOPE_SCRIPT_RUN = "script-run"
+# `plugin:<name>` scopes a token to the routes under /api/plugins/<name>/.
+SCOPE_PLUGIN_PREFIX = "plugin:"
 
 # The only (method, path) pairs a scoped token may call. Every other route refuses it.
 # Named groups (schedule, session, job) are checked for ownership by the HTTP server.
@@ -52,7 +54,7 @@ class Token:
     prefix: str  # first 8 chars for display
     persistent: bool = False
     expires_at: str | None = None  # ISO format, None = never
-    scope: str | None = None  # None = full API; else a key of _SCOPE_ROUTES
+    scope: str | None = None  # None = full API; else a key of _SCOPE_ROUTES or "plugin:<name>"
 
     def route_params(self, method: str, path: str) -> dict[str, str] | None:
         """Path ids of the scoped route a request hits, or None if the scope refuses it."""
@@ -141,8 +143,10 @@ class TokenStore:
 
     # --- Agent tokens (temporary, with TTL) ---
 
-    def issue(self, schedule_id: str = "", ttl: int | None = None, scope: str | None = None) -> str:
-        """Issue a temporary token for a schedule run. Returns the raw token."""
+    def issue(
+        self, schedule_id: str = "", ttl: int | None = None, scope: str | None = None, identity: str | None = None
+    ) -> str:
+        """Issue an expiring in-memory token, by default for a schedule run. Returns the raw token."""
         with self._lock:
             if len(self._tokens) > 100:
                 self.cleanup_expired()
@@ -150,7 +154,7 @@ class TokenStore:
         now = datetime.now(timezone.utc)
         t = Token(
             hash=self._hash(raw),
-            identity=f"schedule:{schedule_id}",
+            identity=identity or f"schedule:{schedule_id}",
             created_at=now.isoformat(),
             prefix=raw[:8],
             expires_at=(now + timedelta(seconds=ttl or self._default_ttl)).isoformat(),

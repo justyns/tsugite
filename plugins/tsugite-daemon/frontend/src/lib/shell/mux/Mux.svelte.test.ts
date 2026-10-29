@@ -305,12 +305,17 @@ function seedFramingSurface(): void {
   };
   pluginsMeta.surfaces = [surface];
   pluginsMeta.loaded = true;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ token: 'tsu_surface-token' })),
+  );
 }
 
 afterEach(() => {
   pluginsMeta.surfaces = [];
   pluginsMeta.loaded = false;
   for (const url of blobUrls.splice(0)) URL.revokeObjectURL(url);
+  vi.unstubAllGlobals();
 });
 
 test('clicking into a plugin surface claims the pane without taking focus off the frame', async () => {

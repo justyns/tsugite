@@ -37,7 +37,7 @@ from tsugite_daemon.adapters.http.usage import UsageMixin
 from tsugite_daemon.adapters.http.webhooks import WebhooksMixin
 from tsugite_daemon.adapters.http.workspace_files import WorkspaceFilesMixin
 from tsugite_daemon.agent_store import UnknownAgentError
-from tsugite_daemon.auth import Token
+from tsugite_daemon.auth import SCOPE_PLUGIN_PREFIX, Token
 from tsugite_daemon.config import HTTPConfig
 from tsugite_daemon.session_store import SessionSource
 from tsugite_daemon.webhook_store import WebhookStore
@@ -157,9 +157,14 @@ class HTTPServer(
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     def _token_permits(self, token: Token, method: str, path: str) -> bool:
-        """Route scope plus ownership: a scoped token reaches only records of its own schedule."""
+        """A schedule token may call only its own schedule's records.
+
+        A plugin token may call only routes under its plugin's mount.
+        """
         if token.scope is None:
             return True
+        if token.scope.startswith(SCOPE_PLUGIN_PREFIX):
+            return path.startswith(f"/api/plugins/{token.scope.removeprefix(SCOPE_PLUGIN_PREFIX)}/")
         params = token.route_params(method, path)
         if params is None:
             return False

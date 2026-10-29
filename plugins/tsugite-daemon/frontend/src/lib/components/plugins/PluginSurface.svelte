@@ -2,6 +2,7 @@
   // The one component every plugin UI surface renders through: the plugin's page
   // in a pane-filling iframe, plus the host end of the postMessage bridge.
   // Threat model and the public-assets rule: docs/plugin-adapters.md.
+  import { api } from '$lib/api/client';
   import { auth } from '$lib/stores/auth.svelte';
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { theme } from '$lib/stores/theme.svelte';
@@ -41,10 +42,21 @@
     return { name: theme.current, tokens: readThemeTokens(document.documentElement) };
   }
 
-  function onLoad(): void {
+  async function onLoad(): Promise<void> {
     sentTheme = theme.current;
-    frame?.contentWindow?.postMessage(
-      initMessage(kind, params, payload(), auth.token, auth.userId),
+    const target = frame;
+    // The frame gets a token valid only under its plugin's routes, never the viewer's own.
+    let token: string;
+    try {
+      ({ token } = await api.post<{ token: string }>('/api/plugin-surface-token', {
+        plugin: surface?.plugin,
+      }));
+    } catch {
+      phase = 'stalled';
+      return;
+    }
+    target?.contentWindow?.postMessage(
+      initMessage(kind, params, payload(), token, auth.userId),
       location.origin,
     );
   }

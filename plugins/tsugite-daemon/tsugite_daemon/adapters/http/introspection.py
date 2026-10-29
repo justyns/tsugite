@@ -12,13 +12,37 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from tsugite_daemon.auth import SCOPE_PLUGIN_PREFIX
+
+SURFACE_TOKEN_TTL_SECONDS = 24 * 3600
+
 
 class IntrospectionMixin:
     def _introspection_routes(self) -> list:
         return [
             Route("/api/plugins", self._api_list_plugins, methods=["GET"]),
             Route("/api/tools", self._api_list_tools, methods=["GET"]),
+            Route("/api/plugin-surface-token", self._api_plugin_surface_token, methods=["POST"]),
         ]
+
+    async def _api_plugin_surface_token(self, request: Request) -> JSONResponse:
+        """Mint the token a plugin surface frame gets in place of the viewer's own:
+        valid only under /api/plugins/<plugin>/."""
+        if err := self._check_auth(request):
+            return err
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        plugin = body.get("plugin") if isinstance(body, dict) else None
+        if not isinstance(plugin, str) or plugin not in {s["plugin"] for s in self.plugin_ui_surfaces}:
+            return JSONResponse({"error": "plugin is not a loaded plugin with a UI surface"}, status_code=400)
+        token = self._token_store.issue(
+            ttl=SURFACE_TOKEN_TTL_SECONDS,
+            scope=f"{SCOPE_PLUGIN_PREFIX}{plugin}",
+            identity=f"plugin-surface:{plugin}",
+        )
+        return JSONResponse({"token": token})
 
     async def _api_list_plugins(self, request: Request) -> JSONResponse:
         """Discovered plugins across every entry-point group, plus the UI surfaces

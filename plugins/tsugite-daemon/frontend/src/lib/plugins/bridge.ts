@@ -20,7 +20,7 @@ interface InitMessage {
   version: number;
   surface: { kind: string; params: Record<string, string> };
   theme: ThemePayload;
-  /** The daemon bearer token, for calling the plugin's own authed routes. */
+  /** A bearer token valid only under the plugin's own `/api/plugins/<name>/` routes. */
   token: string;
   /** Who is viewing, so a surface can attribute what the human does in it apart
    *  from what an agent does through the plugin's tools. */

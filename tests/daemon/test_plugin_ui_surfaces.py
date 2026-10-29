@@ -307,3 +307,60 @@ def test_plugins_endpoint_serves_registered_surfaces(server, test_token):
     body = TestClient(server.app).get("/api/plugins", headers={"Authorization": f"Bearer {test_token}"}).json()
     assert [s["kind"] for s in body["ui_surfaces"]] == ["plugin/onlyoffice/doc"]
     assert body["ui_surfaces"][0]["entry"] == "/api/plugins/onlyoffice/ui/editor.html"
+
+
+# ── POST /api/plugin-surface-token ──
+
+
+def _surface_token(client, admin_token, plugin="alpha"):
+    resp = client.post("/api/plugin-surface-token", json={"plugin": plugin}, headers=_bearer(admin_token))
+    assert resp.status_code == 200
+    return resp.json()["token"]
+
+
+def _bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _echo_route(path):
+    async def endpoint(request):
+        return JSONResponse({"ok": True})
+
+    return Route(path, endpoint, methods=["GET", "POST"])
+
+
+def test_surface_token_reaches_only_its_plugins_routes(server, test_token):
+    server.plugin_ui_surfaces.append({"plugin": "alpha"})
+    server.mount_plugin_routes("alpha", [_echo_route("/ping")], [])
+    server.mount_plugin_routes("beta", [_echo_route("/ping")], [])
+    server.mount_plugin_routes("alphabet", [_echo_route("/ping")], [])
+    client = TestClient(server.app)
+    surface = _surface_token(client, test_token)
+
+    assert client.get("/api/plugins/alpha/ping", headers=_bearer(surface)).status_code == 200
+    assert client.get("/api/plugins/beta/ping", headers=_bearer(surface)).status_code == 403
+    assert client.get("/api/plugins/alphabet/ping", headers=_bearer(surface)).status_code == 403
+    assert client.put("/api/hooks", json={}, headers=_bearer(surface)).status_code == 403
+    assert client.get("/api/plugins", headers=_bearer(surface)).status_code == 403
+
+
+def test_surface_token_cannot_mint_tokens(server, test_token):
+    server.plugin_ui_surfaces.append({"plugin": "alpha"})
+    client = TestClient(server.app)
+    surface = _surface_token(client, test_token)
+    resp = client.post("/api/plugin-surface-token", json={"plugin": "alpha"}, headers=_bearer(surface))
+    assert resp.status_code == 403
+
+
+def test_surface_token_needs_auth(server):
+    client = TestClient(server.app)
+    assert client.post("/api/plugin-surface-token", json={"plugin": "alpha"}).status_code == 401
+
+
+def test_surface_token_rejects_unloaded_plugins_and_bad_bodies(server, test_token):
+    server.plugin_ui_surfaces.append({"plugin": "alpha"})
+    client = TestClient(server.app)
+    bodies = [{}, {"plugin": "beta"}, {"plugin": "../hooks"}, {"plugin": []}, {"plugin": {}}, []]
+    for kwargs in [{"json": body} for body in bodies] + [{"content": b"not json"}]:
+        resp = client.post("/api/plugin-surface-token", headers=_bearer(test_token), **kwargs)
+        assert resp.status_code == 400

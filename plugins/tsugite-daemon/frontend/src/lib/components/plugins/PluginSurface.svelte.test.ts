@@ -60,11 +60,16 @@ beforeEach(() => {
   theme.set('mocha');
   auth.token = 'tsu_test-token';
   auth.userId = 'desk-viewer';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ token: 'tsu_surface-token' })),
+  );
 });
 
 afterEach(() => {
   pluginsMeta.surfaces = [];
   pluginsMeta.loaded = false;
+  vi.unstubAllGlobals();
   for (const url of urls.splice(0)) URL.revokeObjectURL(url);
 });
 
@@ -95,11 +100,36 @@ test('init carries the protocol version and the resolved theme tokens', async ()
     version: 1,
     surface: { kind: 'plugin/demo/board', params: { path: 'q4.docx' } },
     theme: { name: 'mocha' },
-    token: 'tsu_test-token',
+    token: 'tsu_surface-token',
   });
   const tokens = (init as unknown as { theme: { tokens: Record<string, string> } }).theme.tokens;
   expect(tokens['--bg0']).toMatch(/^(#|rgb|oklch|hsl)/);
   expect(Object.keys(tokens).length).toBeGreaterThan(20);
+});
+
+test('init hands the frame a plugin-scoped token, never the viewer token', async () => {
+  seed(pluginPage(RECORD_AND_READY));
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+  await handshake();
+
+  const [path, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+  expect(path).toBe('/api/plugin-surface-token');
+  expect(JSON.parse(init.body as string)).toEqual({ plugin: 'demo' });
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
+  const received = (frame.contentWindow as unknown as { received: unknown[] }).received;
+  expect(JSON.stringify(received)).not.toContain('tsu_test-token');
+});
+
+test('a failed token mint offers a reload instead of waiting out the handshake', async () => {
+  vi.mocked(fetch).mockResolvedValue(Response.json({ error: 'boom' }, { status: 500 }));
+  seed(pluginPage(RECORD_AND_READY));
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+
+  await expect
+    .element(page.getByTestId(TESTID.pluginSurfaceReload), { timeout: 2000 })
+    .toBeInTheDocument();
 });
 
 test('a theme switch re-skins a live surface', async () => {
