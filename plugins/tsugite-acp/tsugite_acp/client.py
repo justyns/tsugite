@@ -79,9 +79,11 @@ class ACPClientHandler:
     def __init__(self, policy: PermissionPolicy | None = None) -> None:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._policy = policy or PermissionPolicy()
+        self.started = False  # updates before start() finishes are load_session history replay
 
     async def session_update(self, session_id: str, update, **_: Any) -> None:
-        await self._queue.put(update)
+        if self.started:
+            await self._queue.put(update)
 
     async def request_permission(self, options, session_id: str, tool_call, **_: Any) -> RequestPermissionResponse:
         if not options:
@@ -179,6 +181,7 @@ class ACPClientSession:
         cwd: str,
         resume_session_id: str | None = None,
         mcp_servers: list | None = None,
+        model: str | None = None,
     ) -> str:
         init_resp = await self._conn.initialize(
             protocol_version=PROTOCOL_VERSION,
@@ -200,6 +203,9 @@ class ACPClientSession:
         else:
             new_resp = await self._conn.new_session(cwd=cwd, mcp_servers=mcp_servers)
             self._session_id = new_resp.session_id
+        if model:
+            await self._conn.set_config_option(config_id="model", session_id=self._session_id, value=model)
+        self._handler.started = True
         return self._session_id
 
     async def prompt(self, blocks: list) -> AsyncIterator[ACPEvent]:

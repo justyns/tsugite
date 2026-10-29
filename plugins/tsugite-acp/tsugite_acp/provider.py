@@ -72,7 +72,7 @@ class ACPProvider:
         resolve_model_alias(model)  # validate non-empty
 
         if self._session is None:
-            await self._spawn_session()
+            await self._spawn_session(model)
             blocks = self._build_first_prompt(messages)
         else:
             blocks = self._latest_user_blocks(messages)
@@ -81,7 +81,7 @@ class ACPProvider:
             return self._stream_turn(blocks)
         return await self._collect_turn(blocks)
 
-    async def _spawn_session(self) -> None:
+    async def _spawn_session(self, model: str) -> None:
         if self._session_factory is not None:
             self._session = self._session_factory()
         else:
@@ -96,7 +96,7 @@ class ACPProvider:
                 cwd=cmd.cwd or workspace_cwd(),
             )
 
-        await self._session.start(cwd=workspace_cwd(), resume_session_id=self._resume_session)
+        await self._session.start(cwd=workspace_cwd(), resume_session_id=self._resume_session, model=model)
 
     def _build_first_prompt(self, messages: list[dict]) -> list[TextContentBlock]:
         from tsugite.context_block import build_context_el
@@ -153,8 +153,8 @@ class ACPProvider:
             return Usage()
         prompt_tokens = int(raw_usage.get("input_tokens") or 0)
         completion_tokens = int(raw_usage.get("output_tokens") or 0)
-        cache_creation = int(raw_usage.get("cache_creation_input_tokens") or 0)
-        cache_read = int(raw_usage.get("cache_read_input_tokens") or 0)
+        cache_creation = int(raw_usage.get("cached_write_tokens") or 0)
+        cache_read = int(raw_usage.get("cached_read_tokens") or 0)
         self._cache_creation_tokens += cache_creation
         self._cache_read_tokens += cache_read
         return Usage(

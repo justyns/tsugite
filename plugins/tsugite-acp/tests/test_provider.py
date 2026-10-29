@@ -283,3 +283,66 @@ class TestAcompletion:
         await p.acompletion(messages=[{"role": "user", "content": "go"}], model="sonnet", stream=False)
         state = p.get_state()
         assert state["session_id"] == "sess-test-1"
+
+
+class TestModelUsageReplay:
+    @pytest.fixture
+    def patched_provider(self, mock_conn):
+        from tsugite_acp.client import ACPClientHandler, ACPClientSession
+        from tsugite_acp.provider import ACPProvider
+
+        p = ACPProvider()
+        p._session_factory = lambda: ACPClientSession(handler=ACPClientHandler(), conn=mock_conn)
+        return p, mock_conn
+
+    @pytest.mark.asyncio
+    async def test_model_sent_to_adapter(self, patched_provider):
+        from acp.schema import PromptResponse
+
+        p, conn = patched_provider
+        conn.prompt = AsyncMock(return_value=PromptResponse(stop_reason="end_turn"))
+
+        await p.acompletion(messages=[{"role": "user", "content": "go"}], model="haiku", stream=False)
+        conn.set_config_option.assert_awaited_once_with(config_id="model", session_id="sess-test-1", value="haiku")
+
+    @pytest.mark.asyncio
+    async def test_usage_reads_adapter_cache_fields(self, patched_provider):
+        from acp.schema import PromptResponse, Usage
+
+        p, conn = patched_provider
+        usage = Usage(input_tokens=5, output_tokens=7, total_tokens=162, cached_read_tokens=100, cached_write_tokens=50)
+        conn.prompt = AsyncMock(return_value=PromptResponse(stop_reason="end_turn", usage=usage))
+
+        resp = await p.acompletion(messages=[{"role": "user", "content": "go"}], model="sonnet", stream=False)
+        assert resp.usage.cache_read_input_tokens == 100
+        assert resp.usage.cache_creation_input_tokens == 50
+        assert p.get_state()["cache_read_tokens"] == 100
+
+    @pytest.mark.asyncio
+    async def test_replayed_history_dropped_after_load_session(self, patched_provider):
+        from acp.schema import AgentMessageChunk, PromptResponse, TextContentBlock
+
+        p, conn = patched_provider
+        p.set_context(resume_session="sess-prev-7")
+
+        def chunk(text):
+            return AgentMessageChunk(
+                content=TextContentBlock(type="text", text=text), session_update="agent_message_chunk"
+            )
+
+        async def replay(**_):
+            await p._session._handler.session_update(session_id="sess-prev-7", update=chunk("old reply"))
+
+        async def late_replay(**_):
+            await p._session._handler.session_update(session_id="sess-prev-7", update=chunk("late reply"))
+
+        async def fake_prompt(*, prompt, session_id, **_):
+            await p._session._handler.session_update(session_id=session_id, update=chunk("new reply"))
+            return PromptResponse(stop_reason="end_turn")
+
+        conn.load_session.side_effect = replay
+        conn.set_config_option.side_effect = late_replay
+        conn.prompt.side_effect = fake_prompt
+
+        resp = await p.acompletion(messages=[{"role": "user", "content": "go"}], model="sonnet", stream=False)
+        assert resp.content == "new reply"

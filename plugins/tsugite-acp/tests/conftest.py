@@ -36,6 +36,7 @@ def mock_conn():
     )
     conn.new_session = AsyncMock(return_value=NewSessionResponse(session_id="sess-test-1"))
     conn.load_session = AsyncMock(return_value=None)
+    conn.set_config_option = AsyncMock()
     conn.prompt = AsyncMock()
     conn.cancel = AsyncMock()
     conn.close_session = AsyncMock()
