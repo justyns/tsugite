@@ -781,8 +781,20 @@ class TestVariableInjection:
         assert "total_steps" not in injectable_vars
         # But everything should be accessible via ctx
         assert "ctx" in injectable_vars
-        assert injectable_vars["ctx"].user_prompt == "test task"
-        assert injectable_vars["ctx"].data == '{"result": "value"}'
+        assert injectable_vars["ctx"]["user_prompt"] == "test task"
+        assert injectable_vars["ctx"]["data"] == '{"result": "value"}'
+
+    def test_ctx_survives_subprocess_executor(self):
+        import asyncio
+
+        from tsugite.agent_runner.steps import _build_injectable_vars
+        from tsugite.core.subprocess_executor import SubprocessExecutor
+
+        step_context = {"user_prompt": "test task", "step_number": 1, "all_errors": []}
+        executor = SubprocessExecutor()
+        asyncio.run(executor.send_variables(_build_injectable_vars(step_context, {"data"})))
+
+        assert executor._sticky_injections["ctx"] == step_context
 
     def test_multistep_with_variable_injection_structure(self, tmp_path):
         """Test that multi-step agent structure supports variable injection."""

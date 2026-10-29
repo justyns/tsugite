@@ -29,22 +29,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ExecutionContext:
-    """Namespace for tsugite-provided execution context.
-
-    Provides access to runtime metadata via attribute access (ctx.user_prompt, ctx.tasks, etc.)
-    while keeping user-assigned step variables as top-level names in the execution namespace.
-    """
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-    def __repr__(self):
-        attrs = ", ".join(f"{k}={v!r}" for k, v in self.__dict__.items())
-        return f"ExecutionContext({attrs})"
-
-
 def _build_step_error_message(
     error_type: str,
     step_name: str,
@@ -92,7 +76,7 @@ def _build_step_error_message(
 def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional[set] = None) -> Dict[str, Any]:
     """Build variables for injection into Python execution namespace.
 
-    Creates a `ctx` object containing everything. Only user-assigned step variables
+    Creates a `ctx` dict containing everything. Only user-assigned step variables
     (from `assign="varname"`) are exposed at top-level to avoid namespace pollution.
 
     Args:
@@ -101,9 +85,9 @@ def _build_injectable_vars(step_context: Dict[str, Any], assigned_vars: Optional
                        If None, no variables are exposed at top-level.
 
     Returns:
-        Dictionary with 'ctx' ExecutionContext and user-assigned variables at top-level
+        Dictionary with 'ctx' dict and user-assigned variables at top-level
     """
-    ctx = ExecutionContext(**step_context)
+    ctx = dict(step_context)
 
     # Only user-assigned step variables at top-level (not tsugite metadata)
     if assigned_vars:
