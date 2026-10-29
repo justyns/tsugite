@@ -5,6 +5,7 @@ import {
   splitStreamFence,
   type ProseBlock,
   type ExecBlock,
+  type HooksBlock,
   type ResultBlock,
   type CodeBlock,
   type ErrorBlock,
@@ -2051,5 +2052,69 @@ describe('retryTarget', () => {
     const target = retryTarget(t.turns, true);
     expect(target?.text).toBe('third');
     expect(target?.turnId).toBe(t.turns[t.turns.length - 1]!.id);
+  });
+});
+
+describe('buildTimeline (hook folding)', () => {
+  const hook = (n: number, exit = 0): Record<string, unknown> => ({
+    type: 'hook_execution',
+    name: `h${n}`,
+    exit_code: exit,
+    duration_ms: 10,
+    ...(exit ? { stderr: `h${n} failed` } : {}),
+    id: 10 + n,
+  });
+  const events = (hooks: Record<string, unknown>[]) => [
+    { type: 'user_input', text: 'go', id: 1 },
+    ...hooks,
+    { type: 'model_response', raw_content: 'Done.', thought: 'Done.', id: 99 },
+  ];
+
+  it('folds 6 successful hooks into one group', () => {
+    const blocks = buildTimeline(events([1, 2, 3, 4, 5, 6].map((n) => hook(n)))).turns[1]!.blocks;
+    expect(blocks[0]).toMatchObject({ kind: 'hooks', meta: '60ms' });
+    const group = blocks[0] as HooksBlock;
+    expect(group.hooks.map((h) => h.command)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `hook:h${n}`));
+    expect(blocks.filter((b) => b.kind === 'exec')).toHaveLength(0);
+  });
+
+  it('keeps a single hook as a plain row', () => {
+    const blocks = buildTimeline(events([hook(1)])).turns[1]!.blocks;
+    expect(blocks[0]).toMatchObject({ kind: 'exec', command: 'hook:h1' });
+  });
+
+  it('leaves a failed hook as its own row after the folded successes', () => {
+    const blocks = buildTimeline(events([...[1, 2, 3, 4, 5].map((n) => hook(n)), hook(6, 1)]))
+      .turns[1]!.blocks;
+    expect((blocks[0] as HooksBlock).hooks).toHaveLength(5);
+    expect(blocks[1]).toMatchObject({
+      kind: 'exec',
+      command: 'hook:h6',
+      status: 'error',
+      output: 'h6 failed',
+    });
+  });
+
+  it('folds pre_message hooks held before the user message', () => {
+    const t = buildTimeline([
+      hook(1),
+      hook(2),
+      { type: 'user_input', text: 'go', id: 1 },
+      { type: 'model_response', raw_content: 'Done.', thought: 'Done.', id: 99 },
+    ]);
+    expect(t.turns[1]!.blocks[0]).toMatchObject({ kind: 'hooks' });
+    expect((t.turns[1]!.blocks[0] as HooksBlock).hooks).toHaveLength(2);
+  });
+
+  it('a replayed list matches the live-folded one', () => {
+    const all = events([hook(1), hook(2), hook(3, 1), hook(4), hook(5)]);
+    const live = buildTimeline(all.slice(0, 4));
+    expect(live.turns[1]!.blocks).toHaveLength(2);
+    expect(buildTimeline(all).turns[1]!.blocks).toMatchObject([
+      { kind: 'hooks', hooks: [{}, {}] },
+      { kind: 'exec', status: 'error' },
+      { kind: 'hooks', hooks: [{}, {}] },
+      { kind: 'prose' },
+    ]);
   });
 });

@@ -15,6 +15,7 @@
   import Think from '$lib/components/chatturns/Think.svelte';
   import CodeBlock from '$lib/components/chatturns/CodeBlock.svelte';
   import ExecBlock from '$lib/components/chatturns/ExecBlock.svelte';
+  import HookGroup from '$lib/components/chatturns/HookGroup.svelte';
   import LocalEcho from '$lib/components/chatturns/LocalEcho.svelte';
   import Work from '$lib/components/feedback/Work.svelte';
   import Ask from '$lib/components/ask/Ask.svelte';
@@ -735,6 +736,8 @@
                 meta={block.meta}
                 open={block.status === 'running' || block.status === 'error'}
               />
+            {:else if block.kind === 'hooks'}
+              <HookGroup hooks={block.hooks} meta={block.meta} />
             {:else if block.kind === 'code'}
               <CodeBlock
                 code={block.code}

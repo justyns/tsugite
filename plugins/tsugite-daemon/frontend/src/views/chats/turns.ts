@@ -44,6 +44,15 @@ export interface ExecBlock {
   args?: Record<string, unknown>;
   /** tool call id, so a later tool_result folds into this block. */
   callId?: string;
+  /** Set on a hook_execution row. A run of successful ones folds into a HooksBlock. */
+  hook?: { durationMs?: number };
+}
+/** Consecutive successful hooks in one turn, shown as a single folded row. */
+export interface HooksBlock {
+  kind: 'hooks';
+  hooks: ExecBlock[];
+  /** Summed duration ("41ms"), unset when no hook reported one. */
+  meta?: string;
 }
 /** One tool call observed inside a code execution. Live: a `tool_call` opens
  *  it running and its `tool_result_audit` resolves it. Replay: persisted
@@ -125,6 +134,7 @@ export type TurnBlock =
   | ProseBlock
   | ThinkBlock
   | ExecBlock
+  | HooksBlock
   | CodeBlock
   | ContentBlock
   | ResultBlock
@@ -412,6 +422,29 @@ function key(e: Event, i: number): string {
   return id != null ? `e${String(id)}` : `i${i}`;
 }
 
+/** Append a hook row to a turn's blocks. A successful hook joins the run of
+ *  successful hooks just before it (two or more become a HooksBlock); a failed
+ *  hook stays its own row, open, and ends the run. */
+function pushHook(blocks: TurnBlock[], hook: ExecBlock): void {
+  const last = blocks[blocks.length - 1];
+  if (hook.status === 'done' && last) {
+    const run =
+      last.kind === 'hooks'
+        ? last
+        : last.kind === 'exec' && last.hook && last.status === 'done'
+          ? ({ kind: 'hooks', hooks: [last] } as HooksBlock)
+          : null;
+    if (run) {
+      run.hooks.push(hook);
+      const durations = run.hooks.flatMap((h) => h.hook?.durationMs ?? []);
+      if (durations.length) run.meta = formatMs(durations.reduce((a, b) => a + b, 0));
+      blocks[blocks.length - 1] = run;
+      return;
+    }
+  }
+  blocks.push(hook);
+}
+
 class Builder {
   turns: Turn[] = [];
   compactions: Compaction[] = [];
@@ -445,10 +478,11 @@ class Builder {
         id: this.uid('ai'),
         role: 'ai',
         at,
-        blocks: [...this.pendingHooks],
+        blocks: [],
         streaming: true,
         ...(this.replyTo ? { replyTo: this.replyTo } : {}),
       };
+      for (const hook of this.pendingHooks) pushHook(this.ai.blocks, hook);
       this.pendingHooks = [];
       this.turns.push(this.ai);
       // return_value dedupe is scoped to the turn: a later turn's final_result
@@ -742,6 +776,7 @@ class Builder {
       case 'hook_execution': {
         // One hook's captured result (persisted, so replay shows it too):
         // an exec row named hook:{name}, failed exits open with their output.
+        // Runs of successes fold into one HooksBlock.
         const name = str(e.name) ?? str(e.phase) ?? 'hook';
         const exit = num(e.exit_code) ?? 0;
         const output = [str(e.stdout), str(e.stderr)].filter(Boolean).join('\n');
@@ -751,6 +786,7 @@ class Builder {
           command: `hook:${name}`,
           status: exit === 0 ? 'done' : 'error',
           exitCode: exit,
+          hook: dur != null ? { durationMs: dur } : {},
           ...(output ? { output } : {}),
           ...(dur != null ? { meta: formatMs(dur) } : {}),
         };
@@ -762,7 +798,7 @@ class Builder {
         }
         this.closeOpenCode(this.ai);
         this.flushStream(this.ai);
-        this.ai.blocks.push(block);
+        pushHook(this.ai.blocks, block);
         this.ai.liveStatus = undefined;
         return;
       }
