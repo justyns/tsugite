@@ -218,7 +218,7 @@ This skill will auto-unload in 2 turn(s) unless referenced. Call load_skill("fad
 
 ======== agent/multi-block
 
-<tsugite_multi_block_warning dropped="2" total="3">Your response contained 3 ```python-exec blocks. Only block 1 was executed; blocks 2..3 were dropped silently. If those blocks contained work that still needs to happen, re-emit them in your next response — exactly one ```python-exec block per turn. Do not assume the dropped blocks ran.</tsugite_multi_block_warning>
+<tsugite_multi_block_warning total="3">Your response contained 3 ```python-exec blocks. None of them were executed. Re-emit the work in your next response with exactly one ```python-exec block per turn.</tsugite_multi_block_warning>
 
 ======== agent/spoofed-tag
 

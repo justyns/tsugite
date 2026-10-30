@@ -284,20 +284,12 @@ def _build_runaway_notice_xml(reason: str) -> str:
 
 
 def _build_multi_block_warning_xml(count: int) -> str:
-    """Model-visible note appended to a turn's observation when the agent
-    received N>1 ```python blocks in one response.
-
-    The parser only ever runs the first block; without this signal the model
-    sees its full N-block response in raw_content but only one execution
-    result and (reasonably) assumes the rest also ran. See justyns/tsugite#212.
-    """
+    """Model-visible rejection for a response with N>1 ```python-exec blocks."""
     return (
-        f'\n<tsugite_multi_block_warning dropped="{count - 1}" total="{count}">'
+        f'\n<tsugite_multi_block_warning total="{count}">'
         f"Your response contained {count} ```python-exec blocks. "
-        f"Only block 1 was executed; blocks 2..{count} were dropped silently. "
-        "If those blocks contained work that still needs to happen, re-emit them "
-        "in your next response — exactly one ```python-exec block per turn. "
-        "Do not assume the dropped blocks ran."
+        "None of them were executed. "
+        "Re-emit the work in your next response with exactly one ```python-exec block per turn."
         "</tsugite_multi_block_warning>"
     )
 
@@ -577,25 +569,6 @@ class TsugiteAgent:
                             self.event_bus.emit(ContentBlockEvent(name=name, content=content))
                     await self.executor.inject_content_blocks(turn.content_blocks)
 
-                # Multiple python blocks: the parser already took just the first
-                # one as `code`. Surface the drop on two channels - a UI warning
-                # for the human, and an in-conversation observation for the
-                # model. Without the latter the model sees its full N-block
-                # response in raw_content but only one execution result, and
-                # (reasonably) assumes the rest also ran. See #212.
-                multi_block_count = turn.num_code_blocks if turn.num_code_blocks > 1 else 0
-                if multi_block_count and self.event_bus:
-                    self.event_bus.emit(
-                        WarningEvent(
-                            message=(
-                                f"Response contained {multi_block_count} ```python-exec blocks; "
-                                "only the first was executed, the rest were dropped."
-                            ),
-                            category="multi_code_block",
-                            step=turn_num + 1,
-                        )
-                    )
-
                 # Neutralizing the tag is silent otherwise, so a model impersonating
                 # the runtime leaves no trace for an operator reading logs or events.
                 if turn.spoofed_runtime_tag:
@@ -609,11 +582,35 @@ class TsugiteAgent:
                             )
                         )
 
+                if turn.num_code_blocks > 1:
+                    if self.event_bus:
+                        self.event_bus.emit(
+                            WarningEvent(
+                                message=(
+                                    f"Response contained {turn.num_code_blocks} ```python-exec blocks; "
+                                    "none were executed, the model was asked to re-emit one per turn."
+                                ),
+                                category="multi_code_block",
+                                step=turn_num + 1,
+                            )
+                        )
+                    rejection = _build_multi_block_warning_xml(turn.num_code_blocks)
+                    if turn.spoofed_runtime_tag:
+                        rejection += _build_spoofed_runtime_tag_warning()
+                    self.memory.add_step(
+                        thought=thought,
+                        code="",
+                        output="",
+                        tools_called=[],
+                        content_blocks=turn.content_blocks,
+                        raw_content=last_response_text,
+                        xml_observation=rejection,
+                    )
+                    continue
+
                 # No code = the model is done. Its raw text is the answer.
                 if not code or not code.strip():
                     trailing_notice = ""
-                    if multi_block_count:
-                        trailing_notice += _build_multi_block_warning_xml(multi_block_count)
                     if turn.spoofed_runtime_tag:
                         trailing_notice += _build_spoofed_runtime_tag_warning()
                     # The model wrote a bare ```python block instead of ```python-exec;
@@ -688,11 +685,6 @@ class TsugiteAgent:
                     else:
                         self._previous_turn_had_error = False
                         self.event_bus.emit(ObservationEvent(observation=masked))
-
-                # Multi-block extras were dropped earlier; tell the model so it
-                # knows to re-emit them rather than assume they ran.
-                if multi_block_count:
-                    xml_observation += _build_multi_block_warning_xml(multi_block_count)
 
                 # The model wrote a runtime-only tag (now escaped). Tell it not to,
                 # so a hallucinated execution loop doesn't compound across turns.
@@ -1648,9 +1640,8 @@ the real result next turn.
 
 ## How to write code
 
-- Exactly one ```python-exec code block per response. The parser runs only the first;
-  any additional blocks are silently dropped, and the runtime will warn you next
-  turn. Never assume dropped blocks ran.
+- Exactly one ```python-exec code block per response. A response with more than one
+  is rejected and none of its blocks run. Re-emit the work one block per turn.
 - Use print() to surface anything you'll want to refer to next turn.
 - Each turn starts with a fresh namespace. Plain variables are discarded between turns.
 - To persist across turns: `state["key"] = value` then `state["key"]` next turn.

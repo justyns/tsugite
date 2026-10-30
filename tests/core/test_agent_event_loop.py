@@ -4,7 +4,7 @@ Behaviors verified:
 - LLM raw responses are recorded verbatim (no parser-rebuild loss)
 - No-code response ends the loop and returns the text as the answer
 - return_value(x) ends the loop and returns the (possibly non-string) value
-- Multi-code-block response executes the first block and emits a warning about dropped extras
+- Multi-code-block response runs nothing, emits a warning, and re-prompts
 - Each turn appends model_request + model_response + code_execution events
 """
 
@@ -131,11 +131,9 @@ async def test_max_turns_returns_last_response_text(storage):
 
 
 @pytest.mark.asyncio
-async def test_multi_code_block_executes_first_and_warns(storage):
-    """When the model emits multiple ```python-exec blocks in one response, the agent
-    executes only the first block (the parser already takes just the first),
-    emits a WarningEvent noting the extras were dropped, and proceeds normally.
-    No format_error event is recorded and no retry is forced.
+async def test_multi_code_block_runs_nothing_and_warns(storage):
+    """A response with several ```python-exec blocks is rejected before anything
+    runs: no code_execution event, a WarningEvent, and the loop re-prompts.
     """
     event_bus = EventBus()
     warnings: list = []
@@ -163,30 +161,14 @@ async def test_multi_code_block_executes_first_and_warns(storage):
     result = await agent.run("multi block")
 
     assert result == "Recovered."
-    types = [e.type for e in storage.iter_events()]
-    assert "format_error" not in types, "must not reject multi-block response anymore"
-    # First block executed; the second was dropped. Exactly one code_execution on turn 1.
-    code_execs = [e for e in storage.iter_events(types=["code_execution"])]
-    assert len(code_execs) == 1
-    assert code_execs[0].data["code"] == "a=1"
-    # A WarningEvent was emitted mentioning the dropped extras.
-    assert any("2" in w.message and "block" in w.message.lower() for w in warnings), (
-        f"expected a warning mentioning 2 blocks, got: {[w.message for w in warnings]}"
-    )
+    assert calls == 2
+    assert list(storage.iter_events(types=["code_execution"])) == []
+    assert any("2" in w.message and "none were executed" in w.message for w in warnings)
 
 
 @pytest.mark.asyncio
-async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
-    """Regression test for justyns/tsugite#212.
-
-    When the model emits N>1 ```python-exec blocks in a single response, only the
-    first block runs. The model's prior response (saved as raw_content) still
-    shows all N blocks, so without an explicit signal the model cannot tell
-    that blocks 2..N were dropped — it sees one observation and assumes the
-    rest also ran. The fix appends a model-visible
-    ``<tsugite_multi_block_warning>`` element to the executed block's
-    observation so the next turn's prompt carries the correction.
-    """
+async def test_multi_code_block_rejection_lands_in_next_turn_and_retry_runs(storage):
+    """The next model call includes the rejection, and a single-block retry executes."""
     agent = TsugiteAgent(
         model_string="openai:gpt-4o-mini",
         tools=[],
@@ -203,35 +185,22 @@ async def test_multi_code_block_warning_lands_in_next_turn_observation(storage):
             return _resp(
                 "```python-exec\na = 1\nprint(a)\n```\n\n```python-exec\nb = 2\n```\n\n```python-exec\nc = 3\n```"
             )
+        if calls == 2:
+            return _resp("```python-exec\na = 1\nprint(a)\n```")
         return _resp("All done.")
 
     provider_mock = _patch(agent, side_effect=side)
 
     await agent.run("multi block obs")
 
-    # Second call to acompletion is turn 2 — the model is seeing turn 1's
-    # raw_content (all 3 blocks) plus turn 1's observation. The observation
-    # should contain the multi-block warning so the model knows blocks 2..3
-    # never ran.
-    assert provider_mock.call_count >= 2, "expected at least two LLM turns"
     turn2_call = provider_mock.call_args_list[1]
     turn2_messages = turn2_call.kwargs.get("messages") or turn2_call.args[0]
-
-    # The observation arrives as a user-role message after the assistant turn.
     user_msgs = [m for m in turn2_messages if m.get("role") == "user"]
     obs_text = "\n".join(str(m.get("content", "")) for m in user_msgs)
 
-    assert "<tsugite_multi_block_warning" in obs_text, (
-        f"expected multi-block warning element in turn 2's prompt, got user messages: {user_msgs!r}"
-    )
-    assert 'dropped="2"' in obs_text and 'total="3"' in obs_text, (
-        f"warning should report dropped=2 total=3, got: {obs_text!r}"
-    )
-    assert "one ```python-exec block per turn" in obs_text, (
-        f"warning should instruct one-block-per-turn discipline, got: {obs_text!r}"
-    )
+    assert '<tsugite_multi_block_warning total="3">' in obs_text
+    assert "None of them were executed" in obs_text
 
-    # Sanity: only one code execution (the first block) actually ran.
     code_execs = list(storage.iter_events(types=["code_execution"]))
     assert len(code_execs) == 1
     assert code_execs[0].data["code"].strip() == "a = 1\nprint(a)"
