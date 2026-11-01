@@ -263,7 +263,7 @@ async def test_step_variables_are_plain_strings_under_token_accounting(tmp_path,
     findings = injected[-1].get("findings")
     assert isinstance(findings, str), f"step variable is not a plain string: {type(findings).__name__}"
 
-    json.dumps(injected[-1]["ctx"].__dict__.get("findings"))
+    json.dumps(injected[-1]["ctx"]["findings"])
 
 
 @pytest.mark.asyncio
