@@ -70,6 +70,18 @@ describe('SessionsStore unread lifecycle', () => {
     expect(store.rows.find((r) => r.id === 'a')?.unread).toBe(true);
   });
 
+  it('adds a titled successor row when a `compacted` broadcast arrives', () => {
+    const store = new SessionsStore();
+    store.rows = [row('a', { title: 'Reading' })];
+
+    store.applySessionUpdate({ action: 'compacted', id: 'a', successor_id: 'b' });
+
+    expect(store.rows.find((r) => r.id === 'a')?.superseded_by).toBe('b');
+    const successor = store.rows.find((r) => r.id === 'b');
+    expect(successor?.title).toBe('Reading');
+    expect(successor?.superseded_by).toBeNull();
+  });
+
   it('restores unread when the mark-viewed POST fails', async () => {
     vi.spyOn(api, 'post').mockRejectedValue(new Error('offline'));
     const store = new SessionsStore();

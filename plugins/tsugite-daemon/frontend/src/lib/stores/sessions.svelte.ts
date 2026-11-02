@@ -287,6 +287,18 @@ export class SessionsStore {
             needs_attention: data.needs_attention === true,
           } as Partial<SessionRow>);
         return;
+      case 'compacted': {
+        const successorId = data.successor_id as string;
+        const old = this.rows.find((r) => r.id === id);
+        if (old && !this.rows.some((r) => r.id === successorId)) {
+          this.rows = orderSessions([
+            { ...old, id: successorId, superseded_by: null },
+            ...patchRow(this.rows, old.id, { superseded_by: successorId } as Partial<SessionRow>),
+          ]);
+        }
+        this.scheduleRevalidate();
+        return;
+      }
       case 'room_updated':
         // The rooms store applies it.
         return;
