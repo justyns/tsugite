@@ -32,6 +32,7 @@ EXECUTION_SESSION_MESSAGE = "session_message"
 EXECUTION_TYPES = (EXECUTION_AGENT, EXECUTION_SCRIPT, EXECUTION_SESSION_MESSAGE)
 
 AUTH_FAILURE_MARKER = "Failed to authenticate"
+DAILY_CAP_REASON = "daily_cap"
 
 DELIVERY_MODE_EXISTING = "existing_session"
 DELIVERY_MODE_PARENT = "parent_session"
@@ -122,6 +123,9 @@ class ScheduleEntry:
     # Hook names or phases skipped on each run; "*" skips all.
     skip_hooks: list[str] = field(default_factory=list)
 
+    # True while a manual run (fire_now) holds the lock.
+    manual_run: bool = field(default=False, repr=False, compare=False, metadata={"persist": False})
+
     # Concurrency lock for this entry's runs. Per-entry so two fires of the
     # same schedule can't overlap; per-instance (not persisted) so the lock
     # belongs to the entry it gates and disappears with it.
@@ -150,6 +154,11 @@ class ScheduleEntry:
         if self.execution_type == EXECUTION_SESSION_MESSAGE and self.target_session in (None, TARGET_SESSION_NONE):
             raise ValueError("target_session required for session_message execution type")
         validate_delivery(self.delivery_mode, self.delivery_kind, self.delivery_mode_on_error)
+
+    @property
+    def uncapped(self) -> bool:
+        """Manual and one-off runs neither count toward nor are skipped by the daily cap."""
+        return self.manual_run or self.schedule_type == "once"
 
 
 _PERSISTED_FIELDS = frozenset(f.name for f in dataclass_fields(ScheduleEntry) if f.metadata.get("persist", True))
@@ -181,6 +190,9 @@ class Scheduler:
         session_message_callback: RunCallback | None = None,
         on_repeated_failure: Callable[["ScheduleEntry"], None] | None = None,
         validate_agent_file: Callable[[str], object] | None = None,
+        max_scheduled_agent_runs_per_day: int | None = None,
+        on_daily_cap: Callable[["ScheduleEntry", int], None] | None = None,
+        timezone_name: str = "",
     ):
         self._path = schedules_path
         self._storage = SqliteCollectionStorage.for_state_file(schedules_path, "schedules")
@@ -191,6 +203,12 @@ class Scheduler:
         # so the daemon/adapter can surface it (Discord/notify). None = log only.
         self._on_repeated_failure = on_repeated_failure
         self._validate_agent_file = validate_agent_file
+        self._max_scheduled_agent_runs_per_day = max_scheduled_agent_runs_per_day
+        self._on_daily_cap = on_daily_cap
+        self._tz = self._zoneinfo(timezone_name) if timezone_name else None
+        self._count_day: datetime | None = None
+        self._daily_count = 0
+        self._cap_notified = False
         self._schedules: dict[str, ScheduleEntry] = {}
         self._wakeup = asyncio.Event()
         self._running = False
@@ -201,6 +219,8 @@ class Scheduler:
         self._arm_loaded_schedules()
         self._save()
         self.cleanup_history()
+        if self._max_scheduled_agent_runs_per_day is not None:
+            self._rebuild_daily_count()
         self._running = True
         logger.info("Scheduler started with %d schedule(s)", len(self._schedules))
         await self._main_loop()
@@ -245,6 +265,33 @@ class Scheduler:
                 logger.warning("Schedule '%s' missed its one-off run while the daemon was down; disabling", entry.id)
                 entry.enabled = False
                 entry.disabled_reason = "missed one-off (run_at passed while daemon was down)"
+
+    def _day_start(self) -> datetime:
+        now = datetime.now(self._tz) if self._tz else datetime.now().astimezone()
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def _rebuild_daily_count(self) -> None:
+        from tsugite.history import get_history_backend
+
+        self._count_day = self._day_start()
+        self._daily_count = get_history_backend().count_unattended_schedule_turns(self._count_day)
+        self._cap_notified = self._daily_count >= self._max_scheduled_agent_runs_per_day
+
+    def _daily_cap_reached(self, entry: ScheduleEntry) -> bool:
+        """Count this fire against today's cap, or report that the cap is spent."""
+        cap = self._max_scheduled_agent_runs_per_day
+        if cap is None or entry.uncapped or entry.execution_type == EXECUTION_SCRIPT:
+            return False
+        day = self._day_start()
+        if day != self._count_day:
+            self._count_day, self._daily_count, self._cap_notified = day, 0, False
+        if self._daily_count < cap:
+            self._daily_count += 1
+            return False
+        if not self._cap_notified and self._on_daily_cap:
+            self._cap_notified = True
+            self._on_daily_cap(entry, cap)
+        return True
 
     async def stop(self):
         self._running = False
@@ -368,7 +415,7 @@ class Scheduler:
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
 
-    async def _fire_schedule(self, entry: ScheduleEntry):
+    async def _fire_schedule(self, entry: ScheduleEntry, manual: bool = False):
         from tsugite.agent_runner.models import AgentSkippedError
 
         if entry.lock.locked():
@@ -377,8 +424,11 @@ class Scheduler:
 
         async with entry.lock:
             logger.info("Firing schedule '%s' (type=%s)", entry.id, entry.execution_type)
+            entry.manual_run = manual
             run_conv_id = None
             try:
+                if self._daily_cap_reached(entry):
+                    raise AgentSkippedError(DAILY_CAP_REASON)
                 if entry.execution_type == EXECUTION_SCRIPT:
                     if not self._script_callback:
                         raise RuntimeError("No script callback configured — cannot run script schedules")
@@ -400,7 +450,7 @@ class Scheduler:
             except AgentSkippedError as e:
                 logger.info("Schedule '%s' skipped: %s", entry.id, e.reason)
                 entry.last_status = "skipped"
-                entry.last_error = None
+                entry.last_error = DAILY_CAP_REASON if e.reason == DAILY_CAP_REASON else None
             except Exception as e:
                 logger.error("Schedule '%s' failed: %s", entry.id, e)
                 entry.last_status = "error"
@@ -698,7 +748,7 @@ class Scheduler:
         entry = self.get(schedule_id)
         if not entry.enabled:
             raise ValueError(f"Schedule '{schedule_id}' is disabled")
-        task = asyncio.create_task(self._fire_schedule(entry), context=contextvars.Context())
+        task = asyncio.create_task(self._fire_schedule(entry, manual=True), context=contextvars.Context())
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
 

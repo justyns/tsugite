@@ -469,6 +469,19 @@ class SqliteHistoryBackend:
         )
         return [(r["session_id"], _event_from_row(r)) for r in rows]
 
+    def count_unattended_schedule_turns(self, since: datetime) -> int:
+        """Agent and session-message turns started by a schedule since `since`, uncapped runs excluded."""
+        return (
+            self._conn()
+            .execute(
+                "SELECT COUNT(*) FROM events WHERE type='user_input' AND ts >= ? "
+                "AND json_extract(data, '$.channel.source') IN ('scheduler', 'schedule_message') "
+                "AND json_extract(data, '$.channel.uncapped') IS NULL",
+                (_as_iso(since),),
+            )
+            .fetchone()[0]
+        )
+
     def latest_event_per_session(
         self,
         *,

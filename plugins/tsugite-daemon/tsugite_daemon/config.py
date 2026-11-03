@@ -144,6 +144,10 @@ class HTTPConfig(BaseModel):
     image_quality: float = 0.85  # JPEG quality for the client re-encode (0..1)
 
 
+class SchedulerSettings(BaseModel):
+    max_scheduled_agent_runs_per_day: Optional[int] = Field(default=None, ge=1)
+
+
 class DaemonConfig(BaseModel):
     """Main daemon configuration."""
 
@@ -160,6 +164,7 @@ class DaemonConfig(BaseModel):
     default_max_turns: Optional[int] = None
     timezone: str = ""
     auto_compact: Optional[AutoCompactConfig] = None
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
 
     discord_bots: List[DiscordBotConfig] = Field(default_factory=list)
     http: Optional[HTTPConfig] = None

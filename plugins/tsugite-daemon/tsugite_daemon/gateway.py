@@ -177,6 +177,7 @@ BOOT_ONLY_SECTIONS = (
     "discord_bots",
     "plugins",
     "sandbox",
+    "scheduler",
     "log_level",
     "log_file",
     "log_to_console",
@@ -349,6 +350,8 @@ class Gateway:
                 identity_map,
                 token_store=self._token_store,
                 tsugite_api_url=self._tsugite_api_url,
+                max_scheduled_agent_runs_per_day=self.config.scheduler.max_scheduled_agent_runs_per_day,
+                timezone_name=self.config.timezone,
             )
             tasks.append(self._scheduler_adapter.start())
             if self._http_server:

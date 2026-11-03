@@ -160,6 +160,8 @@ class SchedulerAdapter:
         identity_map: dict[str, str] | None = None,
         token_store: TokenStore | None = None,
         tsugite_api_url: str = "",
+        max_scheduled_agent_runs_per_day: int | None = None,
+        timezone_name: str = "",
     ):
         self._adapter = adapter
         self._notification_channels = notification_channels or {}
@@ -175,6 +177,9 @@ class SchedulerAdapter:
             session_message_callback=self._run_session_message,
             on_repeated_failure=self._on_repeated_failure,
             validate_agent_file=self._require_agent_path,
+            max_scheduled_agent_runs_per_day=max_scheduled_agent_runs_per_day,
+            on_daily_cap=self._on_daily_cap,
+            timezone_name=timezone_name,
         )
 
     def set_session_runner(self, session_runner) -> None:
@@ -188,7 +193,6 @@ class SchedulerAdapter:
         await self.scheduler.stop()
 
     def _on_repeated_failure(self, entry: ScheduleEntry) -> None:
-        adapter = self._adapter
         error = entry.last_error or "No error was recorded."
         if is_auth_failure(entry):
             provider = entry.model.split(":")[0] if entry.model else None
@@ -201,6 +205,18 @@ class SchedulerAdapter:
         else:
             title = f"Schedule failing: {entry.id}"
             message = f"Schedule `{entry.id}` has failed {entry.consecutive_failures} runs in a row.\n\n{error}"
+        self._notify_problem(entry, title, message)
+
+    def _on_daily_cap(self, entry: ScheduleEntry, cap: int) -> None:
+        self._notify_problem(
+            entry,
+            "Daily schedule cap reached",
+            f"{cap} unattended agent runs have started today. Schedule `{entry.id}` and later agent and "
+            "session_message fires are skipped until local midnight.",
+        )
+
+    def _notify_problem(self, entry: ScheduleEntry, title: str, message: str) -> None:
+        adapter = self._adapter
         routed = replace(
             entry,
             target_session=entry.target_session_on_error or entry.target_session,
@@ -312,7 +328,7 @@ class SchedulerAdapter:
                 target.id,
                 _scheduled_message_block(entry),
                 source="schedule_message",
-                metadata={"schedule_id": entry.id},
+                metadata={"schedule_id": entry.id, **({"uncapped": True} if entry.uncapped else {})},
             )
         if result is None:
             raise RuntimeError(f"Target session '{target.id}' finished before the message could be sent")
@@ -441,6 +457,8 @@ class SchedulerAdapter:
         }
         if entry.last_scheduled_for:
             metadata["scheduled_for"] = entry.last_scheduled_for
+        if entry.uncapped:
+            metadata["uncapped"] = True
         if entry.notify_tool:
             metadata["notify_tool"] = True
         if entry.model:
