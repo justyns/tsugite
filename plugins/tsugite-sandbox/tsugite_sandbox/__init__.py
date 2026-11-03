@@ -2,6 +2,7 @@
 Linux, sandbox-exec on macOS). Registered as `hozo` in the `tsugite.sandbox` entry-point group.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -49,7 +50,15 @@ class HozoSandbox:
 
         # sys.path covers editable installs, whose .pth files point at the source tree.
         # A read-only grant of the workspace would replace its writable bind.
-        read = _existing([sys.prefix, sys.base_prefix, *sys.path, *self.config.extra_ro_binds])
+        read = _existing(
+            [
+                sys.prefix,
+                sys.base_prefix,
+                *_interpreter_link_prefixes(sys.executable),
+                *sys.path,
+                *self.config.extra_ro_binds,
+            ]
+        )
         read = [p for p in read if p != str(self.workspace_dir)]
         write = _existing([self.state_dir, *self.config.extra_rw_binds])
         if read:
@@ -63,6 +72,18 @@ class HozoSandbox:
     @staticmethod
     def check_available() -> bool:
         return hozo.check_available()
+
+
+def _interpreter_link_prefixes(path: str) -> List[str]:
+    """Prefix (the dir above bin/) of each symlink hop from the interpreter, as the links spell it.
+
+    Python searches for its stdlib under the prefix of the path it was launched through.
+    """
+    prefixes = []
+    while os.path.islink(path):
+        path = os.path.join(os.path.dirname(path), os.readlink(path))
+        prefixes.append(os.path.dirname(os.path.dirname(path)))
+    return prefixes
 
 
 def _existing(paths) -> List[str]:

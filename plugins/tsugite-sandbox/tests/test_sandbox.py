@@ -46,6 +46,19 @@ class TestBinds:
     def test_python_prefix_is_read_only(self):
         assert sys.prefix in _flag(_build(), "--allow-read")
 
+    def test_interpreter_symlink_chain_is_readable(self, tmp_path, monkeypatch):
+        # uv venvs link bin/python through a minor-version dir symlink to the real install.
+        real = tmp_path / "cpython-3.11.15" / "bin"
+        real.mkdir(parents=True)
+        (real / "python3.11").touch()
+        minor = tmp_path / "cpython-3.11"
+        minor.symlink_to(real.parent)
+        venv_bin = tmp_path / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        (venv_bin / "python").symlink_to(minor / "bin" / "python3.11")
+        monkeypatch.setattr(sys, "executable", str(venv_bin / "python"))
+        assert str(minor) in _flag(_build(), "--allow-read")
+
     def test_workspace_on_sys_path_stays_writable(self, tmp_path, monkeypatch):
         monkeypatch.syspath_prepend(str(tmp_path))
         assert str(tmp_path) not in _flag(_build(workspace_dir=tmp_path), "--allow-read")

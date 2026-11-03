@@ -2,7 +2,11 @@
 
 import asyncio
 import os
+import subprocess
+import sys
 import tempfile
+import textwrap
+import time
 
 import pytest
 
@@ -263,6 +267,31 @@ async def test_child_crash():
         assert result.error is not None
     finally:
         executor.cleanup()
+
+
+def test_child_that_never_connects_fails_fast_without_leaking_a_thread():
+    # A separate interpreter: asyncio.run joins the default executor on shutdown, so a
+    # pool thread stuck opening a FIFO hangs the process.
+    script = textwrap.dedent("""\
+        import asyncio, sys
+        from tsugite.core.subprocess_executor import SubprocessExecutor
+
+        class ExitsAtOnce:
+            def __init__(self, **kwargs):
+                pass
+
+            def build_command(self, inner_cmd):
+                return [sys.executable, "-c", "pass"]
+
+        executor = SubprocessExecutor(sandbox_config=True)
+        executor._sandbox_cls = ExitsAtOnce
+        print(asyncio.run(executor.execute("x = 1")).error)
+        executor.cleanup()
+    """)
+    start = time.monotonic()
+    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=20)
+    assert "failed to connect to IPC FIFOs" in proc.stdout
+    assert time.monotonic() - start < 10
 
 
 @pytest.mark.asyncio

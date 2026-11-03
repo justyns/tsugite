@@ -12,6 +12,7 @@ via __reduce__.
 """
 
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -314,6 +316,28 @@ def _build_local_tool_stub(name: str, module_path: str, param_names: list, sensi
             "{name}", lambda **kw: _run_maybe_async(_raw_{name}, kw), kwargs, {sensitive_paths!r}
         )
     """)
+
+
+async def _connect_fifos(proc: subprocess.Popen, req_fifo: str, resp_fifo: str):
+    """Open the parent's FIFO ends without a blocking open(), failing once the child exits.
+
+    The child opens req for writing, then resp for reading, so a successful non-blocking
+    write-open of resp means both ends are connected.
+    """
+    req_fd = os.open(req_fifo, os.O_RDONLY | os.O_NONBLOCK)
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            resp_fd = os.open(resp_fifo, os.O_WRONLY | os.O_NONBLOCK)
+            break
+        except OSError as e:
+            if e.errno != errno.ENXIO or proc.poll() is not None or time.monotonic() > deadline:
+                os.close(req_fd)
+                raise
+        await asyncio.sleep(0.02)
+    os.set_blocking(req_fd, True)
+    os.set_blocking(resp_fd, True)
+    return os.fdopen(req_fd, "r"), os.fdopen(resp_fd, "w", buffering=1)
 
 
 class SubprocessExecutor:
@@ -703,15 +727,9 @@ with open(RESULT_PATH, "w") as f:
                 stderr=str(e),
             )
 
-        # Open FIFOs in a thread with timeout - FIFO open() blocks until both ends
-        # connect, so if the child crashes before opening its ends we'd block forever.
-        loop = asyncio.get_running_loop()
         try:
-            req_file = await asyncio.wait_for(loop.run_in_executor(None, lambda: open(req_fifo, "r")), timeout=30)
-            resp_file = await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: open(resp_fifo, "w", buffering=1)), timeout=30
-            )
-        except (asyncio.TimeoutError, OSError) as e:
+            req_file, resp_file = await _connect_fifos(proc, req_fifo, resp_fifo)
+        except OSError as e:
             proc.kill()
             proc.wait()
             stderr_output = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
