@@ -214,10 +214,14 @@ class RecordStore:
         """Write-through one record's row. Caller holds the lock."""
         self._storage.upsert(record.id, asdict(record))
 
+    def _check_add(self, record) -> None:
+        """Hook run under the lock before a record is stored; raise to reject it."""
+
     def add(self, record):
         with self._lock:
             if record.id in self._records:
                 raise ValueError(f"{self.record_cls.__name__} already exists: {record.id}")
+            self._check_add(record)
             self._records[record.id] = record
             self._persist(record)
         return record

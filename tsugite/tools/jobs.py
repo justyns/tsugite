@@ -48,6 +48,7 @@ def spawn_job(
     teardown_when: str = "always",
     skip_hooks: Optional[list[str]] = None,
     hooks: bool = True,
+    key: Optional[str] = None,
 ) -> dict:
     """Spawn a background Job with an optional verification loop.
 
@@ -122,6 +123,10 @@ def spawn_job(
         skip_hooks: Hook names or phases (e.g. "pre_context_build") to skip in the
             worker and verifier runs. Plugin tools still load.
         hooks: Set to false to skip all workspace and plugin hooks in the Job's runs.
+        key: Optional name you choose for this work, e.g. "kuma:42". While a Job
+            with the key is queued, running, verifying, awaiting_input or stuck,
+            spawn_job fails and the error shows that Job's id. The key frees when
+            the Job is done, errored or cancelled.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -182,6 +187,7 @@ def spawn_job(
             teardown=teardown,
             teardown_when=teardown_when,
             skip_hooks=resolve_skip_hooks(hooks, skip_hooks),
+            key=key,
             timeout=180,
         )
     except TimeoutError:

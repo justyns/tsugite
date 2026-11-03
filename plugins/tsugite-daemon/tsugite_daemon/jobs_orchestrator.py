@@ -295,6 +295,7 @@ class JobsOrchestrator:
         setup: Optional[str] = None,
         teardown: Optional[str] = None,
         teardown_when: str = "always",
+        key: Optional[str] = None,
     ) -> tuple[Job, Optional[Session]]:
         """Create a Job record + spawn the worker session in one step.
 
@@ -319,6 +320,8 @@ class JobsOrchestrator:
             first rung and qualifying failures escalate to the next rung.
         model: when omitted for an agent executor, the parent session's model
             override is used.
+        key: caller-chosen name for the work. Raises JobKeyConflictError while
+            another Job with this key is not done, errored or cancelled.
         """
         worker_agent_file = agent or WORKER_AGENT
 
@@ -395,6 +398,7 @@ class JobsOrchestrator:
                 setup=setup,
                 teardown=teardown,
                 teardown_when=teardown_when,
+                key=key,
                 **job_kwargs,
             )
         )
@@ -813,6 +817,7 @@ class JobsOrchestrator:
                 raise JobStateTransitionError(
                     f"retry_with_hint only valid on stuck/errored jobs (job '{job_id}' is {job.state})"
                 )
+            self._jobs.check_key(job)
 
             # Only a repo job has enough on record to rebuild a worktree from.
             if job.repo and (fresh_workspace or not job.worktree_path):

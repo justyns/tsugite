@@ -75,6 +75,14 @@ class UnknownJobError(LookupError):
     """Raised when a job id matches no Job."""
 
 
+class JobKeyConflictError(ValueError):
+    """Raised when a Job is added with a key another live Job holds."""
+
+
+# STUCK and AWAITING_INPUT keep the key; retry_job or cancel_job is how to move on.
+_KEY_FREE_STATES = frozenset({JobState.DONE.value, JobState.ERRORED.value, JobState.CANCELLED.value})
+
+
 def _coerce_ac_list(items) -> list[str]:
     """Coerce an AC list to plain strings, dropping empties.
 
@@ -211,6 +219,8 @@ class Job:
     # hung one, including one that hangs before its first byte. None for agent
     # jobs - use `session_status` on the worker session instead.
     last_activity_at: Optional[str] = None
+    # Caller-chosen name for the work. At most one Job per key is live at a time.
+    key: Optional[str] = None
 
     def __post_init__(self):
         if not self.id:
@@ -287,6 +297,25 @@ class JobStore(RecordStore):
         self.on_pruned: Optional[Callable[[str], None]] = None
         self._pruned_ids: list[str] = []
         super().__init__(path)
+
+    def _check_add(self, job: Job) -> None:
+        if not job.key:
+            return
+        holder = next(
+            (
+                j
+                for j in self._records.values()
+                if j.key == job.key and j.id != job.id and j.state not in _KEY_FREE_STATES
+            ),
+            None,
+        )
+        if holder:
+            raise JobKeyConflictError(f"Job key {job.key!r} is held by {holder.id}")
+
+    def check_key(self, job: Job) -> None:
+        """Raise JobKeyConflictError when another live Job holds job.key."""
+        with self._lock:
+            self._check_add(job)
 
     def list_all(self) -> list[Job]:
         """Return every Job record, newest-first by updated_at."""

@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import tsugite_daemon.jobs_orchestrator as orch_mod
 from tsugite_daemon.agent_store import Agent, AgentStore
-from tsugite_daemon.job_store import Job, JobState, JobStore, UnknownJobError
+from tsugite_daemon.job_store import Job, JobKeyConflictError, JobState, JobStore, UnknownJobError
 from tsugite_daemon.job_worktrees import _provision_worktree, _prune_worktree
 from tsugite_daemon.jobs_orchestrator import (
     JobsOrchestrator,
@@ -883,6 +883,44 @@ async def test_create_and_start_job_threads_skip_hooks_to_worker(store, runner, 
     )
     assert started.metadata["skip_hooks"] == ["pre_context_build"]
     assert store.get(job.id).skip_hooks == ["pre_context_build"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,holds",
+    [
+        (JobState.QUEUED, True),
+        (JobState.RUNNING, True),
+        (JobState.AWAITING_INPUT, True),
+        (JobState.STUCK, True),
+        (JobState.DONE, False),
+        (JobState.ERRORED, False),
+        (JobState.CANCELLED, False),
+    ],
+)
+async def test_job_key_held_until_done_errored_or_cancelled(store, orchestrator, state, holds):
+    first, _ = await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="a", key="kuma:42")
+    store.update(first.id, state=state.value)
+
+    spawn = orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="b", key="kuma:42")
+    if holds:
+        with pytest.raises(JobKeyConflictError, match=first.id):
+            await spawn
+        assert len(store.list_all()) == 1
+    else:
+        second, _ = await spawn
+        assert second.id != first.id
+
+
+@pytest.mark.asyncio
+async def test_retry_of_errored_job_rejected_while_another_job_holds_key(store, orchestrator):
+    first, _ = await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="a", key="kuma:42")
+    store.update(first.id, state=JobState.ERRORED.value)
+    second, _ = await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="b", key="kuma:42")
+
+    with pytest.raises(JobKeyConflictError, match=second.id):
+        await orchestrator.retry_with_hint(first.id, hint="x")
+    assert store.get(first.id).state == JobState.ERRORED.value
 
 
 def test_on_timeout_skips_cancel_when_worker_already_terminal(store, runner, orchestrator):
