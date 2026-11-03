@@ -4,7 +4,7 @@ Run an interactive **Claude Code** (`claude`) session as a verified tsugite **jo
 
 A job created with `executor="cc"` is driven by a real `claude` process in a PTY.
 The plugin registers Claude Code HTTP `Stop` hooks; on each stop it either lets the
-attempt finish (a completion marker is present, or the continue budget is spent),
+attempt finish (a completion marker is present and its criteria pass, or the continue budget is spent),
 pauses for input (see below), or injects a natural-language nudge to keep going.
 When an attempt finishes, completion routes into tsugite's existing job machinery:
 predicate + LLM acceptance-criteria verification, the retry loop (the failed-AC

@@ -29,6 +29,12 @@ class FakeJob:
         self.id = job_id
         self.state = state
         self.parent_session_id = "parent-1"
+        self.acceptance_criteria = []
+        self.verify_attempts = 0
+        self.sandbox_override = None
+        self.worktree_path = None
+        self.repo = None
+        self.workspace_path = None
 
 
 class FakeJobStore:
@@ -347,6 +353,56 @@ def test_route_stop_block_does_not_complete_and_increments(tmp_path):
     assert body["decision"] == "block"
     assert orch.completed == []
     assert st.consecutive_continues == 1, "route must persist the incremented budget onto DriveState"
+
+
+def _seed_with_criteria(adapter, orch, tmp_path, criteria):
+    st = _seed(adapter, orch)
+    job = orch.get_job("job-1")
+    job.acceptance_criteria = criteria
+    job.worktree_path = str(tmp_path)
+    return st
+
+
+def test_route_stop_marker_with_failing_criterion_blocks_with_output(tmp_path):
+    adapter, orch = _wired_adapter()
+    st = _seed_with_criteria(adapter, orch, tmp_path, ["cmd:echo boom >&2; false"])
+    body = _client(adapter).post("/hook/tok-1", json=_stop_payload(last_assistant_message=f"done {MARKER}")).json()
+    assert body["decision"] == "block"
+    assert "boom" in body["hookSpecificOutput"]["additionalContext"]
+    assert orch.completed == []
+    assert (st.criteria_blocks, st.consecutive_continues) == (1, 0)
+
+
+def test_route_stop_marker_with_passing_criteria_completes(tmp_path):
+    adapter, orch = _wired_adapter()
+    _seed_with_criteria(adapter, orch, tmp_path, ["cmd:true", "file_exists:.", "not a predicate"])
+    resp = _client(adapter).post("/hook/tok-1", json=_stop_payload(last_assistant_message=f"done {MARKER}"))
+    assert resp.json() == {}
+    assert len(orch.completed) == 1
+
+
+def test_route_stop_criteria_blocks_stop_after_three(tmp_path):
+    adapter, orch = _wired_adapter()
+    _seed_with_criteria(adapter, orch, tmp_path, ["cmd:false"])
+    client = _client(adapter)
+    payload = _stop_payload(last_assistant_message=f"done {MARKER}")
+    assert [client.post("/hook/tok-1", json=payload).json().get("decision") for _ in range(4)] == [
+        "block",
+        "block",
+        "block",
+        None,
+    ]
+    assert len(orch.completed) == 1
+
+
+def test_route_stop_criteria_timeout_falls_through_to_completion(tmp_path, monkeypatch):
+    monkeypatch.setattr("tsugite_cc_driver.adapter._CRITERIA_TIMEOUT_SECONDS", 0)
+    adapter, orch = _wired_adapter()
+    st = _seed_with_criteria(adapter, orch, tmp_path, ["cmd:sleep 5"])
+    resp = _client(adapter).post("/hook/tok-1", json=_stop_payload(last_assistant_message=f"done {MARKER}"))
+    assert resp.json() == {}
+    assert len(orch.completed) == 1
+    assert st.criteria_blocks == 0
 
 
 def test_route_stop_wrap_up_marker_completes_worker(tmp_path):

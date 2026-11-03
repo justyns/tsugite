@@ -166,6 +166,7 @@ def _evaluate_predicate(
     ac_text: str,
     attempt: int,
     sandbox_override: Optional[dict] = None,
+    timeout: float = _PREDICATE_TIMEOUT_SECONDS,
 ) -> dict:
     """Run a predicate locally and return an ac_results entry.
 
@@ -211,7 +212,7 @@ def _evaluate_predicate(
             argv = _command_argv(cmd, cwd, sandbox_override)
             if argv is None:
                 return verdict(False, "command predicate requires a sandbox but no backend is installed")
-            completed = subprocess.run(argv, capture_output=True, timeout=_PREDICATE_TIMEOUT_SECONDS, cwd=cwd)
+            completed = subprocess.run(argv, capture_output=True, timeout=timeout, cwd=cwd)
             if completed.returncode == expected:
                 return verdict(True, f"exit code {completed.returncode}")
             stderr = (completed.stderr or b"").decode("utf-8", "replace").strip()

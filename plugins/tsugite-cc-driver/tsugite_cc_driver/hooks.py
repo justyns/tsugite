@@ -64,6 +64,11 @@ def wrap_up_instruction(completion_marker: str, minutes_left: int, *, wrap_up_ma
     )
 
 
+def block_response(context: str) -> dict:
+    """Stop hook body that sends Claude back for another turn with `context`."""
+    return {"decision": "block", "hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": context}}
+
+
 @dataclass
 class StopDecision:
     """Outcome of a Stop hook: the JSON body to return to Claude plus whether the
@@ -122,14 +127,8 @@ def decide_stop(
     if count >= max_consecutive_continues:
         return StopDecision(response={}, complete=True, summary=last_msg, new_consecutive_continues=count)
 
-    block = {
-        "decision": "block",
-        "hookSpecificOutput": {
-            "hookEventName": "Stop",
-            "additionalContext": continue_instruction(completion_marker, needs_input_marker),
-        },
-    }
-    return StopDecision(response=block, complete=False, summary=None, new_consecutive_continues=count + 1)
+    response = block_response(continue_instruction(completion_marker, needs_input_marker))
+    return StopDecision(response=response, complete=False, summary=None, new_consecutive_continues=count + 1)
 
 
 def decide_stop_failure(payload: dict) -> str:

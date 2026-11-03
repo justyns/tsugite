@@ -9,7 +9,9 @@ complete_worker/fail_worker.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -18,12 +20,39 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from tsugite_daemon.adapters.base import BaseAdapter
+from tsugite_daemon.job_predicates import _evaluate_predicate, _resolve_predicate_cwd, partition_acs
 from tsugite_daemon.job_store import JobState
 
 from tsugite_cc_driver.executor import CCExecutor, DriveStateStore
-from tsugite_cc_driver.hooks import decide_stop, decide_stop_failure, notification_attention
+from tsugite_cc_driver.hooks import block_response, decide_stop, decide_stop_failure, notification_attention
 
 logger = logging.getLogger(__name__)
+
+_MAX_CRITERIA_BLOCKS = 3
+_CRITERIA_TIMEOUT_SECONDS = 60
+
+
+def _criteria_failures(job) -> list[dict]:
+    """Run the job's cmd:/exit_code:/file_exists: criteria within one `_CRITERIA_TIMEOUT_SECONDS` budget.
+
+    Returns the failed verdicts, leaving out timeouts, which verification grades instead.
+    """
+    predicates, _ = partition_acs(job.acceptance_criteria)
+    cwd = _resolve_predicate_cwd(job)
+    deadline = time.monotonic() + _CRITERIA_TIMEOUT_SECONDS
+    results = [
+        _evaluate_predicate(
+            p["predicate"],
+            cwd=cwd,
+            ac_index=p["ac_index"],
+            ac_text=p["ac_text"],
+            attempt=job.verify_attempts + 1,
+            sandbox_override=job.sandbox_override,
+            timeout=max(deadline - time.monotonic(), 0),
+        )
+        for p in predicates
+    ]
+    return [r for r in results if not r["pass"] and r["reason"] != "timeout"]
 
 
 class CCDriverConfig(BaseModel):
@@ -154,6 +183,18 @@ class CCDriverAdapter(BaseAdapter):
                 # flag was answered - tell the UI to drop its persistent marker.
                 state.attention_flagged = False
                 self._emit("attention_cleared", {"job_id": job_id, "parent_session_id": job.parent_session_id})
+            if (
+                self.config.completion_marker
+                and self.config.completion_marker in (payload.get("last_assistant_message") or "")
+                and state.criteria_blocks < _MAX_CRITERIA_BLOCKS
+            ):
+                failures = await asyncio.to_thread(_criteria_failures, job)
+                if failures:
+                    state.criteria_blocks += 1
+                    lines = "\n".join(f"- {f['ac_text']}: {f['reason']}" for f in failures)
+                    return JSONResponse(
+                        block_response(f"These acceptance criteria still fail, so the task is not done:\n{lines}")
+                    )
             decision = decide_stop(
                 payload,
                 consecutive_continues=state.consecutive_continues,

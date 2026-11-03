@@ -42,6 +42,8 @@ class DriveState:
     terminal_id: Optional[str] = None
     cc_session_id: Optional[str] = None
     consecutive_continues: int = 0
+    # Separate from the continue budget.
+    criteria_blocks: int = 0
     # True while an un-actioned permission prompt is (probably) on screen: set
     # on a permission_prompt Notification, cleared on the next Stop (claude
     # finishing a turn proves the prompt was answered). Drives the UI's
@@ -368,6 +370,7 @@ class CCExecutor:
         state = self.drive_state.get(job.id)
         if followup is not None and await self._type_into_live_session(job.id, followup):
             state.consecutive_continues = 0
+            state.criteria_blocks = 0
             return
         await self._spawn(job, followup)
 
@@ -499,6 +502,7 @@ class CCExecutor:
 
         state.terminal_id = session.id
         state.consecutive_continues = 0
+        state.criteria_blocks = 0
         self._set_worker_terminal(job.id, session.id)
         # Stamp before any output: a worker wedged before its first byte would
         # otherwise be indistinguishable from an executor that reports nothing.
