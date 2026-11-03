@@ -165,6 +165,9 @@ class Job:
     # construction.
     notify_when: Optional[str] = None
     notify_after_minutes: Optional[int] = None
+    # An "all_done" job reports once the jobs sharing this group finish, ignoring the
+    # parent's other jobs. None waits on every job of the parent.
+    notify_group: Optional[str] = None
     # Maximum verifier rounds before the Job goes stuck. Overridable per-job via
     # /job --max-attempts or the spawn_job() tool.
     max_attempts: int = 3

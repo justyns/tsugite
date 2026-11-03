@@ -287,6 +287,7 @@ class JobsOrchestrator:
         max_attempts: Optional[int] = None,
         notify_when: Optional[str] = None,
         notify_after_minutes: Optional[int] = None,
+        notify_group: Optional[str] = None,
         sandbox_override: Optional[dict] = None,
         skip_hooks: Optional[list] = None,
         executor: str = "agent",
@@ -370,6 +371,8 @@ class JobsOrchestrator:
             if notify_after_minutes < 1:
                 raise ValueError(f"notify_after_minutes must be at least 1, got {notify_after_minutes}")
             job_kwargs["notify_after_minutes"] = notify_after_minutes
+        if notify_group:
+            job_kwargs["notify_group"] = notify_group
 
         # The parent's workspace root: relative --repo paths resolve against it,
         # and non-repo jobs persist it as their workspace anchor (see
@@ -1556,7 +1559,10 @@ class JobsOrchestrator:
             self.close_batch_barrier(run_id)
 
     def close_batch_barrier(self, parent_session_id: str) -> None:
-        """Wake the owner session once, when the last of its active jobs has finalized.
+        """Wake the owner session once per notify_group, when that group has finalized.
+
+        A grouped batch waits only on the jobs of its group; an ungrouped batch
+        waits on every job of the parent session. One wake-up per call.
 
         Call this in the same synchronous region as the transition that produced
         the terminal state; the remaining-active count means nothing if another
@@ -1565,28 +1571,29 @@ class JobsOrchestrator:
         The owner's turn end re-checks the parents it owns.
         """
         jobs = self.jobs_for_parent(parent_session_id)
-        if any(j.state not in self._jobs.terminal_states for j in jobs):
-            return
-        batch = [j for j in jobs if j.notify_when == "all_done" and not j.barrier_notified]
-        if not batch:
-            return
-        if self._turn_in_flight(parent_session_id) or self._turn_in_flight(self._owner_session_id(batch[0])):
-            return
-        batch.sort(key=lambda j: j.created_at or "")
+        pending = [j for j in jobs if j.notify_when == "all_done" and not j.barrier_notified]
+        for group in dict.fromkeys(j.notify_group for j in pending):
+            scope = jobs if group is None else [j for j in jobs if j.notify_group == group]
+            if any(j.state not in self._jobs.terminal_states for j in scope):
+                continue
+            batch = sorted((j for j in pending if j.notify_group == group), key=lambda j: j.created_at or "")
+            if self._turn_in_flight(parent_session_id) or self._turn_in_flight(self._owner_session_id(batch[0])):
+                return
 
-        def unmark_batch() -> None:
+            def unmark_batch() -> None:
+                for member in batch:
+                    self._jobs.update(member.id, barrier_notified=False)
+
             for member in batch:
-                self._jobs.update(member.id, barrier_notified=False)
-
-        for member in batch:
-            self._jobs.update(member.id, barrier_notified=True)
-        self._schedule_reply(
-            batch[-1],
-            _build_barrier_message(batch),
-            source="jobs_all_complete",
-            metadata={"kind": "jobs_barrier"},
-            on_failed=unmark_batch,
-        )
+                self._jobs.update(member.id, barrier_notified=True)
+            self._schedule_reply(
+                batch[-1],
+                _build_barrier_message(batch),
+                source="jobs_all_complete",
+                metadata={"kind": "jobs_barrier"},
+                on_failed=unmark_batch,
+            )
+            return
 
     def _turn_in_flight(self, session_id: str) -> bool:
         session = self._get_session(session_id)

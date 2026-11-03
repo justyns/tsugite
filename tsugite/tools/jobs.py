@@ -40,6 +40,7 @@ def spawn_job(
     max_attempts: Optional[int] = None,
     notify_when: Optional[str] = None,
     notify_after_minutes: Optional[int] = None,
+    notify_group: Optional[str] = None,
     executor: str = "agent",
     effort: Optional[str] = None,
     files: Optional[list[str]] = None,
@@ -92,7 +93,10 @@ def spawn_job(
             all_done | never. Defaults to never - be deliberate when enabling, since
             each notification adds a turn to the parent conversation. "all_done"
             replaces the per-job wake-up with one aggregate message, sent when the
-            last of this session's active jobs finishes.
+            last of this session's active jobs finishes, or of the `notify_group`
+            jobs when a group is set.
+        notify_group: Names a group for "all_done". Jobs spawned with the same
+            group are reported together, regardless of the session's other jobs.
         notify_after_minutes: Soft check-in. If the Job is not terminal this many
             minutes after it first starts, you get one message with its state and
             last activity; the Job keeps running. Independent of `notify_when` and
@@ -179,6 +183,7 @@ def spawn_job(
             max_attempts=max_attempts,
             notify_when=notify_when,
             notify_after_minutes=notify_after_minutes,
+            notify_group=notify_group,
             sandbox_override=sandbox_override,
             executor=executor,
             effort=effort,

@@ -10,11 +10,13 @@ from tsugite_daemon.session_store import Session, SessionStatus
 from .test_jobs_orchestrator import _verifier_session, _worker_session
 
 
-def _seed_batch(store, orchestrator, count, parent="parent-1", notify_when="all_done"):
+def _seed_batch(store, orchestrator, count, parent="parent-1", notify_when="all_done", group=None):
     """Create `count` running jobs anchored on `parent`, all opted into the barrier."""
     jobs = []
     for i in range(count):
-        job = store.add(Job(id="", parent_session_id=parent, prompt=f"task {i}", notify_when=notify_when))
+        job = store.add(
+            Job(id="", parent_session_id=parent, prompt=f"task {i}", notify_when=notify_when, notify_group=group)
+        )
         orchestrator.register_worker(job.id, f"worker-{job.id}", timeout_minutes=30)
         jobs.append(store.get(job.id))
     return jobs
@@ -43,6 +45,14 @@ async def _finish(orchestrator, job):
 async def test_all_done_is_a_valid_notify_when(store, orchestrator):
     job, _ = await orchestrator.create_and_start_job(parent_session_id="parent-1", prompt="hi", notify_when="all_done")
     assert store.get(job.id).notify_when == "all_done"
+
+
+@pytest.mark.asyncio
+async def test_notify_group_is_stored_on_the_job(store, orchestrator):
+    job, _ = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="hi", notify_when="all_done", notify_group="ingest"
+    )
+    assert store.get(job.id).notify_group == "ingest"
 
 
 # ── the barrier ──
@@ -125,6 +135,50 @@ async def test_barrier_waits_for_a_non_barrier_sibling(store, runner, orchestrat
     assert len(sent) == 1
     assert barrier_job.id in sent[0]["message"]
     assert plain.id not in sent[0]["message"], "only all_done jobs are summarised"
+
+
+@pytest.mark.asyncio
+async def test_grouped_barrier_waits_only_on_its_group(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    first, second = _seed_batch(store, orchestrator, 2, group="ingest")
+    unrelated = _seed_batch(store, orchestrator, 1, notify_when="never")[0]
+
+    await _finish(orchestrator, first)
+    assert sent == [], "a running group member must hold the barrier closed"
+
+    await _finish(orchestrator, second)
+    assert len(sent) == 1, "an unrelated running job must not hold back the group"
+    assert first.id in sent[0]["message"] and second.id in sent[0]["message"]
+    assert unrelated.id not in sent[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_ungrouped_barrier_waits_for_a_running_grouped_job(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    ungrouped = _seed_batch(store, orchestrator, 1)[0]
+    grouped = _seed_batch(store, orchestrator, 1, notify_when="never", group="ingest")[0]
+
+    await _finish(orchestrator, ungrouped)
+    assert sent == [], "no group means the barrier is session-wide"
+
+    await _finish(orchestrator, grouped)
+    assert len(sent) == 1
+    assert ungrouped.id in sent[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_groups_finish_independently(store, runner, orchestrator):
+    sent = _capture_replies(runner)
+    a = _seed_batch(store, orchestrator, 1, group="a")[0]
+    b = _seed_batch(store, orchestrator, 1, group="b")[0]
+
+    await _finish(orchestrator, a)
+    assert len(sent) == 1
+    assert a.id in sent[0]["message"] and b.id not in sent[0]["message"]
+
+    await _finish(orchestrator, b)
+    assert len(sent) == 2
+    assert b.id in sent[1]["message"]
 
 
 @pytest.mark.asyncio

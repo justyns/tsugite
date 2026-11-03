@@ -166,6 +166,8 @@ spawn_job(
 
 **Notification cost**: `notify_when` defaults to `"never"`. Set it to `"stuck"` for a wake-up only when the Job needs user intervention, or `"terminal"` for any final state. Every notification adds a turn to this conversation - prefer polling `get_job` over `notify_when="terminal"` for routine tracking.
 
+For several Jobs, set `notify_when="all_done"` on each to get one wake-up when they have all finished instead of one per Job. Add `notify_group="name"` to the Jobs launched together so unrelated Jobs of this session do not delay it; without a group the wake-up waits for every active Job of the session.
+
 **Long Jobs**: pass `notify_after_minutes=N` for one check-in message with the Job's state and last activity when N minutes pass and it has not finished. It does not stop the Job and does not interact with `timeout_minutes` or `notify_when`. Use it in place of polling `get_job`.
 
 **When a Job goes `stuck`** (max_attempts verifier rejections), the user can retry-with-hint or mark-done-anyway from the UI; you usually don't need to act. If asked to diagnose, `get_job(job_id)` returns the worker session id and each `ac_results[].reason` - read those, suggest a different approach, or open the worker session via `session_status` to inspect what went wrong.
