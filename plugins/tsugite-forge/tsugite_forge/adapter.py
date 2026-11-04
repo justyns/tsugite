@@ -12,8 +12,9 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from tsugite_daemon.adapters.base import BaseAdapter
 
+from tsugite.link_previews import register_link_resolver
 from tsugite.secrets.registry import get_registry
-from tsugite_forge import refs
+from tsugite_forge import previews, refs
 from tsugite_forge.cache import LruCache
 from tsugite_forge.config import REPO_PATTERN, Forge, ForgePluginConfig
 from tsugite_forge.providers import ForgeError, Provider, PullRequest, kinds
@@ -214,6 +215,34 @@ class ForgeAdapter(BaseAdapter):
             detail[part] = hit[0]
         return get_registry().mask_obj(detail)
 
+    def link_preview(self, url: str) -> dict | None:
+        """Preview a pull request or issue link into a configured repo. Blocks on a forge call on a cache miss."""
+        ref = refs.link_ref(url, self.config.forges)
+        if ref is None:
+            return None
+        forge, repo, kind, number = ref
+        cache = self.forges[forge]
+        if repo not in cache.repos:
+            return None
+        is_pr = kind != "issues"
+        if is_pr and (pr := next((pr for pr in cache.prs if pr.repo == repo and pr.number == number), None)):
+            return previews.pr_preview(pr, cache.config)
+        key = (forge, repo, kind, number)
+        hit = self._details.get(key)
+        if hit and self.clock() - hit[1] <= DETAIL_TTL:
+            return hit[0]
+        try:
+            if is_pr:
+                preview = previews.pr_preview(cache.provider.get_pr(repo, number), cache.config)
+            else:
+                preview = previews.issue_preview(cache.provider.get_issue(repo, number), cache.config)
+        except ForgeError as exc:
+            logger.info("forge %s has no preview for %s: %s", forge, url, exc)
+            return None
+        # Kept for the next request when this read outlives the daemon's resolve timeout.
+        self._details.put(key, (preview, self.clock()))
+        return preview
+
     def get_http_routes(self) -> list:
         return [
             Route("/prs", self._list_prs, methods=["GET"]),
@@ -368,4 +397,11 @@ def create_adapter(*, config, runtime, session_store, identity_map):
     if not config.get("forges"):
         logger.info("forge plugin installed but no forges configured (add plugins.forge.forges to activate)")
         return None
-    return ForgeAdapter(ForgePluginConfig(**config), session_store=session_store)
+    adapter = ForgeAdapter(ForgePluginConfig(**config), session_store=session_store)
+    register_link_resolver(
+        name="links",
+        hosts=sorted({refs.forge_host(forge) for forge in adapter.config.forges}),
+        path=previews.LINK_PATH,
+        resolve=adapter.link_preview,
+    )
+    return adapter

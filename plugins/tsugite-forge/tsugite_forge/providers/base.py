@@ -32,6 +32,30 @@ class PullRequest:
 
 
 @dataclass
+class Issue:
+    repo: str
+    number: int
+    title: str
+    state: str  # open or closed
+    author: str
+    labels: list[str]
+    url: str
+
+
+def rest_issue(repo: str, raw: dict) -> Issue:
+    """An issue from the REST shape Forgejo and GitHub share."""
+    return Issue(
+        repo=repo,
+        number=raw["number"],
+        title=raw["title"],
+        state=raw["state"],
+        author=raw["user"]["login"],
+        labels=[label["name"] for label in raw["labels"] or []],
+        url=raw["html_url"],
+    )
+
+
+@dataclass
 class ReviewThreads:
     total: int
     unresolved: int | None
@@ -66,6 +90,9 @@ class Provider(ABC):
 
     @abstractmethod
     def get_pr(self, repo: str, number: int) -> PullRequest: ...
+
+    @abstractmethod
+    def get_issue(self, repo: str, number: int) -> Issue: ...
 
     @abstractmethod
     def checks(self, repo: str, number: int) -> str: ...

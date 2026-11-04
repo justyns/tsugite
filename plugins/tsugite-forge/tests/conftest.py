@@ -41,3 +41,13 @@ def reset_history_backend():
     yield
     close_all()
     reset_history_backend()
+
+
+@pytest.fixture(autouse=True)
+def reset_link_resolvers():
+    """Clear the link resolver create_adapter registers."""
+    from tsugite.link_previews import reset_link_resolvers
+
+    reset_link_resolvers()
+    yield
+    reset_link_resolvers()

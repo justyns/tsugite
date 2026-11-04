@@ -88,6 +88,22 @@ def test_get_pr_maps_merged_expected_and_a_deleted_author(make):
     assert (pr.state, pr.ci_state, pr.review_state, pr.author) == ("merged", "pending", "approved", "ghost")
 
 
+def test_get_issue_normalizes_an_issue(make):
+    from tsugite_forge.providers import Issue
+
+    provider, gh = make()
+    assert provider.get_issue("octo-org/demo", 5) == Issue(
+        repo="octo-org/demo",
+        number=5,
+        title="Upload test is flaky",
+        state="closed",
+        author="octocat",
+        labels=["tests"],
+        url="https://github.com/octo-org/demo/issues/5",
+    )
+    assert gh.calls == [["api", "repos/octo-org/demo/issues/5"]]
+
+
 def test_review_threads_beyond_the_fetched_page_are_unknown(make):
     from tsugite_forge.providers import ReviewThreads
 

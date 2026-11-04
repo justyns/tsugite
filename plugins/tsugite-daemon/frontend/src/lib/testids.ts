@@ -153,6 +153,8 @@ export const TESTID = {
   chatEffortSeg: 'chat-effort-seg',
   chatQuota: 'chat-quota',
   chatQuotaPopover: 'chat-quota-popover',
+  chatLinkChip: 'chat-link-chip',
+  chatLinkPreviewPopover: 'chat-link-preview-popover',
   /** Prominent, always-visible Retry on a failed turn (re-sends the last message). */
   chatRetry: 'chat-retry',
   chatTurnOrigin: 'chat-turn-origin',

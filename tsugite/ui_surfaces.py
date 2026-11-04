@@ -10,7 +10,7 @@ rather than being a request handler.
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Union
+from typing import Any, Awaitable, Callable, Optional, Union
 
 # (plugin_name, descriptor). The name is empty until the plugin loader stamps it.
 _surfaces: list[tuple[str, dict]] = []
@@ -89,17 +89,22 @@ def reset_ui_surfaces() -> None:
 
 
 @contextmanager
-def attributing_to(plugin_name: str):
-    """Attribute surfaces registered inside the block to `plugin_name`.
-
-    A registration running at import time cannot know its own entry-point name, so
-    the plugin loader wraps each import in this. An import that raises leaves nothing
-    behind.
-    """
-    start = len(_surfaces)
+def stamping(registry: list[tuple[str, Any]], plugin_name: str):
+    """Stamp `plugin_name` on the (name, descriptor) entries the block appends to `registry`.
+    A block that raises drops its entries."""
+    start = len(registry)
     try:
         yield
     except Exception:
-        del _surfaces[start:]
+        del registry[start:]
         raise
-    _surfaces[start:] = [(plugin_name, descriptor) for _name, descriptor in _surfaces[start:]]
+    registry[start:] = [(plugin_name, descriptor) for _name, descriptor in registry[start:]]
+
+
+def attributing_to(plugin_name: str):
+    """Attribute surfaces registered inside the block to `plugin_name`.
+
+    The plugin loader wraps each plugin load in this, because a registration does not know
+    its own entry-point name.
+    """
+    return stamping(_surfaces, plugin_name)

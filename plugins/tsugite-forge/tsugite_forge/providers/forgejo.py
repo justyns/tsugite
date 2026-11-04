@@ -5,7 +5,7 @@ import httpx
 from tsugite.secrets import get_backend
 from tsugite.secrets.registry import get_registry
 from tsugite_forge.cache import LruCache
-from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads
+from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads, rest_issue
 
 # Forgejo's default [api] MAX_RESPONSE_ITEMS. A larger limit is capped to it.
 PAGE_SIZE = 50
@@ -85,6 +85,9 @@ class ForgejoProvider(Provider):
 
     def get_pr(self, repo, number):
         return self._normalize(repo, self._get(f"/repos/{repo}/pulls/{number}").json())
+
+    def get_issue(self, repo, number):
+        return rest_issue(repo, self._get(f"/repos/{repo}/issues/{number}").json())
 
     def checks(self, repo, number):
         return self._ci_state(repo, self._get(f"/repos/{repo}/pulls/{number}").json()["head"]["sha"])

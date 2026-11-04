@@ -1,10 +1,8 @@
 <script lang="ts">
   // Workspace tag chip: `#tag` that indexes across files. Renders as a link
   // when navigable, a button when it only fires a callback, or a removable
-  // filter pill with an `x`. Transcribes the .t-chip primitive inline.
-  // Kept inline rather than the shared Chip: this renders as <a>/<button> when
-  // navigable (Chip is always a <span>), and its remove-× glyph is 10px where
-  // Chip's is 9px - swapping would change the element type and shrink the ×.
+  // filter pill with an `x`, styled by the global .t-chip rules. The shared Chip
+  // differs: always a <span>, with a 9px remove-×.
   let {
     tag,
     href,
@@ -50,20 +48,6 @@
 {/if}
 
 <style>
-  .t-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 20px;
-    padding: 0 7px;
-    border-radius: var(--r-md);
-    background: var(--bg2);
-    border: 1px solid var(--bd0);
-    font: 500 var(--fs-xs) var(--font-mono);
-    color: var(--tx1);
-    white-space: nowrap;
-    cursor: default;
-  }
   .cnt {
     color: var(--tx3);
   }

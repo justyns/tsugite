@@ -1,6 +1,6 @@
 # Plugins
 
-Most plugins need only one entry point, `tsugite.plugins`. Importing the module triggers `@tool`, `@hook`, `@subscribe`, and `@ui_surface` decorators.
+Most plugins need only one entry point, `tsugite.plugins`. Importing the module triggers `@tool`, `@hook`, `@subscribe`, `@ui_surface` and `@link_resolver` decorators.
 
 ```toml
 [project.entry-points."tsugite.plugins"]

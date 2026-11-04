@@ -21,6 +21,7 @@ from tsugite_daemon.adapters.http.helpers import (
 from tsugite_daemon.adapters.http.hooks_config import HooksConfigMixin
 from tsugite_daemon.adapters.http.introspection import IntrospectionMixin
 from tsugite_daemon.adapters.http.jobs import JobsMixin
+from tsugite_daemon.adapters.http.link_preview import LinkPreviewMixin
 from tsugite_daemon.adapters.http.providers import ProvidersMixin
 from tsugite_daemon.adapters.http.push import PushMixin
 from tsugite_daemon.adapters.http.rooms import RoomsMixin
@@ -61,6 +62,7 @@ class HTTPServer(
     UsageMixin,
     ActivityMixin,
     IntrospectionMixin,
+    LinkPreviewMixin,
     StaticMixin,
 ):
     """Runs a Starlette ASGI app with uvicorn for the HTTP API."""
@@ -214,6 +216,7 @@ class HTTPServer(
             *self._usage_routes(),
             *self._activity_routes(),
             *self._introspection_routes(),
+            *self._link_preview_routes(),
             *self._static_routes(),
         ]
         return Starlette(routes=routes)

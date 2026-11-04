@@ -1,6 +1,8 @@
 <script lang="ts">
   import Icon from '$lib/components/icon/Icon.svelte';
+  import { linkPreviews } from '$lib/stores/linkPreviews.svelte';
   import { formatTokens, parseMarkdown } from './chatturns.util';
+  import LinkPreviewPopover from './LinkPreviewPopover.svelte';
   import { rafThrottle } from './rafThrottle';
 
   let {
@@ -25,12 +27,15 @@
 
   // Seed synchronously (no flash of empty), then coalesce streamed reasoning
   // deltas to one parse per frame; the trailing value always renders.
+  const chip = (href: string) => linkPreviews.lookup(href);
   // svelte-ignore state_referenced_locally -- `content` seeds the first parse; the effect owns updates.
-  let html = $state(parseMarkdown(content));
-  const throttle = rafThrottle<string>((src) => (html = parseMarkdown(src)));
+  let html = $state(parseMarkdown(content, false, chip));
+  const throttle = rafThrottle<string>((src) => (html = parseMarkdown(src, false, chip)));
+  let body = $state<HTMLElement>();
 
   let seeded = false;
   $effect(() => {
+    void linkPreviews.version;
     const src = content;
     if (seeded) throttle.push(src);
     else seeded = true;
@@ -48,12 +53,15 @@
     {label}{#if tokens != null}<span class="tok"> · {formatTokens(tokens)} tokens</span>{/if}
   </button>
   <div class="body">
-    <div>{@html html}</div>
+    <div bind:this={body}>{@html html}</div>
   </div>
+  <!-- Outside .body, whose overflow clips while it animates open. -->
+  <LinkPreviewPopover root={body} />
 </div>
 
 <style>
   .t-think {
+    position: relative;
     border-left: 2px solid color-mix(in oklab, var(--brand) 55%, transparent);
     padding: 2px 0 2px 10px;
     font-size: var(--fs-sm);

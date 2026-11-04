@@ -325,6 +325,16 @@ def reset_ui_surfaces_fixture():
 
 
 @pytest.fixture(autouse=True)
+def reset_link_resolvers_fixture():
+    """Clear registered link resolvers between tests."""
+    from tsugite.link_previews import reset_link_resolvers
+
+    reset_link_resolvers()
+    yield
+    reset_link_resolvers()
+
+
+@pytest.fixture(autouse=True)
 def reset_api_key_cache_fixture():
     """Clear cached provider API keys, so one test's secret or env var never reaches another's."""
     from tsugite.providers.base import invalidate_api_key_cache

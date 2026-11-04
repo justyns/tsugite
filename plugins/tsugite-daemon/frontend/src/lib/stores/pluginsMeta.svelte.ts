@@ -5,9 +5,10 @@
  * an `available:false` empty state (a clean "not exposed by this daemon" seam)
  * rather than an error. Exported as a class instance.
  *
- * The same payload carries the UI surfaces adapter plugins declare, which feed
- * the surface registry (views/surfaces.ts) and the nav rail (views/index.ts). The
- * shell loads this at boot so a persisted plugin tab resolves on the first frame.
+ * The same payload lists the UI surfaces adapter plugins declare, which feed the
+ * surface registry (views/surfaces.ts) and the nav rail (views/index.ts), and the
+ * link resolver patterns stores/linkPreviews matches against. The shell loads this
+ * at boot so a persisted plugin tab resolves on the first frame.
  *
  * It is also where the shell hands off the broadcast frames it reads, so an open
  * surface hears a daemon event over its bridge instead of opening a second
@@ -16,6 +17,7 @@
 import { api, type ApiError } from '$lib/api/client';
 import type { SSEEvent } from '$lib/api/sse';
 import { ICONS, type IconName } from '$lib/components/icon/icons';
+import type { LinkResolverPattern } from './linkPreviews.svelte';
 import type { ViewMode } from '../../views';
 
 export interface PluginInfo {
@@ -57,6 +59,7 @@ function toSurface(raw: RawSurface): PluginSurface {
 export class PluginsMetaStore {
   plugins = $state<PluginInfo[]>([]);
   surfaces = $state<PluginSurface[]>([]);
+  linkResolvers = $state<LinkResolverPattern[]>([]);
   /** False when the daemon doesn't expose GET /api/plugins (a clean empty-state
    *  seam, distinct from a transient fetch error). */
   available = $state(true);
@@ -94,17 +97,21 @@ export class PluginsMetaStore {
     this.loading = true;
     this.error = null;
     try {
-      const res = await api.get<{ plugins: PluginInfo[]; ui_surfaces?: RawSurface[] }>(
-        '/api/plugins',
-      );
+      const res = await api.get<{
+        plugins: PluginInfo[];
+        ui_surfaces?: RawSurface[];
+        link_resolvers?: LinkResolverPattern[];
+      }>('/api/plugins');
       this.plugins = res.plugins;
       this.surfaces = (res.ui_surfaces ?? []).map(toSurface);
+      this.linkResolvers = res.link_resolvers ?? [];
       this.available = true;
     } catch (err) {
       if ((err as ApiError).status === 404) {
         this.available = false;
         this.plugins = [];
         this.surfaces = [];
+        this.linkResolvers = [];
       } else {
         this.error = err instanceof Error ? err.message : String(err);
       }

@@ -6,11 +6,12 @@ import inspect
 import json
 import logging
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from tsugite import link_previews, ui_surfaces
 from tsugite.events.bus import Subscription
-from tsugite.ui_surfaces import attributing_to
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,12 @@ def discover_plugins(plugin_config: dict | None = None) -> list[PluginInfo]:
     return plugins
 
 
+@contextmanager
+def _attributing_to(plugin_name: str):
+    with ui_surfaces.attributing_to(plugin_name), link_previews.attributing_to(plugin_name):
+        yield
+
+
 def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[PluginInfo]:
     """Iterate a plugin group: skip disabled, ep.load(), invoke register_fn(cfg),
     pass result to on_loaded(payload), accumulate PluginInfo, isolate errors.
@@ -186,7 +193,7 @@ def _load_plugin_group(group, plugin_config, on_loaded, summarize=None) -> list[
             logger.debug("Plugin '%s' (%s) disabled, skipping", ep.name, group)
             continue
         try:
-            with attributing_to(ep.name):
+            with _attributing_to(ep.name):
                 target = ep.load()
                 if inspect.ismodule(target):
                     # Module-only entry point: import did the registration via decorators.
@@ -269,13 +276,14 @@ def load_adapter_plugins(plugin_config, session_store, identity_map, runtime) ->
             logger.debug("Adapter plugin '%s' disabled, skipping", ep.name)
             continue
         try:
-            factory = ep.load()
-            adapter = factory(
-                config=cfg,
-                runtime=runtime,
-                session_store=session_store,
-                identity_map=identity_map,
-            )
+            with _attributing_to(ep.name):
+                factory = ep.load()
+                adapter = factory(
+                    config=cfg,
+                    runtime=runtime,
+                    session_store=session_store,
+                    identity_map=identity_map,
+                )
             results.append((PluginInfo.from_entry_point(ep, GROUP_ADAPTERS, loaded=True), adapter))
             logger.info("Loaded adapter plugin '%s'", ep.name)
         except Exception as e:

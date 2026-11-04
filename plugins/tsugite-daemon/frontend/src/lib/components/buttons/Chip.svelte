@@ -40,24 +40,10 @@
 </span>
 
 <style>
-  /* ---- kbd + chip ---- */
-  .t-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 20px;
-    padding: 0 7px;
-    border-radius: var(--r-md);
-    background: var(--bg2);
-    border: 1px solid var(--bd0);
-    font: 500 var(--fs-xs) var(--font-mono);
-    color: var(--tx1);
-    white-space: nowrap;
-    cursor: default;
-  }
+  /* Base .t-chip rules live in styles/app.css. */
   /* `:global(.ic)` on the descendant half: `icon` is a consumer-supplied
      snippet, so that <svg> is authored by (and scope-hashed to) the caller,
-     not this component — without `:global` this rule could never match it. */
+     not this component. Without `:global` this rule could never match it. */
   .t-chip :global(.ic) {
     width: 10px;
     height: 10px;
@@ -78,7 +64,7 @@
     color: var(--tx3);
     display: inline-flex;
     /* `.x` is a real <button> here (for keyboard/AT access); reset the UA button
-       chrome so it reads as a bare glyph. */
+       border and padding so it reads as a bare glyph. */
     background: none;
     border: 0;
     padding: 0;

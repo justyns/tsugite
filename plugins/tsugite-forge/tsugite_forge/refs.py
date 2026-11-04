@@ -28,12 +28,12 @@ BARE_NUMBER = re.compile(r"(?<![\w/#&])#(\d+)\b")
 LINK_KINDS = {"forgejo": ("pulls", "issues"), "github": ("pull", "issues")}
 
 
-def _host(forge) -> str:
+def forge_host(forge) -> str:
     return GITHUB_HOST if forge.kind == "github" else urlsplit(forge.url).hostname
 
 
 def _forge_for(host: str | None, forges):
-    return next((forge for forge in forges if host and host.lower() == _host(forge)), None)
+    return next((forge for forge in forges if host and host.lower() == forge_host(forge)), None)
 
 
 def remote_ref(url: str, forges) -> tuple[str, str] | None:
@@ -54,6 +54,20 @@ def remote_ref(url: str, forges) -> tuple[str, str] | None:
     return forge.name, "/".join(segments[-2:])
 
 
+def link_ref(url: str, forges) -> tuple[str, str, str, int] | None:
+    """(forge, owner/repo, kind, number) for a pull request or issue URL on a configured forge, or None.
+    `kind` is the URL path segment."""
+    parts = urlsplit(url)
+    forge = _forge_for(parts.hostname, forges)
+    segments = parts.path.strip("/").split("/")
+    if forge is None or len(segments) < 4 or not segments[-1].isdigit():
+        return None
+    owner, repo, kind, number = segments[-4:]
+    if kind not in LINK_KINDS[forge.kind]:
+        return None
+    return forge.name, f"{owner}/{repo}", kind, int(number)
+
+
 def mention_refs(text: str, forges, bare_repo: tuple[str, str] | None) -> list[tuple[str, str, int]]:
     """(forge, owner/repo, number) for each pull request or issue URL on a configured forge.
 
@@ -61,14 +75,10 @@ def mention_refs(text: str, forges, bare_repo: tuple[str, str] | None) -> list[t
     """
     found = []
     for match in URL.finditer(text):
-        parts = urlsplit(match.group().rstrip(".,;:!?"))
-        forge = _forge_for(parts.hostname, forges)
-        segments = parts.path.strip("/").split("/")
-        if forge is None or len(segments) < 4 or not segments[-1].isdigit():
-            continue
-        owner, repo, kind, number = segments[-4:]
-        if kind in LINK_KINDS[forge.kind]:
-            found.append((forge.name, f"{owner}/{repo}", int(number)))
+        ref = link_ref(match.group().rstrip(".,;:!?"), forges)
+        if ref:
+            forge, repo, _kind, number = ref
+            found.append((forge, repo, number))
     if bare_repo:
         found += [(*bare_repo, int(number)) for number in BARE_NUMBER.findall(text)]
     return found

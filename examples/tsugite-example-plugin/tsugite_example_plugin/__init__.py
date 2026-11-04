@@ -1,13 +1,14 @@
 """Example tsugite plugin - the agent-facing extension points in one module.
 
 Three entry points in pyproject.toml wire the plugin up. Importing this module
-(the first entry point) runs the @tool / @hook / @subscribe decorators; the
-context providers live in context.py (their own entry point, whose import
-registers them); the daemon-only adapter (HTTP routes + job executors) lives in
-adapter.py so this half still loads on an install without the `[daemon]` extra:
+(the first entry point) runs the @tool / @hook / @subscribe / @link_resolver
+decorators. The context providers live in context.py, whose own entry point
+registers them on import. The daemon-only adapter (HTTP routes + job executors)
+lives in adapter.py so this half still loads on an install without the
+`[daemon]` extra:
 
     [project.entry-points."tsugite.plugins"]
-    example = "tsugite_example_plugin"                          # tool + hook + subscriber
+    example = "tsugite_example_plugin"                          # tool + hook + subscriber + page + link resolver
 
     [project.entry-points."tsugite.context_providers"]
     example = "tsugite_example_plugin.context"                  # menu provider + detector
@@ -37,6 +38,7 @@ from pathlib import Path
 
 from tsugite.events.bus import subscribe
 from tsugite.hooks import hook
+from tsugite.link_previews import link_resolver
 from tsugite.tools import tool
 from tsugite.ui_surfaces import register_ui_surface
 
@@ -94,3 +96,19 @@ register_ui_surface(
     nav=True,
     params=["path"],
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. LINK PREVIEW - a matching link in chat renders as a chip with a hover
+#    preview. `path` must compile in both Python and JavaScript.
+# ─────────────────────────────────────────────────────────────────────────────
+@link_resolver(name="tickets", hosts=["tickets.example.test"], path=r"^/t/\d+$")
+def ticket_preview(url: str) -> dict | None:
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    return {
+        "label": f"T-{number}",
+        "title": f"Ticket {number}",
+        "status": {"text": "open", "tone": "ok"},
+        "badges": [{"text": "open", "tone": "ok"}],
+        "fields": [{"label": "number", "value": number}],
+    }

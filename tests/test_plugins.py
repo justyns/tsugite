@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tsugite.link_previews import register_link_resolver, registered_link_resolvers
 from tsugite.plugins import (
     GROUP_PLUGINS,
     check_plugin_config,
@@ -12,7 +13,7 @@ from tsugite.plugins import (
     load_adapter_plugins,
     load_module_only_plugins,
 )
-from tsugite.ui_surfaces import registered_ui_surfaces
+from tsugite.ui_surfaces import register_ui_surface, registered_ui_surfaces
 
 
 def _make_entry_point(name, value, group):
@@ -129,6 +130,32 @@ class TestLoadAdapterPlugins:
         info, adapter = results[0]
         assert adapter is None
         assert "connection failed" in info.error
+
+    def _load_factory(self, factory):
+        ep = _make_entry_point("forge", "tsugite_forge:create", "tsugite.adapters")
+        ep.load.return_value = factory
+        with patch("tsugite.plugins.importlib.metadata.entry_points", return_value=[ep]):
+            return load_adapter_plugins(plugin_config={}, session_store=MagicMock(), identity_map={}, runtime=None)
+
+    def test_registrations_made_by_the_factory_are_attributed_to_the_plugin(self):
+        def factory(**_kwargs):
+            register_link_resolver(name="pulls", hosts=["example.test"], resolve=lambda url: None)
+            register_ui_surface(kind="dash", entry="ui/index.html")
+            return MagicMock()
+
+        self._load_factory(factory)
+
+        assert [r["plugin"] for r in registered_link_resolvers()] == ["forge"]
+        assert list(registered_ui_surfaces()) == ["forge"]
+
+    def test_a_factory_that_raises_leaves_no_registrations(self):
+        def factory(**_kwargs):
+            register_link_resolver(name="pulls", hosts=["example.test"], resolve=lambda url: None)
+            raise RuntimeError("boom")
+
+        self._load_factory(factory)
+
+        assert registered_link_resolvers() == []
 
 
 class TestUnifiedPluginsGroup:
@@ -383,3 +410,16 @@ class TestUISurfaceAttribution:
 
         assert [(r.name, r.loaded) for r in results] == [("broken", False), ("dashboard", True)]
         assert list(registered_ui_surfaces()) == ["dashboard"]
+
+    def test_a_link_resolver_registered_at_import_is_stamped_too(self, tmp_path):
+        body = (
+            "from tsugite.link_previews import link_resolver\n\n"
+            "@link_resolver(name='pulls', hosts=['example.test'])\n"
+            "def resolve(url):\n"
+            "    return None\n"
+        )
+        plugin_file = self._write_plugin(tmp_path, "previews", body)
+
+        load_module_only_plugins(GROUP_PLUGINS, {"previews": {"path": str(plugin_file)}})
+
+        assert [r["plugin"] for r in registered_link_resolvers()] == ["previews"]

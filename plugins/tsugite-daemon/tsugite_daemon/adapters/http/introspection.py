@@ -50,6 +50,7 @@ class IntrospectionMixin:
         discover_plugins(); no enable/disable mutation."""
         if err := self._check_auth(request):
             return err
+        from tsugite.link_previews import link_resolver_patterns
         from tsugite.plugins import discover_plugins
 
         plugin_config = None
@@ -72,6 +73,7 @@ class IntrospectionMixin:
                     for p in discovered
                 ],
                 "ui_surfaces": self.plugin_ui_surfaces,
+                "link_resolvers": link_resolver_patterns(),
             }
         )
 

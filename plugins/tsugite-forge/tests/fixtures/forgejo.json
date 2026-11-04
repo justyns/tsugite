@@ -239,5 +239,19 @@
   "/api/v1/repos/octo-org/demo/pulls/7.diff": "diff --git a/sync.py b/sync.py\nindex 1111111..7777777 100644\n--- a/sync.py\n+++ b/sync.py\n@@ -10,3 +10,4 @@ def upload(path):\n-    send(path)\n+    for _ in range(3):\n+        send(path)\n",
   "/api/v1/user": {
     "login": "reviewer1"
+  },
+  "/api/v1/repos/octo-org/demo/issues/3": {
+    "number": 3,
+    "title": "Sync job drops the last page",
+    "state": "open",
+    "user": {
+      "login": "octocat"
+    },
+    "labels": [
+      {
+        "name": "bug"
+      }
+    ],
+    "html_url": "https://forge.example.test/octo-org/demo/issues/3"
   }
 }

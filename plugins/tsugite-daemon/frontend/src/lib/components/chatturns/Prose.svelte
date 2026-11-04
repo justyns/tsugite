@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { linkPreviews } from '$lib/stores/linkPreviews.svelte';
+  import LinkPreviewPopover from './LinkPreviewPopover.svelte';
   import { rafThrottle } from './rafThrottle';
   import { parseMarkdown } from './chatturns.util';
 
@@ -17,15 +19,18 @@
   // `content` grows every few ms; re-parsing the whole string each time is
   // superlinear, so deltas coalesce to one parse per frame with the trailing
   // (final) value guaranteed to render.
+  const chip = (href: string) => linkPreviews.lookup(href);
   // svelte-ignore state_referenced_locally -- the props seed the first parse; the effect owns updates.
-  let html = $state(parseMarkdown(content, breaks));
+  let html = $state(parseMarkdown(content, breaks, chip));
   const throttle = rafThrottle<{ src: string; breaks: boolean }>(
-    (next) => (html = parseMarkdown(next.src, next.breaks)),
+    (next) => (html = parseMarkdown(next.src, next.breaks, chip)),
   );
+  let root = $state<HTMLElement>();
 
   let seeded = false;
   $effect(() => {
-    // Reads `breaks` too, so flipping it re-parses bubbles already on screen.
+    // Reading `breaks` and the preview version re-parses bubbles on screen when either changes.
+    void linkPreviews.version;
     const next = { src: content, breaks };
     if (seeded) throttle.push(next);
     else seeded = true;
@@ -33,12 +38,13 @@
   $effect(() => () => throttle.dispose());
 </script>
 
-<div class="t-prose">{@html html}</div>
+<div class="t-prose" bind:this={root}>{@html html}<LinkPreviewPopover {root} /></div>
 
 <style>
   /* Descendant rules use :global() because marked output is injected via {@html}
      and never carries this component's scope hash. */
   .t-prose {
+    position: relative;
     font-size: var(--fs-md);
     line-height: 1.6;
     color: var(--tx1);

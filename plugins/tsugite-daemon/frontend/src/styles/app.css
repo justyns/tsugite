@@ -1,6 +1,7 @@
-/* Base layout only. Tokens live in tokens.css; component styles live with
-   their components. These ride <body> (rather than a scoped container) so the
-   app shell fills the viewport and follows the theme. */
+/* Base layout, plus primitives used by markup injected with {@html}. Tokens live
+   in tokens.css; component styles live with their components. These apply to
+   <body> (rather than a scoped container) so the app shell fills the viewport
+   and follows the theme. */
 
 /* Braille-only subset of DejaVu Sans (license beside the file). Fontsource's
    JetBrains Mono subsets cover no U+2800-28FF, so spinner glyphs would
@@ -29,4 +30,69 @@ body {
 
 #app {
   min-height: 100%;
+}
+
+.t-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--r-md);
+  background: var(--bg2);
+  border: 1px solid var(--bd0);
+  font: 500 var(--fs-xs) var(--font-mono);
+  color: var(--tx1);
+  white-space: nowrap;
+  cursor: default;
+}
+
+/* Inline-block so a long label ellipsizes inside a narrow pane. */
+.t-linkchip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  line-height: 18px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.t-linkchip .ic-mask {
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+/* A resolver icon, masked so it takes the text color. */
+.ic-mask {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask: var(--icon) center / contain no-repeat;
+}
+.t-linkchip:hover,
+.t-linkchip:focus-visible {
+  border-color: var(--acc);
+  color: var(--acc);
+  text-decoration: none;
+}
+/* Resolver badge tones. */
+.t-chip[data-tone='ok'] {
+  --tone: var(--st-ok);
+}
+.t-chip[data-tone='warn'] {
+  --tone: var(--st-warn);
+}
+.t-chip[data-tone='err'] {
+  --tone: var(--st-err);
+}
+.t-chip[data-tone='info'] {
+  --tone: var(--st-info);
+}
+.t-chip[data-tone='mute'] {
+  --tone: var(--st-mute);
+}
+.t-linkchip .st {
+  color: var(--tone);
 }

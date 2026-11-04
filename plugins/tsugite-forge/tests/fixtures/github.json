@@ -311,5 +311,24 @@
     ],
     "stderr": "gh: Not Found (HTTP 404)\n",
     "exit": 1
+  },
+  {
+    "match": [
+      "repos/octo-org/demo/issues/5"
+    ],
+    "stdout": {
+      "number": 5,
+      "title": "Upload test is flaky",
+      "state": "closed",
+      "user": {
+        "login": "octocat"
+      },
+      "labels": [
+        {
+          "name": "tests"
+        }
+      ],
+      "html_url": "https://github.com/octo-org/demo/issues/5"
+    }
   }
 ]

@@ -94,6 +94,21 @@ def test_get_pr_reports_merged_and_ignores_dismissed_reviews(make):
     assert (pr.state, pr.review_state, pr.ci_state) == ("merged", "approved", "success")
 
 
+def test_get_issue_normalizes_an_issue(make):
+    from tsugite_forge.providers import Issue
+
+    provider, _ = make()
+    assert provider.get_issue("octo-org/demo", 3) == Issue(
+        repo="octo-org/demo",
+        number=3,
+        title="Sync job drops the last page",
+        state="open",
+        author="octocat",
+        labels=["bug"],
+        url="https://forge.example.test/octo-org/demo/issues/3",
+    )
+
+
 def test_checks_and_review_threads(make):
     from tsugite_forge.providers import ReviewThreads
 

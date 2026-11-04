@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { LinkPreview } from '$lib/stores/linkPreviews.svelte';
 import { formatTokens, parseMarkdown, splitCommand } from './chatturns.util';
 
 describe('parseMarkdown', () => {
@@ -135,5 +136,66 @@ describe('formatTokens', () => {
 
   it('drops the decimal past 100k', () => {
     expect(formatTokens(128000)).toBe('128k');
+  });
+});
+
+describe('parseMarkdown link chips', () => {
+  const PR = 'https://forge.example.test/octo-org/demo/pulls/7';
+  const preview: LinkPreview = {
+    label: 'demo#7',
+    title: 'Add retry',
+    url: PR,
+    status: { text: 'CI failure', tone: 'err' },
+    badges: [],
+    fields: [],
+    icon: null,
+  };
+  const src = `See ${PR} and [the docs](https://example.test/docs).`;
+
+  it('renders byte-identical output when no link has a preview', () => {
+    expect(parseMarkdown(src, false, () => undefined)).toBe(parseMarkdown(src));
+  });
+
+  it('renders a link with a preview as a chip showing its label and state', () => {
+    const html = parseMarkdown(src, false, (href) => (href === PR ? preview : undefined));
+
+    expect(html).toContain(
+      `<a class="t-chip t-linkchip" data-testid="chat-link-chip" data-tone="err" href="${PR}"` +
+        ` target="_blank" rel="noopener" aria-label="demo#7, CI failure">` +
+        `<span class="st" aria-hidden="true">✕</span> demo#7</a>`,
+    );
+    expect(html).toContain('<a href="https://example.test/docs">the docs</a>');
+  });
+
+  it('leaves the state glyph out when the preview has no status', () => {
+    const html = parseMarkdown(PR, false, () => ({ ...preview, status: null }));
+
+    expect(html).toContain('aria-label="demo#7">demo#7</a>');
+    expect(html).not.toContain('data-tone');
+  });
+
+  it('leads the chip with the resolver icon as a mask', () => {
+    const icon = '/api/plugins/forge/ui/icons/forgejo.svg';
+    const html = parseMarkdown(PR, false, () => ({ ...preview, icon }));
+
+    expect(html).toContain(
+      `aria-label="demo#7, CI failure"><span class="ic-mask" aria-hidden="true" style="--icon: url('${icon}')"></span>` +
+        `<span class="st" aria-hidden="true">✕</span> demo#7</a>`,
+    );
+  });
+
+  it('escapes what the resolver returned', () => {
+    const hostile = { ...preview, label: '<img src=x onerror=alert(1)>"', status: null };
+    const html = parseMarkdown(PR, false, () => hostile);
+
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img');
+    expect(html).toContain('&quot;');
+  });
+
+  it('never asks about a link with an unsafe scheme', () => {
+    const asked: string[] = [];
+    parseMarkdown('[x](javascript:alert(1))', false, (href) => (asked.push(href), preview));
+    expect(asked).toEqual([]);
   });
 });

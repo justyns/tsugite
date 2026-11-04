@@ -245,6 +245,28 @@ inside the plugin's own page, so the daemon only ever frames plugin-owned HTML.
 A tab whose plugin is later disabled or uninstalled survives a reload and renders a "plugin isn't
 installed" placeholder, so an arranged layout is never silently dropped.
 
+## Link previews
+
+A link resolver turns matching links in chat into chips with a preview popover:
+
+```python
+from tsugite.link_previews import link_resolver
+
+@link_resolver(name="tickets", hosts=["tickets.example.test"], path=r"^/t/\d+$")
+def ticket_preview(url: str) -> dict | None:
+    return {
+        "label": "T-42",  # required
+        "title": "Login loops on Safari",
+        "status": {"text": "open", "tone": "ok"},
+        "badges": [{"text": "p1", "tone": "err"}],
+        "fields": [{"label": "assignee", "value": "octocat"}],
+        "icon": "/api/plugins/tickets/ui/icons/tickets.svg",
+    }
+```
+
+`path` must compile in both Python and JavaScript. The resolver may be sync or async. Tones are `ok`,
+`warn`, `err`, `info` and `mute`, and `icon` must be a path under the plugin's own UI assets.
+
 ## Job executors
 
 An adapter supplies non-agent job executors by returning `{name: executor}` from

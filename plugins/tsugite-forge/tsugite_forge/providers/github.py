@@ -5,7 +5,7 @@ import subprocess
 import time
 
 from tsugite_forge.cache import LruCache
-from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads
+from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads, rest_issue
 
 GH_TIMEOUT = 60
 # Seconds one pull request's GraphQL node serves get_pr, checks and review_threads.
@@ -139,6 +139,9 @@ class GithubProvider(Provider):
 
     def get_pr(self, repo, number):
         return self._normalize(repo, self._node(repo, number))
+
+    def get_issue(self, repo, number):
+        return rest_issue(repo, json.loads(self._gh(f"repos/{repo}/issues/{number}")))
 
     def checks(self, repo, number):
         return _ci_state(self._node(repo, number))

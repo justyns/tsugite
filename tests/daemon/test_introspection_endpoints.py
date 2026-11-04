@@ -68,6 +68,7 @@ class TestPluginsEndpoint:
                 {"name": "broken", "group": "tsugite.tools", "enabled": False, "loaded": False, "error": "boom"},
             ],
             "ui_surfaces": [],
+            "link_resolvers": [],
         }
 
 
