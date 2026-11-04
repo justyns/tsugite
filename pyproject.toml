@@ -55,6 +55,7 @@ all = [
   "tsugite-acp",
   "tsugite-claude-code",
   "tsugite-codex-cli",
+  "tsugite-cursor",
 ]
 
 [project.scripts]
@@ -87,6 +88,7 @@ tsugite-tmux = { workspace = true }
 tsugite-acp = { workspace = true }
 tsugite-claude-code = { workspace = true }
 tsugite-codex-cli = { workspace = true }
+tsugite-cursor = { workspace = true }
 tsugite-web = { workspace = true }
 tsugite-youtube = { workspace = true }
 tsugite-sandbox = { workspace = true }
@@ -172,6 +174,7 @@ paths = [
   "plugins/tsugite-cc-driver/tsugite_cc_driver",
   "plugins/tsugite-claude-code/tsugite_claude_code",
   "plugins/tsugite-codex-cli/tsugite_codex_cli",
+  "plugins/tsugite-cursor/tsugite_cursor",
   "plugins/tsugite-daemon/tsugite_daemon",
   "plugins/tsugite-discord/tsugite_discord",
   "plugins/tsugite-forge/tsugite_forge",
@@ -268,6 +271,7 @@ dev = [
   "tsugite-acp",
   "tsugite-claude-code",
   "tsugite-codex-cli",
+  "tsugite-cursor",
   "tsugite-web",
   "tsugite-youtube",
   "tsugite-sandbox",

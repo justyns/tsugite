@@ -17,6 +17,7 @@ members = [
     "tsugite-claude-code",
     "tsugite-cli",
     "tsugite-codex-cli",
+    "tsugite-cursor",
     "tsugite-daemon",
     "tsugite-discord",
     "tsugite-forge",
@@ -707,6 +708,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ec/2e/cdfd8b01c37cbf4f9482eefd455853a3cf9c995029a46acd31dfaa9c1dd6/cssselect-1.4.0.tar.gz", hash = "sha256:fdaf0a1425e17dfe8c5cf66191d211b357cf7872ae8afc4c6762ddd8ac47fc92", size = 40589, upload-time = "2026-01-29T07:00:26.701Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/0c/7bb51e3acfafd16c48875bf3db03607674df16f5b6ef8d056586af7e2b8b/cssselect-1.4.0-py3-none-any.whl", hash = "sha256:c0ec5c0191c8ee39fcc8afc1540331d8b55b0183478c50e9c8a79d44dbceb1d8", size = 18540, upload-time = "2026-01-29T07:00:24.994Z" },
+]
+
+[[package]]
+name = "cursor-sdk"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/7e/cdb7992739ad3679a92778f245b388419be520004ec5b6f7cd85c35b88d3/cursor_sdk-1.3.1.tar.gz", hash = "sha256:2a21618215710b71d35059c6a262e9f7f954d5d8b7329d1d01d27cefa4069033", size = 1298, upload-time = "2026-11-04T01:16:25.404Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/f0/b8a57e9989ce337e015bcdc3d04d9d2d85e130b0639af516a240ad6966d3/cursor_sdk-1.3.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:cc0e700cd4cf2cad9421bdd382a6e8421ff713daddc2e4aa5fc252971d42b7ea", size = 51923707, upload-time = "2026-11-04T01:16:04.537Z" },
+    { url = "https://files.pythonhosted.org/packages/22/8b/68900bdd28e2509b030fb412f77836e567d3acf20b7439a1d4099fbac598/cursor_sdk-1.3.1-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:9c4cb2b3982c06d731bb358790b534d4c4b283af4884ca03ec8adf6594e81030", size = 53569478, upload-time = "2026-11-04T01:16:08.628Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/6b/41d5a1a305b894cc0899e1a2bf9ab3363f2fdd1e98724bfa2f724b1aa2c2/cursor_sdk-1.3.1-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:8882fe28317b7cdeb8bbf212e0883c71eff93f69eda389a7bc758f38fa44c03d", size = 58640019, upload-time = "2026-11-04T01:16:13.919Z" },
+    { url = "https://files.pythonhosted.org/packages/18/2f/214d421cd6371a46712688ac6dd52f244af1bf3ab6d80da8cb438b837da5/cursor_sdk-1.3.1-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f7d459072fb963684d89bad9d16eeb7679b9523780d40f1f8581093a3a58b431", size = 59260900, upload-time = "2026-11-04T01:16:17.882Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/af/34adeb76b17a0faa1eeb92dbc7a98e880a90ec4408967aa8e45fe96f2e14/cursor_sdk-1.3.1-py3-none-win_amd64.whl", hash = "sha256:7441738625ffe3ceadd51a5ca8af1ed21128327694af66c892f47a5559f7071f", size = 47878974, upload-time = "2026-11-04T01:16:21.476Z" },
 ]
 
 [[package]]
@@ -2669,6 +2686,7 @@ all = [
     { name = "tsugite-acp" },
     { name = "tsugite-claude-code" },
     { name = "tsugite-codex-cli" },
+    { name = "tsugite-cursor" },
     { name = "tsugite-daemon" },
     { name = "tsugite-discord" },
     { name = "tsugite-pty" },
@@ -2709,6 +2727,7 @@ dev = [
     { name = "tsugite-cc-driver" },
     { name = "tsugite-claude-code" },
     { name = "tsugite-codex-cli" },
+    { name = "tsugite-cursor" },
     { name = "tsugite-daemon" },
     { name = "tsugite-discord" },
     { name = "tsugite-forge" },
@@ -2742,6 +2761,7 @@ requires-dist = [
     { name = "tsugite-claude-code", marker = "extra == 'all'", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-claude-code", marker = "extra == 'claude-code'", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-codex-cli", marker = "extra == 'all'", editable = "plugins/tsugite-codex-cli" },
+    { name = "tsugite-cursor", marker = "extra == 'all'", editable = "plugins/tsugite-cursor" },
     { name = "tsugite-daemon", marker = "extra == 'all'", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-daemon", marker = "extra == 'daemon'", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-discord", marker = "extra == 'all'", editable = "plugins/tsugite-discord" },
@@ -2774,6 +2794,7 @@ dev = [
     { name = "tsugite-cc-driver", editable = "plugins/tsugite-cc-driver" },
     { name = "tsugite-claude-code", editable = "plugins/tsugite-claude-code" },
     { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
+    { name = "tsugite-cursor", editable = "plugins/tsugite-cursor" },
     { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-discord", editable = "plugins/tsugite-discord" },
     { name = "tsugite-forge", editable = "plugins/tsugite-forge" },
@@ -2797,6 +2818,21 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "tsugite-cli", editable = "." }]
+
+[[package]]
+name = "tsugite-cursor"
+version = "0.26.0"
+source = { editable = "plugins/tsugite-cursor" }
+dependencies = [
+    { name = "cursor-sdk" },
+    { name = "tsugite-cli" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cursor-sdk", specifier = ">=1.3.1,<2" },
+    { name = "tsugite-cli", editable = "." },
+]
 
 [[package]]
 name = "tsugite-daemon"
