@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pull requests</title>
+    <link rel="stylesheet" href="forge.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Pull requests</h1>
+      <button id="refresh" type="button">Refresh</button>
+    </header>
+    <div class="filters" id="filters">
+      <button type="button" data-filter="mine" aria-pressed="false">Mine</button>
+      <button type="button" data-filter="reviewRequested" aria-pressed="false">Review requested</button>
+      <button type="button" data-filter="ciFailing" aria-pressed="false">CI failing</button>
+      <button type="button" data-filter="unresolved" aria-pressed="false">Unresolved threads</button>
+      <select id="label" aria-label="Label"></select>
+    </div>
+    <div class="forges" id="forges"></div>
+    <main id="list"><p class="empty">Loading…</p></main>
+
+    <script type="module">
+      import { duration, filterPrs, groupByRepo, labelsOf } from './filters.js';
+      import { api, connect, el, prLink, prMeta, repoSection } from './surface.js';
+
+      const filters = { mine: false, reviewRequested: false, ciFailing: false, unresolved: false, label: '' };
+      let prs = [];
+      let forges = [];
+
+      function renderForges() {
+        const box = document.getElementById('forges');
+        box.replaceChildren();
+        for (const forge of forges) {
+          const cache = forge.cache_age_seconds === null ? 'not refreshed yet' : `${duration(forge.cache_age_seconds)} old`;
+          box.append(el('span', `${forge.name} · ${cache}`, 'badge'));
+        }
+        for (const forge of forges.filter((f) => f.error)) {
+          box.append(el('div', `Refresh failed: ${forge.error}`, 'forge-error'));
+        }
+      }
+
+      function renderLabels() {
+        const select = document.getElementById('label');
+        const present = labelsOf(prs);
+        if (filters.label && !present.includes(filters.label)) filters.label = '';
+        const any = el('option', 'Any label');
+        any.value = '';
+        select.replaceChildren(any, ...present.map((label) => el('option', label)));
+        select.value = filters.label;
+      }
+
+      function row(pr, now) {
+        const item = el('li');
+        const meta = el('div', undefined, 'meta');
+        meta.append(...prMeta(pr, now));
+        item.append(prLink(pr.title, pr.url), meta);
+        return item;
+      }
+
+      function renderList() {
+        const list = document.getElementById('list');
+        const viewers = Object.fromEntries(forges.map((f) => [f.name, f.viewer]));
+        const shown = filterPrs(prs, filters, viewers);
+        if (!shown.length) {
+          list.replaceChildren(el('p', prs.length ? 'No pull requests match these filters.' : 'No open pull requests.', 'empty'));
+          return;
+        }
+        const now = Date.now();
+        list.replaceChildren(
+          ...groupByRepo(shown).map(([repo, group]) => {
+            const forge = forges.find((f) => f.name === group[0].forge);
+            return repoSection(`${repo} (${group.length})`, forge, group.map((pr) => row(pr, now)));
+          }),
+        );
+      }
+
+      async function load() {
+        try {
+          const [list, status] = await Promise.all([api('/prs'), api('/status')]);
+          prs = list.prs;
+          forges = status.forges;
+        } catch (error) {
+          document.getElementById('list').replaceChildren(el('p', String(error.message), 'forge-error'));
+          return;
+        }
+        renderForges();
+        renderLabels();
+        renderList();
+      }
+
+      for (const button of document.querySelectorAll('[data-filter]')) {
+        button.addEventListener('click', () => {
+          const key = button.dataset.filter;
+          filters[key] = !filters[key];
+          button.setAttribute('aria-pressed', String(filters[key]));
+          renderList();
+        });
+      }
+      document.getElementById('label').addEventListener('change', (event) => {
+        filters.label = event.target.value;
+        renderList();
+      });
+      document.getElementById('refresh').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await api('/refresh', 'POST');
+        } catch (error) {
+          document.getElementById('list').replaceChildren(el('p', String(error.message), 'forge-error'));
+        }
+        await load();
+        button.disabled = false;
+      });
+
+      connect('Pull requests', load);
+    </script>
+  </body>
+</html>

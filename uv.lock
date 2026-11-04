@@ -19,6 +19,7 @@ members = [
     "tsugite-codex-cli",
     "tsugite-daemon",
     "tsugite-discord",
+    "tsugite-forge",
     "tsugite-mcp",
     "tsugite-onlyoffice",
     "tsugite-pty",
@@ -2710,6 +2711,7 @@ dev = [
     { name = "tsugite-codex-cli" },
     { name = "tsugite-daemon" },
     { name = "tsugite-discord" },
+    { name = "tsugite-forge" },
     { name = "tsugite-mcp" },
     { name = "tsugite-onlyoffice" },
     { name = "tsugite-pty" },
@@ -2774,6 +2776,7 @@ dev = [
     { name = "tsugite-codex-cli", editable = "plugins/tsugite-codex-cli" },
     { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
     { name = "tsugite-discord", editable = "plugins/tsugite-discord" },
+    { name = "tsugite-forge", editable = "plugins/tsugite-forge" },
     { name = "tsugite-mcp", editable = "plugins/tsugite-mcp" },
     { name = "tsugite-onlyoffice", editable = "plugins/tsugite-onlyoffice" },
     { name = "tsugite-pty", editable = "plugins/tsugite-pty" },
@@ -2836,6 +2839,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "discord-py", specifier = ">=2.3.2" },
+    { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
+]
+
+[[package]]
+name = "tsugite-forge"
+version = "0.26.0"
+source = { editable = "plugins/tsugite-forge" }
+dependencies = [
+    { name = "tsugite-cli" },
+    { name = "tsugite-daemon" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "tsugite-cli", editable = "." },
     { name = "tsugite-daemon", editable = "plugins/tsugite-daemon" },
 ]
 

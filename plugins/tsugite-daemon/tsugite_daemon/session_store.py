@@ -197,11 +197,12 @@ METADATA_JOB_HOST = "job_host"
 # is_primary makes the user's chosen primary session "follow" compaction. topic/type
 # describe the conversation's subject and are carried forward like title, so a compacted
 # session keeps its subject instead of resetting to blank until the next turn re-sets it.
-# task/pr/notes are user-authored workstream links and freeform notes - durable by
-# intent. Anything outside this set is dropped deliberately; in particular status_text
+# task/notes are user-authored workstream links and notes, and refs holds the forge
+# plugin's pinned and hidden repos and pull requests. All are durable by intent.
+# Anything outside this set is dropped deliberately; in particular status_text
 # is transient ("investigating", "idle") and must reset on compaction.
 COMPACTION_PRESERVED_METADATA_KEYS = READ_ONLY_METADATA_KEYS | frozenset(
-    {METADATA_PRIMARY_FLAG, "topic", "type", "task", "pr", "notes"}
+    {METADATA_PRIMARY_FLAG, "topic", "type", "task", "refs", "notes"}
 )
 
 # What a branch copies from the session it forks. Routing keys are excluded: a branch

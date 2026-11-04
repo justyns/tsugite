@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Session PRs</title>
+    <link rel="stylesheet" href="forge.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Session PRs</h1>
+      <button id="reload" type="button">Reload</button>
+    </header>
+    <main id="list"><p class="empty">Loading…</p></main>
+
+    <script type="module">
+      import { groupByRepo, partitionRefs } from './filters.js';
+      import { api, connect, el, prLink, prMeta, repoSection } from './surface.js';
+
+      let session = '';
+      let forges = [];
+
+      function show(...nodes) {
+        document.getElementById('list').replaceChildren(...nodes);
+      }
+
+      async function act(action, ref) {
+        try {
+          const body = await api(`/sessions/${encodeURIComponent(session)}/refs`, 'POST', {
+            action,
+            forge: ref.forge,
+            repo: ref.repo,
+            pr: ref.pr,
+          });
+          render(body.refs);
+        } catch (error) {
+          show(el('p', String(error.message), 'forge-error'));
+        }
+      }
+
+      function button(label, action, ref) {
+        const node = el('button', label);
+        node.type = 'button';
+        node.addEventListener('click', () => act(action, ref));
+        return node;
+      }
+
+      function row(ref, now) {
+        const pull = ref.pull;
+        const title = ref.pr === null ? 'Repository' : pull ? pull.title : `#${ref.pr}`;
+        const meta = el('div', undefined, 'meta');
+        meta.append(el('span', ref.source, 'badge'));
+        if (pull) meta.append(...prMeta(pull, now));
+        else if (ref.pr !== null) meta.append(el('span', 'not an open pull request in the cache'));
+        const actions = el('div', undefined, 'actions');
+        actions.append(ref.source === 'pinned' ? button('Unpin', 'unpin', ref) : button('Pin', 'pin', ref));
+        actions.append(ref.hidden ? button('Unhide', 'unhide', ref) : button('Hide', 'hide', ref));
+        const main = el('div', undefined, 'row-main');
+        main.append(pull ? prLink(title, pull.url) : el('span', title), meta);
+        const item = el('li', undefined, 'row');
+        item.append(main, actions);
+        return item;
+      }
+
+      function groups(refs, now) {
+        return groupByRepo(refs).map(([repo, group]) =>
+          repoSection(repo, forges.find((f) => f.name === group[0].forge), group.map((ref) => row(ref, now))),
+        );
+      }
+
+      function folded(label, refs, now) {
+        const details = el('details');
+        details.append(el('summary', `${label} (${refs.length})`), ...groups(refs, now));
+        return details;
+      }
+
+      function render(refs) {
+        const now = Date.now();
+        const { main, mentioned, hidden } = partitionRefs(refs);
+        const nodes = main.length ? groups(main, now) : [el('p', 'Nothing pinned or touched in this session yet.', 'empty')];
+        if (mentioned.length) nodes.push(folded('Mentioned', mentioned, now));
+        if (hidden.length) nodes.push(folded('Hidden', hidden, now));
+        show(...nodes);
+      }
+
+      async function load() {
+        if (!session) {
+          show(el('p', 'Open this from a session to see the repos and pull requests it works with.', 'empty'));
+          return;
+        }
+        try {
+          const [body, status] = await Promise.all([api(`/sessions/${encodeURIComponent(session)}/refs`), api('/status')]);
+          forges = status.forges;
+          render(body.refs);
+        } catch (error) {
+          show(el('p', String(error.message), 'forge-error'));
+        }
+      }
+
+      document.getElementById('reload').addEventListener('click', load);
+
+      connect('Session PRs', (msg) => {
+        session = msg.surface.params.session || '';
+        load();
+      });
+    </script>
+  </body>
+</html>

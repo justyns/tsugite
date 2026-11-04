@@ -1,4 +1,4 @@
-"""Compaction must preserve user-authored durable metadata (task/pr/notes)."""
+"""Compaction must preserve user-authored durable metadata (task/refs/notes)."""
 
 import pytest
 from tsugite_daemon.session_store import Session, SessionSource, SessionStore
@@ -15,17 +15,18 @@ def _compacted(store, metadata):
     return store.compact_session(s.id)
 
 
-def test_compaction_preserves_task_pr_notes(store):
+def test_compaction_preserves_task_refs_notes(store):
+    refs = [{"forge": "home", "repo": "octo-org/demo", "pr": 7, "source": "pinned"}]
     new = _compacted(
         store,
         {
             "task": "https://tracker/task/42",
-            "pr": "https://tracker/pr/7",
+            "refs": refs,
             "notes": "long-lived pinned session notes",
         },
     )
     assert new.metadata.get("task") == "https://tracker/task/42"
-    assert new.metadata.get("pr") == "https://tracker/pr/7"
+    assert new.metadata.get("refs") == refs
     assert new.metadata.get("notes") == "long-lived pinned session notes"
 
 

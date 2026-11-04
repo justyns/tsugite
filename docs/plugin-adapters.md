@@ -230,7 +230,7 @@ A surface's assets are served without auth, the same as the daemon's own web bun
 `assets`, and read anything worth protecting from your authenticated routes.
 
 The frame is same-origin under `/api/plugins/<plugin_name>/`, sandboxed to
-`allow-scripts allow-forms allow-same-origin`. Sharing the origin is what lets a page reach its own
+`allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox`. Sharing the origin is what lets a page reach its own
 authenticated routes with the token `init` hands it. That token is minted per surface and is valid
 only under `/api/plugins/<plugin_name>/`, which limits the token handed to the page. It does not stop
 script in the frame that reads the host's stored full-access token from `localStorage`

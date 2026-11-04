@@ -1,0 +1,176 @@
+/* Host tokens, with system colors for the paint before `init` lands. */
+* {
+  box-sizing: border-box;
+}
+:root {
+  color-scheme: var(--scheme, normal);
+}
+body {
+  margin: 0;
+  padding: var(--sp-4, 16px);
+  background: var(--bg1, Canvas);
+  color: var(--tx0, CanvasText);
+  font-family: var(--font-ui, system-ui, sans-serif);
+  font-size: var(--fs-md, 14px);
+}
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  margin-bottom: var(--sp-3, 12px);
+}
+h1 {
+  margin: 0 auto 0 0;
+  font-size: var(--fs-lg, 16px);
+  font-weight: 600;
+}
+button,
+select {
+  font: inherit;
+  font-size: var(--fs-sm, 13px);
+  color: var(--tx1, CanvasText);
+  background: var(--bg2, Canvas);
+  border: 1px solid var(--bd1, GrayText);
+  border-radius: var(--r-md, 6px);
+  padding: var(--sp-1, 4px) var(--sp-3, 12px);
+  cursor: pointer;
+}
+button[aria-pressed='true'] {
+  color: var(--acc, LinkText);
+  border-color: var(--acc, LinkText);
+}
+button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2, 8px);
+  margin-bottom: var(--sp-3, 12px);
+}
+.forges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2, 8px);
+  color: var(--tx2, GrayText);
+  font-size: var(--fs-sm, 13px);
+  margin-bottom: var(--sp-3, 12px);
+}
+.forge-error {
+  color: var(--st-err, CanvasText);
+  border: 1px solid var(--st-err, GrayText);
+  border-radius: var(--r-md, 6px);
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  overflow-wrap: anywhere;
+  flex-basis: 100%;
+}
+section {
+  margin-bottom: var(--sp-4, 16px);
+}
+h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1, 4px);
+  margin: 0 0 var(--sp-1, 4px);
+  font-size: var(--fs-sm, 13px);
+  font-weight: 600;
+  color: var(--tx2, GrayText);
+  overflow-wrap: anywhere;
+}
+/* A mask lets the mark take the text color. */
+.forge-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+.forge-icon[data-kind='forgejo'] {
+  mask-image: url(icons/forgejo.svg);
+}
+.forge-icon[data-kind='github'] {
+  mask-image: url(icons/github.svg);
+}
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--bd0, GrayText);
+  border-radius: var(--r-lg, 8px);
+  background: var(--bg2, Canvas);
+}
+li {
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  min-width: 0;
+}
+li + li {
+  border-top: 1px solid var(--bd0, GrayText);
+}
+li a {
+  color: var(--tx0, CanvasText);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+li a:hover {
+  color: var(--acc, LinkText);
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1, 4px) var(--sp-2, 8px);
+  margin-top: var(--sp-1, 4px);
+  color: var(--tx2, GrayText);
+  font-size: var(--fs-xs, 12px);
+}
+.badge {
+  border: 1px solid var(--bd1, GrayText);
+  border-radius: var(--r-full, 999px);
+  padding: 0 var(--sp-2, 8px);
+}
+.ci-success {
+  color: var(--st-ok, CanvasText);
+}
+.ci-failure {
+  color: var(--st-err, CanvasText);
+}
+.ci-pending {
+  color: var(--st-warn, CanvasText);
+}
+.unresolved {
+  color: var(--st-attn, CanvasText);
+}
+.empty {
+  color: var(--tx2, GrayText);
+}
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2, 8px);
+}
+.row-main {
+  flex: 1;
+  min-width: 0;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-1, 4px);
+}
+.actions button {
+  padding: 0 var(--sp-2, 8px);
+  font-size: var(--fs-xs, 12px);
+}
+details {
+  margin-bottom: var(--sp-4, 16px);
+}
+summary {
+  cursor: pointer;
+  color: var(--tx2, GrayText);
+  font-size: var(--fs-sm, 13px);
+  font-weight: 600;
+  margin-bottom: var(--sp-2, 8px);
+}

@@ -273,6 +273,7 @@ _OPTIONAL_CATEGORIES = {
     "tmux",
     "terminal",
     "onlyoffice",
+    "forge",
 }
 
 

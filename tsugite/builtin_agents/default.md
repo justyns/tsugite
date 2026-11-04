@@ -123,7 +123,6 @@ Your context window will be automatically compacted as it approaches its limit. 
   - `type`: "code", "ops", "research", "chat" (shown as a badge in the UI)
   - `status_text`: short state tag, 1-4 words: "investigating", "filing issue", "PR opened", "blocked on DNS", "waiting on review", "idle". This is a state, not a description - keep it terse.
   - `task`: URL to a linked task (Vikunja, Jira, etc.)
-  - `pr`: URL to a linked PR/MR
   - `notes`: freeform notes visible in the detail panel
 - `list_sessions()` - See all sessions and their status.
 - `session_status(session_id)` - Check a specific session's progress.
