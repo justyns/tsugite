@@ -860,3 +860,17 @@ test('a room whose sessions need you is marked needs-you', async () => {
     .element(page.getByRole('button', { name: /^quiet room, .*awaiting your input/ }))
     .not.toBeInTheDocument();
 });
+
+test('right-clicking a room row opens a menu that docks the room as a tab', async () => {
+  render(SessionsRail, { ...base, rows: [], rooms: [roomOf('r9', 'PROJ-456')] });
+  const before = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs).length;
+
+  await page.getByRole('button', { name: /PROJ-456/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Open in new tab' }).click();
+
+  const tabs = collectLeaves(spaces.active.layout.root).flatMap((l) => l.tabs);
+  expect(tabs.length).toBe(before + 1);
+  const docked = tabs[tabs.length - 1]!;
+  expect(docked.kind).toBe('room');
+  expect(docked.params.roomId).toBe('r9');
+});

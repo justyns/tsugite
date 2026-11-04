@@ -102,10 +102,11 @@
   // Right-click menu on a row: tab-independent actions (open elsewhere, pin,
   // copy id, lifecycle). Rename/topic stay in the conversation header menu -
   // they need its inline edit field.
-  let menu = $state<{ x: number; y: number; row: Row } | null>(null);
-  function openRowMenu(event: MouseEvent, row: Row) {
+  type MenuTarget = { row: Row } | { room: Room };
+  let menu = $state<({ x: number; y: number } & MenuTarget) | null>(null);
+  function openRowMenu(event: MouseEvent, target: MenuTarget) {
     event.preventDefault();
-    menu = { x: event.clientX, y: event.clientY, row };
+    menu = { x: event.clientX, y: event.clientY, ...target };
   }
   function openInNewTab(row: Row) {
     spaces.open({
@@ -134,8 +135,17 @@
     }
   }
   const menuItems = $derived.by<ContextMenuItem[]>(() => {
-    const row = menu?.row;
-    if (!row) return [];
+    if (!menu) return [];
+    if ('room' in menu) {
+      const { room } = menu;
+      return [
+        {
+          label: 'Open in new tab',
+          run: () => spaces.open({ kind: 'room', params: { roomId: room.id }, title: room.title }),
+        },
+      ];
+    }
+    const { row } = menu;
     return [
       {
         label: 'Open in new tab',
@@ -371,7 +381,7 @@
       ondragend={() => pinDrag.end()}
       ondragover={(e) => onPinnedDragOver(e, row)}
       ondrop={(e) => onPinnedDrop(e, row)}
-      oncontextmenu={(e) => openRowMenu(e, row)}
+      oncontextmenu={(e) => openRowMenu(e, { row })}
     >
       <SessionRow
         title={row.title ?? 'Untitled session'}
@@ -437,16 +447,19 @@
       <div class="sb-group">rooms</div>
       {#each liveRooms as room (room.id)}
         {@const n = room.participants.length}
-        <SessionRow
-          title={room.title}
-          when={formatWhen(room.created_at)}
-          description="{n} agent{n === 1 ? '' : 's'}"
-          state={busyRooms.has(room.id) ? 'running' : 'idle'}
-          needsYou={room.needs_attention}
-          sourceType="room"
-          isActive={room.id === selectedRoomId}
-          onSelect={() => onOpenRoom?.(room.id)}
-        />
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div oncontextmenu={(e) => openRowMenu(e, { room })}>
+          <SessionRow
+            title={room.title}
+            when={formatWhen(room.created_at)}
+            description="{n} agent{n === 1 ? '' : 's'}"
+            state={busyRooms.has(room.id) ? 'running' : 'idle'}
+            needsYou={room.needs_attention}
+            sourceType="room"
+            isActive={room.id === selectedRoomId}
+            onSelect={() => onOpenRoom?.(room.id)}
+          />
+        </div>
       {/each}
     {/if}
     {#if roomsError}
