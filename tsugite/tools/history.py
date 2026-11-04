@@ -4,9 +4,12 @@ Reads the new per-event session JSONL format and surfaces it as turn-shaped
 summaries (one turn = one user_input → next user_input span).
 """
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from ..agent_runner import get_current_agent
 from ..history import Event, SessionSummary, get_history_backend
+from ..secrets.registry import get_registry
 from . import tool
 
 
@@ -164,73 +167,36 @@ def list_conversations(
 
 
 @tool
-def search_conversations(
+def search_history(
     query: str,
-    limit: int = 10,
     agent: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = 20,
 ) -> List[Dict[str, Any]]:
-    """Search conversation history by text content.
+    """Substring-search your own past sessions' prompts, replies and tool names; agent="<name>" or "*" searches other agents."""
+    scope = agent or get_current_agent()
+    if scope is None:
+        raise ValueError("No current agent; pass agent=<name> or agent='*'")
+    since_dt = datetime.fromisoformat(since) if since else None
+    if since_dt and since_dt.tzinfo is None:
+        since_dt = since_dt.replace(tzinfo=timezone.utc)
 
-    Searches across user inputs and assistant responses.
-    """
-    if limit < 1 or limit > 50:
-        raise ValueError("Limit must be between 1 and 50")
-
-    q = query.lower()
     backend = get_history_backend()
+    mask = get_registry().mask
+    hits = backend.search(query, agent=None if scope == "*" else scope, limit=200 if since_dt else limit)
     out: List[Dict[str, Any]] = []
-    for sid in backend.list_sessions():
+    for hit in hits:
+        summary = backend.load(hit["session_id"]).summary()
+        if since_dt and summary.created_at < since_dt:
+            continue
+        out.append(
+            {
+                "session_id": hit["session_id"],
+                "agent": summary.agent,
+                "created_at": summary.created_at.isoformat(),
+                "snippet": mask(hit["snippet"]),
+            }
+        )
         if len(out) >= limit:
             break
-        try:
-            meta = backend.get_meta(sid)
-            if not meta:
-                continue
-            if agent and meta.data.get("agent") != agent:
-                continue
-
-            storage = backend.load(sid)
-            events = storage.load_events()
-            snippet = _snippet_for_query(events, q)
-            if not snippet:
-                continue
-
-            summary = _summary_dict(events)
-            out.append(
-                {
-                    "conversation_id": storage.session_id,
-                    "agent": meta.data.get("agent"),
-                    "match": snippet,
-                    "status": summary["status"],
-                    "created_at": meta.ts.isoformat(),
-                    "total_tokens": summary["total_tokens"],
-                    "total_cost": round(summary["total_cost"], 4) if summary["total_cost"] else None,
-                }
-            )
-        except Exception:
-            continue
     return out
-
-
-def _snippet_for_query(events: List[Event], q: str) -> Optional[str]:
-    for event in events:
-        if event.type == "user_input":
-            text = event.data.get("text", "")
-            if q in text.lower():
-                return f"User: {_window(text, q)}"
-        elif event.type == "model_response":
-            text = event.data.get("raw_content", "")
-            if q in text.lower():
-                return f"Assistant: {_window(text, q)}"
-    return None
-
-
-def _window(text: str, q: str, radius: int = 60) -> str:
-    idx = text.lower().find(q)
-    if idx < 0:
-        return text[:120]
-    start = max(0, idx - radius)
-    end = min(len(text), idx + len(q) + radius)
-    prefix = "..." if start > 0 else ""
-    suffix = "..." if end < len(text) else ""
-    return f"{prefix}{text[start:end]}{suffix}"
