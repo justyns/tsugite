@@ -5,6 +5,9 @@ Gateway with `_http_server` stubbed, so the drain can be driven by hand.
 """
 
 import asyncio
+import json
+import logging
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -151,6 +154,94 @@ class TestDrain:
         # This turn never finishes: a drain that ignored the cleared flag would poll
         # until its deadline, holding the gateway alive.
         await asyncio.wait_for(drain, timeout=1)
+
+
+class TestRestartNotice:
+    @pytest.mark.asyncio
+    async def test_the_drain_leaves_a_notice_for_the_next_daemon(self, gateway):
+        gateway.config.state_dir.mkdir()
+        gateway.request_restart("new plugin", "origin-1")
+
+        assert await _wait_until(lambda: gateway._http_server.stop.called)
+        notice = json.loads(gateway._restart_notice_path.read_text())
+        assert (notice["reason"], notice["session_id"]) == ("new plugin", "origin-1")
+
+    @pytest.fixture
+    def after_restart(self, gateway, monkeypatch):
+        """A freshly started daemon holding a notice, with one plugin loaded and one failed."""
+        import tsugite.plugins
+        import tsugite.tools
+        import tsugite.tools.sessions
+
+        gateway._restart_notice_path.parent.mkdir(parents=True, exist_ok=True)
+        gateway._restart_notice_path.write_text(
+            json.dumps({"reason": "new plugin", "session_id": "origin-1", "requested_at": 0})
+        )
+        info = tsugite.plugins.PluginInfo
+        monkeypatch.setattr(
+            tsugite.tools,
+            "plugin_results",
+            [
+                info("good", "g", "good.py", loaded=True),
+                info("bad", "g", "bad.py", error="boom"),
+                info("pkg", "g", "x"),
+            ],
+        )
+        monkeypatch.setattr(
+            tsugite.plugins,
+            "local_plugin_files",
+            lambda: [SimpleNamespace(name="good"), SimpleNamespace(name="bad")],
+        )
+        sent = []
+
+        def reply(message, session_id):
+            sent.append((session_id, message))
+            return {}
+
+        monkeypatch.setattr(tsugite.tools.sessions, "session_reply", reply)
+        return sent
+
+    @pytest.mark.asyncio
+    async def test_the_new_daemon_tells_the_session(self, gateway, after_restart):
+        await gateway._send_restart_notice()
+
+        [(session_id, message)] = after_restart
+        assert session_id == "origin-1"
+        assert "Restart reason: new plugin" in message
+        assert f"pid {os.getpid()}" in message
+        assert "loaded: good" in message
+        assert "- bad: boom" in message
+        assert "pkg" not in message
+        assert not gateway._restart_notice_path.exists()
+
+    @pytest.mark.parametrize("failure", ["gone", "queue full"])
+    @pytest.mark.asyncio
+    async def test_an_undelivered_notice_is_dropped_and_logged_at_info(
+        self, gateway, after_restart, monkeypatch, caplog, failure
+    ):
+        import tsugite.tools.sessions
+
+        def reply(message, session_id):
+            if failure == "gone":
+                raise KeyError(session_id)
+            return {"error": failure}
+
+        monkeypatch.setattr(tsugite.tools.sessions, "session_reply", reply)
+
+        with caplog.at_level(logging.INFO):
+            await gateway._send_restart_notice()
+
+        assert [r.levelno for r in caplog.records if "Dropped" in r.message] == [logging.INFO]
+        assert not gateway._restart_notice_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_a_corrupt_notice_is_removed(self, gateway, after_restart):
+        gateway._restart_notice_path.write_text("{not json")
+
+        with pytest.raises(json.JSONDecodeError):
+            await gateway._send_restart_notice()
+
+        assert not gateway._restart_notice_path.exists()
 
 
 class TestRunDaemonReturn:

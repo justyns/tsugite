@@ -28,8 +28,9 @@ class _ControllerStub:
     def preflight_restart(self):
         return list(self.problems)
 
-    def request_restart(self):
+    def request_restart(self, reason="", session_id=None):
         self.restarts += 1
+        self.args = (reason, session_id)
         self.restarted.set()
 
 
@@ -101,7 +102,7 @@ def blocked_backend():
 
 
 class TestApprovalGate:
-    def test_approve_requests_the_restart(self, wire):
+    def test_approve_requests_the_restart(self, wire, notified):
         controller = wire(_ControllerStub())
         backend = FakeBackend("Approve")
         set_interaction_backend(backend)
@@ -114,6 +115,7 @@ class TestApprovalGate:
         assert "picked up dashboard.py" in backend.calls[0][0]
         assert result == "Asked the user to approve a restart."
         assert controller.restarts == 1
+        assert controller.args == ("picked up dashboard.py", "origin-1")
 
     def test_returns_while_the_approval_is_pending(self, wire, blocked_backend):
         controller = wire(_ControllerStub())

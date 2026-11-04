@@ -440,11 +440,12 @@ def load_custom_shell_tools() -> None:
 
 # Lazy loading flag to defer tool module imports until first use
 _tools_loaded = False
+plugin_results: list = []
 
 
 def _ensure_tools_loaded():
     """Lazy load tool modules on first use to speed up CLI startup."""
-    global _tools_loaded
+    global _tools_loaded, plugin_results
     if _tools_loaded:
         return
 
@@ -475,7 +476,7 @@ def _ensure_tools_loaded():
         load_module_only_plugins,
     )
 
-    load_module_only_plugins(GROUP_PLUGINS)
+    plugin_results = load_module_only_plugins(GROUP_PLUGINS)
     load_attachment_plugins()
 
     _tools_loaded = True

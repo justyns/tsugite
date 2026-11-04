@@ -38,7 +38,7 @@ def _approve_then_restart(reason: str, origin_session: str | None) -> None:
     approved = False
     try:
         if request_approval("Restart the tsugite daemon?", detail=_approval_detail(reason)) == "approve":
-            call_on_loop(_loop, _controller.request_restart)
+            call_on_loop(_loop, _controller.request_restart, reason, origin_session)
             approved = True
         else:
             outcome = "The user denied the daemon restart."
@@ -70,8 +70,9 @@ def restart_daemon(reason: str) -> str:
     Otherwise returns at once and asks the user in the background; a denial or a
     failed approval is sent back to this session as a message. Once approved the
     daemon stops accepting new HTTP chats, gives the in-flight turns up to two
-    minutes to finish, then re-execs; running background jobs and terminal
-    sessions do not survive it.
+    minutes to finish, then re-execs and sends this session a message with the
+    reason, the daemon version and pid, and which single-file plugins loaded or
+    failed. Running background jobs and terminal sessions do not survive it.
 
     Args:
         reason: Why the daemon should restart, shown to the user in the prompt.

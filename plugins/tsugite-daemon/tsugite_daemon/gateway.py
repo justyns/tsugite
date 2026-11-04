@@ -1,11 +1,14 @@
 """Main daemon gateway coordinating all adapters."""
 
 import asyncio
+import json
 import logging
 import logging.handlers
+import os
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -207,6 +210,7 @@ class Gateway:
         self._identity_map: dict[str, str] = {}
         self._shutting_down = False
         self.restart_requested = False
+        self._restart_notice: dict | None = None
 
     async def start(self):
         """Start all enabled adapters."""
@@ -484,6 +488,9 @@ class Gateway:
         if not tasks:
             raise ValueError("No adapters enabled in config")
 
+        if self._restart_notice_path.exists():
+            tasks.append(self._send_restart_notice())
+
         adapter_count = len(self.adapters) + (1 if self._http_server else 0)
         logger.info("Starting %d adapter(s)...", adapter_count)
         try:
@@ -528,7 +535,40 @@ class Gateway:
             problems.append(f"Daemon config would not load: {e}")
         return problems + check_plugin_config()
 
-    def request_restart(self) -> None:
+    @property
+    def _restart_notice_path(self) -> Path:
+        return self.config.state_dir / "restart_notice.json"
+
+    async def _send_restart_notice(self) -> None:
+        """Tell the session that asked for the restart that this daemon is up."""
+        from tsugite import __version__
+        from tsugite.plugins import local_plugin_files
+        from tsugite.tools import plugin_results
+        from tsugite.tools.sessions import session_reply
+
+        text = self._restart_notice_path.read_text()
+        self._restart_notice_path.unlink()
+        notice = json.loads(text)
+        local = {ep.name for ep in local_plugin_files()}
+        loaded = [p.name for p in plugin_results if p.name in local and p.loaded]
+        failed = [f"{p.name}: {p.error}" for p in plugin_results if p.name in local and p.error]
+        lines = [
+            f"The daemon is back. Restart reason: {notice['reason']}",
+            f"Version {__version__}, pid {os.getpid()}, restart took {time.time() - notice['requested_at']:.0f}s.",
+        ]
+        if loaded:
+            lines.append("Single-file plugins loaded: " + ", ".join(loaded))
+        if failed:
+            lines.append("Single-file plugins failed:\n" + "\n".join(f"- {f}" for f in failed))
+        try:
+            result = await asyncio.to_thread(session_reply, "\n".join(lines), session_id=notice["session_id"])
+            error = result.get("error")
+        except Exception as e:
+            error = e
+        if error:
+            logger.info("Dropped the daemon-back notice for session %s: %s", notice["session_id"], error)
+
+    def request_restart(self, reason: str = "", session_id: str | None = None) -> None:
         """Flag a restart and start draining the in-flight turns.
 
         Returns immediately: the turn that asked for the restart is itself in
@@ -538,6 +578,8 @@ class Gateway:
         if self.restart_requested:
             return
         self.restart_requested = True
+        if session_id:
+            self._restart_notice = {"reason": reason, "session_id": session_id, "requested_at": time.time()}
         logger.info("Restart requested; draining in-flight turns")
         asyncio.create_task(self._drain_then_shutdown())
 
@@ -556,6 +598,8 @@ class Gateway:
                 self._force_exit_http()
                 break
             await asyncio.sleep(self._drain_poll)
+        if self.restart_requested and self._restart_notice:
+            self._restart_notice_path.write_text(json.dumps(self._restart_notice))
         await self._shutdown()
 
     def _resolve_session_sandbox(self, session_id: str):
