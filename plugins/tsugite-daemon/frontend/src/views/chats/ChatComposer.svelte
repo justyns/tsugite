@@ -143,16 +143,19 @@
   // A ⌘K command pick routes through here, so the palette and the inline `/` menu
   // share one execution path. Reactive on the prefill store (not mount-only), so it
   // fires whether this composer was already open or just mounted for the session the
-  // palette navigated to. A run reuses dispatchCommand - but only once the command
-  // list has loaded, so the name can resolve; a prefill just fills + focuses.
+  // palette navigated to. A `/command` run waits for the command list so the name
+  // resolves. Other run text is the new-chat launcher's starting message.
   $effect(() => {
     const req = composerPrefill.pending;
     if (!req || req.sessionId !== sessionId) return;
-    if (req.run && slash.commands.length === 0) return;
+    const isCommand = /^\s*\//.test(req.text);
+    if (req.run && isCommand && slash.commands.length === 0) return;
     composerPrefill.consume(sessionId);
     untrack(() => {
-      if (req.run) {
+      if (req.run && isCommand) {
         void slash.dispatchCommand(req.text);
+      } else if (req.run) {
+        onSend(req.text, { uploadedFiles: [] });
       } else {
         value = req.text;
         void tick().then(() => focus());

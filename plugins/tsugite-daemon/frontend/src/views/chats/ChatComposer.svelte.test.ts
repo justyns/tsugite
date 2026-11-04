@@ -435,6 +435,21 @@ test('an unknown command echoes an inline error rather than a toast', async () =
   expect(post).not.toHaveBeenCalled();
 });
 
+test('a run request that is not a slash command is sent as a message, unchanged', async () => {
+  stubCommands([{ name: 'et', description: 'x', params: [] }]);
+  const post = vi.spyOn(api, 'post');
+  const onSend = vi.fn();
+  const onCommandResult = vi.fn();
+  await render(ChatComposer, { ...base, onSend, onCommandResult });
+
+  composerPrefill.request(base.sessionId, "Let's try this later https://example.test/repo", true);
+
+  await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+  expect(onSend.mock.calls[0]?.[0]).toBe("Let's try this later https://example.test/repo");
+  expect(post).not.toHaveBeenCalled();
+  expect(onCommandResult).not.toHaveBeenCalled();
+});
+
 test('a non-run prefill request for this session fills and focuses the composer', async () => {
   stubCommands([]);
   const post = vi.spyOn(api, 'post');
