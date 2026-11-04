@@ -117,6 +117,7 @@ class SchedulesMixin:
             "delivery_mode_on_error",
             "incident_key",
             "incident_title",
+            "skip_hooks",
         }
         fields = {k: v for k, v in body.items() if k in allowed}
         for key in ("target_session", "target_session_on_error", "delivery_mode_on_error"):

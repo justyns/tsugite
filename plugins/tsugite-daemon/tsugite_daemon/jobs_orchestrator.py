@@ -288,6 +288,7 @@ class JobsOrchestrator:
         notify_when: Optional[str] = None,
         notify_after_minutes: Optional[int] = None,
         sandbox_override: Optional[dict] = None,
+        skip_hooks: Optional[list] = None,
         executor: str = "agent",
         effort: Optional[str] = None,
         delegation_files: Optional[list] = None,
@@ -387,6 +388,7 @@ class JobsOrchestrator:
                 timeout_minutes=timeout_minutes,
                 spawned_by=spawned_by,
                 sandbox_override=sandbox_override,
+                skip_hooks=skip_hooks or [],
                 workspace_path=str(workspace_root) if workspace_root is not None and not repo else None,
                 executor=executor,
                 delegation_files=delegation_files or [],
@@ -483,6 +485,7 @@ class JobsOrchestrator:
         worker_meta: dict = {"job_id": job.id, **(extra_metadata or {})}
         if job.delegation_files:
             worker_meta["delegation_files"] = list(job.delegation_files)
+        worker_meta["skip_hooks"] = job.skip_hooks
         session = Session(
             id="",
             source=SessionSource.SPAWNED.value,
@@ -1079,7 +1082,9 @@ class JobsOrchestrator:
             # verifier_for must stay truthy so on_session_complete detects this as a
             # verifier (not a worker) completion. Executor jobs have no worker
             # session id, so fall back to the job id as the marker.
-            metadata=_with_sandbox(job, {"job_id": job.id, "verifier_for": worker_id or job.id}),
+            metadata=_with_sandbox(
+                job, {"job_id": job.id, "verifier_for": worker_id or job.id, "skip_hooks": job.skip_hooks}
+            ),
         )
         try:
             started_verifier = self._runner.start_session(verifier_session, inherit_from=job.parent_session_id)

@@ -1,6 +1,7 @@
 """Workspace hooks - fire shell commands after tool calls and lifecycle events."""
 
 import asyncio
+import contextvars
 import inspect
 import json
 import logging
@@ -226,6 +227,28 @@ def load_hooks_config(workspace_dir: Path) -> Optional[HooksConfig]:
     return config
 
 
+# Hook names and phases this run skips; "*" skips every hook.
+_skip_hooks_var: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar("skip_hooks", default=frozenset())
+
+
+def resolve_skip_hooks(hooks: Optional[bool], skip_hooks: Optional[list[str]]) -> list[str]:
+    """`hooks: false` skips everything; otherwise the `skip_hooks` list."""
+    return ["*"] if hooks is False else list(skip_hooks or [])
+
+
+def set_skip_hooks(names: "frozenset[str] | set[str]") -> contextvars.Token:
+    return _skip_hooks_var.set(frozenset(names))
+
+
+def reset_skip_hooks(token: contextvars.Token) -> None:
+    _skip_hooks_var.reset(token)
+
+
+def _is_skipped(rule: "HookRule", phase: str) -> bool:
+    skip = _skip_hooks_var.get()
+    return bool(skip) and ("*" in skip or phase in skip or (rule.name is not None and rule.name in skip))
+
+
 def _match_passes(jinja_env: jinja2.Environment, match_expr: str, context: dict[str, Any]) -> bool:
     """Evaluate a Jinja2 match expression against context."""
     try:
@@ -430,6 +453,8 @@ def _render_and_execute(
     captured: dict[str, str] = {}
     executions: list[HookExecution] = []
     for rule in rules:
+        if _is_skipped(rule, phase):
+            continue
         if rule.type in ("agent", "python"):
             logger.warning("%s hooks are not supported in sync execution (phase=%s), skipping", rule.type, phase)
             continue
@@ -470,6 +495,8 @@ async def _render_and_execute_async(
     captured: dict[str, str] = {}
     executions: list[HookExecution] = []
     for rule in rules:
+        if _is_skipped(rule, phase):
+            continue
         if rule.only_interactive and not interactive:
             continue
         if rule.match and not _match_passes(jinja_env, rule.match, context):

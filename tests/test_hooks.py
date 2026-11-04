@@ -25,6 +25,8 @@ from tsugite.hooks import (
     fire_compact_hooks,
     fire_pre_message_hooks,
     load_hooks_config,
+    reset_skip_hooks,
+    set_skip_hooks,
 )
 
 
@@ -541,6 +543,48 @@ class TestOnlyInteractive:
             result = await fire_pre_message_hooks(tmp_workspace, {"message": "test"}, interactive=False)
             mock_run.assert_not_called()
             assert result == {}
+
+
+class TestSkipHooks:
+    @pytest.mark.parametrize(
+        "skip, ran",
+        [(["*"], False), (["pre_message"], False), (["indexer"], False), (["post_tool"], True), ([], True)],
+    )
+    def test_rule_skipped_by_wildcard_phase_or_name(self, skip, ran):
+        rules = [HookRule(run="echo hi", name="indexer")]
+        token = set_skip_hooks(skip)
+        try:
+            with patch("tsugite.hooks.subprocess.run", return_value=_ok_result()) as mock_run:
+                _render_and_execute(jinja2.Environment(), rules, {}, Path("."), phase="pre_message")
+        finally:
+            reset_skip_hooks(token)
+        assert mock_run.called is ran
+
+    @pytest.mark.parametrize(
+        "frontmatter, metadata, ran",
+        [
+            ("", None, True),
+            ("hooks: false\n", None, False),
+            ("skip_hooks: [pre_message]\n", None, False),
+            ("", {"skip_hooks": ["pre_message"]}, False),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_run_agent_applies_frontmatter_and_metadata(
+        self, tmp_workspace, monkeypatch, frontmatter, metadata, ran
+    ):
+        from tsugite.agent_runner import run_agent_async
+
+        monkeypatch.chdir(tmp_workspace)
+        (tmp_workspace / ".tsugite" / "hooks.yaml").write_text("hooks:\n  pre_message:\n    - run: touch ran.flag\n")
+        agent = tmp_workspace / "a.md"
+        agent.write_text(f"---\nname: a\nextends: none\nmodel: openai:gpt-4o-mini\ntools: []\n{frontmatter}---\nhi\n")
+        mock_agent = MagicMock()
+        mock_agent.run = AsyncMock(return_value="done")
+        mock_agent.ended_no_action = False
+        with patch("tsugite.agent_runner.runner.TsugiteAgent", return_value=mock_agent):
+            await run_agent_async(agent, "go", channel_metadata=metadata)
+        assert (tmp_workspace / "ran.flag").exists() is ran
 
 
 class TestShellQuoteFilter:

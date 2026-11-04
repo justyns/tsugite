@@ -176,6 +176,8 @@ class Job:
     # Inherited sandbox policy (a SandboxSettings-shaped dict) stamped when a
     # sandboxed agent spawns the job, so worker + verifier sessions stay sandboxed.
     sandbox_override: Optional[dict] = None
+    # Hook names or phases skipped in the worker and verifier runs; "*" skips all.
+    skip_hooks: list[str] = field(default_factory=list)
     # Workspace files the spawner handed to the job (validated absolute path
     # strings). The runner materializes them into the worker session's first-turn
     # attachments once the model is known - images reach a vision model as pixels,

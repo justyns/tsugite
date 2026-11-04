@@ -315,6 +315,18 @@
       "title": "Allowed Secrets",
       "type": "array"
     },
+    "hooks": {
+      "default": true,
+      "title": "Hooks",
+      "type": "boolean"
+    },
+    "skip_hooks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Skip Hooks",
+      "type": "array"
+    },
     "run_if": {
       "anyOf": [
         {

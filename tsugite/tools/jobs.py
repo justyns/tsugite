@@ -3,6 +3,7 @@
 from typing import Optional
 
 from ..exceptions import ToolUnavailableError
+from ..hooks import resolve_skip_hooks
 from . import call_on_loop, tool
 
 _jobs_orchestrator = None
@@ -45,6 +46,8 @@ def spawn_job(
     setup: Optional[str] = None,
     teardown: Optional[str] = None,
     teardown_when: str = "always",
+    skip_hooks: Optional[list[str]] = None,
+    hooks: bool = True,
 ) -> dict:
     """Spawn a background Job with an optional verification loop.
 
@@ -116,6 +119,9 @@ def spawn_job(
         teardown_when: always (default) | on_success (done) | on_failure (stuck,
             errored, cancelled). A retry of a parked Job re-runs setup when
             teardown ran on it.
+        skip_hooks: Hook names or phases (e.g. "pre_context_build") to skip in the
+            worker and verifier runs. Plugin tools still load.
+        hooks: Set to false to skip all workspace and plugin hooks in the Job's runs.
 
     Returns:
         Dict with job_id, worker_session_id, parent_session_id, state.
@@ -175,6 +181,7 @@ def spawn_job(
             setup=setup,
             teardown=teardown,
             teardown_when=teardown_when,
+            skip_hooks=resolve_skip_hooks(hooks, skip_hooks),
             timeout=180,
         )
     except TimeoutError:

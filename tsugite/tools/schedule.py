@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import uuid4
 
 from ..exceptions import ToolUnavailableError
+from ..hooks import resolve_skip_hooks
 from . import call_on_loop, deny_when_sandboxed, tool
 from .sessions import CURRENT_SESSION, get_current_session_id
 
@@ -99,6 +100,8 @@ def schedule_create(
     delivery_mode_on_error: Optional[str] = None,
     incident_key: Optional[str] = None,
     incident_title: Optional[str] = None,
+    skip_hooks: Optional[list[str]] = None,
+    hooks: bool = True,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -144,6 +147,8 @@ def schedule_create(
         incident_key: Dedupe key so repeat firings of this schedule share one incident session instead of opening
             a new one each run.
         incident_title: Title for the incident session (default: "Incident: <id>").
+        skip_hooks: Hook names or phases (e.g. "pre_context_build") to skip on every run. Plugin tools still load.
+        hooks: Set to false to skip all workspace and plugin hooks on every run.
 
     Returns:
         Created schedule details including computed next_run
@@ -197,6 +202,7 @@ def schedule_create(
         delivery_mode_on_error=delivery_mode_on_error,
         incident_key=incident_key,
         incident_title=incident_title,
+        skip_hooks=resolve_skip_hooks(hooks, skip_hooks),
     )
     result = _call(_scheduler.add, entry)
     return _entry_to_dict(result)
@@ -294,6 +300,8 @@ def schedule_update(
     delivery_mode_on_error: Optional[str] = None,
     incident_key: Optional[str] = None,
     incident_title: Optional[str] = None,
+    skip_hooks: Optional[list[str]] = None,
+    hooks: Optional[bool] = None,
 ) -> dict:
     """Update fields on an existing schedule.
 
@@ -321,6 +329,8 @@ def schedule_update(
         delivery_mode_on_error: New failure-card delivery mode (optional). Set to empty string to clear.
         incident_key: New incident dedupe key (optional). Set to empty string to clear.
         incident_title: New incident session title (optional). Set to empty string to clear.
+        skip_hooks: Hook names or phases to skip on every run (optional). Empty list clears.
+        hooks: false skips all workspace and plugin hooks on every run; true clears the skip list (optional).
 
     Returns:
         Updated schedule details
@@ -349,6 +359,9 @@ def schedule_update(
             if not effective_notify:
                 raise ValueError("notify_tool=True requires a non-empty 'notify' list")
         fields["notify_tool"] = notify_tool
+
+    if skip_hooks is not None or hooks is not None:
+        fields["skip_hooks"] = resolve_skip_hooks(hooks, skip_hooks)
 
     # Clearable fields: empty/falsy value → None (clears the field)
     for param_name, value in [

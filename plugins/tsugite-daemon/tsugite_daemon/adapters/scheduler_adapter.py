@@ -445,6 +445,8 @@ class SchedulerAdapter:
             metadata["notify_tool"] = True
         if entry.model:
             metadata["model_override"] = entry.model
+        if entry.skip_hooks:
+            metadata["skip_hooks"] = entry.skip_hooks
         if entry.max_turns is not None:
             metadata["max_turns_override"] = entry.max_turns
 

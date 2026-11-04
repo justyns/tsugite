@@ -121,6 +121,8 @@ class AgentConfig(BaseModel):
     # it can never disable the sandbox or widen network beyond the daemon ceiling.
     sandbox: Optional[Dict[str, Any]] = None
     allowed_secrets: List[str] = Field(default_factory=list)  # Per-agent secret allowlist (empty = all allowed)
+    hooks: bool = True  # false skips every workspace and plugin hook; plugin tools still load
+    skip_hooks: List[str] = Field(default_factory=list)  # Hook names or phases to skip
     run_if: Optional[str] = Field(
         default=None,
         description="Jinja expression guard evaluated after prefetch. Agent is skipped if the expression evaluates to a falsy value. Has access to prefetch variables and built-in helpers (file_exists, read_text, env, now, etc.).",

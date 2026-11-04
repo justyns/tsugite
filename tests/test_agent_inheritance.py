@@ -622,6 +622,8 @@ FIELD_SAMPLES = {
     "network": {"allow_domains": ["example.test"]},
     "sandbox": {"enabled": True},
     "allowed_secrets": ["child-token"],
+    "hooks": False,
+    "skip_hooks": ["pre_message"],
     "run_if": "count | int > 0",
 }
 

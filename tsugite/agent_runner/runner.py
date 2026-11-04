@@ -1097,7 +1097,21 @@ async def run_agent_async(
     if context is None:
         context = {}
 
-    from tsugite.hooks import fire_pre_message_hooks
+    from tsugite.hooks import fire_pre_message_hooks, reset_skip_hooks, resolve_skip_hooks, set_skip_hooks
+
+    # Parse agent configuration (with inheritance resolution)
+    try:
+        agent = parse_agent_file(agent_path)
+        agent_config = agent.config
+    except Exception as e:
+        raise ValueError(f"Failed to parse agent file: {e}")
+
+    skip_hooks_token = set_skip_hooks(
+        {
+            *resolve_skip_hooks(agent_config.hooks, agent_config.skip_hooks),
+            *(channel_metadata or {}).get("skip_hooks", []),
+        }
+    )
 
     hooks_dir = workspace.path if workspace else (path_context.effective_cwd if path_context else Path.cwd())
     hook_message = context.pop("raw_message", prompt)
@@ -1175,13 +1189,6 @@ async def run_agent_async(
             # New conversation (e.g., fresh workspace session) - start with empty history
             pass
 
-    # Parse agent configuration (with inheritance resolution)
-    try:
-        agent = parse_agent_file(agent_path)
-        agent_config = agent.config
-    except Exception as e:
-        raise ValueError(f"Failed to parse agent file: {e}")
-
     # Scope this run's ambient state with tokens: an agent hook nests a full run
     # inside this one and must restore what it found rather than clobber it.
     agent_token = set_current_agent(agent_config.name)
@@ -1221,6 +1228,7 @@ async def run_agent_async(
     finally:
         reset_current_agent(agent_token)
         reset_allowed_secrets(secrets_token)
+        reset_skip_hooks(skip_hooks_token)
         if turn_token is not None:
             reset_turn(turn_token)
 

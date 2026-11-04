@@ -343,6 +343,8 @@ class SessionRunner:
         # the chokepoint so the spawned run stays sandboxed.
         if session.metadata and session.metadata.get("sandbox_override"):
             metadata["sandbox_override"] = session.metadata["sandbox_override"]
+        if session.metadata and session.metadata.get("skip_hooks"):
+            metadata["skip_hooks"] = session.metadata["skip_hooks"]
 
         # Delegated files (validated at spawn time) become first-turn attachments
         # here, where the target model is known for the vision gate; non-inlinable

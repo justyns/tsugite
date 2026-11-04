@@ -119,6 +119,8 @@ class ScheduleEntry:
     # Dedupe key so repeat firings of one monitor share a single incident session.
     incident_key: str | None = None
     incident_title: str | None = None
+    # Hook names or phases skipped on each run; "*" skips all.
+    skip_hooks: list[str] = field(default_factory=list)
 
     # Concurrency lock for this entry's runs. Per-entry so two fires of the
     # same schedule can't overlap; per-instance (not persisted) so the lock

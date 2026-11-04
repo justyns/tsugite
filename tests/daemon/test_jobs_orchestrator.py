@@ -876,6 +876,15 @@ async def test_create_and_start_job_omits_delegation_files_key_when_none(store, 
     assert "delegation_files" not in started.metadata
 
 
+@pytest.mark.asyncio
+async def test_create_and_start_job_threads_skip_hooks_to_worker(store, runner, orchestrator):
+    job, started = await orchestrator.create_and_start_job(
+        parent_session_id="parent-1", prompt="task", acceptance_criteria=[], skip_hooks=["pre_context_build"]
+    )
+    assert started.metadata["skip_hooks"] == ["pre_context_build"]
+    assert store.get(job.id).skip_hooks == ["pre_context_build"]
+
+
 def test_on_timeout_skips_cancel_when_worker_already_terminal(store, runner, orchestrator):
     """If the worker has already completed/failed by the time the timeout handler
     fires, _on_timeout must NOT call cancel_session - otherwise it overwrites the
