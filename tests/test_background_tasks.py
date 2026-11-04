@@ -402,7 +402,10 @@ class TestAutoReply:
 
 class TestRunSessionStatus:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(("outcome", "session_status"), [("success", "completed"), ("no_action", "failed")])
+    @pytest.mark.parametrize(
+        ("outcome", "session_status"),
+        [("success", "completed"), ("no_action", "failed"), ("silent", "completed")],
+    )
     async def test_run_session_status_follows_the_recorded_outcome(self, outcome, session_status):
         sa, mock_adapter = _make_scheduler_adapter()
         entry = ScheduleEntry(id="idle", prompt="check", schedule_type="cron", cron_expr="0 9 * * *")
@@ -419,6 +422,20 @@ class TestRunSessionStatus:
         assert result.status == outcome
         final = mock_adapter.session_store.update_session.call_args
         assert final.kwargs["status"] == session_status
+
+    @pytest.mark.asyncio
+    async def test_silent_run_sends_no_notification(self):
+        sa, _ = _make_scheduler_adapter(notification_channels={"dm": _make_discord_channel()})
+        entry = ScheduleEntry(id="quiet", prompt="check", schedule_type="cron", cron_expr="0 9 * * *", notify=["dm"])
+
+        with (
+            patch("tsugite_daemon.adapters.scheduler_adapter.send_notification") as mock_notify,
+            patch("tsugite.interaction.set_interaction_backend"),
+            patch("tsugite_daemon.adapters.scheduler_adapter._recorded_run_outcome", return_value=("silent", None)),
+        ):
+            await sa._run_agent(entry)
+
+        mock_notify.assert_not_called()
 
 
 class TestAgentExecutionErrorNotification:

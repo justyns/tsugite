@@ -316,7 +316,8 @@ class SchedulerAdapter:
             )
         if result is None:
             raise RuntimeError(f"Target session '{target.id}' finished before the message could be sent")
-        return RunResult(output=result, session_id=target.id)
+        status, _ = _recorded_run_outcome(target.id)
+        return RunResult(output=result, session_id=target.id, status="silent" if status == "silent" else "success")
 
     async def _report_undeliverable(self, entry: ScheduleEntry, target: Session | None) -> None:
         """Deliver a needs-ack card to the session that set the reminder. A one-off
@@ -519,10 +520,14 @@ class SchedulerAdapter:
             if temp_token and self._token_store:
                 self._token_store.revoke(temp_token)
 
+        status, error = _recorded_run_outcome(conv_id)
+        if status == "silent":
+            self._update_run_session(conv_id, entry, status=SessionStatus.COMPLETED.value, result=result[:2000])
+            return RunResult(output=result, session_id=conv_id, status=status)
+
         # Runs before the status update. The on_complete fallback records in this run
         # session, which `deliver_to_session` refuses once it is finished.
         await self._handle_on_complete(entry, result, run_session_id=conv_id)
-        status, error = _recorded_run_outcome(conv_id)
         session_status = SessionStatus.FAILED if status == "no_action" else SessionStatus.COMPLETED
         self._update_run_session(conv_id, entry, status=session_status.value, result=result[:2000])
         logger.info("Schedule '%s' completed", entry.id)

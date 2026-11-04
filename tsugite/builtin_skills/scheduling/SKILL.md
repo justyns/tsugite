@@ -178,7 +178,7 @@ print(schedules)
 
 Each schedule includes: `id`, `execution_type`, `schedule_type`, `enabled`, `next_run`, `last_run`, `last_status`, `last_error`.
 
-`last_status` is `success`, `error`, `skipped`, or `no_action`.
+`last_status` is `success`, `error`, `skipped`, `no_action`, or `silent`.
 
 ## Managing Schedules
 

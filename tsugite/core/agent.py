@@ -770,6 +770,9 @@ class TsugiteAgent:
                 error_message = "model answered with unexecuted tool-call markup; no code ran"
                 if self.event_bus:
                     self.event_bus.emit(WarningEvent(message=error_message, step=turn_num + 1))
+            elif isinstance(final_value, dict) and final_value.get("notify") is False:
+                status = "silent"
+                error_message = None
             elif self.expects_action and not executed_code:
                 status = "no_action"
                 self.ended_no_action = True

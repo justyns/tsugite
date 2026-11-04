@@ -46,11 +46,12 @@ _SESSION_END_STATUS = {
     "cancelled": "cancelled",
     "interrupted": "error",
     "no_action": "error",
+    "silent": "ok",
 }
 _STATUS_LABEL = {"ok": "completed", "error": "failed", "cancelled": "cancelled"}
 
 _JOB_STATUS = {"done": "ok", "cancelled": "cancelled", "stuck": "error", "errored": "error"}
-_RUN_STATUS = {"success": "ok", "error": "error", "no_action": "error", "skipped": "skipped"}
+_RUN_STATUS = {"success": "ok", "error": "error", "no_action": "error", "silent": "ok", "skipped": "skipped"}
 
 
 def _one_line(text: Optional[str], width: int) -> str:

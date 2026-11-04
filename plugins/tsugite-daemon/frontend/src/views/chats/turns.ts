@@ -1076,6 +1076,12 @@ class Builder {
       case 'session_complete':
       case 'session_error':
       case 'session_cancelled': {
+        if (str(e.status) === 'silent') {
+          const from = this.turns.map((t) => t.role).lastIndexOf('user');
+          if (from >= 0) this.turns.splice(from);
+          this.ai = null;
+          return;
+        }
         // How the run ended, when it did not end well: "max_turns (20) reached",
         // "Cancelled by user". The recorded message already reads as the reason,
         // so it ships unformatted.

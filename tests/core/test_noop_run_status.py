@@ -49,6 +49,17 @@ async def test_scheduled_run_that_executes_nothing_ends_no_action():
 
 
 @pytest.mark.asyncio
+async def test_scheduled_run_returning_notify_false_ends_silent():
+    agent, storage = _agent(['```python-exec\nreturn_value({"notify": False})\n```'], expects_action=True)
+
+    await agent.run("check for changes")
+
+    end = _end(storage)
+    assert end["status"] == "silent"
+    assert end.get("error_message") is None
+
+
+@pytest.mark.asyncio
 async def test_scheduled_run_with_return_value_is_success():
     agent, storage = _agent(['```python-exec\nreturn_value("done")\n```'], expects_action=True)
 

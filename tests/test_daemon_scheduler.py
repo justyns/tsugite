@@ -278,6 +278,21 @@ class TestSchedulerExecution:
         assert stored.run_history[-1]["status"] == "no_action"
 
     @pytest.mark.asyncio
+    async def test_silent_run_counts_as_success_and_clears_the_failure_streak(self, scheduler, run_callback):
+        run_callback.return_value = RunResult(output="", session_id="s1", status="silent")
+        entry = ScheduleEntry(
+            id="job1", prompt="hi", schedule_type="cron", cron_expr="*/5 * * * *", consecutive_failures=2
+        )
+        scheduler.add(entry)
+        await scheduler._fire_schedule(scheduler.get("job1"))
+
+        stored = scheduler.get("job1")
+        assert stored.last_status == "silent"
+        assert stored.last_error is None
+        assert stored.consecutive_failures == 0
+        assert stored.run_count == 1
+
+    @pytest.mark.asyncio
     async def test_once_auto_removed(self, scheduler, run_callback):
         future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
         entry = ScheduleEntry(id="job1", prompt="hi", schedule_type="once", run_at=future)

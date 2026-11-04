@@ -23,7 +23,7 @@ Standard event types (documented for reference; runtime treats `type` as opaque)
 - compacted_into: new_session_id, reason, replaced_count, retained_count
 - any event a compaction re-recorded into the successor has compaction_copy_of (the original event's id);
   SessionSummary turn_count, tokens, cost and duration skip those rows
-- session_end: status (success|error|interrupted|cancelled|no_action), error_message
+- session_end: status (success|error|interrupted|cancelled|no_action|silent), error_message
 """
 
 from datetime import datetime, timezone

@@ -1112,6 +1112,20 @@ describe('buildTimeline (hooks)', () => {
   });
 });
 
+describe('buildTimeline (silent turns)', () => {
+  it('drops a turn that ended silent and keeps the turns around it', () => {
+    const t = buildTimeline([
+      { type: 'user_input', text: 'hi', id: 1 },
+      { type: 'final_result', result: 'hello', id: 2 },
+      { type: 'session_end', status: 'success', id: 3 },
+      { type: 'user_input', text: 'check again', id: 4 },
+      { type: 'final_result', result: "{'notify': False}", result_data: { notify: false }, id: 5 },
+      { type: 'session_end', status: 'silent', id: 6 },
+    ]);
+    expect(t.turns.map((x) => x.role)).toEqual(['user', 'ai']);
+  });
+});
+
 describe('buildTimeline (context injections)', () => {
   // The events endpoint splits injections server-side: user_input arrives with
   // `injected` blocks and `display_text` (the words the person actually typed).
