@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connectors</title>
+    <style>
+      body { margin: 0; padding: var(--sp-3, 12px); background: var(--bg1); color: var(--tx0); font: var(--fs-md, 13px) var(--font-ui, sans-serif); }
+      h1 { font-size: 1.2em; margin: 0 0 var(--sp-3, 12px); }
+      form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: var(--sp-3, 12px); }
+      input, button { background: var(--bg2); color: var(--tx0); border: 1px solid var(--bd1); border-radius: var(--r-sm, 4px); padding: 6px 10px; font: inherit; }
+      input[name="url"] { flex: 1; min-width: 16em; }
+      button { cursor: pointer; }
+      section { border: 1px solid var(--bd0); border-radius: var(--r-sm, 4px); padding: 10px; margin-bottom: 10px; }
+      header { display: flex; align-items: center; gap: 8px; }
+      header strong { flex: 1; }
+      .meta, .error { color: var(--tx2); font-size: 0.9em; }
+      .error { color: var(--st-err); }
+      ul { margin: 6px 0 0; padding-left: 1.2em; }
+      code { user-select: all; }
+      details { margin-top: 6px; }
+      details form { margin: 6px 0 0; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <h1>Connectors</h1>
+    <form id="add">
+      <input name="name" placeholder="name" pattern="[a-z][a-z0-9]{0,23}" required aria-label="Name" />
+      <input name="url" type="url" placeholder="https://mcp.example.com/mcp" required aria-label="Server URL" />
+      <input name="client_id" placeholder="Client ID (optional)" autocomplete="off" aria-label="Client ID" />
+      <input name="client_secret" type="password" placeholder="Client secret (optional)" autocomplete="off" aria-label="Client secret" />
+      <button type="submit">Add</button>
+    </form>
+    <p class="meta">
+      With no client set, the plugin registers one itself when the server allows it. Otherwise create a client in the
+      provider's developer console with this redirect URL:
+      <code id="redirect"></code> <button type="button" id="copy">Copy</button>
+    </p>
+    <p class="error" id="error"></p>
+    <main id="list"></main>
+    <script>
+      const BASE = '/api/plugins/mcp';
+      let token = '';
+      let timer = null;
+      const REDIRECT = location.origin + BASE + '/callback';
+
+      async function api(path, method = 'GET', body) {
+        const headers = { Authorization: 'Bearer ' + token };
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        const resp = await fetch(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || `${path} returned ${resp.status}`);
+        return data;
+      }
+
+      function el(tag, text, className) {
+        const node = document.createElement(tag);
+        if (text !== undefined) node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      }
+
+      function button(label, onclick) {
+        const b = el('button', label);
+        b.type = 'button';
+        b.onclick = () => run(onclick);
+        return b;
+      }
+
+      async function run(action) {
+        document.getElementById('error').textContent = '';
+        try {
+          render(await action());
+        } catch (err) {
+          document.getElementById('error').textContent = err.message;
+        }
+      }
+
+      async function signin(name) {
+        // Opened before the await, while the click still counts as a user gesture for popup blockers.
+        const w = window.open('', '_blank');
+        w.opener = null;
+        try {
+          const { authorization_url } = await api(`/servers/${name}/signin`, 'POST', { redirect_base: location.origin });
+          w.location = authorization_url;
+        } catch (err) {
+          w.close();
+          throw err;
+        }
+        return api('/servers');
+      }
+
+      function input(name, type, placeholder, value = '') {
+        const i = el('input');
+        Object.assign(i, { name, type, placeholder, value, autocomplete: 'off' });
+        i.setAttribute('aria-label', placeholder);
+        return i;
+      }
+
+      function clientForm(s) {
+        const form = el('form');
+        const id = input('client_id', 'text', 'Client ID', s.client_id);
+        const secret = input('client_secret', 'password', s.has_secret ? 'Secret is set - type to replace' : 'Client secret (optional)');
+        const clear = el('input');
+        clear.type = 'checkbox';
+        const label = el('label', ' Clear secret');
+        label.prepend(clear);
+        label.hidden = !s.has_secret;
+        const save = el('button', 'Save client');
+        form.append(id, secret, label, save);
+        form.onsubmit = (event) => {
+          event.preventDefault();
+          run(() => api(`/servers/${s.name}`, 'PUT', { client_id: id.value, client_secret: secret.value, clear_secret: clear.checked }));
+        };
+        const details = el('details');
+        details.append(el('summary', s.client_id ? 'OAuth client' : 'OAuth client (registered automatically)'), form);
+        return details;
+      }
+
+      function poll() {
+        if (document.querySelector('#list details[open]')) timer = setTimeout(poll, 2000);
+        else run(() => api('/servers'));
+      }
+
+      function render({ servers }) {
+        clearTimeout(timer);
+        if (servers.some((s) => s.status === 'connecting')) timer = setTimeout(poll, 2000);
+        const list = document.getElementById('list');
+        list.replaceChildren(...servers.map((s) => {
+          const box = el('section');
+          const head = el('header');
+          head.append(el('strong', s.name), el('span', s.status.replace('_', ' '), 'meta'));
+          if (s.status === 'needs_signin') head.append(button('Sign in', () => signin(s.name)));
+          head.append(button('Refresh', () => api(`/servers/${s.name}/refresh`, 'POST')));
+          head.append(button('Disconnect', () => api(`/servers/${s.name}`, 'DELETE')));
+          box.append(head, el('div', s.url, 'meta'));
+          if (s.error) box.append(el('div', s.error, 'error'));
+          box.append(clientForm(s));
+          if (s.tools.length) {
+            const tools = el('ul');
+            tools.append(...s.tools.map((t) => el('li', t.description ? `${t.name} - ${t.description}` : t.name)));
+            box.append(tools);
+          }
+          return box;
+        }));
+      }
+
+      document.getElementById('add').onsubmit = (event) => {
+        event.preventDefault();
+        const form = new FormData(event.target);
+        run(async () => {
+          const data = await api('/servers', 'POST', {
+            name: form.get('name'),
+            url: form.get('url'),
+            client_id: form.get('client_id'),
+            client_secret: form.get('client_secret'),
+          });
+          event.target.reset();
+          return data;
+        });
+      };
+
+      document.getElementById('redirect').textContent = REDIRECT;
+      document.getElementById('copy').onclick = () =>
+        navigator.clipboard.writeText(REDIRECT).then(
+          () => (document.getElementById('copy').textContent = 'Copied'),
+          (err) => (document.getElementById('error').textContent = err.message),
+        );
+
+      addEventListener('message', (event) => {
+        if (event.source !== parent) return;
+        const msg = event.data;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'tsugite:init' || msg.type === 'tsugite:theme') {
+          for (const [name, value] of Object.entries(msg.theme.tokens)) document.documentElement.style.setProperty(name, value);
+        }
+        if (msg.type === 'tsugite:init') {
+          token = msg.token;
+          parent.postMessage({ type: 'tsugite:ready' }, location.origin);
+          run(() => api('/servers'));
+        }
+      });
+    </script>
+  </body>
+</html>

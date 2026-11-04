@@ -1,6 +1,11 @@
 """Secret management tools for Tsugite agents."""
 
+import re
+
 from tsugite.tools import tool
+
+# The keys the MCP plugin's SecretStorage writes: OAuth tokens and client credentials.
+MCP_SECRET = re.compile(r"mcp-.+-(tokens|client|client-preset)")
 
 
 @tool(parent_only=True)
@@ -18,6 +23,9 @@ def get_secret(name: str) -> str:
     from tsugite.secrets.registry import get_registry
 
     agent_name = resolve_current_agent()
+
+    if MCP_SECRET.fullmatch(name):
+        raise PermissionError(f"Secret '{name}' is reserved for the MCP plugin")
 
     # Check per-agent allowlist
     allowed = get_allowed_secrets()

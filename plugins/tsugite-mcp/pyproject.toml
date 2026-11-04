@@ -1,0 +1,34 @@
+[project]
+name = "tsugite-mcp"
+version = "0.26.0"
+description = "Tsugite plugin: remote MCP servers over Streamable HTTP with OAuth sign-in"
+authors = [{ name = "Justyn Shull" }]
+requires-python = ">=3.11"
+dependencies = [
+  "tsugite-cli==0.26.0",
+  "tsugite-daemon==0.26.0",
+  "mcp>=1.30,<2",
+]
+
+[project.entry-points."tsugite.plugins"]
+mcp = "tsugite_mcp.tools"
+
+[project.entry-points."tsugite.adapters"]
+mcp = "tsugite_mcp.adapter:create_adapter"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tsugite_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/tsugite_mcp",
+  "/pyproject.toml",
+]
+
+[tool.uv.sources]
+tsugite-cli = { workspace = true }
+tsugite-daemon = { workspace = true }

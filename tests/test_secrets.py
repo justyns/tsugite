@@ -590,6 +590,27 @@ class TestGetSecretTool:
         with pytest.raises(PermissionError, match="not allowed"):
             get_secret("blocked-key")
 
+    def test_get_secret_refuses_mcp_secrets(self, tmp_path):
+        from tsugite.secrets import set_backend
+        from tsugite.secrets.file import FileSecretBackend
+
+        b = FileSecretBackend({"path": str(tmp_path / "secrets")})
+        for name in ("mcp-fake-tokens", "mcp-fake-client", "mcp-fake-client-preset", "mcp-github-token"):
+            b.set(name, "val")
+        set_backend(b)
+
+        from tsugite.agent_runner.helpers import set_allowed_secrets, set_current_agent
+
+        set_current_agent("test-agent")
+        set_allowed_secrets(None)
+
+        from tsugite.tools.secrets import get_secret
+
+        for name in ("mcp-fake-tokens", "mcp-fake-client", "mcp-fake-client-preset"):
+            with pytest.raises(PermissionError, match="reserved"):
+                get_secret(name)
+        assert get_secret("mcp-github-token") == "val"
+
 
 # -- SecretsConfig --
 
