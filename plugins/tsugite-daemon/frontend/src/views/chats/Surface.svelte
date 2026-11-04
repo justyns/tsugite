@@ -250,7 +250,11 @@
   // into the composer's attach pipeline. Only file drags are handled: internal
   // rail-to-mux drags carry a private MIME (never `Files`), so they pass straight
   // through to the mux, and a read-only artifact (no composer) is left inert.
-  let composer = $state<{ attachFiles: (files: File[]) => void; focus: () => void }>();
+  let composer = $state<{
+    attachFiles: (files: File[]) => void;
+    focus: () => void;
+    insertQuote: (text: string, sourceId?: number) => Promise<void>;
+  }>();
   let surfaceEl = $state<HTMLDivElement>();
   let fileDragActive = $state(false);
 
@@ -341,6 +345,7 @@
     soloLinks={solo ? undefined : { open: openSolo, copy: copySoloLink }}
     onOpenSession={selectSession}
     onRetry={(text) => void onSend(text, { uploadedFiles: [] })}
+    onQuote={(text, sourceId) => composer?.insertQuote(text, sourceId)}
     onDismissAttention={(deliveryId) =>
       selectedId && void sessions.dismissAttention(selectedId, deliveryId)}
   />

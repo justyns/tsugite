@@ -396,6 +396,18 @@
     ta?.focus();
   }
 
+  /** Insert `block` at the caret as its own lines, starting a new line first when
+   *  the caret follows text on the same line. */
+  export async function insertBlockAtCursor(block: string) {
+    const start = ta?.selectionStart ?? value.length;
+    const before = value.slice(0, start);
+    const text = (before && !before.endsWith('\n') ? '\n' : '') + block;
+    value = before + text + value.slice(ta?.selectionEnd ?? start);
+    await tick();
+    ta?.focus();
+    ta?.setSelectionRange(start + text.length, start + text.length);
+  }
+
   /** Imperative focus for callers that own navigation (e.g. auto-focus on landing
    *  in a chat); moves the caret into the textarea. */
   export function focus() {

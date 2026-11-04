@@ -39,6 +39,7 @@
   interface SendExtras {
     uploadedFiles: { name: string }[];
     contextMetadata?: ContextItem[];
+    quotedFrom?: number[];
   }
 
   let {
@@ -225,9 +226,11 @@
       onSend(text, {
         uploadedFiles: attach.attachments.map((a) => ({ name: a.name })),
         ...(contextMetadata.length ? { contextMetadata } : {}),
+        ...(quotedFrom.length ? { quotedFrom } : {}),
       });
     }
     value = '';
+    quotedFrom = [];
     attach.attachments = [];
     context.contextItems = [];
     clearDraft(sessionId);
@@ -239,7 +242,22 @@
     void attach.upload(files);
   }
 
-  let composerEl = $state<{ focus: () => void }>();
+  // Source message ids of the quotes inserted since the last send.
+  let quotedFrom: number[] = [];
+  /** Insert `text` as a Markdown blockquote at the cursor, then a blank line. */
+  export async function insertQuote(text: string, sourceId?: number) {
+    const quote = text
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n');
+    if (sourceId != null && !quotedFrom.includes(sourceId)) quotedFrom.push(sourceId);
+    await composerEl?.insertBlockAtCursor(`${quote}\n\n`);
+  }
+
+  let composerEl = $state<{
+    focus: () => void;
+    insertBlockAtCursor: (b: string) => Promise<void>;
+  }>();
   // Imperative focus, forwarded to the library composer's textarea; Surface calls
   // this to auto-focus on chat navigation.
   export function focus() {

@@ -10,6 +10,7 @@
     agentColor,
     at,
     index,
+    eventId,
     streaming = false,
     pinnedActs = false,
     retryFailed = false,
@@ -27,6 +28,8 @@
     at: string;
     // Optional turn index, rendered as "#NN" alongside the timestamp.
     index?: number;
+    // Storage id of the event behind this turn, read by the selection Quote action.
+    eventId?: number;
     // Marks the body as a live region while tokens stream in.
     streaming?: boolean;
     // Keep the hover action bar visible (e.g. after a menu opens on touch).
@@ -53,7 +56,7 @@
   }
 </script>
 
-<article class="t-msg t-msg--{role}">
+<article class="t-msg t-msg--{role}" data-event-id={eventId}>
   <div class="gut">
     <span class="who"
       >{#if agentColor !== undefined}<AgentDot color={agentColor} />{/if}{who}</span

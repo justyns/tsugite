@@ -187,6 +187,8 @@ export interface Turn {
   synthetic?: boolean;
   /** Set on a user turn something other than the person sent. */
   origin?: TurnOrigin;
+  /** Storage id of the event that opened this turn; absent on a not-yet-persisted bubble. */
+  eventId?: number;
   /** Set on the AI turn whose answer was handed back to the sender - a
    *  `session_reply` only, never a one-way completion or job wake-up. */
   replyTo?: TurnOrigin;
@@ -469,6 +471,8 @@ class Builder {
   /** One tile per job. A job outlives the turn that spawned it. */
   private jobBlocks = new Map<string, JobBlock>();
 
+  private eventId: number | undefined;
+
   private uid(prefix: string): string {
     this.seq += 1;
     return `${prefix}-${this.seq}`;
@@ -482,6 +486,7 @@ class Builder {
         at,
         blocks: [],
         streaming: true,
+        ...(this.eventId != null ? { eventId: this.eventId } : {}),
         ...(this.replyTo ? { replyTo: this.replyTo } : {}),
       };
       for (const hook of this.pendingHooks) pushHook(this.ai.blocks, hook);
@@ -674,10 +679,12 @@ class Builder {
       ...(attachments ? { attachments } : {}),
       ...(blocks.length && !rest ? { synthetic: true } : {}),
       ...(origin ? { origin } : {}),
+      ...(this.eventId != null ? { eventId: this.eventId } : {}),
     });
   }
 
   apply(e: Event, i: number): void {
+    this.eventId = num(e.id);
     const type = str(e.type) ?? '';
     const at = str(e.timestamp) ?? '';
     switch (type) {

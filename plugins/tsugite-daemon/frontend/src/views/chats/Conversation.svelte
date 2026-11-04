@@ -76,6 +76,7 @@
     soloLinks,
     onOpenSession,
     onRetry,
+    onQuote,
     onDismissAttention,
   }: {
     ctrl: ConversationController;
@@ -104,6 +105,8 @@
     soloLinks?: { open: () => void; copy: () => void };
     onOpenSession: (id: string) => void;
     onRetry: (text: string) => void;
+    /** Quote selected message prose into the composer; `sourceId` is the message's storage id. */
+    onQuote?: (text: string, sourceId?: number) => void;
     onDismissAttention: (deliveryId?: string) => void;
   } = $props();
 
@@ -299,6 +302,30 @@
     const isToday = dayKey(iso) === `${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
     const date = `${MONTHS[d.getMonth()]} ${d.getDate()}`;
     return isToday ? `today · ${date}` : date;
+  }
+
+  // Quote popover for a selection inside message prose, outside code blocks.
+  // Touch devices raise it from the long-press contextmenu instead of mouseup.
+  let quote = $state<{ x: number; y: number; text: string; sourceId?: number } | null>(null);
+  function readQuote() {
+    quote = null;
+    const sel = window.getSelection();
+    const text = sel?.toString().trim();
+    if (!sel || sel.isCollapsed || !text) return;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
+    const prose = el?.closest('.t-prose');
+    if (!prose || el!.closest('pre') || range.cloneContents().querySelector('pre')) return;
+    const at = range.getBoundingClientRect();
+    const id = Number.parseInt(prose.closest('.t-msg')?.getAttribute('data-event-id') ?? '', 10);
+    quote = { x: at.left, y: at.bottom + 6, text, ...(Number.isNaN(id) ? {} : { sourceId: id }) };
+  }
+  const isTouch = () => window.matchMedia('(pointer: coarse)').matches;
+  function doQuote() {
+    if (quote) onQuote?.(quote.text, quote.sourceId);
+    quote = null;
+    window.getSelection()?.removeAllRanges();
   }
 
   // Auto-follow: the ScrollFollow controller sticks to the tail while pinned and
@@ -621,7 +648,33 @@
     </div>
   {/if}
 
-  <div class="convo-scroll" data-testid={TESTID.chatTranscript} bind:this={scrollEl}>
+  {#if quote}
+    <div
+      class="quote-pop"
+      role="menu"
+      aria-label="Selection actions"
+      style="left:{quote.x}px;top:{quote.y}px"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onmousedown={(e) => e.preventDefault()}
+        onclick={doQuote}
+      >
+        Quote
+      </button>
+    </div>
+  {/if}
+
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="convo-scroll"
+    data-testid={TESTID.chatTranscript}
+    bind:this={scrollEl}
+    onmouseup={() => !isTouch() && readQuote()}
+    oncontextmenu={() => isTouch() && readQuote()}
+    onscroll={() => (quote = null)}
+  >
     {#if ctrl.loading && timeline.turns.length === 0}
       <p class="convo-empty">loading conversation…</p>
     {:else if ctrl.error && timeline.turns.length === 0}
@@ -659,6 +712,7 @@
           index={i + 1}
           streaming={turn.streaming}
           retryFailed={failed}
+          eventId={turn.eventId}
           onRetry={retry && turn.id === retry.turnId ? () => onRetry(retry.text) : undefined}
         >
           {#if turn.origin}
@@ -1155,6 +1209,28 @@
     .cbn .chev {
       transition: none;
     }
+  }
+  .quote-pop {
+    position: fixed;
+    z-index: 40;
+    background: var(--bg3);
+    border: 1px solid var(--bd1);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-2);
+    padding: 3px;
+  }
+  .quote-pop button {
+    background: none;
+    border: 0;
+    color: var(--tx1);
+    font: 500 var(--fs-xs) / 1 var(--font-ui);
+    padding: 5px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .quote-pop button:hover {
+    background: var(--bg4);
+    color: var(--tx0);
   }
   .convo-scroll {
     flex: 1;

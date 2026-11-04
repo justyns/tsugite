@@ -1698,3 +1698,39 @@ test('the header quota chip follows the chat provider, and hides on a phone', as
   await page.viewport(390, 780);
   await expect.element(chip).not.toBeVisible();
 });
+
+// --- Quote selection --------------------------------------------------------
+
+function selectIn(root: Element, selector: string) {
+  const node = root.querySelector(selector)!.firstChild as Text;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+}
+
+test.each([
+  ['your message', '.t-msg--user .t-prose p', 'status?', 4],
+  ['assistant prose', '.t-msg--ai .t-prose p', 'Two files left.', 5],
+  ['a code block', '.t-prose pre code', 'rm -rf build', undefined],
+])('selecting %s offers Quote only for prose', async (_name, selector, text, id) => {
+  const onQuote = vi.fn();
+  const ctrl = controllerWith([
+    { id: 4, type: 'user_input', text: 'status?', timestamp: '2026-07-14T15:00:00Z' },
+    { id: 5, type: 'turn_start' },
+    { id: 7, type: 'final_result', result: `Two files left.\n\n\`\`\`\nrm -rf build\n\`\`\`` },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, onQuote });
+
+  await expect.element(page.getByText(text)).toBeInTheDocument();
+  selectIn(page.getByTestId(TESTID.chatTranscript).element(), selector);
+
+  const quote = page.getByRole('menuitem', { name: 'Quote' });
+  if (id === undefined) {
+    expect(await quote.elements()).toHaveLength(0);
+    return;
+  }
+  await quote.click();
+  expect(onQuote).toHaveBeenCalledWith(text, id);
+});

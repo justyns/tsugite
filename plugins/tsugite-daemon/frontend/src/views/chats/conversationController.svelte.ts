@@ -119,6 +119,7 @@ export interface SendOpts {
   uploadedFiles?: { name: string }[];
   /** Structured client-context items to send as metadata (never in the text). */
   contextMetadata?: { key: string; label: string; value: string }[];
+  quotedFrom?: number[];
 }
 
 /** One inline slash-command echo (Claude-Code style): the command line and its
@@ -319,6 +320,7 @@ export class ConversationController {
         ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
         ...(opts.uploadedFiles?.length ? { uploadedFiles: opts.uploadedFiles } : {}),
         ...(opts.contextMetadata?.length ? { contextMetadata: opts.contextMetadata } : {}),
+        ...(opts.quotedFrom?.length ? { quotedFrom: opts.quotedFrom } : {}),
       },
       {
         // Before a stream opens the send may still be parked, or the pane may

@@ -27,6 +27,8 @@ export interface ChatSendBody {
   /** Structured client-context items (location, ...) sent as metadata alongside
    *  the message - the backend splits them back out, never into the text. */
   contextMetadata?: { key: string; label: string; value: string }[];
+  /** Storage ids of the messages quoted into this one; recorded for the UI only. */
+  quotedFrom?: number[];
 }
 
 export interface ChatStreamHandlers {
@@ -84,6 +86,7 @@ export function sendChat(body: ChatSendBody, handlers: ChatStreamHandlers = {}):
   if (body.reasoningEffort != null) payload.reasoning_effort = body.reasoningEffort;
   if (body.uploadedFiles) payload.uploaded_files = body.uploadedFiles;
   if (body.contextMetadata?.length) payload.context_metadata = body.contextMetadata;
+  if (body.quotedFrom?.length) payload.quoted_from = body.quotedFrom;
 
   const run = async (): Promise<void> => {
     try {

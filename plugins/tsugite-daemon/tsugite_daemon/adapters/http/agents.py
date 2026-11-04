@@ -884,6 +884,7 @@ class AgentsMixin:
         reasoning_effort: Optional[str],
         uploaded_files: list,
         context_metadata,
+        channel_extra: dict,
     ) -> JSONResponse:
         """Park a send that must wait for the queue to drain - the target session
         is busy, or idle with an earlier entry already parked - holding the raw
@@ -894,6 +895,7 @@ class AgentsMixin:
             reasoning_effort=reasoning_effort,
             uploaded_files=uploaded_files,
             context_metadata=context_metadata,
+            metadata=channel_extra,
         )
         try:
             position = self.adapter.session_store.queue_message(session.id, entry)
@@ -1070,6 +1072,8 @@ class AgentsMixin:
         logger.info("<- %s (http): %s", user_id, message[:100])
 
         context_metadata = body.get("context_metadata")
+        quoted_from = body.get("quoted_from")
+        channel_extra = {"quoted_from": quoted_from} if quoted_from else {}
 
         from tsugite_daemon.session_store import SessionSource, room_transcript_error
 
@@ -1112,12 +1116,13 @@ class AgentsMixin:
 
         if self.session_busy(target_session) or target_session.queued_messages:
             return self._queue_chat(
-                target_session, message, raw_user_id, reasoning_effort, uploaded_files, context_metadata
+                target_session, message, raw_user_id, reasoning_effort, uploaded_files, context_metadata, channel_extra
             )
 
         message, metadata = _build_send_metadata(
             adapter, target_session_id, message, uploaded_files, reasoning_effort, context_metadata
         )
+        metadata.update(channel_extra)
         metadata["client_ip"] = request.client.host if request.client else "unknown"
         metadata["conv_id_override"] = target_session_id
 

@@ -241,6 +241,7 @@ class TestTheTurnEnding:
                 "uploaded_files": [{"name": "notes.txt"}],
                 "context_metadata": [{"type": "file", "path": "notes.txt"}],
                 "reasoning_effort": "high",
+                "quoted_from": [12],
             },
         )
         assert resp.status_code == 202
@@ -249,6 +250,7 @@ class TestTheTurnEnding:
 
         assert await _wait_until(lambda: adapter.handle_message.await_count == 1)
         metadata = adapter.handle_message.await_args.kwargs["channel_context"].metadata
+        assert metadata["quoted_from"] == [12]
         assert [a.name for a in metadata["uploaded_attachments"]] == ["notes.txt"]
         assert all(a.user_upload for a in metadata["uploaded_attachments"])
         assert metadata["context_metadata"] == [{"type": "file", "path": "notes.txt"}]

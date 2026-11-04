@@ -82,6 +82,11 @@ test('send threads contextMetadata into the sendChat body when present, omits it
   expect('contextMetadata' in chat.body!).toBe(false);
 });
 
+test('send threads quotedFrom into the sendChat body when present', async () => {
+  await controller([]).send('> quoted\n\nreply', { quotedFrom: [4, 9] });
+  expect(chat.body).toMatchObject({ quotedFrom: [4, 9] });
+});
+
 test('the optimistic bubble carries the attached context as an injected gutter block', async () => {
   const ctrl = controller([]);
   await ctrl.send('with ctx', {

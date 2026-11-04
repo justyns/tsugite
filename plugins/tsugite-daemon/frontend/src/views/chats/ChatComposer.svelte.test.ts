@@ -1017,3 +1017,22 @@ test('neither busy nor streaming shows a plain Send with no Queue button', async
   ).toHaveLength(0);
   expect(container.querySelector('.composer')?.classList.contains('is-queued')).toBe(false);
 });
+
+test('quotes stack as blockquotes at the cursor and their source ids ride the send', async () => {
+  stubCommands([]);
+  const onSend = vi.fn();
+  const { component } = await render(ChatComposer, { ...base, onSend });
+  const { insertQuote } = component as unknown as {
+    insertQuote: (text: string, sourceId?: number) => Promise<void>;
+  };
+  const box = page.getByRole('textbox', { name: 'Message' });
+
+  await userEvent.fill(box, 'agree');
+  await insertQuote('first\nsecond', 4);
+  await insertQuote('third', 9);
+
+  await expect.element(box).toHaveValue('agree\n> first\n> second\n\n> third\n\n');
+  await userEvent.keyboard('{Enter}');
+  await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+  expect(onSend.mock.calls[0]?.[1]?.quotedFrom).toEqual([4, 9]);
+});

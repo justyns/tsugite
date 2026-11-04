@@ -899,6 +899,11 @@ class TestChatContextMetadata:
         cc = _capture_chat_channel_context(client, test_token, {"message": "hi"})
         assert "context_metadata" not in cc.metadata
 
+    def test_quoted_from_rides_channel_metadata_not_the_message(self, client, test_token):
+        cc = _capture_chat_channel_context(client, test_token, {"message": "> hi\n\nok", "quoted_from": [3, 5]})
+        assert cc.metadata["quoted_from"] == [3, 5]
+        assert cc.metadata.get("context_metadata") is None
+
 
 class TestUnloadSkillEndpoint:
     """POST /api/chat/unload-skill suppresses a skill for the session."""
