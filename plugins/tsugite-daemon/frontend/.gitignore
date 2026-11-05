@@ -1,5 +1,5 @@
 # Local install artifacts.
-node_modules/
+node_modules
 
 # --- Force-track source dirs that a global or repo-root gitignore would skip ---
 # A per-user global excludesfile commonly has a bare `lib/` (matches src/lib), and

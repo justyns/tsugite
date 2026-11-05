@@ -183,7 +183,6 @@ benchmarks/
 docker-compose.test.yml
 #### TODO ^^^
 
-plugins/tsugite-daemon/frontend/node_modules/
 # Vite dep-optimizer cache. Normally under node_modules/.vite, but lands at the
 # cwd's `.vite/` when vite/vitest is run from the repo root, so ignore it anywhere.
 .vite/
