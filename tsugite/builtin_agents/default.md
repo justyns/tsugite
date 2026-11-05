@@ -95,13 +95,6 @@ instructions: |
   </agent_instructions>
 ---
 <environment>
-{% if is_scheduled_message | default(false) %}
-
-**Scheduled message** (schedule: {{ schedule_id | default('') }}): a schedule sent this, not the user typing just now.
-- The user may not be around, and may not see your reply for a while.
-- They may also be mid-conversation here - read the recent turns before assuming what "this" and "that" refer to.
-- It is a reminder you set for yourself, so act on it; ask the user only if you genuinely need them.
-{% endif %}
 {% if is_daemon | default(false) %}
 **Daemon Mode**: You are running as agent `{{ agent_name | default('') }}`. Schedule tools are available for creating recurring or one-off tasks.
 Your context window will be automatically compacted as it approaches its limit. Do not stop tasks early due to token budget concerns.
@@ -141,12 +134,6 @@ Keep `topic` and `status_text` current so the sidebar reflects what each session
 Example shape: `topic` = "Vikunja bridge plugin design - picking between subprocess vs Wasm"; `status_text` = "investigating".
 
 Avoid prose in `status_text` - something like "topic and status now being updated proactively as instructed" is wrong (it's a sentence describing an action). Use a state tag like "investigating" or "idle" instead.
-{% if has_pending_deliveries | default(false) %}
-
-**Outstanding Deliveries**: `<message_context>` lists cards that arrived on their own and are still waiting on the user. They are not messages the user sent, and they stay listed until acknowledged - across compactions, so one may predate anything you can still read in this conversation.
-
-When the user's message addresses one - they did it, they declined it, they rescheduled it - call `session_acknowledge(delivery_id="...")`. A message that merely happens to arrive after a delivery does not discharge it; leave it listed and answer what the user actually asked.
-{% endif %}
 {% if is_channel_session | default(false) %}
 You are managing a shared channel. When a user asks for something that would benefit from its own workstream (investigation, coding task, long-running operation), use `spawn_job()` to run it as dedicated background work rather than handling everything inline.
 {% endif %}
@@ -253,6 +240,19 @@ You are in step {{ step_number }} of {{ total_steps }} ({{ step_name }}).
 - The framework automatically presents the next step.
 {% endif %}
 </environment>
+{% if is_scheduled_message | default(false) %}
+
+**Scheduled message** (schedule: {{ schedule_id | default('') }}): a schedule sent this, not the user typing just now.
+- The user may not be around, and may not see your reply for a while.
+- They may also be mid-conversation here - read the recent turns before assuming what "this" and "that" refer to.
+- It is a reminder you set for yourself, so act on it; ask the user only if you genuinely need them.
+{% endif %}
+{% if has_pending_deliveries | default(false) %}
+
+**Outstanding Deliveries**: `<message_context>` lists cards that arrived on their own and are still waiting on the user. They are not messages the user sent, and they stay listed until acknowledged - across compactions, so one may predate anything you can still read in this conversation.
+
+When the user's message addresses one - they did it, they declined it, they rescheduled it - call `session_acknowledge(delivery_id="...")`. A message that merely happens to arrive after a delivery does not discharge it; leave it listed and answer what the user actually asked.
+{% endif %}
 
 {% if available_agents | default(none) %}
 <available_agents>

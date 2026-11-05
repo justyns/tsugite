@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, AsyncIterator
 
 from tsugite.exceptions import AgentExecutionError
@@ -11,6 +12,10 @@ from tsugite.providers.model_registry import get_model_info as _get_model_info
 from tsugite.providers.model_registry import register_aliases, register_models
 
 logger = logging.getLogger(__name__)
+
+# Template blocks rendered into every task message. The CLI stores each task message in its
+# transcript but never stores the system prompt.
+_STABLE_BLOCKS = re.compile(r"<(environment|available_skills|guidelines)>.*?</\1>\s*", re.DOTALL)
 
 _CLAUDE_CODE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 
@@ -162,6 +167,11 @@ class ClaudeCodeProvider:
             if messages and messages[0].get("role") == "system":
                 system_prompt = messages[0]["content"]
                 messages = messages[1:]
+            task = messages[-1] if messages else None
+            if task and task.get("role") == "user" and isinstance(task["content"], str):
+                blocks = [m.group(0).strip() for m in _STABLE_BLOCKS.finditer(task["content"])]
+                system_prompt = "\n\n".join([system_prompt, *blocks])
+                messages = [*messages[:-1], {**task, "content": _STABLE_BLOCKS.sub("", task["content"])}]
 
             # Kept so the poisoned-resume fallback can restart fresh and
             # rebuild the first message with serialized history included.
