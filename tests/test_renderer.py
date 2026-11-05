@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -288,6 +289,14 @@ def test_humanize_relative_future_or_zero():
 
     assert humanize_relative(now_ref, now_ref) == "just now"
     assert humanize_relative(now_ref + timedelta(seconds=30), now_ref) == "just now"
+
+
+def test_humanize_relative_counts_elapsed_time_across_dst():
+    tz = ZoneInfo("America/Chicago")
+    now_ref = datetime(2026, 11, 5, 3, 30, tzinfo=tz)
+    started = (now_ref.astimezone(timezone.utc) - timedelta(days=6)).astimezone(tz)
+
+    assert humanize_relative(started, now_ref) == "6 days ago"
 
 
 def test_slugify_edge_cases():

@@ -86,8 +86,8 @@ def humanize_relative(dt: datetime, ref: datetime) -> str:
     weeks / months / years). Future or equal timestamps render as "just now"
     so callers don't have to special-case negative deltas.
     """
-    delta = ref - dt
-    seconds = int(delta.total_seconds())
+    # Same-tzinfo subtraction is wall-clock; compare in UTC so a DST change does not shift the delta.
+    seconds = int((ref.astimezone(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds())
     if seconds < 60:
         return "just now"
 
