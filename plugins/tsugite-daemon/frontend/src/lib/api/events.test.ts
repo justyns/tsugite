@@ -29,6 +29,14 @@ describe('routeShellEvent', () => {
     expect(sink.onTerminalState).toHaveBeenCalledWith({ terminal_id: 't1', state: 'running' });
   });
 
+  it('routes agents_changed to onAgentsChanged', () => {
+    const onAgentsChanged = vi.fn();
+    expect(routeShellEvent({ type: 'agents_changed', data: {} }, { onAgentsChanged })).toBe(
+      'onAgentsChanged',
+    );
+    expect(onAgentsChanged).toHaveBeenCalledWith({});
+  });
+
   it('routes the compaction lifecycle broadcasts to their sinks', () => {
     const onCompactionStarted = vi.fn();
     const onCompactionFinished = vi.fn();

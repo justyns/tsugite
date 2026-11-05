@@ -26,6 +26,7 @@
   import { pluginsMeta } from '$lib/stores/pluginsMeta.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
   import { jobs } from '$lib/stores/jobs.svelte';
+  import { agents } from '$lib/stores/agents.svelte';
   import { activity } from '$lib/stores/activity.svelte';
   import { schedules } from '$lib/stores/schedules.svelte';
   import { terminals } from '$lib/stores/terminals.svelte';
@@ -426,6 +427,7 @@
     onJobUpdate: (data) => jobs.applyJobUpdate(data),
     onScheduleUpdate: (data) => schedules.applyScheduleUpdate(data),
     onTerminalState: (data) => terminals.applyTerminalState(data),
+    onAgentsChanged: () => void agents.load(),
   };
 
   const artifactSignature = $derived(

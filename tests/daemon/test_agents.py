@@ -429,6 +429,13 @@ class TestAgentTools:
             False,
         )
 
+    def test_create_agent_broadcasts_agents_changed(self, adapter, agents_root):
+        adapter.event_bus = MagicMock()
+
+        sessions_tools.create_agent("atlas")
+
+        adapter.event_bus.emit.assert_called_once_with("agents_changed", {})
+
     def test_create_agent_uses_a_default_template_from_the_default_workspace(self, store, default_ws):
         store.agents.ensure_default(default_ws, "pinned")
 

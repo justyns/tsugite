@@ -32,6 +32,8 @@ export interface ShellEventSink {
   onTerminalState?: (data: Record<string, unknown>) => void;
   /** agent_status: {agent} - config/running-count changed. */
   onAgentStatus?: (data: Record<string, unknown>) => void;
+  /** agents_changed: {} - an agent was created; refetch the list. */
+  onAgentsChanged?: (data: Record<string, unknown>) => void;
   /** history_update: {agent, session_id} - a turn settled; refetch history. */
   onHistoryUpdate?: (data: Record<string, unknown>) => void;
 }
@@ -48,6 +50,7 @@ const ROUTES: Record<string, keyof ShellEventSink> = {
   schedule_update: 'onScheduleUpdate',
   terminal_state: 'onTerminalState',
   agent_status: 'onAgentStatus',
+  agents_changed: 'onAgentsChanged',
   history_update: 'onHistoryUpdate',
 };
 

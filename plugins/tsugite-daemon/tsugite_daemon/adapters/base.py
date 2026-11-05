@@ -524,13 +524,16 @@ class BaseAdapter(ABC):
                 "reasoning_effort": reasoning_effort,
                 "color": color,
             }
-            return agents.create(Agent(id=agent_id, **self.agent_fields(body)))
+            agent = agents.create(Agent(id=agent_id, **self.agent_fields(body)))
         except BaseException:
             try:
                 shutil.rmtree(workspace)
             except OSError as e:
                 logger.warning("Could not remove workspace %s of failed agent %s: %s", workspace, agent_id, e)
             raise
+        if self.event_bus:
+            self.event_bus.emit("agents_changed", {})
+        return agent
 
     def _session_and_agent(self, session_id: Optional[str]) -> tuple[Optional[Session], Agent]:
         try:
