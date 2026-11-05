@@ -11,6 +11,10 @@ from tsugite.providers.base import CompletionResponse, Usage
 from tsugite.ui.jsonl import JSONLUIHandler
 
 
+def _quarter(text):
+    return len(text) // 4
+
+
 class TestPromptSnapshotEvent:
     def test_defaults_to_empty(self):
         event = PromptSnapshotEvent()
@@ -20,14 +24,14 @@ class TestPromptSnapshotEvent:
 
 class TestEstimateContentTokens:
     def test_string(self):
-        assert estimate_content_tokens("x" * 400) == 100
+        assert estimate_content_tokens("x" * 400, _quarter) == 100
 
     def test_list_content(self):
         content = [{"type": "text", "text": "x" * 200}, {"type": "text", "text": "y" * 100}]
-        assert estimate_content_tokens(content) == 75
+        assert estimate_content_tokens(content, _quarter) == 75
 
     def test_non_string(self):
-        assert estimate_content_tokens(42) == 100
+        assert estimate_content_tokens(42, _quarter) == 100
 
 
 class _FakeAgent:
@@ -44,6 +48,8 @@ class _FakeAgent:
         self.attachments = attachments or []
         self.skills = skills or []
         self.hook_vars = hook_vars or {}
+        self._model_id = "test-model"
+        self._provider = SimpleNamespace(count_tokens=lambda text, model: len(text) // 4)
 
 
 def _cat(result, name):
@@ -76,6 +82,14 @@ class TestComputeTokenBreakdown:
         assert tools_cat["tokens"] == 50
         assert len(tools_cat["items"]) == 1
         assert tools_cat["items"][0]["name"] == "read_file"
+
+    def test_counts_with_provider_count_tokens(self):
+        from types import SimpleNamespace
+
+        agent = _FakeAgent(task="task", attachments=[SimpleNamespace(name="a.md", content="x" * 400)])
+        agent._provider = SimpleNamespace(count_tokens=lambda text, model: len(text) if model == "test-model" else -1)
+        result = agent._compute_token_breakdown([{"role": "system", "content": "sys"}])
+        assert _cat(result, "attachments")["tokens"] == 400
 
     def test_attachments_with_items(self):
         from types import SimpleNamespace
@@ -122,6 +136,7 @@ def _patch(agent, *, side_effect=None, return_value=None):
     agent._provider.stop = AsyncMock()
     agent._provider.get_state = MagicMock(return_value=None)
     agent._provider.set_context = MagicMock()
+    agent._provider.count_tokens = lambda text, model: len(text) // 4
     return mock
 
 

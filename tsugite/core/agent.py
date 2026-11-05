@@ -75,12 +75,12 @@ CONTEXT_ACK = "Context loaded."
 NO_ACTION_MESSAGE = "run ended without executing any code or calling return_value()"
 
 
-def estimate_content_tokens(content) -> int:
-    """Rough token estimate for message content (string or multipart blocks)."""
+def estimate_content_tokens(content, count) -> int:
+    """Token estimate for message content (string or multipart blocks); `count` counts one text."""
     if isinstance(content, str):
-        return len(content) // 4
+        return count(content)
     if isinstance(content, list):
-        return sum(len(b.get("text", "")) // 4 if isinstance(b, dict) else 25 for b in content)
+        return sum(count(b.get("text", "")) if isinstance(b, dict) else 25 for b in content)
     return 100
 
 
@@ -1400,7 +1400,9 @@ class TsugiteAgent:
 
     def _compute_token_breakdown(self, messages: List[Dict]) -> Dict:
         """Compute per-category token breakdown with individual item details."""
-        est = estimate_content_tokens
+
+        def est(content) -> int:
+            return estimate_content_tokens(content, lambda text: self._provider.count_tokens(text, self._model_id))
 
         def itemized(name: str, items: list) -> Dict:
             return {"name": name, "tokens": sum(i["tokens"] for i in items), "items": items}

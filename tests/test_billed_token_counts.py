@@ -58,6 +58,7 @@ async def _run(tmp_path, responses):
     agent._provider.stop = AsyncMock()
     agent._provider.get_state = MagicMock(return_value=None)
     agent._provider.set_context = MagicMock()
+    agent._provider.count_tokens = lambda text, model: len(text) // 4
 
     await agent.run("do the task")
     snaps = [e.data["token_breakdown"] for e in storage.iter_events() if e.type == "prompt_snapshot"]
