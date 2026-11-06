@@ -3,9 +3,9 @@
 import json
 import os
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 # XDG Base Directory utilities
 
@@ -142,6 +142,13 @@ class ExecutorConfig(BackendConfig):
     backend: str = "subprocess"
 
 
+class EgressFilterConfig(BaseModel):
+    """Sensitive strings that agent HTTP requests may not contain (case-insensitive)."""
+
+    mode: Literal["reject", "warn", "off"] = "reject"
+    strings: List[Annotated[str, StringConstraints(min_length=1)]] = Field(default_factory=list)
+
+
 class Config(BaseModel):
     """Tsugite configuration."""
 
@@ -168,6 +175,7 @@ class Config(BaseModel):
     sandbox: Optional[SandboxSettings] = None
     executor: Optional[ExecutorConfig] = None
     user_agent: Optional[str] = None
+    egress_filter: Optional[EgressFilterConfig] = None
 
 
 def get_config_path() -> Path:

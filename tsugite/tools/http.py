@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from tsugite.egress_filter import apply_egress_filter
 from tsugite.exceptions import ToolUnavailableError
 from tsugite.permissions import get_permissions, web_fetch_blocked
 from tsugite.secrets.redaction import redact_sensitive_obj
@@ -85,7 +86,7 @@ def _refuse_denied_request(request: httpx.Request) -> None:
     _refuse_denied_host(str(request.url))
 
 
-_DENYLIST_HOOKS = {"request": [_refuse_denied_request]}
+_REQUEST_HOOKS = {"request": [_refuse_denied_request, apply_egress_filter]}
 
 
 def _simple_request(
@@ -116,7 +117,7 @@ def _simple_request(
             timeout=timeout,
             follow_redirects=follow_redirects,
             max_redirects=_MAX_REDIRECTS,
-            event_hooks=_DENYLIST_HOOKS,
+            event_hooks=_REQUEST_HOOKS,
         ) as client:
             response = client.request(method=method.upper(), url=url, headers=_default_headers(headers), **kwargs)
             if raise_for_status and (follow_redirects or not response.is_redirect):
@@ -260,7 +261,7 @@ def download_file(url: str, local_path: str, timeout: int = 60, follow_redirects
             headers=_default_headers(),
             follow_redirects=follow_redirects,
             max_redirects=_MAX_REDIRECTS,
-            event_hooks=_DENYLIST_HOOKS,
+            event_hooks=_REQUEST_HOOKS,
         ) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
@@ -292,7 +293,7 @@ def check_url(url: str, timeout: int = 10) -> Dict[str, Any]:
     """
     _refuse_denied_host(url)
     try:
-        with httpx.Client(timeout=timeout, headers=_default_headers(), event_hooks=_DENYLIST_HOOKS) as client:
+        with httpx.Client(timeout=timeout, headers=_default_headers(), event_hooks=_REQUEST_HOOKS) as client:
             response = client.head(url, follow_redirects=True)
 
             return {
