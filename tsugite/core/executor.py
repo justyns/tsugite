@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, runt
 
 from tsugite.core.state import load_state, save_state
 from tsugite.exceptions import StateSerializationError
-from tsugite.prompt_xml import El
+from tsugite.prompt_xml import El, Raw
 from tsugite.secrets.redaction import redact_sensitive_obj
 
 PPRINT_WIDTH = 100
@@ -162,7 +162,17 @@ def build_execution_result(
     def _pairs(mapping: Dict[str, str]) -> str:
         return ", ".join(f"{k}={v}" for k, v in mapping.items())
 
-    children = [El("output", [output], inline=True)]
+    # Local import: tsugite.core.agent imports this module.
+    from tsugite.core.agent import escape_runtime_injection_tags
+
+    def _verbatim(text: str) -> Raw:
+        """Tool output reaches the model unescaped; only runtime tags and element closers are made inert."""
+        text = escape_runtime_injection_tags(text)[0]
+        for name in ("output", "return_value"):
+            text = text.replace(f"</{name}", f"&lt;/{name}")
+        return Raw(text)
+
+    children = [El("output", [_verbatim(output)], inline=True)]
     if error:
         if error.startswith("NameError:"):
             error += NAME_ERROR_NOTE
@@ -176,7 +186,7 @@ def build_execution_result(
     if state_keys:
         children.append(El("state", [_pairs(state_keys)], inline=True))
     if return_value is not None:
-        children.append(El("return_value", [return_value], inline=True))
+        children.append(El("return_value", [_verbatim(return_value)], inline=True))
 
     return El(
         "tsugite_execution_result",
