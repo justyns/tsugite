@@ -85,6 +85,18 @@ test('init carries the viewing user, so a surface can attribute what the human d
   expect(init?.user).toBe('desk-viewer');
 });
 
+test('a surface can open links in a new tab that runs outside its sandbox', async () => {
+  seed(pluginPage(RECORD_AND_READY));
+  await render(PluginSurface, { kind: 'plugin/demo/board', params: {} });
+
+  const frame = document.querySelector<HTMLIFrameElement>(
+    `[data-testid="${TESTID.pluginSurface}"] iframe`,
+  )!;
+  expect([...frame.sandbox]).toEqual(
+    expect.arrayContaining(['allow-popups', 'allow-popups-to-escape-sandbox']),
+  );
+});
+
 test('init carries the protocol version and the resolved theme tokens', async () => {
   seed(pluginPage(RECORD_AND_READY));
   await render(PluginSurface, { kind: 'plugin/demo/board', params: { path: 'q4.docx' } });

@@ -148,7 +148,7 @@
         bind:this={frame}
         {src}
         title={surface.label}
-        sandbox="allow-scripts allow-forms allow-same-origin"
+        sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
         onload={onLoad}
       ></iframe>
     {/key}
