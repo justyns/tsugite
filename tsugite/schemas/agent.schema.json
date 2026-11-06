@@ -148,6 +148,13 @@
       "title": "Strict Tools",
       "type": "boolean"
     },
+    "deferred_tools": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Deferred Tools",
+      "type": "array"
+    },
     "prefetch": {
       "items": {
         "additionalProperties": true,

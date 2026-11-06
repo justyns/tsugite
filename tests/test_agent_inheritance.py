@@ -603,6 +603,7 @@ FIELD_SAMPLES = {
     "max_turns": 42,
     "tools": ["read_file"],
     "strict_tools": True,
+    "deferred_tools": ["*", "-mcp_*"],
     "prefetch": [{"tool": "get_env", "assign": "env"}],
     "attachments": ["CHILD.md"],
     "auto_load_skills": ["child-skill"],

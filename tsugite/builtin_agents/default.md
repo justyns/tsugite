@@ -40,6 +40,9 @@ tools:
   - "@artifacts"
   - "@terminal"
   - "@tmux"
+deferred_tools:
+  - "*"
+  - "-mcp_*"
 auto_load_skills:
   - response-patterns
 prefetch:

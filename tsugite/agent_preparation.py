@@ -330,6 +330,17 @@ class AgentPreparer:
                 if "notify_user" not in expanded and "notify_user" in _tools:
                     expanded.append("notify_user")
 
+            if agent_config.deferred_tools:
+                from tsugite.permissions import get_permissions
+                from tsugite.tools.tool_access import TOOL_ACCESS_TOOLS, start_turn
+
+                perms = get_permissions()
+                granted = perms.listed(f"agents.{agent_config.name}.tools") if perms else []
+                deferred = expand_tool_specs(agent_config.deferred_tools) + granted
+                deferred = [t for t in deferred if t in _tools and (has_interaction or t not in interactive_tool_names)]
+                access = start_turn(agent_config.name, expanded, deferred)
+                expanded += [t for t in TOOL_ACCESS_TOOLS + access.loaded if t in _tools and t not in expanded]
+
             return [create_tool_from_tsugite(name) for name in expanded]
         except Exception as e:
             raise RuntimeError(f"Failed to create tools: {e}") from e

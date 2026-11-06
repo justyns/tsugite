@@ -584,6 +584,10 @@ async def _execute_agent_with_prompt(
             pre_llm_call=pre_llm_call_cb,
             expects_action=requires_action or (channel_metadata or {}).get("source") == "scheduler",
         )
+        if agent_config.deferred_tools:
+            from tsugite.tools.tool_access import get_access
+
+            get_access().agent = agent
         # Set event_bus in context so tools can access it during execution
         _setup_event_context(event_bus)
 
@@ -1189,11 +1193,14 @@ async def run_agent_async(
             # New conversation (e.g., fresh workspace session) - start with empty history
             pass
 
+    from tsugite.tools.tool_access import current_access
+
     # Scope this run's ambient state with tokens: an agent hook nests a full run
     # inside this one and must restore what it found rather than clobber it.
     agent_token = set_current_agent(agent_config.name)
     secrets_token = set_allowed_secrets(agent_config.allowed_secrets)
     turn_token = start_turn() if get_turn_id() is None else None
+    access_token = current_access.set(None)
 
     setup = _RunSetup(
         exec_options=exec_options,
@@ -1229,6 +1236,7 @@ async def run_agent_async(
         reset_current_agent(agent_token)
         reset_allowed_secrets(secrets_token)
         reset_skip_hooks(skip_hooks_token)
+        current_access.reset(access_token)
         if turn_token is not None:
             reset_turn(turn_token)
 
