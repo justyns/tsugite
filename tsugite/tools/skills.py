@@ -144,8 +144,8 @@ class SkillManager:
 
         If the skill is already loaded, this still registers the call with the
         executor so the daemon's TTL bookkeeping can treat it as a renewal
-        (reference resets the unused-turns counter to 0). Content is not
-        re-read from disk in that case.
+        (reference resets the unused-turns counter to 0). The cached rendered
+        content is returned, since the context block may have clipped it.
 
         Args:
             skill_name: Name of the skill to load (from available skills list)
@@ -154,7 +154,7 @@ class SkillManager:
                 `disable-model-invocation: true`.
 
         Returns:
-            Success message or error description
+            Status message, followed by the rendered skill content when it is already loaded; or an error description
         """
         self._ensure_registry_initialized()
 
@@ -163,7 +163,7 @@ class SkillManager:
             rendered_content = self._loaded_skills[skill_name]
             if self._executor and hasattr(self._executor, "register_loaded_skill"):
                 self._executor.register_loaded_skill(skill_name, rendered_content)
-            return f"Skill '{skill_name}' is already loaded (TTL renewed)"
+            return f"Skill '{skill_name}' is already loaded (TTL renewed)\n\n{rendered_content}"
 
         skill = self._skill_registry.get(skill_name)
         if not skill:

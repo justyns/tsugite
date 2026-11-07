@@ -90,6 +90,7 @@ class TestLoadSkillTool:
 
         result = call_tool("load_skill", skill_name="test-skill")
         assert "already" in result.lower()
+        assert "already loaded content" in result
 
     def test_load_skill_renders_template(self, tmp_path, monkeypatch):
         skill_dir = _make_skill_dir(
