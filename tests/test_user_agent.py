@@ -9,9 +9,9 @@ deferring to the caller.
 import logging
 from unittest.mock import patch
 
-from tsugite.user_agent import set_user_agent_header
+from tsugite.user_agent import get_user_agent, set_user_agent_header
 
-FRAMEWORK_UA = "Tsugite/test (+https://github.com/justyns/tsugite)"
+FRAMEWORK_UA = "Mozilla/5.0 (compatible; Tsugite-User/test; +https://github.com/justyns/tsugite)"
 
 
 class TestForcesFrameworkUA:
@@ -97,3 +97,11 @@ class TestForcesFrameworkUA:
                 set_user_agent_header(headers)
         assert list(headers.keys()) == ["User-Agent"]
         assert headers["User-Agent"] == FRAMEWORK_UA
+
+
+def test_default_user_agent_format(monkeypatch):
+    monkeypatch.setattr("tsugite.user_agent._user_agent_cached", ...)
+    with patch("tsugite.config.load_config") as load_config, patch("importlib.metadata.version", return_value="1.2.3"):
+        load_config.return_value.user_agent = None
+        ua = get_user_agent()
+    assert ua == "Mozilla/5.0 (compatible; Tsugite-User/1.2.3; +https://github.com/justyns/tsugite)"

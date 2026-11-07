@@ -379,12 +379,14 @@ def test_http_request_returns_headers(mock_httpx_client):
 
 # --- User-Agent tests ---
 
+UA_PREFIX = "Mozilla/5.0 (compatible; Tsugite-User/"
+
 
 def test_default_headers_sets_user_agent():
     """Default headers include User-Agent."""
     headers = _default_headers()
     assert "User-Agent" in headers
-    assert headers["User-Agent"].startswith("Tsugite/")
+    assert headers["User-Agent"].startswith(UA_PREFIX)
 
 
 def test_default_headers_overwrites_custom_user_agent():
@@ -394,7 +396,7 @@ def test_default_headers_overwrites_custom_user_agent():
     (e.g. user emails copied from system context). The framework value wins.
     """
     headers = _default_headers({"User-Agent": "Custom/1.0"})
-    assert headers["User-Agent"].startswith("Tsugite/")
+    assert headers["User-Agent"].startswith(UA_PREFIX)
 
 
 def test_default_headers_disabled_user_agent():
@@ -420,7 +422,7 @@ def test_request_sends_user_agent(mock_httpx_client):
     call_kwargs = mock_httpx_client.request.call_args
     sent_headers = call_kwargs.kwargs["headers"]
     assert "User-Agent" in sent_headers
-    assert sent_headers["User-Agent"].startswith("Tsugite/")
+    assert sent_headers["User-Agent"].startswith(UA_PREFIX)
 
 
 # --- redirect following (3xx was the top tool-failure class) ---

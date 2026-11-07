@@ -31,7 +31,7 @@ def get_user_agent() -> str | None:
         v = version("tsugite-cli")
     except Exception:
         v = __version__
-    _user_agent_cached = f"Tsugite/{v} (+https://github.com/justyns/tsugite)"
+    _user_agent_cached = f"Mozilla/5.0 (compatible; Tsugite-User/{v}; +https://github.com/justyns/tsugite)"
     return _user_agent_cached
 
 
