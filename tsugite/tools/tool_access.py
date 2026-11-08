@@ -1,4 +1,6 @@
 import inspect
+import re
+import textwrap
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, List, Optional
@@ -12,6 +14,7 @@ from . import get_tool, iter_tool_infos, tool
 TOOL_ACCESS_TOOLS = ["search_tools", "load_tool", "request_tool_access"]
 MAX_RESULTS = 20
 MAX_REMEMBERED = 256
+SENTENCE_END = re.compile(r"(?<=[.!?])\s")
 
 
 @dataclass
@@ -121,16 +124,23 @@ def request_tool_access(tools: List[str], reason: str) -> str:
         raise ValueError(f"Invalid tools {unknown}: not installed. Use search_tools to list tool names")
     ask = [t for t in tools if t not in access.allowed and t not in access.denied]
     if ask:
-        lines = []
+        groups: dict[str, list[str]] = {}
         for name in ask:
             category = infos[name].category or ""
-            server = f" (MCP server {category.removeprefix('mcp_')})" if category.startswith("mcp_") else ""
-            lines.append(f"- {name}{server}: {infos[name].description}")
+            group = f"MCP server {category.removeprefix('mcp_')}" if category.startswith("mcp_") else "Other tools"
+            doc = inspect.getdoc(infos[name].func) or ""
+            flat = " ".join(doc.split())
+            summary = SENTENCE_END.split(flat, maxsplit=1)[0]
+            row = f"- {name}: {summary}"
+            if flat != summary:
+                row += "\n" + textwrap.indent(doc, "    ", lambda _: True)
+            groups.setdefault(group, []).append(row)
+        listing = "\n\n".join(f"{group}:\n" + "\n".join(rows) for group, rows in groups.items())
         perms = get_permissions()
         decision = request_approval(
-            f"Allow agent '{access.agent_name}' to use these tools?",
+            f"Allow agent '{access.agent_name}' to use {len(ask)} tool{'s' if len(ask) > 1 else ''}?",
             allow_always=perms is not None,
-            detail=f"Reason: {reason}\n\n" + "\n".join(lines) + "\n\nApprove allows them for this session only.",
+            detail=f"Reason: {reason}\n\n{listing}\n\nApprove allows them for this session only.",
         )
         if decision == "always":
             for name in ask:

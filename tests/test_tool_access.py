@@ -33,7 +33,7 @@ def demo_tools(tmp_path):
 
     @tool(category="mcp_demo")
     def mcp_demo_send() -> str:
-        """Send through the demo MCP server."""
+        """Send through the demo MCP server. Returns the message id once the server accepts it."""
 
     tool(read_file)
     for fn in (ta.search_tools, ta.load_tool, ta.request_tool_access):
@@ -122,6 +122,19 @@ def test_request_tool_access_decisions(answer, loaded, denied, always):
     assert ta.get_permissions().listed("agents.default.tools") == always
     assert "MCP server demo" in backend.calls[0][0]
     assert "send the report" in backend.calls[0][0]
+
+
+def test_approval_groups_tools_by_server_with_full_description_indented():
+    _loaded_agent()
+    backend = FakeBackend("Deny")
+    set_interaction_backend(backend)
+    ta.request_tool_access(["mcp_demo_send"], "why")
+    question = backend.calls[0][0]
+    assert question.startswith("Allow agent 'default' to use 1 tool?\n\nReason: why\n\nMCP server demo:\n")
+    assert (
+        "\n- mcp_demo_send: Send through the demo MCP server.\n    Send through the demo MCP server. Returns"
+        in question
+    )
 
 
 def test_denied_tool_is_not_asked_again():

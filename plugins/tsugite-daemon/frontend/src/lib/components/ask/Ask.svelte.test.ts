@@ -180,3 +180,26 @@ test('a11y: the block is a labelled group', async () => {
   });
   await expect.element(page.getByRole('group', { name: 'Approval required' })).toBeInTheDocument();
 });
+
+test('approval question folds indented lines behind the row above', async () => {
+  render(Ask, {
+    question: 'Allow 1 tool?\n\n- search: Find mail.\n    Find mail. Takes a query.',
+    questionType: 'approval',
+    options: ['Approve', 'Deny'],
+    onAnswer: vi.fn(),
+  });
+
+  await expect.element(page.getByText('Takes a query.')).not.toBeVisible();
+  await page.getByText('- search: Find mail.').click();
+  await expect.element(page.getByText('Find mail. Takes a query.')).toBeVisible();
+});
+
+test('a line indented less than four spaces stays visible', async () => {
+  render(Ask, {
+    question: 'Run this?\n  npm test',
+    questionType: 'yes_no',
+    onAnswer: vi.fn(),
+  });
+
+  await expect.element(page.getByText('npm test')).toBeVisible();
+});

@@ -69,6 +69,15 @@
   const headIcon = $derived<IconName>(
     resolution ? (resolution.tone === 'approved' ? 'check' : 'x') : alert ? 'alert' : 'q',
   );
+  // Lines indented four spaces belong to the line above and fold behind it.
+  const rows = $derived(
+    question.split('\n').reduce<{ text: string; more: string[] }[]>((acc, line) => {
+      const last = acc.at(-1);
+      if (line.startsWith('    ') && last) last.more.push(line.slice(4));
+      else acc.push({ text: line, more: [] });
+      return acc;
+    }, []),
+  );
   const canSubmitChoice = $derived(choice !== '');
   const canSubmitText = $derived(draft.trim() !== '');
 
@@ -100,7 +109,17 @@
   </div>
 
   <div class="q" id="{uid}-q">
-    {question}{#if command}&nbsp;<code>{command}</code>{/if}
+    {#each rows as row, i (i)}
+      {#if row.more.length}
+        <details>
+          <summary>{row.text}</summary>
+          <div class="more">{row.more.join('\n')}</div>
+        </details>
+      {:else}
+        <div class="line">{row.text}</div>
+      {/if}
+    {/each}
+    {#if command}&nbsp;<code>{command}</code>{/if}
   </div>
 
   {#if resolution}
@@ -187,6 +206,15 @@
     color: var(--tx0);
     line-height: 1.5;
     text-wrap: pretty;
+  }
+  .t-ask .q .line {
+    min-height: 1.5em;
+  }
+  .t-ask .q .more {
+    white-space: pre-wrap;
+    color: var(--tx2);
+    font-size: var(--fs-sm);
+    padding: 4px 0 4px 16px;
   }
   .t-ask .q code {
     font: 500 var(--fs-sm) var(--font-mono);
