@@ -35,11 +35,13 @@ class FakeServer:
     With `oauth=False` the MCP endpoint accepts anyone. `denied` lists requests the OAuth
     endpoints rejected, e.g. a PKCE verifier that does not match. `dynamic=False` leaves
     `registration_endpoint` out of the metadata. `auth_methods` is what the token endpoint
-    advertises. A client made in the provider's console is added with `preregister`.
+    advertises. `loopback_only` makes `/register` reject any redirect not on 127.0.0.1, as a native-app-only
+    server does. A client made in the provider's console is added with `preregister`.
     """
 
-    def __init__(self, oauth=True, dynamic=True, auth_methods=("none",)):
+    def __init__(self, oauth=True, dynamic=True, auth_methods=("none",), loopback_only=False):
         self.oauth = oauth
+        self.loopback_only = loopback_only
         self.dynamic = dynamic
         self.auth_methods = list(auth_methods)
         self.secrets = {}
@@ -94,6 +96,9 @@ class FakeServer:
     async def register(self, request: Request):
         self.requests.append("register")
         body = await request.json()
+        if self.loopback_only and any(urlparse(uri).hostname != "127.0.0.1" for uri in body["redirect_uris"]):
+            error = {"error": "invalid_redirect_uri", "error_description": "redirect_uri not a valid scheme or host"}
+            return JSONResponse(error, status_code=400)
         client_id = f"client-{len(self.clients) + 1}"
         self.clients[client_id] = body["redirect_uris"]
         return JSONResponse({**body, "client_id": client_id}, status_code=201)

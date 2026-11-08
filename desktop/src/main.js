@@ -7,6 +7,7 @@ const { daemonItems } = require('./menu');
 const { RotatingLog } = require('./log');
 const { resolveRuntime } = require('./runtime');
 const { Settings } = require('./settings');
+const { forwardCallback, watchSignin } = require('./oauth');
 const { quitHandler } = require('./quit');
 const { Supervisor } = require('./supervisor');
 const { ensureLocalToken } = require('./token');
@@ -58,9 +59,31 @@ function createWindow() {
   };
   w.webContents.on('will-navigate', guard);
   w.webContents.on('will-redirect', guard);
+  // The Connectors page opens a blank window and then points it at the authorization URL.
   w.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          parent: w,
+          title: 'Sign in',
+          icon: ICON,
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: undefined },
+        },
+      };
+    }
     external(url);
     return { action: 'deny' };
+  });
+  w.webContents.on('did-create-window', (child) => {
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    watchSignin(child.webContents, (search) =>
+      forwardCallback(supervisor.target.origin, search)
+        .catch((err) => dialog.showErrorBox('Sign-in failed', err.message))
+        .finally(() => {
+          if (!child.isDestroyed()) child.close();
+        }),
+    );
   });
   w.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     if (isMainFrame && code !== -3 && !isShellFile(url)) showError(`Could not load ${url}: ${description}`);

@@ -42,6 +42,7 @@
       const BASE = '/api/plugins/mcp';
       let token = '';
       let timer = null;
+      const pasting = new Set();
       const REDIRECT = location.origin + BASE + '/callback';
 
       async function api(path, method = 'GET', body) {
@@ -81,7 +82,8 @@
         const w = window.open('', '_blank');
         w.opener = null;
         try {
-          const { authorization_url } = await api(`/servers/${name}/signin`, 'POST', { redirect_base: location.origin });
+          const { authorization_url, paste_back } = await api(`/servers/${name}/signin`, 'POST', { redirect_base: location.origin });
+          if (paste_back) pasting.add(name);
           w.location = authorization_url;
         } catch (err) {
           w.close();
@@ -117,8 +119,24 @@
         return details;
       }
 
+      function pasteForm(name) {
+        const form = el('form', undefined, 'paste');
+        const url = input('url', 'text', 'Paste the address the browser ended on after you approved');
+        url.size = 40;
+        form.append(url, el('button', 'Finish sign-in'));
+        form.onsubmit = (event) => {
+          event.preventDefault();
+          run(async () => {
+            const data = await api('/paste', 'POST', { url: url.value });
+            pasting.delete(name);
+            return data;
+          });
+        };
+        return form;
+      }
+
       function poll() {
-        if (document.querySelector('#list details[open]')) timer = setTimeout(poll, 2000);
+        if (document.querySelector('#list details[open], #list .paste:focus-within')) timer = setTimeout(poll, 2000);
         else run(() => api('/servers'));
       }
 
@@ -135,6 +153,8 @@
           head.append(button('Disconnect', () => api(`/servers/${s.name}`, 'DELETE')));
           box.append(head, el('div', s.url, 'meta'));
           if (s.error) box.append(el('div', s.error, 'error'));
+          if (s.status !== 'connecting') pasting.delete(s.name);
+          if (pasting.has(s.name)) box.append(pasteForm(s.name));
           box.append(clientForm(s));
           if (s.tools.length) {
             const tools = el('ul');

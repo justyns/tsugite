@@ -71,6 +71,59 @@ async def test_sign_in_registers_pkce_exchange_and_tools(daemon, adapter, fake, 
         assert token not in caplog.text
 
 
+LOOPBACK = "http://127.0.0.1" + CALLBACK
+
+
+async def start_paste_back(daemon, adapter):
+    if "fake" not in adapter.servers:
+        await adapter.add("fake", URL)
+    resp = await daemon.post(
+        "/api/plugins/mcp/servers/fake/signin", json={"redirect_base": ORIGIN}, headers=daemon.auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["paste_back"] is True
+    return resp.json()["authorization_url"]
+
+
+@pytest.mark.parametrize("fake", [{"loopback_only": True}], indirect=True)
+async def test_loopback_only_server_signs_in_by_paste_back(daemon, adapter, fake, secrets_backend):
+    code, state = fake.authorize(await start_paste_back(daemon, adapter))
+    landed = f"{LOOPBACK}?code={code}&state={state}"
+
+    pasted = await daemon.post("/api/plugins/mcp/paste", json={"url": landed}, headers=daemon.auth_headers)
+
+    assert pasted.status_code == 200
+    assert (await settled(adapter)).status == "connected"
+    assert fake.clients == {"client-1": [LOOPBACK]}
+    assert fake.requests.count("register") == 2
+
+    del secrets_backend.values["mcp-fake-tokens"]
+    await start_paste_back(daemon, adapter)
+    assert fake.requests.count("register") == 2
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["", "state=wrong&code=c", "code=c", "state={state}&error=access_denied"],
+    ids=["bare", "wrong-state", "code-without-state", "denied"],
+)
+@pytest.mark.parametrize("fake", [{"loopback_only": True}], indirect=True)
+async def test_paste_rejects_a_url_that_does_not_finish_the_flow(daemon, adapter, fake, query):
+    state = fake.authorize(await start_paste_back(daemon, adapter))[1]
+
+    resp = await daemon.post(
+        "/api/plugins/mcp/paste",
+        json={"url": f"{LOOPBACK}?{query.format(state=state)}"},
+        headers=daemon.auth_headers,
+    )
+
+    assert resp.status_code == 400
+
+
+async def test_paste_needs_the_daemon_token(daemon):
+    assert (await daemon.post("/api/plugins/mcp/paste", json={"url": LOOPBACK})).status_code in (401, 403)
+
+
 async def test_tools_run_as_registered_tsugite_tools(daemon, adapter, fake):
     await sign_in(daemon, adapter, fake)
 

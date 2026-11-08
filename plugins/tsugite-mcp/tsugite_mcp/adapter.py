@@ -22,6 +22,7 @@ from mcp.client.auth.utils import (
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.auth import OAuthClientMetadata
+from starlette.datastructures import QueryParams
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
@@ -36,6 +37,8 @@ logger = logging.getLogger(__name__)
 
 NAME_PATTERN = re.compile(r"[a-z][a-z0-9]{0,23}")
 CALLBACK_PATH = "/api/plugins/mcp/callback"
+# Registered with servers that reject the daemon's own redirect. Nothing listens on it.
+LOOPBACK_REDIRECT = "http://127.0.0.1" + CALLBACK_PATH
 LIST_TIMEOUT = 30
 SIGNIN_TIMEOUT = 300
 NEEDS_CLIENT = (
@@ -289,16 +292,28 @@ class McpAdapter(BaseAdapter):
         tools.clear_tools(name)
         await SecretStorage(name).delete_all()
 
-    async def signin(self, name: str, redirect_base: str) -> str:
-        """Start the OAuth flow and return the URL the user opens. It finishes after the callback."""
+    async def signin(self, name: str, redirect_base: str) -> tuple[str, bool]:
+        """Start the OAuth flow and return the URL the user opens and whether the user must paste the redirect back.
+
+        It finishes after the callback. A server that rejects the daemon's own redirect at registration gets the loopback one.
+        """
         self._cancel_signin(name)
-        redirect_uri = redirect_base.rstrip("/") + CALLBACK_PATH
-        storage = SecretStorage(name)
         if self.servers[name].status == "needs_client":
             raise RuntimeError(NEEDS_CLIENT)
+        storage = SecretStorage(name)
         registered = await storage.get_registration()
-        if registered and [str(uri) for uri in registered.redirect_uris] != [redirect_uri]:
+        uris = [str(uri) for uri in registered.redirect_uris] if registered else []
+        redirect_uri = LOOPBACK_REDIRECT if uris == [LOOPBACK_REDIRECT] else redirect_base.rstrip("/") + CALLBACK_PATH
+        if registered and uris != [redirect_uri]:
             await storage.delete_registration()
+        try:
+            return await self._begin(name, redirect_uri), redirect_uri == LOOPBACK_REDIRECT
+        except RuntimeError as exc:
+            if redirect_uri == LOOPBACK_REDIRECT or "invalid_redirect_uri" not in str(exc):
+                raise
+        return await self._begin(name, LOOPBACK_REDIRECT), True
+
+    async def _begin(self, name: str, redirect_uri: str) -> str:
         url_ready: asyncio.Future = self.loop.create_future()
         state = None
 
@@ -327,6 +342,7 @@ class McpAdapter(BaseAdapter):
             Route("/servers/{name}", self._remove, methods=["DELETE"]),
             Route("/servers/{name}/refresh", self._refresh, methods=["POST"]),
             Route("/servers/{name}/signin", self._signin, methods=["POST"]),
+            Route("/paste", self._paste, methods=["POST"]),
         ]
 
     def get_public_http_routes(self) -> list:
@@ -407,21 +423,36 @@ class McpAdapter(BaseAdapter):
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         try:
-            url = await self.signin(name, str(body.get("redirect_base", "")))
+            url, paste_back = await self.signin(name, str(body.get("redirect_base", "")))
         except Exception as exc:
             return JSONResponse({"error": _describe(exc)}, status_code=502)
-        return JSONResponse({"authorization_url": url})
+        return JSONResponse({"authorization_url": url, "paste_back": paste_back})
 
-    async def _callback(self, request: Request) -> HTMLResponse:
-        params = request.query_params
+    def _finish(self, params) -> str | None:
+        """Give the callback's `code` to the sign-in waiting on its `state`. Returns an error message, or None."""
         flow = self._flows.get(params.get("state", ""))
         if flow is None or flow.done():
-            return HTMLResponse(HTML.format("This sign-in link is unknown or expired."), status_code=400)
+            return "This sign-in link is unknown or expired."
         if "code" in params:
             flow.set_result((params["code"], params["state"]))
-            return HTMLResponse(HTML.format("Signed in. You can close this tab."))
+            return None
         flow.set_exception(RuntimeError(f"authorization denied: {params.get('error', 'no code returned')}"))
-        return HTMLResponse(HTML.format("Sign-in was not completed. You can close this tab."), status_code=400)
+        return "Sign-in was not completed."
+
+    async def _callback(self, request: Request) -> HTMLResponse:
+        if error := self._finish(request.query_params):
+            return HTMLResponse(HTML.format(f"{error} You can close this tab."), status_code=400)
+        return HTMLResponse(HTML.format("Signed in. You can close this tab."))
+
+    async def _paste(self, request: Request) -> JSONResponse:
+        try:
+            body = await _body(request)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        url = str(body.get("url", ""))
+        if error := self._finish(QueryParams(urlparse(url).query)):
+            return JSONResponse({"error": error}, status_code=400)
+        return JSONResponse(await self._status())
 
 
 async def _body(request: Request) -> dict:
