@@ -64,6 +64,16 @@ uv tool install "tsugite-cli[daemon]"    # full server install
 
 The package is `tsugite-cli`, the command is `tsugite` (or `tsu` for short).
 
+### Desktop app
+
+On Apple Silicon Macs (macOS 13 or later), install the desktop app from the Homebrew tap:
+
+```bash
+brew install --cask justyns/tap/tsugite
+```
+
+Linux builds ship as an AppImage on the [releases page](https://github.com/justyns/tsugite/releases).
+
 ## Quick start
 
 ```bash
