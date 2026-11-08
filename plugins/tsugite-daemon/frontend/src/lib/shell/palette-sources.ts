@@ -10,6 +10,7 @@
 import type { IconName } from '$lib/components/icon/icons';
 import type { PaletteItem } from '$lib/components/palette/palette-match';
 import type { Theme } from '$lib/stores/theme.svelte';
+import type { ViewMode } from '../../views';
 
 /** A command param carrying the optional rich-input hints `/api/commands` serves:
  *  `widget` names a dedicated control (`model`, `effort`); `choices` is a fixed
@@ -38,7 +39,9 @@ export interface ViewLike {
 
 export interface PaletteData {
   /** Plugin-contributed UI surfaces, openable as a mux tab. */
-  surfaces: { kind: string; label: string; icon: IconName }[];
+  surfaces: { kind: string; label: string; icon: IconName; nav: boolean; mode: ViewMode }[];
+  /** Phone width, where the mux is hidden: only a full-mode nav surface can show. */
+  narrow: boolean;
   themes: readonly Theme[];
   currentTheme: Theme;
   spaces: { id: string; name: string }[];
@@ -118,12 +121,13 @@ export function buildPaletteItems(data: PaletteData): PaletteItem[] {
   const items: PaletteItem[] = [];
 
   for (const surface of data.surfaces) {
+    if (data.narrow && !(surface.nav && surface.mode === 'full')) continue;
     items.push({
       group: 'plugins',
       icon: surface.icon,
       label: surface.label,
-      meta: 'tab',
-      href: `surface:${surface.kind}`,
+      meta: data.narrow ? 'view' : 'tab',
+      href: data.narrow ? `view:${surface.kind}` : `surface:${surface.kind}`,
     });
   }
 

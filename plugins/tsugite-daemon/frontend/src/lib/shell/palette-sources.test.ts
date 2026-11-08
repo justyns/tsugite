@@ -18,7 +18,8 @@ const viewRows = [
 ] as const;
 
 const data: PaletteData = {
-  surfaces: [{ kind: 'plugin/demo/board', label: 'Board', icon: 'grid' }],
+  surfaces: [{ kind: 'plugin/demo/board', label: 'Board', icon: 'grid', nav: false, mode: 'full' }],
+  narrow: false,
   themes: ['mocha', 'latte'],
   currentTheme: 'mocha',
   spaces: [
@@ -88,6 +89,21 @@ describe('buildPaletteItems', () => {
     expect(it?.label).toBe('/status');
     expect(it?.meta).toBe('Show agent status and context usage');
     expect(it?.keywords).toContain('context');
+  });
+
+  test('on a phone, plugin rows open their full view and skip surfaces it cannot show', () => {
+    const items = buildPaletteItems({
+      ...data,
+      narrow: true,
+      surfaces: [
+        { kind: 'plugin/demo/board', label: 'Board', icon: 'grid', nav: true, mode: 'full' },
+        { kind: 'plugin/demo/dock', label: 'Dock', icon: 'grid', nav: true, mode: 'workspace' },
+        { kind: 'plugin/demo/pane', label: 'Pane', icon: 'grid', nav: false, mode: 'full' },
+      ],
+    });
+    const plugins = items.filter((i) => i.group === 'plugins');
+    expect(plugins.map((i) => i.href)).toEqual(['view:plugin/demo/board']);
+    expect(plugins[0]?.meta).toBe('view');
   });
 
   test('falls back to a generic meta for a description-less command', () => {

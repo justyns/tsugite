@@ -320,6 +320,7 @@
   const paletteItems = $derived(
     buildPaletteItems({
       surfaces: pluginsMeta.surfaces,
+      narrow,
       themes: theme.list,
       currentTheme: theme.current,
       spaces: spaces.spaces.map((s) => ({ id: s.id, name: s.name })),
