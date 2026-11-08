@@ -36,7 +36,15 @@ class GithubForge(_Forge):
     kind: Literal["github"]
 
 
-Forge = Annotated[ForgejoForge | GithubForge, Field(discriminator="kind")]
+class BitbucketForge(_Forge):
+    """Bitbucket Cloud, authenticated with an Atlassian API token as Basic auth."""
+
+    kind: Literal["bitbucket"]
+    email: str
+    token_secret: str
+
+
+Forge = Annotated[ForgejoForge | GithubForge | BitbucketForge, Field(discriminator="kind")]
 
 
 class ForgePluginConfig(BaseModel):

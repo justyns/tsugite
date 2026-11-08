@@ -14,7 +14,7 @@ from tsugite.history import get_history_backend
 
 SOURCES = ("pinned", "touched", "mentioned")
 ACTIONS = ("pin", "unpin", "hide", "unhide")
-GITHUB_HOST = "github.com"
+HOSTS = {"github": "github.com", "bitbucket": "bitbucket.org"}
 # Bounds the history read per request, and stops a compaction chain that loops.
 MAX_CHAIN = 10
 GIT_TIMEOUT = 5
@@ -25,11 +25,11 @@ HISTORY_TYPES = ["session_start", "code_execution", "user_input", "model_respons
 URL = re.compile(r"https?://[^\s<>()\"'`]+")
 SCP_REMOTE = re.compile(r"^[\w.-]+@([\w.-]+):(.+)$")
 BARE_NUMBER = re.compile(r"(?<![\w/#&])#(\d+)\b")
-LINK_KINDS = {"forgejo": ("pulls", "issues"), "github": ("pull", "issues")}
+LINK_KINDS = {"forgejo": ("pulls", "issues"), "github": ("pull", "issues"), "bitbucket": ("pull-requests",)}
 
 
 def forge_host(forge) -> str:
-    return GITHUB_HOST if forge.kind == "github" else urlsplit(forge.url).hostname
+    return HOSTS.get(forge.kind) or urlsplit(forge.url).hostname
 
 
 def _forge_for(host: str | None, forges):

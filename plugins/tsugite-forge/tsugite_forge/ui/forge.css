@@ -93,6 +93,9 @@ h2 {
 .forge-icon[data-kind='github'] {
   mask-image: url(icons/github.svg);
 }
+.forge-icon[data-kind='bitbucket'] {
+  mask-image: url(icons/bitbucket.svg);
+}
 ul {
   list-style: none;
   margin: 0;

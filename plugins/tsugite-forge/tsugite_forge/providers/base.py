@@ -3,6 +3,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from tsugite.secrets import get_backend
+from tsugite.secrets.registry import get_registry
+
 
 class ForgeError(RuntimeError):
     pass
@@ -55,6 +58,17 @@ def rest_issue(repo: str, raw: dict) -> Issue:
     )
 
 
+def secret_token(config) -> str:
+    """Read `config.token_secret` from the secrets backend and register it for masking."""
+    token = get_backend().get(config.token_secret)
+    if token is None:
+        raise ForgeError(
+            f"{config.name}: secret {config.token_secret!r} not found in secrets backend,"
+            f" set it with `tsu secrets set {config.token_secret}`"
+        )
+    return get_registry().register(config.token_secret, token, agent="forge")
+
+
 @dataclass
 class ReviewThreads:
     total: int
@@ -85,8 +99,8 @@ class Provider(ABC):
     @abstractmethod
     def _owner_repos(self, owner: str) -> list[str]: ...
 
-    @abstractmethod
-    def _open_prs(self, repo: str) -> list[PullRequest]: ...
+    def _open_prs(self, repo: str) -> list[PullRequest]:
+        raise NotImplementedError
 
     @abstractmethod
     def get_pr(self, repo: str, number: int) -> PullRequest: ...

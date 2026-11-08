@@ -1,5 +1,6 @@
 """Pure ref helpers: remote and mention parsing, the stored `refs` value, and pin/hide actions."""
 
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +17,7 @@ FORGES = ForgePluginConfig(
             "repos": ["octo-org/*"],
         },
         {"name": "gh", "kind": "github", "repos": ["octo-org/*"]},
+        {"name": "bb", "kind": "bitbucket", "email": "me@example.test", "token_secret": "t", "repos": ["octo-ws/*"]},
     ]
 ).forges
 
@@ -35,6 +37,8 @@ FORGES = ForgePluginConfig(
         ("git@github.com:octo-org/site.git", ("gh", "octo-org/site")),
         ("https://github.com/octo-org/site", ("gh", "octo-org/site")),
         ("ssh://git@github.com/octo-org/site.git", ("gh", "octo-org/site")),
+        ("git@bitbucket.org:octo-ws/api.git", ("bb", "octo-ws/api")),
+        ("https://me@bitbucket.org/octo-ws/api.git", ("bb", "octo-ws/api")),
         ("git@gitlab.example.test:octo-org/demo.git", None),
         ("https://forge.example.test.other.test/octo-org/demo", None),
         ("https://forge.example.test/demo", None),
@@ -65,6 +69,24 @@ def test_mention_refs_reads_configured_forge_urls():
         ("gh", "octo-org/site", 4),
         ("home", "octo-org/demo", 11),
     ]
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://bitbucket.org/octo-ws/api/pull-requests/12", ("bb", "octo-ws/api", "pull-requests", 12)),
+        ("https://bitbucket.org/octo-ws/api/pull-requests/12/", ("bb", "octo-ws/api", "pull-requests", 12)),
+        ("https://bitbucket.org/octo-ws/api/issues/3", None),
+        ("https://bitbucket.org/octo-ws/api/pulls/12", None),
+    ],
+)
+def test_bitbucket_link_ref(url, expected):
+    from tsugite_forge.previews import LINK_PATH
+    from tsugite_forge.refs import link_ref
+
+    assert link_ref(url, FORGES) == expected
+    if expected:
+        assert re.search(LINK_PATH, url)
 
 
 def test_bare_number_needs_a_single_pinned_repo():

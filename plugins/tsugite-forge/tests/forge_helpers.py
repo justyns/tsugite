@@ -1,4 +1,4 @@
-"""Fakes for the forge plugin's tests: a secrets backend, a Forgejo server and a `gh` executable."""
+"""Fakes for the forge plugin's tests: a secrets backend, Forgejo and Bitbucket servers and a `gh` executable."""
 
 import json
 import os
@@ -35,6 +35,13 @@ def forgejo_config(**overrides):
     return ForgejoForge(**{**fields, "repos": ["octo-org/demo"], **overrides})
 
 
+def bitbucket_config(**overrides):
+    from tsugite_forge.config import BitbucketForge
+
+    fields = {"name": "bb", "kind": "bitbucket", "email": "me@example.test", "token_secret": SECRET_NAME}
+    return BitbucketForge(**{**fields, "repos": ["octo-ws/demo"], **overrides})
+
+
 def github_config(**overrides):
     from tsugite_forge.config import GithubForge
 
@@ -42,14 +49,17 @@ def github_config(**overrides):
 
 
 class FakeForgejo:
-    """Answers from fixtures/forgejo.json, keyed by path and query, and records each request.
+    """Answers from the JSON file named by `FIXTURE` under fixtures/, keyed by path and query,
+    and records each request.
 
     A route value is a JSON body, a string body, `{"__status": n, ...}` for an error,
     or a callable taking the request. A page past the first with no route is empty.
     """
 
+    FIXTURE = "forgejo.json"
+
     def __init__(self, overrides: dict | None = None):
-        self.routes = {**json.loads((FIXTURES / "forgejo.json").read_text()), **(overrides or {})}
+        self.routes = {**json.loads((FIXTURES / self.FIXTURE).read_text()), **(overrides or {})}
         self.requests: list[httpx.Request] = []
         self.transport = httpx.MockTransport(self._handle)
 
@@ -67,6 +77,10 @@ class FakeForgejo:
         if isinstance(route, dict) and "__status" in route:
             return httpx.Response(route["__status"], json={k: v for k, v in route.items() if k != "__status"})
         return httpx.Response(200, json=route)
+
+
+class FakeBitbucket(FakeForgejo):
+    FIXTURE = "bitbucket.json"
 
 
 FAKE_GH = """#!{python}

@@ -2,10 +2,9 @@
 
 import httpx
 
-from tsugite.secrets import get_backend
 from tsugite.secrets.registry import get_registry
 from tsugite_forge.cache import LruCache
-from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads, rest_issue
+from tsugite_forge.providers.base import ForgeError, Provider, PullRequest, ReviewThreads, rest_issue, secret_token
 
 # Forgejo's default [api] MAX_RESPONSE_ITEMS. A larger limit is capped to it.
 PAGE_SIZE = 50
@@ -28,13 +27,7 @@ class ForgejoProvider(Provider):
 
     def _authorization(self) -> str:
         if self._token is None:
-            token = get_backend().get(self.config.token_secret)
-            if token is None:
-                raise ForgeError(
-                    f"{self.config.name}: secret {self.config.token_secret!r} not found in secrets backend,"
-                    f" set it with `tsu secrets set {self.config.token_secret}`"
-                )
-            self._token = get_registry().register(self.config.token_secret, token, agent="forge")
+            self._token = secret_token(self.config)
         return f"token {self._token}"
 
     def _get(self, path: str, params: dict | None = None, etag: bool = True) -> httpx.Response:

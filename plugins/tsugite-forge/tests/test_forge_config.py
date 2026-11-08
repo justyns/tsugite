@@ -13,7 +13,14 @@ FORGEJO = {
     "repos": ["octo-org/demo", "octo-org/*"],
 }
 GITHUB = {"name": "gh", "kind": "github", "repos": ["octo-org/*"]}
-VALID = {"poll_minutes": 5, "forges": [FORGEJO, GITHUB]}
+BITBUCKET = {
+    "name": "bb",
+    "kind": "bitbucket",
+    "email": "me@example.test",
+    "token_secret": "bitbucket-token",
+    "repos": ["octo-ws/*"],
+}
+VALID = {"poll_minutes": 5, "forges": [FORGEJO, GITHUB, BITBUCKET]}
 
 
 def _create(config):
@@ -35,7 +42,7 @@ def test_adapter_entry_point_registered():
 def test_valid_config_parses_each_kind():
     config = _parse(VALID)
     assert config.poll_minutes == 5
-    assert [(f.name, f.kind) for f in config.forges] == [("home", "forgejo"), ("gh", "github")]
+    assert [(f.name, f.kind) for f in config.forges] == [("home", "forgejo"), ("gh", "github"), ("bb", "bitbucket")]
     assert config.forges[0].url == "https://forge.example.test"
     assert config.forges[0].token_secret == "forgejo-token"
 
@@ -51,6 +58,7 @@ def test_enabled_key_is_accepted():
         ({**VALID, "pol_minutes": 5}, "pol_minutes"),
         ({"forges": [{**GITHUB, "repo": ["octo-org/demo"]}]}, "repo"),
         ({"forges": [{**FORGEJO, "tokn_secret": "x"}]}, "tokn_secret"),
+        ({"forges": [{**BITBUCKET, "url": "https://bitbucket.example.test"}]}, "url"),
     ],
 )
 def test_unknown_key_fails_with_its_name(config, needle):
@@ -85,4 +93,4 @@ def test_no_forges_returns_none():
 
 def test_valid_config_returns_adapter():
     adapter = _create(VALID)
-    assert [f.name for f in adapter.config.forges] == ["home", "gh"]
+    assert [f.name for f in adapter.config.forges] == ["home", "gh", "bb"]

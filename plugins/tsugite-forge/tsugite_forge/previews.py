@@ -2,15 +2,14 @@
 
 from tsugite_forge.config import Forge
 from tsugite_forge.providers import Issue, PullRequest
-from tsugite_forge.refs import forge_host
+from tsugite_forge.refs import LINK_KINDS, forge_host
 
-# Every forge kind's pull request and issue URLs. refs.link_ref checks the kind per forge.
-LINK_PATH = r"/(pulls|pull|issues)/\d+/?$"
+LINK_PATH = rf"/({'|'.join(sorted({segment for segments in LINK_KINDS.values() for segment in segments}))})/\d+/?$"
 
 STATE_TONES = {"open": "ok", "draft": "mute", "merged": "info", "closed": "mute"}
 CI_TONES = {"success": "ok", "failure": "err", "pending": "warn"}
 REVIEW_TONES = {"approved": "ok", "changes_requested": "warn"}
-KIND_NAMES = {"forgejo": "Forgejo", "github": "GitHub"}
+KIND_NAMES = {"forgejo": "Forgejo", "github": "GitHub", "bitbucket": "Bitbucket"}
 
 
 def _label(repo: str, number: int) -> str:

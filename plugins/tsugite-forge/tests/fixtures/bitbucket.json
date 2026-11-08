@@ -1,0 +1,644 @@
+{
+  "/2.0/user": {
+    "type": "user",
+    "nickname": "octocat",
+    "display_name": "Octo Cat",
+    "uuid": "{octocat}",
+    "account_id": "000000:00000000-0000-0000-0000-000000000000"
+  },
+  "/2.0/repositories/octo-ws?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "full_name": "octo-ws/demo"
+      },
+      {
+        "full_name": "octo-ws/tools"
+      }
+    ],
+    "next": "https://api.bitbucket.org/2.0/repositories/octo-ws?pagelen=100&page=2"
+  },
+  "/2.0/repositories/octo-ws?pagelen=100&page=2": {
+    "pagelen": 50,
+    "values": [
+      {
+        "full_name": "octo-ws/site"
+      }
+    ]
+  },
+  "/2.0/workspaces/octo-ws/pullrequests/%7Boctocat%7D?state=OPEN&pagelen=50&fields=%2Bvalues.participants%2C%2Bvalues.reviewers": {
+    "pagelen": 50,
+    "values": [
+      {
+        "id": 12,
+        "title": "Fix flaky upload test",
+        "state": "OPEN",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octocat",
+          "display_name": "Octocat",
+          "uuid": "{octocat}"
+        },
+        "source": {
+          "branch": {
+            "name": "fix-upload"
+          },
+          "commit": {
+            "hash": "cccccccccccc"
+          }
+        },
+        "destination": {
+          "repository": {
+            "full_name": "octo-ws/demo"
+          },
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "dddddddddddd"
+          }
+        },
+        "reviewers": [
+          {
+            "type": "user",
+            "nickname": "reviewer1",
+            "display_name": "Reviewer1",
+            "uuid": "{reviewer1}"
+          },
+          {
+            "type": "user",
+            "nickname": "reviewer2",
+            "display_name": "Reviewer2",
+            "uuid": "{reviewer2}"
+          },
+          {
+            "type": "app_user",
+            "display_name": "Deploy Bot",
+            "uuid": "{deploy-bot}",
+            "kind": "connect"
+          }
+        ],
+        "participants": [
+          {
+            "user": {
+              "type": "user",
+              "nickname": "reviewer2",
+              "display_name": "Reviewer2",
+              "uuid": "{reviewer2}"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": "changes_requested"
+          },
+          {
+            "user": {
+              "type": "user",
+              "nickname": "reviewer3",
+              "display_name": "Reviewer3",
+              "uuid": "{reviewer3}"
+            },
+            "role": "PARTICIPANT",
+            "approved": true,
+            "state": "approved"
+          },
+          {
+            "user": {
+              "type": "user",
+              "nickname": "octocat",
+              "display_name": "Octocat",
+              "uuid": "{octocat}"
+            },
+            "role": "PARTICIPANT",
+            "approved": false,
+            "state": null
+          },
+          {
+            "user": {
+              "type": "app_user",
+              "display_name": "Deploy Bot",
+              "uuid": "{deploy-bot}",
+              "kind": "connect"
+            },
+            "role": "REVIEWER",
+            "approved": false,
+            "state": null
+          }
+        ],
+        "comment_count": 6,
+        "task_count": 0,
+        "created_on": "2026-10-05T14:00:00.000000+00:00",
+        "updated_on": "2026-10-06T09:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://bitbucket.org/octo-ws/demo/pull-requests/12"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Elsewhere",
+        "state": "OPEN",
+        "draft": false,
+        "author": {
+          "type": "user",
+          "nickname": "octocat",
+          "display_name": "Octocat",
+          "uuid": "{octocat}"
+        },
+        "source": {
+          "branch": {
+            "name": "other"
+          },
+          "commit": {
+            "hash": "bbbbbbbbbbbb"
+          }
+        },
+        "destination": {
+          "repository": {
+            "full_name": "octo-ws/unwatched"
+          },
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "dddddddddddd"
+          }
+        },
+        "reviewers": [],
+        "participants": [],
+        "comment_count": 0,
+        "task_count": 0,
+        "created_on": "2026-10-04T12:00:00.000000+00:00",
+        "updated_on": "2026-10-04T12:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://bitbucket.org/octo-ws/unwatched/pull-requests/7"
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Draft: rework settings",
+        "state": "OPEN",
+        "draft": true,
+        "author": {
+          "type": "user",
+          "nickname": "octocat",
+          "display_name": "Octocat",
+          "uuid": "{octocat}"
+        },
+        "source": {
+          "branch": {
+            "name": "settings"
+          },
+          "commit": {
+            "hash": "eeeeeeeeeeee"
+          }
+        },
+        "destination": {
+          "repository": {
+            "full_name": "octo-ws/demo"
+          },
+          "branch": {
+            "name": "main"
+          },
+          "commit": {
+            "hash": "dddddddddddd"
+          }
+        },
+        "reviewers": [],
+        "participants": [],
+        "comment_count": 0,
+        "task_count": 0,
+        "created_on": "2026-10-07T08:00:00.000000+00:00",
+        "updated_on": "2026-10-07T08:00:00.000000+00:00",
+        "links": {
+          "html": {
+            "href": "https://bitbucket.org/octo-ws/demo/pull-requests/13"
+          }
+        }
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/12": {
+    "id": 12,
+    "title": "Fix flaky upload test",
+    "state": "OPEN",
+    "draft": false,
+    "author": {
+      "type": "user",
+      "nickname": "octocat",
+      "display_name": "Octocat",
+      "uuid": "{octocat}"
+    },
+    "source": {
+      "branch": {
+        "name": "fix-upload"
+      },
+      "commit": {
+        "hash": "cccccccccccc"
+      }
+    },
+    "destination": {
+      "repository": {
+        "full_name": "octo-ws/demo"
+      },
+      "branch": {
+        "name": "main"
+      },
+      "commit": {
+        "hash": "dddddddddddd"
+      }
+    },
+    "reviewers": [
+      {
+        "type": "user",
+        "nickname": "reviewer1",
+        "display_name": "Reviewer1",
+        "uuid": "{reviewer1}"
+      },
+      {
+        "type": "user",
+        "nickname": "reviewer2",
+        "display_name": "Reviewer2",
+        "uuid": "{reviewer2}"
+      },
+      {
+        "type": "app_user",
+        "display_name": "Deploy Bot",
+        "uuid": "{deploy-bot}",
+        "kind": "connect"
+      }
+    ],
+    "participants": [
+      {
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "role": "REVIEWER",
+        "approved": false,
+        "state": "changes_requested"
+      },
+      {
+        "user": {
+          "type": "user",
+          "nickname": "reviewer3",
+          "display_name": "Reviewer3",
+          "uuid": "{reviewer3}"
+        },
+        "role": "PARTICIPANT",
+        "approved": true,
+        "state": "approved"
+      },
+      {
+        "user": {
+          "type": "user",
+          "nickname": "octocat",
+          "display_name": "Octocat",
+          "uuid": "{octocat}"
+        },
+        "role": "PARTICIPANT",
+        "approved": false,
+        "state": null
+      },
+      {
+        "user": {
+          "type": "app_user",
+          "display_name": "Deploy Bot",
+          "uuid": "{deploy-bot}",
+          "kind": "connect"
+        },
+        "role": "REVIEWER",
+        "approved": false,
+        "state": null
+      }
+    ],
+    "comment_count": 6,
+    "task_count": 0,
+    "created_on": "2026-10-05T14:00:00.000000+00:00",
+    "updated_on": "2026-10-06T09:00:00.000000+00:00",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/octo-ws/demo/pull-requests/12"
+      }
+    }
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/14": {
+    "id": 14,
+    "title": "Add retry to sync",
+    "state": "MERGED",
+    "draft": false,
+    "author": {
+      "type": "user",
+      "nickname": "reviewer1",
+      "display_name": "Reviewer1",
+      "uuid": "{reviewer1}"
+    },
+    "source": {
+      "branch": {
+        "name": "retry-sync"
+      },
+      "commit": {
+        "hash": "ffffffffffff"
+      }
+    },
+    "destination": {
+      "repository": {
+        "full_name": "octo-ws/demo"
+      },
+      "branch": {
+        "name": "main"
+      },
+      "commit": {
+        "hash": "dddddddddddd"
+      }
+    },
+    "reviewers": [
+      {
+        "type": "user",
+        "nickname": "octocat",
+        "display_name": "Octocat",
+        "uuid": "{octocat}"
+      }
+    ],
+    "participants": [
+      {
+        "user": {
+          "type": "user",
+          "nickname": "octocat",
+          "display_name": "Octocat",
+          "uuid": "{octocat}"
+        },
+        "role": "REVIEWER",
+        "approved": true,
+        "state": "approved"
+      }
+    ],
+    "comment_count": 1,
+    "task_count": 0,
+    "created_on": "2026-10-01T12:00:00.000000+00:00",
+    "updated_on": "2026-10-02T12:00:00.000000+00:00",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/octo-ws/demo/pull-requests/14"
+      }
+    }
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/15": {
+    "id": 15,
+    "title": "Abandoned idea",
+    "state": "DECLINED",
+    "draft": false,
+    "author": {
+      "type": "user",
+      "nickname": "octocat",
+      "display_name": "Octocat",
+      "uuid": "{octocat}"
+    },
+    "source": {
+      "branch": {
+        "name": "idea"
+      },
+      "commit": {
+        "hash": "aaaaaaaaaaaa"
+      }
+    },
+    "destination": {
+      "repository": {
+        "full_name": "octo-ws/demo"
+      },
+      "branch": {
+        "name": "main"
+      },
+      "commit": {
+        "hash": "dddddddddddd"
+      }
+    },
+    "reviewers": [],
+    "participants": [],
+    "comment_count": 0,
+    "task_count": 0,
+    "created_on": "2026-10-03T12:00:00.000000+00:00",
+    "updated_on": "2026-10-03T13:00:00.000000+00:00",
+    "links": {
+      "html": {
+        "href": "https://bitbucket.org/octo-ws/demo/pull-requests/15"
+      }
+    }
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/12/statuses?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "key": "unit",
+        "state": "FAILED",
+        "updated_on": "2026-10-06T01:00:00.000000+00:00"
+      },
+      {
+        "key": "lint",
+        "state": "SUCCESSFUL",
+        "updated_on": "2026-10-06T01:00:00.000000+00:00"
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/13/statuses?pagelen=100": {
+    "pagelen": 50,
+    "values": []
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/14/statuses?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "key": "unit",
+        "state": "INPROGRESS",
+        "updated_on": "2026-10-06T03:00:00.000000+00:00"
+      },
+      {
+        "key": "unit",
+        "state": "FAILED",
+        "updated_on": "2026-10-06T02:00:00.000000+00:00"
+      },
+      {
+        "key": "lint",
+        "state": "SUCCESSFUL",
+        "updated_on": "2026-10-06T02:00:00.000000+00:00"
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/15/statuses?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "key": "unit",
+        "state": "STOPPED",
+        "updated_on": "2026-10-06T01:00:00.000000+00:00"
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/12/comments?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "id": 101,
+        "deleted": false,
+        "pending": false,
+        "content": {
+          "raw": "comment 101"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 101
+        },
+        "resolution": {
+          "type": "comment_resolution",
+          "user": {
+            "type": "user",
+            "nickname": "octocat",
+            "display_name": "Octocat",
+            "uuid": "{octocat}"
+          },
+          "created_on": "2026-10-06T10:00:00+00:00"
+        }
+      },
+      {
+        "id": 102,
+        "deleted": false,
+        "pending": false,
+        "content": {
+          "raw": "comment 102"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 102
+        }
+      },
+      {
+        "id": 103,
+        "deleted": false,
+        "pending": false,
+        "content": {
+          "raw": "comment 103"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 103
+        },
+        "parent": {
+          "id": 102
+        }
+      },
+      {
+        "id": 104,
+        "deleted": false,
+        "pending": false,
+        "content": {
+          "raw": "comment 104"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        }
+      },
+      {
+        "id": 105,
+        "deleted": true,
+        "pending": false,
+        "content": {
+          "raw": "comment 105"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 105
+        }
+      },
+      {
+        "id": 106,
+        "deleted": false,
+        "pending": true,
+        "content": {
+          "raw": "comment 106"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 106
+        }
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/pullrequests/14/comments?pagelen=100": {
+    "pagelen": 50,
+    "values": [
+      {
+        "id": 201,
+        "deleted": false,
+        "pending": false,
+        "content": {
+          "raw": "comment 201"
+        },
+        "user": {
+          "type": "user",
+          "nickname": "reviewer2",
+          "display_name": "Reviewer2",
+          "uuid": "{reviewer2}"
+        },
+        "inline": {
+          "path": "upload.py",
+          "from": null,
+          "to": 201
+        },
+        "resolution": {
+          "type": "comment_resolution",
+          "user": {
+            "type": "user",
+            "nickname": "octocat",
+            "display_name": "Octocat",
+            "uuid": "{octocat}"
+          },
+          "created_on": "2026-10-06T10:00:00+00:00"
+        }
+      }
+    ]
+  },
+  "/2.0/repositories/octo-ws/demo/diff/octo-ws/demo:cccccccccccc%0Ddddddddddddd": "diff --git a/upload.py b/upload.py\n"
+}

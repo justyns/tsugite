@@ -1,6 +1,6 @@
 # tsugite-forge
 
-Read open pull requests from Forgejo and GitHub in the tsugite daemon.
+Read open pull requests from Forgejo, GitHub and Bitbucket Cloud in the tsugite daemon.
 
 ## Setup
 
@@ -8,6 +8,11 @@ Read open pull requests from Forgejo and GitHub in the tsugite daemon.
   it with `tsu secrets set forgejo-token`, and put that name in `token_secret`.
 - GitHub: install the [`gh` CLI](https://cli.github.com) for the daemon's user and run
   `gh auth login`.
+- Bitbucket Cloud: create an Atlassian API token with the `read:repository:bitbucket`,
+  `read:pullrequest:bitbucket` and `read:user:bitbucket` scopes, store it with
+  `tsu secrets set bitbucket-token`, put that name in `token_secret`, and set `email` to
+  your Atlassian account email. Repo patterns use the workspace as the owner. Only pull
+  requests you opened are listed.
 
 ```yaml
 plugins:
@@ -22,4 +27,9 @@ plugins:
       - name: gh
         kind: github
         repos: [octo-org/*]
+      - name: bb
+        kind: bitbucket
+        email: me@example.test
+        token_secret: bitbucket-token
+        repos: [myworkspace/*]
 ```
