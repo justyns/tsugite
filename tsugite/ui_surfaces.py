@@ -1,4 +1,4 @@
-"""Registry for web UI pages a plugin contributes.
+"""Registry for web UI pages and authenticated HTTP routes a plugin contributes.
 
 Plugins register at import time from a `tsugite.plugins` module; the daemon reads
 this at startup and mounts what it finds.
@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Optional, Union
 
 # (plugin_name, descriptor). The name is empty until the plugin loader stamps it.
 _surfaces: list[tuple[str, dict]] = []
+_routes: list[tuple[str, dict]] = []
 
 
 def register_ui_surface(
@@ -74,18 +75,41 @@ def ui_surface(**kwargs):
     return decorator
 
 
+def http_route(path: str, methods: Optional[list[str]] = None):
+    """Decorate `handler(request)`, sync or async, as an authenticated route at
+    `/api/plugins/<plugin>/<path>`. The plugin's surface token can call it.
+
+    A returned response is sent as is, and anything else is sent as JSON.
+    """
+
+    def decorator(fn):
+        _routes.append(("", {"path": "/" + path.lstrip("/"), "methods": methods or ["GET"], "handler": fn}))
+        return fn
+
+    return decorator
+
+
+def _grouped(registry: list[tuple[str, dict]]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for name, descriptor in registry:
+        grouped.setdefault(name, []).append(descriptor)
+    return grouped
+
+
 def registered_ui_surfaces() -> dict[str, list[dict]]:
     """Registered surfaces by plugin name, with an empty name for anything
     registered outside a plugin load."""
-    grouped: dict[str, list[dict]] = {}
-    for name, descriptor in _surfaces:
-        grouped.setdefault(name, []).append(descriptor)
-    return grouped
+    return _grouped(_surfaces)
+
+
+def registered_http_routes() -> dict[str, list[dict]]:
+    return _grouped(_routes)
 
 
 def reset_ui_surfaces() -> None:
     """Drop every registration. For tests."""
     _surfaces.clear()
+    _routes.clear()
 
 
 @contextmanager
@@ -101,10 +125,12 @@ def stamping(registry: list[tuple[str, Any]], plugin_name: str):
     registry[start:] = [(plugin_name, descriptor) for _name, descriptor in registry[start:]]
 
 
+@contextmanager
 def attributing_to(plugin_name: str):
-    """Attribute surfaces registered inside the block to `plugin_name`.
+    """Attribute surfaces and routes registered inside the block to `plugin_name`.
 
     The plugin loader wraps each plugin load in this, because a registration does not know
     its own entry-point name.
     """
-    return stamping(_surfaces, plugin_name)
+    with stamping(_surfaces, plugin_name), stamping(_routes, plugin_name):
+        yield

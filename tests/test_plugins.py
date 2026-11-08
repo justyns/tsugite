@@ -13,7 +13,7 @@ from tsugite.plugins import (
     load_adapter_plugins,
     load_module_only_plugins,
 )
-from tsugite.ui_surfaces import register_ui_surface, registered_ui_surfaces
+from tsugite.ui_surfaces import register_ui_surface, registered_http_routes, registered_ui_surfaces
 
 
 def _make_entry_point(name, value, group):
@@ -410,6 +410,17 @@ class TestUISurfaceAttribution:
 
         assert [(r.name, r.loaded) for r in results] == [("broken", False), ("dashboard", True)]
         assert list(registered_ui_surfaces()) == ["dashboard"]
+
+    def test_a_route_registered_at_import_is_stamped_too(self, tmp_path):
+        body = "from tsugite.ui_surfaces import http_route\n\n@http_route('/ledger')\ndef ledger(request):\n    return {}\n"
+        broken = self._write_plugin(tmp_path, "broken", body + "\nraise RuntimeError('boom')\n")
+        working = self._write_plugin(tmp_path, "ledger", body)
+
+        load_module_only_plugins(GROUP_PLUGINS, {"broken": {"path": str(broken)}, "ledger": {"path": str(working)}})
+
+        assert {name: [r["path"] for r in rs] for name, rs in registered_http_routes().items()} == {
+            "ledger": ["/ledger"]
+        }
 
     def test_a_link_resolver_registered_at_import_is_stamped_too(self, tmp_path):
         body = (

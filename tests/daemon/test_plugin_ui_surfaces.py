@@ -5,8 +5,9 @@ A plugin registers them at import; the gateway namespaces each one to
 `/api/plugins/<name>/` mount, and serves the declared `assets` directory there.
 GET /api/plugins serves the merged list.
 
-Surfaces reach the gateway as an argument, so a plugin with no adapter still gets
-its page, and a page function can replace the assets directory.
+The gateway receives surfaces and registered routes as arguments. A plugin with no
+adapter still gets its page and routes, and a page function can replace the assets
+directory.
 """
 
 import logging
@@ -364,3 +365,56 @@ def test_surface_token_rejects_unloaded_plugins_and_bad_bodies(server, test_toke
     for kwargs in [{"json": body} for body in bodies] + [{"content": b"not json"}]:
         resp = client.post("/api/plugin-surface-token", headers=_bearer(test_token), **kwargs)
         assert resp.status_code == 400
+
+
+# ── registered routes: a plugin's authenticated backend without an adapter ──
+
+
+def _ledger_route(handler, methods=None):
+    return {"path": "/ledger", "methods": methods or ["GET"], "handler": handler}
+
+
+def test_a_registered_route_mounts_authenticated_without_an_adapter(server, test_token):
+    async def ledger(request):
+        return {"rows": [request.query_params["month"]]}
+
+    attach_plugin_http(server, "ledger", None, [], [_ledger_route(ledger)])
+    client = TestClient(server.app)
+
+    resp = client.get("/api/plugins/ledger/ledger?month=11", headers=_bearer(test_token))
+    assert resp.status_code == 200
+    assert resp.json() == {"rows": ["11"]}
+    assert client.get("/api/plugins/ledger/ledger?month=11").status_code == 401
+
+
+def test_a_plugins_surface_token_reaches_its_registered_route(server, test_token):
+    attach_plugin_http(
+        server, "ledger", None, [{"kind": "dash", "page": lambda: "<h1>ledger</h1>"}], [_ledger_route(lambda r: [1])]
+    )
+    client = TestClient(server.app)
+
+    resp = client.get("/api/plugins/ledger/ledger", headers=_bearer(_surface_token(client, test_token, "ledger")))
+    assert resp.status_code == 200
+    assert resp.json() == [1]
+
+
+def test_a_route_handler_can_return_its_own_response_and_take_other_methods(server, test_token):
+    async def save(request):
+        return JSONResponse(await request.json(), status_code=201)
+
+    attach_plugin_http(server, "ledger", None, [], [_ledger_route(save, methods=["POST"])])
+    client = TestClient(server.app)
+
+    resp = client.post("/api/plugins/ledger/ledger", json={"amount": 3}, headers=_bearer(test_token))
+    assert resp.status_code == 201
+    assert resp.json() == {"amount": 3}
+    assert client.get("/api/plugins/ledger/ledger", headers=_bearer(test_token)).status_code == 405
+
+
+def test_registered_routes_share_the_adapters_mount(server, test_token):
+    attach_plugin_http(
+        server, "alpha", FakePluginAdapter(public=[_echo_route("/hook")]), [], [_ledger_route(lambda r: {})]
+    )
+    client = TestClient(server.app)
+    assert client.get("/api/plugins/alpha/hook").status_code == 200
+    assert client.get("/api/plugins/alpha/ledger", headers=_bearer(test_token)).status_code == 200

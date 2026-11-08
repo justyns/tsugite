@@ -452,12 +452,15 @@ class Gateway:
 
         # Load adapter plugins
         from tsugite.plugins import load_adapter_plugins
-        from tsugite.ui_surfaces import registered_ui_surfaces
+        from tsugite.ui_surfaces import registered_http_routes, registered_ui_surfaces
 
-        # Pages registered when `set_daemon_mode(True)` above imported the plugin modules.
+        # Pages and routes registered when `set_daemon_mode(True)` above imported the plugin modules.
         pages = registered_ui_surfaces()
+        routes = registered_http_routes()
         for descriptor in pages.pop("", []):
             logger.warning("UI surface %r was registered outside a plugin load; skipping it", descriptor.get("kind"))
+        for descriptor in routes.pop("", []):
+            logger.warning("HTTP route %r was registered outside a plugin load; skipping it", descriptor["path"])
 
         plugin_results = load_adapter_plugins(
             plugin_config=self.config.plugins,
@@ -469,13 +472,14 @@ class Gateway:
             # A plugin whose adapter is disabled or failed loses its page too: it
             # would open onto routes that never mounted.
             declared = pages.pop(info.name, [])
+            declared_routes = routes.pop(info.name, [])
             if adapter:
                 self.adapters.append(adapter)
-                attach_plugin_http(self._http_server, info.name, adapter, declared)
+                attach_plugin_http(self._http_server, info.name, adapter, declared, declared_routes)
                 attach_plugin_executors(self._jobs_orchestrator, info.name, adapter)
                 tasks.append(adapter.start())
-        for name, declared in pages.items():
-            attach_plugin_http(self._http_server, name, None, declared)
+        for name in {*pages, *routes}:
+            attach_plugin_http(self._http_server, name, None, pages.get(name, []), routes.get(name, []))
 
         # Set up notification callback if channels are configured
         if self.config.notification_channels:

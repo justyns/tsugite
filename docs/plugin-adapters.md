@@ -126,7 +126,7 @@ A page function must complete the `tsugite:ready` handshake below, the same as a
 
 A page is served **unauthenticated**, because the browser loads a surface as a navigation and a
 navigation carries no bearer header. Return an HTML shell and fetch anything private from the
-adapter's `get_http_routes()`.
+adapter's `get_http_routes()` or an `@http_route`, which single-file plugins can use too.
 
 `kind` is required, and so is one of `entry` or `page`; a descriptor missing either is logged and
 skipped. A plugin whose import fails registers nothing. Surfaces are skipped entirely when HTTP is
@@ -176,7 +176,7 @@ page can skin itself across all five themes without importing anything from the 
 Reply to `location.origin` rather than `'*'`: the frame is same-origin with the host, and a wildcard
 reply goes to whatever page framed the surface.
 
-`init.token` is a bearer token valid only under `/api/plugins/<your plugin>/`, for calling your own `get_http_routes()` endpoints:
+`init.token` is a bearer token valid only under `/api/plugins/<your plugin>/`, for calling your own `get_http_routes()` and `@http_route` endpoints:
 
 ```js
 fetch('/api/plugins/my_plugin/status', { headers: { Authorization: 'Bearer ' + msg.token } });

@@ -2,7 +2,13 @@
 
 from pathlib import Path
 
-from tsugite.ui_surfaces import register_ui_surface, registered_ui_surfaces, ui_surface
+from tsugite.ui_surfaces import (
+    http_route,
+    register_ui_surface,
+    registered_http_routes,
+    registered_ui_surfaces,
+    ui_surface,
+)
 
 
 class TestRegisterUISurface:
@@ -59,3 +65,24 @@ class TestUISurfaceDecorator:
 
         assert ui_surface(kind="dash")(page) is page
         assert page() == "<h1>ok</h1>"
+
+
+class TestHTTPRouteDecorator:
+    def test_registers_the_handler_with_get_by_default(self):
+        @http_route("/ledger")
+        def ledger(request):
+            return {}
+
+        assert registered_http_routes() == {"": [{"path": "/ledger", "methods": ["GET"], "handler": ledger}]}
+
+    def test_returns_the_function_unchanged(self):
+        def save(request):
+            return {}
+
+        assert http_route("/ledger", methods=["POST"])(save) is save
+        assert registered_http_routes()[""][0]["methods"] == ["POST"]
+
+    def test_a_path_without_a_leading_slash_gets_one(self):
+        http_route("ledger")(lambda request: {})
+
+        assert registered_http_routes()[""][0]["path"] == "/ledger"

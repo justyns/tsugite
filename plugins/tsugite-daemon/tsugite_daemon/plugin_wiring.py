@@ -110,16 +110,36 @@ def _page_routes(plugin_name: str, declared: list) -> list:
     ]
 
 
-def attach_plugin_http(http_server, plugin_name: str, adapter, declared_surfaces: list | None = None) -> None:
+def _route_endpoint(handler):
+    from starlette.responses import JSONResponse, Response
+
+    is_async = inspect.iscoroutinefunction(handler)
+
+    async def endpoint(request):
+        result = await handler(request) if is_async else await asyncio.to_thread(handler, request)
+        return result if isinstance(result, Response) else JSONResponse(result)
+
+    return endpoint
+
+
+def _registered_routes(declared: list) -> list:
+    from starlette.routing import Route
+
+    return [Route(item["path"], _route_endpoint(item["handler"]), methods=item["methods"]) for item in declared]
+
+
+def attach_plugin_http(
+    http_server, plugin_name: str, adapter, declared_surfaces: list | None = None, declared_routes: list | None = None
+) -> None:
     """Wire a plugin's HTTP surface into the daemon's Starlette app.
 
     Sets the shared SSE bus on the adapter (so it can broadcast events), then
-    mounts its `get_http_routes()` (auth-wrapped) and `get_public_http_routes()`
+    mounts its `get_http_routes()` and `declared_routes` (auth-wrapped) and `get_public_http_routes()`
     (no auth) under `/api/plugins/<plugin_name>`, and registers `declared_surfaces`
     for the web UI. A plugin that lacks the route methods is skipped, and one that
     raises while producing them is logged and skipped.
 
-    Surfaces arrive as an argument, so a plugin that only registered a page needs no
+    Surfaces and routes arrive as arguments, so a plugin that only registered a page or route needs no
     adapter: pass `adapter=None`. Routes and surfaces mount together because they share
     one Starlette Mount, which matches on prefix.
     """
@@ -140,7 +160,7 @@ def attach_plugin_http(http_server, plugin_name: str, adapter, declared_surfaces
             return []
 
     declared = declared_surfaces or []
-    authed = _collect("get_http_routes")
+    authed = [*_collect("get_http_routes"), *_registered_routes(declared_routes or [])]
     public = [*_collect("get_public_http_routes"), *_page_routes(plugin_name, declared)]
     surfaces, assets = _collect_plugin_ui(plugin_name, declared)
     if not authed and not public and not surfaces:

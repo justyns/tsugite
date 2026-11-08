@@ -76,7 +76,7 @@ An entry point that resolves to a factory (an adapter, an attachment handler, a 
 
 ## Single-file plugins
 
-A `path` entry names one Python file instead of an installed package. Importing it registers its `@tool`, `@hook`, `@subscribe`, and `@ui_surface` decorators, as a module-only entry point does:
+A `path` entry names one Python file instead of an installed package. Importing it registers its `@tool`, `@hook`, `@subscribe`, `@ui_surface`, and `@http_route` decorators, as a module-only entry point does:
 
 ```json
 {
@@ -113,9 +113,9 @@ def dashboard_page() -> str:
 
 The page opens from the command palette, and `nav=True` also gives it a nav-rail row. The host waits
 for `tsugite:ready` before showing it. The page is served unauthenticated, so return an HTML shell
-and fetch anything private from an authenticated route. For a static file, use
-`register_ui_surface(...)` with `entry` and `assets`. Full reference and the bridge protocol:
-[plugin-adapters.md](plugin-adapters.md).
+and fetch anything private from an authenticated route, such as an `@http_route` in the same file.
+For a static file, use `register_ui_surface(...)` with `entry` and `assets`. Full reference and the
+bridge protocol: [plugin-adapters.md](plugin-adapters.md).
 
 ## Inspecting plugins
 
