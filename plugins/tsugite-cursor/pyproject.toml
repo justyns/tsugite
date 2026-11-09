@@ -1,12 +1,12 @@
 [project]
 name = "tsugite-cursor"
-version = "0.26.0"
+version = "0.27.0"
 description = "Tsugite plugin: Cursor provider (routes LLM calls through the Cursor Python SDK)"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
   "cursor-sdk>=1.3.1,<2",
-  "tsugite-cli==0.26.0",
+  "tsugite-cli==0.27.0",
 ]
 
 [project.entry-points."tsugite.providers"]

@@ -1,12 +1,12 @@
 [project]
 name = "tsugite-mcp"
-version = "0.26.0"
+version = "0.27.0"
 description = "Tsugite plugin: remote MCP servers over Streamable HTTP with OAuth sign-in"
 authors = [{ name = "Justyn Shull" }]
 requires-python = ">=3.11"
 dependencies = [
-  "tsugite-cli==0.26.0",
-  "tsugite-daemon==0.26.0",
+  "tsugite-cli==0.27.0",
+  "tsugite-daemon==0.27.0",
   "mcp>=1.30,<2",
 ]
 
