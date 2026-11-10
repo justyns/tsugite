@@ -977,3 +977,54 @@ test('a slow uncached load does not replace a cached chat opened after it', asyn
   expect(ctrl.events.map((e) => e.id)).toEqual([1]);
   expect(ctrl.loading).toBe(false);
 });
+
+test.each([
+  ['before', []],
+  ['after', [{ id: 5, type: 'user_input', text: 'starting message' }]],
+])(
+  'a message sent while a new session is loading shows once when the page lands %s it was recorded',
+  async (_when, events) => {
+    const ctrl = new ConversationController();
+    let release!: (v: unknown) => void;
+    apiMock.get.mockReturnValueOnce(new Promise((r) => (release = r)));
+    const opening = ctrl.open('sess-1');
+    await ctrl.send('starting message');
+    release({ events });
+    await opening;
+
+    expect(ctrl.events.map((e) => e.text)).toEqual(['starting message']);
+    chat.handlers!.onDone?.();
+  },
+);
+
+test('a repeated message sent while a session with history loads stays visible', async () => {
+  const ctrl = new ConversationController();
+  let release!: (v: unknown) => void;
+  apiMock.get.mockReturnValueOnce(new Promise((r) => (release = r)));
+  const opening = ctrl.open('sess-1');
+  await ctrl.send('continue');
+  release({
+    events: [
+      { id: 1, type: 'user_input', text: 'continue' },
+      { id: 2, type: 'user_input', text: 'something else' },
+    ],
+  });
+  await opening;
+
+  expect(ctrl.events.map((e) => e.text)).toEqual(['continue', 'something else', 'continue']);
+  chat.handlers!.onDone?.();
+});
+
+test('a text-less frame streamed while a session loads is kept', async () => {
+  const ctrl = new ConversationController();
+  let release!: (v: unknown) => void;
+  apiMock.get.mockReturnValueOnce(new Promise((r) => (release = r)));
+  const opening = ctrl.open('sess-1');
+  await ctrl.send('hi');
+  chat.handlers!.onEvent?.({ type: 'turn_start' });
+  release({ events: [{ id: 1, type: 'user_input' }] });
+  await opening;
+
+  expect(ctrl.events.map((e) => e.type)).toEqual(['user_input', 'user_input', 'turn_start']);
+  chat.handlers!.onDone?.();
+});

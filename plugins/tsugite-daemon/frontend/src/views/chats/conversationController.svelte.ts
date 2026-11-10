@@ -229,7 +229,16 @@ export class ConversationController {
       // Load only the newest window; older turns arrive on demand via loadEarlier.
       const page = await fetchEventsPage(sessionId, { limit: WINDOW });
       if (token !== this.loadToken) return; // superseded by a newer open()
-      this.setWindow(page);
+      // A send during the load (the new-chat launcher's starting message) left
+      // id-less events the page predates; drop the bubble only if the page's newest
+      // turn is that message.
+      const lastInput = page.events.findLast((p) => p.type === 'user_input');
+      const sentMeanwhile = this.events.filter(
+        (e) =>
+          e.id == null &&
+          !(e.type === 'user_input' && lastInput && userText(lastInput) === userText(e)),
+      );
+      this.setWindow(page, sentMeanwhile);
     } catch (err) {
       if (token === this.loadToken) this.error = err instanceof Error ? err.message : String(err);
     } finally {
