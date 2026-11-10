@@ -14,6 +14,7 @@ _ACP_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 _ACP_MODELS: dict[str, ModelInfo] = {
     "acp/claude-fable-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-fable-5-1": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
+    "acp/claude-fable-5-2": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-haiku-4-5": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
     "acp/claude-haiku-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_ACP_EFFORT_LEVELS),
@@ -34,7 +35,8 @@ _ACP_MODELS: dict[str, ModelInfo] = {
 # --- END GENERATED MODELS (acp) --- #
 
 _ALIASES: dict[str, str] = {
-    "fable": "claude-fable-5-1",
+    "fable": "claude-fable-5-2",
+    "fable-5-2": "claude-fable-5-2",
     "opus": "claude-opus-5-5",
     "opus-5-5": "claude-opus-5-5",
     "opus-5": "claude-opus-5",

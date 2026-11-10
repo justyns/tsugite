@@ -25,6 +25,7 @@ _CLAUDE_CODE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
     "claude_code/claude-fable-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-fable-5-1": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
+    "claude_code/claude-fable-5-2": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-haiku-4-5": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-haiku-4-5-20251001": ModelInfo(max_input_tokens=200_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
     "claude_code/claude-haiku-5-5": ModelInfo(max_input_tokens=1_000_000, supports_vision=True, supported_effort_levels=_CLAUDE_CODE_EFFORT_LEVELS),
@@ -47,7 +48,8 @@ _CLAUDE_CODE_MODELS: dict[str, ModelInfo] = {
 # Bare tier aliases track the newest model in that tier; version-pinned aliases
 # stay for reproducible configs.
 _ALIASES = {
-    "fable": "claude-fable-5-1",
+    "fable": "claude-fable-5-2",
+    "fable-5-2": "claude-fable-5-2",
     "fable-5-1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",
     "opus": "claude-opus-5-5",

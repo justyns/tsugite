@@ -215,6 +215,16 @@ class TestAdaptiveThinkingRequestBody:
         assert "top_k" not in body
 
     @pytest.mark.asyncio
+    async def test_fable_5_2_sends_no_budget_or_sampling_params(self, monkeypatch):
+        body = await self._capture_body(
+            monkeypatch, model="claude-fable-5-2", reasoning_effort="high", temperature=0.7, top_p=0.9, top_k=40
+        )
+        assert body["thinking"] == {"type": "adaptive"}
+        assert body["output_config"] == {"effort": "high"}
+        assert not {"temperature", "top_p", "top_k"} & body.keys()
+        assert "budget_tokens" not in str(body)
+
+    @pytest.mark.asyncio
     async def test_sampling_params_kept_on_budget_models(self, monkeypatch):
         body = await self._capture_body(monkeypatch, model="claude-opus-4-6", temperature=0.7)
         assert body.get("temperature") == 0.7

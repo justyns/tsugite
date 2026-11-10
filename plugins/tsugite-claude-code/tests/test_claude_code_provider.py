@@ -30,7 +30,7 @@ class TestClaudeCodeModelParams:
         assert get_model_id("claude_code:sonnet") == "claude-sonnet-5-5"
         assert get_model_id("claude_code:opus") == "claude-opus-5-5"
         assert get_model_id("claude_code:haiku") == "claude-haiku-5-5"
-        assert get_model_id("claude_code:fable") == "claude-fable-5-1"
+        assert get_model_id("claude_code:fable") == "claude-fable-5-2"
 
     def test_model_id_full_id_passthrough(self):
         assert get_model_id("claude_code:claude-sonnet-4-6") == "claude-sonnet-4-6"
