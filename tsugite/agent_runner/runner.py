@@ -19,7 +19,7 @@ from tsugite.exceptions import (  # noqa: E402
     is_unresumable_history_error,
 )
 from tsugite.md_agents import AgentConfig, parse_agent_file  # noqa: E402
-from tsugite.models import resolve_effective_model, strip_reserved_model_kwargs  # noqa: E402
+from tsugite.models import resolve_effective_model, resolve_model_alias, strip_reserved_model_kwargs  # noqa: E402
 from tsugite.options import ExecutionOptions  # noqa: E402
 from tsugite.renderer import AgentRenderer  # noqa: E402
 from tsugite.utils import is_interactive  # noqa: E402
@@ -1170,7 +1170,8 @@ async def run_agent_async(
         )
 
         # Resume an existing provider session if one was recorded for this conversation.
-        session_info = get_resumable_session_state(continue_conversation_id)
+        model_provider = resolve_model_alias(_get_model_string(exec_options.model_override, agent_config)).split(":")[0]
+        session_info = get_resumable_session_state(continue_conversation_id, model_provider)
         if session_info:
             resume_session = session_info.session_id
             resume_after_compaction = session_info.compacted

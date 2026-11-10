@@ -107,7 +107,7 @@ def test_get_resumable_session_state_carries_cumulative_cost():
         state_delta={"session_id": "test-session", "compacted": False, "cumulative_cost": 1.80},
     )
 
-    state = get_resumable_session_state(session.session_id)
+    state = get_resumable_session_state(session.session_id, "claude_code")
 
     assert isinstance(state, ResumableSessionState)
     assert state.cumulative_cost == pytest.approx(1.80)

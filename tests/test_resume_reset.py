@@ -30,10 +30,10 @@ def _conv_with_recorded_session(session_id: str) -> str:
 
 def test_resume_reset_severs_the_recorded_session():
     cid = _conv_with_recorded_session("cc-poisoned")
-    assert get_resumable_session_state(cid).session_id == "cc-poisoned"
+    assert get_resumable_session_state(cid, "claude_code").session_id == "cc-poisoned"
 
     record_resume_reset(cid)
-    assert get_resumable_session_state(cid) is None
+    assert get_resumable_session_state(cid, "claude_code") is None
 
 
 def test_a_session_recorded_after_the_reset_is_resumable_again():
@@ -42,7 +42,7 @@ def test_a_session_recorded_after_the_reset_is_resumable_again():
     cid = _conv_with_recorded_session("cc-poisoned")
     record_resume_reset(cid)
     get_history_backend().load(cid).record("model_response", raw_content="ok", state_delta={"session_id": "cc-fresh"})
-    assert get_resumable_session_state(cid).session_id == "cc-fresh"
+    assert get_resumable_session_state(cid, "claude_code").session_id == "cc-fresh"
 
 
 def test_record_resume_reset_is_best_effort_on_unknown_conversation():
@@ -59,3 +59,28 @@ def test_record_resume_reset_returns_the_recorded_notice_payload():
     assert payload is not None
     assert payload["reason"] == "poisoned_transcript"
     assert "reset" in payload["message"]
+
+
+def test_another_providers_turn_ends_the_resumable_session():
+    cid = _conv_with_recorded_session("cc-session")
+    session = get_history_backend().load(cid)
+    session.record(
+        "model_response", provider="claude_code", model="opus", raw_content="ok", state_delta={"session_id": "cc-1"}
+    )
+    assert get_resumable_session_state(cid, "claude_code").session_id == "cc-1"
+
+    session.record("model_response", provider="openai", model="gpt-4o", raw_content="ok")
+    assert get_resumable_session_state(cid, "claude_code") is None
+    assert get_resumable_session_state(cid, "openai") is None
+
+    session.record(
+        "model_response", provider="cursor", model="auto", raw_content="ok", state_delta={"session_id": "cur-1"}
+    )
+    assert get_resumable_session_state(cid, "claude_code") is None
+    assert get_resumable_session_state(cid, "cursor").session_id == "cur-1"
+
+    session.record(
+        "model_response", provider="claude_code", model="opus", raw_content="ok", state_delta={"session_id": "cc-2"}
+    )
+    session.record("model_response", raw_content="ok", state_delta={"session_id": "cc-3"})
+    assert get_resumable_session_state(cid, "claude_code").session_id == "cc-3"

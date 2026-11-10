@@ -192,7 +192,7 @@ async def test_retained_model_response_loses_provider_session_id(workspace_dir, 
     assert "session_id" not in state_delta, f"Retained model_response leaked pre-compaction session_id: {state_delta}"
 
     with patch("tsugite.history.sqlite_backend.get_history_dir", return_value=history_dir):
-        info = get_resumable_session_state(new_session.id)
+        info = get_resumable_session_state(new_session.id, "claude_code")
     assert info is None, f"Expected no resume target post-compaction, got {info}"
 
 

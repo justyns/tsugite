@@ -317,12 +317,14 @@ class ResumableSessionState:
     cumulative_cost: float = 0.0
 
 
-def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessionState]:
-    """Find the most recent resumable provider session from a conversation's events.
+def get_resumable_session_state(conversation_id: str, provider: str) -> Optional[ResumableSessionState]:
+    """Find the most recent resumable session ``provider`` recorded for a conversation.
 
     Reads the ``session_id`` a session-owning provider recorded in its ``state_delta``.
-    Returns None if none was recorded (a stateless provider was used) or if a compaction
-    happened after the last one (the provider session is stale at that point).
+    Returns None if none was recorded (a stateless provider was used), if a compaction
+    happened after the last one (the provider session is stale at that point), or if
+    a turn from a different provider came after it (that provider's turns are missing
+    from the session). A response recorded without a provider name is not a boundary.
     """
     try:
         backend = get_history_backend()
@@ -342,11 +344,13 @@ def get_resumable_session_state(conversation_id: str) -> Optional[ResumableSessi
             event = events[i]
             if event.type != "model_response":
                 continue
+            if boundary_idx is not None and i <= boundary_idx:
+                continue
+            if event.data.get("provider") not in (None, provider):
+                return None
             state = event.data.get("state_delta") or {}
             session_id = state.get("session_id")
             if not session_id:
-                continue
-            if boundary_idx is not None and i <= boundary_idx:
                 continue
             return ResumableSessionState(
                 session_id=session_id,
