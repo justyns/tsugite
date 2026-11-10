@@ -94,7 +94,8 @@ def secret_backend(tmp_path):
     set_backend(backend)
     set_current_agent("test-agent")
     get_registry().clear()
-    return backend
+    yield backend
+    get_registry().clear()
 
 
 @pytest.fixture(autouse=True)
