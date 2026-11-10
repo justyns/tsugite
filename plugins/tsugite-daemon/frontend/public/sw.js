@@ -19,11 +19,15 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = e.notification.data?.url || '/';
+  const url = new URL(e.notification.data?.url || '/', self.location.origin).href;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       for (const client of clients) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) return client.focus();
+        if (client.url.includes(self.location.origin) && 'focus' in client)
+          return client
+            .focus()
+            .then((c) => c.navigate(url))
+            .catch(() => self.clients.openWindow(url));
       }
       return self.clients.openWindow(url);
     })
