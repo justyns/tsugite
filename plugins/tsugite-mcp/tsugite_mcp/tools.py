@@ -9,7 +9,9 @@ import keyword
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
+from tsugite.approval import request_approval
 from tsugite.exceptions import ToolUnavailableError
 from tsugite.tools import _tools, call_on_loop, tool
 from tsugite.ui_surfaces import register_ui_surface
@@ -90,3 +92,28 @@ def set_tools(server: str, listed) -> list[dict]:
         _registered.setdefault(server, []).append(call.__name__)
         registered.append({"name": call.__name__, "description": call.__doc__.split("\n")[0].strip()})
     return registered
+
+
+@tool(require_daemon=True, parent_only=True, category="mcp")
+def request_mcp_server(name: str, url: str, reason: str) -> str:
+    """Ask the user to connect a remote MCP server by name and https URL. Its tools still need request_tool_access."""
+    from tsugite_mcp.adapter import validate_server
+
+    if _adapter is None:
+        raise ToolUnavailableError("MCP tools need the tsugite daemon with the mcp plugin")
+    validate_server(name, url)
+    if name in _adapter.servers:
+        raise ValueError(f"{name} is already connected")
+    decision = request_approval(
+        f"Connect MCP server '{name}' at {urlparse(url).hostname}?",
+        detail=f"URL: {url}\nReason: {reason}\n\nApproving connects the server but allows none of its tools.",
+    )
+    if decision != "approve":
+        return f"The user denied connecting {name}."
+    server = call_on_loop(_adapter.loop, _adapter.add, name, url, timeout=CALL_TIMEOUT)
+    if server.status == "connected":
+        names = ", ".join(t["name"] for t in server.tools)
+        return f"Connected {name}. Call request_tool_access for the tools you need: {names}"
+    if server.error:
+        return f"Added {name}, but it did not connect: {server.error}"
+    return f"Added {name}, which needs sign-in. Ask the user to sign in to it on the Connectors page."

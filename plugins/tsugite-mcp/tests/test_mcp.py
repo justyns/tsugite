@@ -525,3 +525,68 @@ async def test_secret_without_client_id_is_rejected(daemon):
     )
 
     assert resp.status_code == 400
+
+
+@pytest.fixture
+def ask(adapter):
+    from tsugite_mcp.tools import request_mcp_server
+
+    from tests.interaction_doubles import FakeBackend
+    from tsugite.interaction import set_interaction_backend
+
+    async def run(answer, name="fake", url=URL, reason="read the docs you mentioned"):
+        backend = FakeBackend(answer)
+        set_interaction_backend(backend)
+        try:
+            return await asyncio.to_thread(request_mcp_server, name, url, reason), backend
+        finally:
+            set_interaction_backend(None)
+
+    return run
+
+
+async def test_requested_server_is_shown_with_its_host_and_denied_adds_nothing(adapter, ask):
+    result, backend = await ask("Deny", url="https://docs.example@mcp.example.net/mcp")
+
+    question, question_type, options = backend.calls[0]
+    assert question_type == "approval" and options == ["Approve", "Deny"]
+    assert question.splitlines()[0] == "Connect MCP server 'fake' at mcp.example.net?"
+    assert "https://docs.example@mcp.example.net/mcp" in question
+    assert "read the docs you mentioned" in question
+    assert adapter.servers == {} and adapter._read() == {}
+    assert "denied" in result
+
+
+async def test_approved_oauth_server_is_added_and_asks_for_sign_in(adapter, ask):
+    result, _ = await ask("Approve")
+
+    assert adapter._read() == {"fake": URL}
+    assert adapter.servers["fake"].status == "needs_signin"
+    assert "sign-in" in result and "Connectors" in result
+
+
+@pytest.mark.parametrize("fake", [{"oauth": False}], indirect=True)
+async def test_approved_server_grants_none_of_its_tools(adapter, ask):
+    from tsugite.tools import tool_access as ta
+
+    token = ta.current_access.set(ta.ToolAccess("default", set(), [], set()))
+    try:
+        result, _ = await ask("Approve")
+        assert adapter.servers["fake"].status == "connected"
+        assert "mcp_fake_echo" in result and "request_tool_access" in result
+        with pytest.raises(PermissionError):
+            ta.load_tool("mcp_fake_echo")
+    finally:
+        ta.current_access.reset(token)
+
+
+@pytest.mark.parametrize(
+    "name, url",
+    [("Bad Name", URL), ("fake", "http://mcp.example.net/mcp"), ("taken", URL)],
+    ids=["bad-name", "plain-http", "already-connected"],
+)
+async def test_invalid_request_fails_without_asking(adapter, ask, name, url):
+    await adapter.add("taken", URL)
+
+    with pytest.raises(ValueError):
+        await ask("Deny", name=name, url=url)
