@@ -87,7 +87,7 @@ jobs:
             target: linux-x86_64
             dist: dist:linux
             files: desktop/out/*.AppImage
-          - os: macos-14
+          - os: macos-15
             target: macos-aarch64
             dist: dist:mac
             files: desktop/out/*.zip
