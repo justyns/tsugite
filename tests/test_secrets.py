@@ -372,7 +372,7 @@ class TestSqliteKeychainPassphrase:
         [(cmd, stdin)] = keychain.stores()
         assert cmd == ["/usr/bin/security", "-i"]
         assert key in stdin
-        assert "-U" not in stdin
+        assert "-U" not in stdin.replace(key, "")
 
     def test_macos_lookup_error_raises(self, keychain, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
