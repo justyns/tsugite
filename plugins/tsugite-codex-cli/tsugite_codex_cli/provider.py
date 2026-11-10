@@ -18,6 +18,7 @@ from tsugite_codex_cli.auth import CodexAuthError, CodexAuthStore
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://chatgpt.com/backend-api/codex"
+_STREAM_ATTEMPTS = 3
 
 
 def _codex_model_info(max_input_tokens: int, effort_levels: list[str]) -> ModelInfo:
@@ -271,6 +272,21 @@ class CodexCliProvider:
         )
 
     async def _stream(self, url: str, headers: dict, body: dict) -> AsyncIterator[StreamChunk]:
+        # A retry after answer text was yielded would replay it. A retry after reasoning-only
+        # chunks replays the reasoning, so reasoning_content and streams contain both attempts.
+        for attempt in range(1, _STREAM_ATTEMPTS + 1):
+            started = False
+            try:
+                async for chunk in self._stream_once(url, headers, body):
+                    started = started or bool(chunk.content)
+                    yield chunk
+                return
+            except httpx.RemoteProtocolError as e:
+                if started or attempt == _STREAM_ATTEMPTS:
+                    raise
+                logger.warning("Codex stream dropped before any answer text (%s), retrying", e)
+
+    async def _stream_once(self, url: str, headers: dict, body: dict) -> AsyncIterator[StreamChunk]:
         client = self._get_client()
         usage: Usage = Usage()
         async with client.stream("POST", url, json=body, headers=headers) as resp:

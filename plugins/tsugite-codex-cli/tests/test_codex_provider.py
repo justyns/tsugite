@@ -436,6 +436,42 @@ async def test_mid_stream_response_failed_raises_typed_error():
     assert "content filter" in str(exc.value).lower()
 
 
+class _DroppedStreamCtx(_FakeStreamCtx):
+    async def aiter_lines(self):
+        for ev in self._events:
+            yield ev
+        raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first_events, attempts, expect_text",
+    [
+        ([], 2, "ok"),
+        (['data: {"type":"response.reasoning_summary_text.delta","delta":"hmm"}'], 2, "ok"),
+        (['data: {"type":"response.output_text.delta","delta":"part"}'], 1, None),
+    ],
+)
+async def test_dropped_stream_retries_only_before_any_output(first_events, attempts, expect_text):
+    provider = CodexCliProvider()
+    good = ['data: {"type":"response.output_text.delta","delta":"ok"}']
+    contexts = [_DroppedStreamCtx(events=first_events), _FakeStreamCtx(events=good)]
+    calls = []
+
+    def fake_stream(self_, method, url, **kwargs):
+        calls.append(url)
+        return contexts[len(calls) - 1]
+
+    with _patched_auth(provider), patch.object(httpx.AsyncClient, "stream", new=fake_stream):
+        coro = provider.acompletion(messages=[{"role": "user", "content": "x"}], model="gpt-5.4")
+        if expect_text is None:
+            with pytest.raises(httpx.RemoteProtocolError):
+                await coro
+        else:
+            assert (await coro).content == expect_text
+    assert len(calls) == attempts
+
+
 @pytest.mark.asyncio
 async def test_mid_stream_error_event_raises_typed_error():
     """The Responses API also signals failure with a bare `error` event/type."""
