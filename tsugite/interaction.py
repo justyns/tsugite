@@ -8,6 +8,8 @@ non-interactive (scheduler) modes.
 import contextvars
 from typing import List, Optional, Protocol, runtime_checkable
 
+from tsugite.exceptions import ToolUnavailableError
+
 
 @runtime_checkable
 class InteractionBackend(Protocol):
@@ -56,32 +58,20 @@ class TerminalInteractionBackend:
 
 
 class NonInteractiveBackend:
-    """Returns defaults for yes_no/choice, raises for freeform text.
+    """Denies approvals and raises for every other question type.
 
-    Used by the scheduler adapter where no user is available.
+    Used where no user is available to answer (scheduler, rooms, background runs).
     """
 
-    def __init__(self, default_yes_no: str = "yes", default_choice_index: int = 0):
-        self._default_yes_no = default_yes_no
-        self._default_choice_index = default_choice_index
-
     def ask_user(self, question: str, question_type: str = "text", options: Optional[List[str]] = None) -> str:
-        if question_type == "yes_no":
-            return self._default_yes_no
         if question_type == "approval":
-            # Fail closed: never auto-approve in non-interactive mode. Return the
-            # "Deny" option (never index 0, which would be "Approve").
+            # Never index 0, which would be "Approve".
             if options:
                 for option in options:
                     if option.strip().lower() == "deny":
                         return option
             return "deny"
-        if question_type == "choice":
-            if not options:
-                raise RuntimeError("Cannot ask choice questions without options in non-interactive mode.")
-            idx = min(self._default_choice_index, len(options) - 1)
-            return options[idx]
-        raise RuntimeError(
-            "Cannot ask freeform text questions in non-interactive mode (scheduler). "
-            "Use yes_no or choice question types instead."
+        raise ToolUnavailableError(
+            f"No user is available in this run to answer the {question_type} question {question!r}. "
+            "Do not assume an answer. Stop and report the question, or continue without it."
         )

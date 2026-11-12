@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tsugite.exceptions import ToolUnavailableError
 from tsugite.interaction import (
     InteractionBackend,
     NonInteractiveBackend,
@@ -23,30 +24,13 @@ def _clear_backend():
 
 
 class TestNonInteractiveBackend:
-    def test_yes_no_defaults_yes(self):
-        backend = NonInteractiveBackend()
-        assert backend.ask_user("Continue?", "yes_no") == "yes"
-
-    def test_yes_no_custom_default(self):
-        backend = NonInteractiveBackend(default_yes_no="no")
-        assert backend.ask_user("Continue?", "yes_no") == "no"
-
-    def test_choice_returns_first(self):
-        backend = NonInteractiveBackend()
-        assert backend.ask_user("Pick:", "choice", ["a", "b", "c"]) == "a"
-
-    def test_choice_custom_index(self):
-        backend = NonInteractiveBackend(default_choice_index=2)
-        assert backend.ask_user("Pick:", "choice", ["a", "b", "c"]) == "c"
-
-    def test_choice_index_clamped(self):
-        backend = NonInteractiveBackend(default_choice_index=99)
-        assert backend.ask_user("Pick:", "choice", ["a", "b"]) == "b"
-
-    def test_text_raises(self):
-        backend = NonInteractiveBackend()
-        with pytest.raises(RuntimeError, match="non-interactive"):
-            backend.ask_user("Name?", "text")
+    @pytest.mark.parametrize(
+        "question_type, options",
+        [("yes_no", None), ("choice", ["a", "b"]), ("text", None)],
+    )
+    def test_never_answers_for_the_user(self, question_type, options):
+        with pytest.raises(ToolUnavailableError, match="No user is available"):
+            NonInteractiveBackend().ask_user("Delete these files?", question_type, options)
 
 
 class TestTerminalInteractionBackend:
