@@ -7,6 +7,7 @@
   import ModelPicker from '../chats/ModelPicker.svelte';
   import { composerPrefill } from '../chats/composerPrefill.svelte';
   import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
+  import { agents } from '$lib/stores/agents.svelte';
   import { sessions } from '$lib/stores/sessions.svelte';
   import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { TESTID } from '$lib/testids';
@@ -30,6 +31,7 @@
 
   let mode = $state('chat');
   let agentPath = $state('');
+  let identityId = $state('');
   let model = $state<string | null>(null);
   let effort = $state('default');
   let message = $state('');
@@ -41,6 +43,7 @@
   const labels = $derived(pool.map((f) => agentLabel(f, agentsMeta.agentFiles)));
   const agent = $derived(pool.find((f) => f.path === agentPath));
   const agentSel = $derived(agent ? agentLabel(agent, agentsMeta.agentFiles) : '');
+  const identityIds = $derived(agents.list.map((a) => a.id));
 
   // Reset the form each time the launcher opens. The requested agent is applied
   // once its file is known (a cold load lists files after open), which also picks
@@ -49,6 +52,8 @@
   let initialPending = false;
   $effect(() => {
     if (open && !wasOpen) {
+      void agents.load();
+      identityId = '';
       agentsMeta.loadAgentFiles().catch((err) => {
         toasts.push('err', 'Could not load agents', {
           body: err instanceof Error ? err.message : String(err),
@@ -81,6 +86,11 @@
     }
   });
 
+  $effect(() => {
+    const fallback = agents.list.find((a) => a.is_default);
+    if (open && !identityId && fallback) identityId = fallback.id;
+  });
+
   const canStart = $derived(!busy && !!agent && (mode === 'chat' || message.trim().length > 0));
 
   async function start() {
@@ -90,6 +100,7 @@
       if (mode === 'chat') {
         const id = await sessions.newSession({
           settings: chatSettings({ agent, model, effort }),
+          agentId: identityId || undefined,
         });
         if (message.trim()) composerPrefill.request(id, message.trim(), true);
         await sessions.load();
@@ -155,6 +166,13 @@
       {/key}
     </div>
     {#if agent?.description}<div class="rl-desc">{agent.description}</div>{/if}
+    {#if mode === 'chat' && agents.list.length > 1}
+      <div class="rl-field rl-row">
+        <span class="rl-lbl">identity</span>
+        <Select options={identityIds} bind:value={identityId} ariaLabel="Daemon agent" />
+        <span class="rl-hint">the sidebar node the chat is filed under</span>
+      </div>
+    {/if}
 
     <div class="rl-field rl-row">
       <span class="rl-lbl">model</span>

@@ -10,6 +10,7 @@ vi.mock('$lib/api/client', () => ({
 
 import { api } from '$lib/api/client';
 import { agentsMeta } from '$lib/stores/agentsMeta.svelte';
+import { agents } from '$lib/stores/agents.svelte';
 import { sessions } from '$lib/stores/sessions.svelte';
 import { toasts } from '$lib/components/feedback/toast-store.svelte';
 import { composerPrefill } from '../chats/composerPrefill.svelte';
@@ -70,6 +71,7 @@ beforeEach(() => {
   vi.mocked(api.patch).mockResolvedValue({} as never);
   vi.spyOn(sessions, 'load').mockResolvedValue(undefined as never);
   agentsMeta.agentFiles = [];
+  agents.list = [];
 });
 
 afterEach(() => {
@@ -124,6 +126,23 @@ test('a chosen agent, model and effort are sent with the create call', async () 
     run: true,
   });
   composerPrefill.consume('new-chat');
+});
+
+test('the chosen daemon agent is sent as agent_id, even when names collide', async () => {
+  const row = (id: string, is_default: boolean) =>
+    ({ id, name: 'Twin', is_default }) as unknown as (typeof agents.list)[number];
+  agents.list = [row('main', true), row('reviewer', false)];
+  vi.spyOn(agents, 'load').mockResolvedValue(undefined);
+  mount();
+  await vi.waitFor(() => expect(optionTexts()).toContain('hollis'));
+  await page.getByTestId('launcher-start').click();
+  await vi.waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
+  expect(api.post).toHaveBeenLastCalledWith('/api/chat/sessions/new', { agent_id: 'main' });
+
+  await page.getByLabelText('Daemon agent', { exact: true }).selectOptions('reviewer');
+  await page.getByTestId('launcher-start').click();
+  await vi.waitFor(() => expect(onOpen).toHaveBeenCalledTimes(2));
+  expect(api.post).toHaveBeenLastCalledWith('/api/chat/sessions/new', { agent_id: 'reviewer' });
 });
 
 test('run once lists every agent file and needs a prompt', async () => {

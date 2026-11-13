@@ -347,11 +347,12 @@ export class SessionsStore {
   // --- lifecycle mutations (keyed by session id) ---
 
   async newSession(
-    opts: { title?: string; userId?: string; settings?: ChatSettingsPatch } = {},
+    opts: { title?: string; userId?: string; agentId?: string; settings?: ChatSettingsPatch } = {},
   ): Promise<string> {
     const body: Record<string, unknown> = { ...opts.settings };
     if (opts.title != null) body.title = opts.title;
     if (opts.userId != null) body.user_id = opts.userId;
+    if (opts.agentId != null) body.agent_id = opts.agentId;
     const res = await api.post<{ id: string }>('/api/chat/sessions/new', body);
     return res.id;
   }
