@@ -306,7 +306,7 @@ class AgentPreparer:
         otherwise.
         """
         from tsugite.core.tools import create_tool_from_tsugite
-        from tsugite.interaction import get_interaction_backend
+        from tsugite.interaction import NonInteractiveBackend, get_interaction_backend
         from tsugite.tools import _tools, expand_tool_specs
 
         try:
@@ -315,8 +315,9 @@ class AgentPreparer:
             )
 
             interactive_tool_names = ["ask_user", "ask_user_batch"]
-            has_interaction = (
-                interactive_mode or get_interaction_backend() is not None or full_context.get("is_daemon", False)
+            backend = get_interaction_backend()
+            has_interaction = not isinstance(backend, NonInteractiveBackend) and (
+                interactive_mode or backend is not None or full_context.get("is_daemon", False)
             )
             if has_interaction:
                 for name in interactive_tool_names:

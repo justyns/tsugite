@@ -296,18 +296,36 @@ class TestDaemonModeInteractiveTools:
         assert "ask_user_batch" in tools
 
     def test_interaction_backend_injects_ask_user(self, monkeypatch, file_tools, interactive_tools):
-        """When an interaction backend is set, ask_user should be auto-injected."""
+        """When an answering interaction backend is set, ask_user should be auto-injected."""
         monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-        from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
+        from tests.interaction_doubles import FakeBackend
+        from tsugite.interaction import set_interaction_backend
 
-        set_interaction_backend(NonInteractiveBackend())
+        set_interaction_backend(FakeBackend("yes"))
         try:
             config = _make_agent_config(tools=["write_file"])
             tools = _prepare_and_capture_tools(config, context={})
 
             assert "ask_user" in tools
             assert "ask_user_batch" in tools
+        finally:
+            set_interaction_backend(None)
+
+    def test_non_interactive_backend_hides_ask_user(self, monkeypatch, file_tools, interactive_tools):
+        """A scheduled run (daemon, NonInteractiveBackend) is not offered ask_user, even when listed."""
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+        from tsugite.interaction import NonInteractiveBackend, set_interaction_backend
+
+        set_interaction_backend(NonInteractiveBackend())
+        try:
+            config = _make_agent_config(tools=["ask_user", "write_file"])
+            tools = _prepare_and_capture_tools(config, context={"is_daemon": True})
+
+            assert "ask_user" not in tools
+            assert "ask_user_batch" not in tools
+            assert "write_file" in tools
         finally:
             set_interaction_backend(None)
 

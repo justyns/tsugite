@@ -19,6 +19,7 @@ from tsugite.history.ui_events import split_injected_context
 from tsugite.interaction import NonInteractiveBackend, get_interaction_backend, set_interaction_backend
 from tsugite.tools import jobs as jobs_tools
 from tsugite.tools import sessions as sessions_tools
+from tsugite.tools.interactive import ask_user
 
 
 class _Adapter:
@@ -519,6 +520,18 @@ class TestRouterTurnContext:
 
 
 class TestTurnOutcomes:
+    @pytest.mark.asyncio
+    async def test_ask_user_in_a_participant_turn_gets_no_answer(self, rooms, store, adapter, lead_chat, room):
+        async def ask():
+            ask_user("Delete these files?", "yes_no")
+
+        adapter.hooks[_session_of(rooms, room, "homelab")] = ask
+        await _handoff_from_lead_turn(rooms, store, lead_chat, room, [{"agent": "homelab", "message": "a"}])
+
+        [card] = _cards(store, room.id)
+        assert (card["kind"], card["agent_id"]) == ("turn_failed", "homelab")
+        assert "Do not assume an answer" in card["text"]
+
     @pytest.mark.asyncio
     async def test_only_the_lead_sees_a_failed_turn_in_its_next_context(self, rooms, store, adapter, lead_chat, room):
         async def boom():
