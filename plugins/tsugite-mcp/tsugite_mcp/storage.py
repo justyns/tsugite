@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 
 from tsugite.secrets import get_backend
 from tsugite.secrets.registry import get_registry
@@ -23,6 +23,7 @@ class SecretStorage:
         self.name = name
         self.tokens_key = f"mcp-{name}-tokens"
         self.client_key = f"mcp-{name}-client"
+        self.metadata_key = f"mcp-{name}-metadata"
         # A client the user registered in the provider's console: client_id, client_secret, auth_method.
         self.preset_key = f"mcp-{name}-client-preset"
         self.using_preset = False
@@ -35,7 +36,7 @@ class SecretStorage:
         await asyncio.to_thread(get_backend().set, key, json.dumps(record))
 
     async def delete_all(self) -> None:
-        for key in (self.tokens_key, self.client_key, self.preset_key):
+        for key in (self.tokens_key, self.client_key, self.metadata_key, self.preset_key):
             await asyncio.to_thread(get_backend().delete, key)
 
     async def delete_registration(self) -> None:
@@ -77,6 +78,13 @@ class SecretStorage:
             record["expires_at"] = time.time() + tokens.expires_in
         self._mask(record)
         await self._set(self.tokens_key, record)
+
+    async def get_metadata(self) -> OAuthMetadata | None:
+        record = await self._get(self.metadata_key)
+        return record and OAuthMetadata.model_validate(record)
+
+    async def set_metadata(self, metadata: OAuthMetadata) -> None:
+        await self._set(self.metadata_key, metadata.model_dump(mode="json", exclude_none=True))
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         """The user's own client when one is set, else the dynamic registration."""

@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import pytest
-from fake_server import URL
+from fake_server import BASE, URL
 
 from tsugite.secrets.registry import get_registry
 from tsugite.tools import call_tool, expand_tool_specs, get_tool
@@ -59,7 +59,7 @@ async def test_sign_in_registers_pkce_exchange_and_tools(daemon, adapter, fake, 
     assert fake.denied == []
     assert fake.clients == {"client-1": [ORIGIN + CALLBACK]}
     assert [t["name"] for t in server.tools] == ["mcp_fake_echo", "mcp_fake_leak", "mcp_fake_fail"]
-    assert set(secrets_backend.values) == {"mcp-fake-tokens", "mcp-fake-client"}
+    assert set(secrets_backend.values) == {"mcp-fake-tokens", "mcp-fake-client", "mcp-fake-metadata"}
 
     listing = await daemon.get("/api/plugins/mcp/servers", headers=daemon.auth_headers)
     assert listing.json()["servers"][0]["tools"][0] == {"name": "mcp_fake_echo", "description": "Repeat text back."}
@@ -257,6 +257,24 @@ async def test_expired_token_is_refreshed(daemon, adapter, fake, secrets_backend
     assert adapter.servers["fake"].status == "connected"
 
 
+@pytest.mark.parametrize("signed_in_before_metadata_was_stored", [False, True])
+async def test_refresh_uses_the_advertised_token_endpoint(
+    daemon, adapter, fake, secrets_backend, signed_in_before_metadata_was_stored
+):
+    await sign_in(daemon, adapter, fake)
+    if signed_in_before_metadata_was_stored:
+        del secrets_backend.values["mcp-fake-metadata"]
+    record = json.loads(secrets_backend.values["mcp-fake-tokens"])
+    record["expires_at"] = 1.0
+    secrets_backend.values["mcp-fake-tokens"] = json.dumps(record)
+
+    await asyncio.to_thread(call_tool, "mcp_fake_echo", text="again")
+
+    assert fake.grants[-1] == "refresh_token"
+    assert json.loads(secrets_backend.values["mcp-fake-metadata"])["token_endpoint"] == BASE + "/oauth/token"
+    assert adapter.servers["fake"].status == "connected"
+
+
 async def test_rejected_refresh_asks_for_sign_in(daemon, adapter, fake, secrets_backend):
     await sign_in(daemon, adapter, fake)
     record = json.loads(secrets_backend.values["mcp-fake-tokens"])
@@ -390,7 +408,7 @@ async def test_preregistered_public_client(daemon, adapter, fake, secrets_backen
     assert fake.token_auth == ["none"]
     assert fake.denied == []
     assert "register" not in fake.requests
-    assert set(secrets_backend.values) == {"mcp-fake-tokens", "mcp-fake-client-preset"}
+    assert set(secrets_backend.values) == {"mcp-fake-tokens", "mcp-fake-client-preset", "mcp-fake-metadata"}
 
 
 @pytest.mark.parametrize(

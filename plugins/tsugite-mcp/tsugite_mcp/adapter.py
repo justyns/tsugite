@@ -21,7 +21,7 @@ from mcp.client.auth.utils import (
 )
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
-from mcp.shared.auth import OAuthClientMetadata
+from mcp.shared.auth import OAuthClientMetadata, OAuthMetadata
 from starlette.datastructures import QueryParams
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
@@ -100,7 +100,10 @@ class _Provider(OAuthClientProvider):
             )
             info.token_endpoint_auth_method = method
             await storage.set_preset({**(await storage.get_preset()), "auth_method": method})
-        return await super()._exchange_token_authorization_code(*args, **kwargs)
+        result = await super()._exchange_token_authorization_code(*args, **kwargs)
+        if self.context.oauth_metadata:
+            await storage.set_metadata(self.context.oauth_metadata)
+        return result
 
 
 def validate_server(name: str, url: str) -> None:
@@ -175,6 +178,12 @@ class McpAdapter(BaseAdapter):
                 callback_handler,
             )
             auth.context.token_expiry_time = await storage.expires_at()
+            auth.context.oauth_metadata = await storage.get_metadata()
+            if not signin and not auth.context.oauth_metadata:
+                # Signed in before the metadata was stored.
+                auth.context.oauth_metadata = await self._discover(server)
+                if auth.context.oauth_metadata:
+                    await storage.set_metadata(auth.context.oauth_metadata)
         async with self.client_factory(auth=auth) as http_client:
             async with streamable_http_client(server.url, http_client=http_client) as streams:
                 async with ClientSession(streams[0], streams[1]) as session:
@@ -213,15 +222,15 @@ class McpAdapter(BaseAdapter):
         if await storage.get_preset() or await storage.get_registration():
             return
         try:
-            dynamic = await self._registers_dynamically(server)
+            metadata = await self._discover(server)
         except Exception as exc:
             server.status, server.error = "error", _describe(exc)
             return
-        if not dynamic:
+        if metadata and metadata.registration_endpoint is None:
             server.status, server.error = "needs_client", NEEDS_CLIENT
 
-    async def _registers_dynamically(self, server: Server) -> bool:
-        """Whether the authorization server advertises a registration endpoint. True when no metadata is found."""
+    async def _discover(self, server: Server) -> OAuthMetadata | None:
+        """The authorization server's metadata, or None when the server publishes none."""
         async with self.client_factory() as http:
             auth_server = None
             for url in build_protected_resource_metadata_discovery_urls(None, server.url):
@@ -231,10 +240,10 @@ class McpAdapter(BaseAdapter):
             for url in build_oauth_authorization_server_metadata_discovery_urls(auth_server, server.url):
                 ok, metadata = await handle_auth_metadata_response(await http.get(url))
                 if metadata:
-                    return metadata.registration_endpoint is not None
+                    return metadata
                 if not ok:
                     break
-        return True
+        return None
 
     async def call_tool(self, name: str, tool: str, arguments: dict) -> str:
         server = self.servers[name]

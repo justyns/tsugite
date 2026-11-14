@@ -30,7 +30,7 @@ TOOLS = [
 
 
 class FakeServer:
-    """Serves OAuth metadata, `/register`, `/token` and a JSON-only Streamable HTTP `/mcp`.
+    """Serves OAuth metadata, `/register`, `/oauth/token` and a JSON-only Streamable HTTP `/mcp`.
 
     With `oauth=False` the MCP endpoint accepts anyone. `denied` lists requests the OAuth
     endpoints rejected, e.g. a PKCE verifier that does not match. `dynamic=False` leaves
@@ -59,7 +59,7 @@ class FakeServer:
                 Route("/.well-known/oauth-protected-resource", self.resource_metadata),
                 Route("/.well-known/oauth-authorization-server", self.server_metadata),
                 Route("/register", self.register, methods=["POST"]),
-                Route("/token", self.token, methods=["POST"]),
+                Route("/oauth/token", self.token, methods=["POST"]),
                 Route("/mcp", self.mcp, methods=["GET", "POST", "DELETE"]),
             ]
         )
@@ -83,7 +83,7 @@ class FakeServer:
         metadata = {
             "issuer": BASE,
             "authorization_endpoint": f"{BASE}/authorize",
-            "token_endpoint": f"{BASE}/token",
+            "token_endpoint": f"{BASE}/oauth/token",
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code", "refresh_token"],
             "code_challenge_methods_supported": ["S256"],
