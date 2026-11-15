@@ -429,3 +429,48 @@ test.each([
   await clickSoloEntry('Copy solo link');
   expect(writeText).toHaveBeenCalledWith(url);
 });
+
+async function summarizeFromMenu() {
+  roster('smoke');
+  stubInfo('smoke', { job_host: true });
+  sessions.rows = [
+    row('session-a', { title: 'long chat' }),
+    row('session-b', { title: 'other chat' }),
+    row('session-a2', { title: 'fresh chat' }),
+  ];
+  const load = vi.spyOn(sessions, 'load').mockResolvedValue();
+  let resolve!: (v: unknown) => void;
+  const post = vi
+    .spyOn(api, 'post')
+    .mockImplementation((path: string) =>
+      path === '/api/chat/compact'
+        ? (new Promise((r) => (resolve = r)) as never)
+        : (Promise.resolve({ ok: true }) as never),
+    );
+  const view = await render(Surface, { params: { sessionId: 'session-a' } });
+  await vi.waitFor(() => expect(headerTitle()).toBe('long chat'));
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await page.getByRole('menuitem', { name: 'Summarize into new chat' }).click();
+  expect(post).toHaveBeenCalledWith('/api/chat/compact', {
+    session_id: 'session-a',
+    retain_recent: false,
+  });
+  return { view, load, resolve: () => resolve({ new_conversation_id: 'session-a2' }) };
+}
+
+test('summarizing into a new chat summarizes every turn and opens the successor', async () => {
+  const { resolve } = await summarizeFromMenu();
+  resolve();
+  await vi.waitFor(() => expect(headerTitle()).toBe('fresh chat'));
+});
+
+test('summarizing does not switch the pane when the user opened another chat meanwhile', async () => {
+  const { view, load, resolve } = await summarizeFromMenu();
+  await view.rerender({ params: { sessionId: 'session-b' } });
+  await vi.waitFor(() => expect(headerTitle()).toBe('other chat'));
+  resolve();
+  await vi.waitFor(() => expect(load).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 0));
+  await tick();
+  expect(headerTitle()).toBe('other chat');
+});

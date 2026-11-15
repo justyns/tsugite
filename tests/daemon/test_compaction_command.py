@@ -202,7 +202,7 @@ class TestCompactRouteRoutesBySessionId:
 
         captured = {}
 
-        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None):
+        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None, **kwargs):
             captured["session_id"] = session_id
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
@@ -226,7 +226,7 @@ class TestCompactRouteRoutesBySessionId:
 
         captured = {}
 
-        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None):
+        async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None, **kwargs):
             captured["session_id"] = session_id
 
         with patch.object(adapter, "_compact_session", new=AsyncMock(side_effect=fake_compact)):
@@ -241,3 +241,121 @@ class TestCompactRouteRoutesBySessionId:
 
         assert resp.status_code == 200, resp.text
         assert captured.get("session_id") == default.id
+
+
+def _post_compact(client, admin_token, body):
+    return client.post(
+        "/api/chat/compact",
+        content=json.dumps(body),
+        headers={"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"},
+    )
+
+
+class TestSummarizeIntoNewChat:
+    def _seed_two_turn_session(self, adapter, user_id):
+        from tests.history_helpers import seed_history_session
+
+        session_id = _seed_session_with_message(adapter, user_id)
+        storage = seed_history_session(session_id)
+        for i in range(2):
+            storage.record("user_input", text=f"message {i}")
+            storage.record("model_response", raw_content=f"reply {i}")
+        return session_id
+
+    def _compact(self, client, admin_token, body, summarized_with):
+        async def fake_summarize(messages, model=None, max_context_tokens=None, progress_callback=None):
+            summarized_with.append((model, messages))
+            return "Summary of everything"
+
+        with (
+            patch("tsugite_daemon.memory.summarize_session", new=fake_summarize),
+            patch("tsugite.hooks.fire_compact_hooks", new_callable=AsyncMock, return_value=[]),
+        ):
+            return _post_compact(client, admin_token, body)
+
+    def test_route_summarizes_whole_chat_into_successor(self, client, adapter, admin_token, history_dir):
+        from tests.history_helpers import load_history_session
+
+        user_id = "summarize-user"
+        old_id = self._seed_two_turn_session(adapter, user_id)
+        summarized_with = []
+
+        resp = self._compact(
+            client, admin_token, {"user_id": user_id, "session_id": old_id, "retain_recent": False}, summarized_with
+        )
+
+        assert resp.status_code == 200, resp.text
+        new_id = resp.json()["new_conversation_id"]
+        assert new_id != old_id
+        new_events = load_history_session(new_id).load_events()
+        assert [e.type for e in new_events if e.type != "session_start"] == ["compaction"]
+        compaction = new_events[-1].data
+        assert compaction["replaced_count"] == 2
+        assert compaction["retained_count"] == 0
+        assert len(summarized_with) == 1
+        assert "reply 1" in str(summarized_with[0][1])
+
+    def test_default_still_skips_a_short_chat(self, client, adapter, admin_token, history_dir):
+        user_id = "summarize-default-user"
+        old_id = self._seed_two_turn_session(adapter, user_id)
+        summarized_with = []
+
+        resp = self._compact(client, admin_token, {"user_id": user_id, "session_id": old_id}, summarized_with)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["new_conversation_id"] == old_id
+        assert summarized_with == []
+
+    def test_chat_without_user_input_is_not_rotated(self, client, adapter, admin_token, history_dir):
+        from tests.history_helpers import seed_history_session
+
+        user_id = "summarize-empty-user"
+        old_id = _seed_session_with_message(adapter, user_id)
+        seed_history_session(old_id, events=[("model_response", {"raw_content": "hello"})])
+        summarized_with = []
+
+        resp = self._compact(
+            client,
+            admin_token,
+            {"user_id": user_id, "session_id": old_id, "retain_recent": False},
+            summarized_with,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert adapter.session_store.get_session(old_id).superseded_by is None
+        assert summarized_with == []
+
+    @pytest.mark.parametrize("value", [None, 0, "false"])
+    def test_non_boolean_retain_recent_is_rejected(self, client, adapter, admin_token, history_dir, value):
+        user_id = "summarize-bad-flag-user"
+        old_id = self._seed_two_turn_session(adapter, user_id)
+        summarized_with = []
+
+        resp = self._compact(
+            client, admin_token, {"user_id": user_id, "session_id": old_id, "retain_recent": value}, summarized_with
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert summarized_with == []
+
+
+class TestCompactRouteRefusals:
+    def test_superseded_session_is_refused(self, client, adapter, admin_token):
+        sid = _seed_session_with_message(adapter, "superseded-user")
+        adapter.session_store.update_session(sid, superseded_by="successor")
+
+        with patch.object(adapter, "_compact_session", new=AsyncMock(return_value=None)) as compact:
+            resp = _post_compact(client, admin_token, {"user_id": "superseded-user", "session_id": sid})
+
+        assert resp.status_code == 409, resp.text
+        compact.assert_not_called()
+
+    def test_busy_session_is_refused(self, client, adapter, admin_token):
+        sid = _seed_session_with_message(adapter, "busy-user")
+        adapter.session_store.begin_turn(sid)
+
+        with patch.object(adapter, "_compact_session", new=AsyncMock(return_value=None)) as compact:
+            resp = _post_compact(client, admin_token, {"user_id": "busy-user", "session_id": sid})
+
+        assert resp.status_code == 409, resp.text
+        compact.assert_not_called()

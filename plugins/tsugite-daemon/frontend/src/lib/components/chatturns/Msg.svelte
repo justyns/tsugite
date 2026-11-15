@@ -17,6 +17,7 @@
     onCopy,
     onEditFork,
     onRetry,
+    onSummarize,
     children,
   }: {
     role: 'user' | 'ai';
@@ -41,6 +42,7 @@
     onCopy?: () => void;
     onEditFork?: () => void;
     onRetry?: () => void;
+    onSummarize?: () => void;
     children: Snippet;
   } = $props();
 
@@ -80,6 +82,16 @@
       <button type="button" class="retry-btn" data-testid={TESTID.chatRetry} onclick={onRetry}>
         <Icon name="retry" size={12} />Continue
       </button>
+      {#if onSummarize}
+        <button
+          type="button"
+          class="retry-btn"
+          data-testid={TESTID.chatSummarize}
+          onclick={onSummarize}
+        >
+          <Icon name="compress" size={12} />Summarize into new chat
+        </button>
+      {/if}
     </div>
   {/if}
   <div class="acts" class:is-pinned={pinnedActs}>
@@ -180,6 +192,8 @@
   .retry-failed {
     grid-column: 2;
     display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
   }
   .retry-btn {
     display: inline-flex;

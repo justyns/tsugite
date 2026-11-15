@@ -45,7 +45,7 @@ _FAKE_PHASES = [
 
 
 def _fake_compact_session_factory():
-    async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None):
+    async def fake_compact(session_id, instructions=None, reason=None, progress_callback=None, **kwargs):
         if progress_callback is not None:
             for payload in _FAKE_PHASES:
                 progress_callback(payload)

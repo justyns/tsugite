@@ -77,6 +77,7 @@
     soloLinks,
     onOpenSession,
     onRetry,
+    onSummarize,
     onQuote,
     onDismissAttention,
   }: {
@@ -106,6 +107,7 @@
     soloLinks?: { open: () => void; copy: () => void };
     onOpenSession: (id: string) => void;
     onRetry: (text: string) => void;
+    onSummarize: () => void;
     /** Quote selected message prose into the composer; `sourceId` is the message's storage id. */
     onQuote?: (text: string, sourceId?: number) => void;
     onDismissAttention: (deliveryId?: string) => void;
@@ -144,6 +146,9 @@
   // what clears `resumable` server-side and drops it into the ended bucket.
   const canComplete = $derived(row != null && (!isFinishedSession(row) || isResumableSession(row)));
   const canCancel = $derived(ctrl.streaming || (row?.busy ?? false));
+  const summarize = $derived(
+    canCancel || row?.compacting || row?.superseded_by ? undefined : onSummarize,
+  );
   const jobCount = $derived(
     timeline.turns.reduce((n, t) => n + t.blocks.filter((b) => b.kind === 'job').length, 0),
   );
@@ -604,6 +609,7 @@
         {onComplete}
         {onCancel}
         {onRestart}
+        onSummarize={summarize}
       />
     {/if}
   </header>
@@ -715,6 +721,7 @@
           retryFailed={failed}
           eventId={turn.eventId}
           onRetry={retry && turn.id === retry.turnId ? () => onRetry(retry.text) : undefined}
+          onSummarize={summarize}
         >
           {#if turn.origin}
             <!-- Another agent, a job, or a schedule sent this - never the person.

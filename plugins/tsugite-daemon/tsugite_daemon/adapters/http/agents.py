@@ -619,6 +619,13 @@ class AgentsMixin:
 
         if session is None or session.message_count == 0:
             return JSONResponse({"error": "no session to compact"}, status_code=404)
+        if session.superseded_by:
+            return JSONResponse({"error": "session was already compacted"}, status_code=409)
+        if self.session_busy(session):
+            return JSONResponse({"error": "session is busy"}, status_code=409)
+        retain_recent = body.get("retain_recent", True)
+        if not isinstance(retain_recent, bool):
+            return JSONResponse({"error": "retain_recent must be a boolean"}, status_code=400)
 
         old_conv_id = session.id
 
@@ -634,6 +641,7 @@ class AgentsMixin:
                 instructions=instructions,
                 reason="manual",
                 progress_callback=adapter._compaction_progress_cb(old_conv_id),
+                retain_recent=retain_recent,
             )
         except Exception as e:
             msg = str(e) or repr(e)
@@ -644,6 +652,8 @@ class AgentsMixin:
             adapter._broadcast_compaction("compaction_finished", old_conv_id)
 
         self.event_bus.emit("agent_status", {})
+        if new_session is None and not retain_recent:
+            return JSONResponse({"error": "nothing to summarize"}, status_code=409)
         if new_session:
             self.event_bus.emit(
                 "session_update",

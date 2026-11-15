@@ -38,6 +38,7 @@ const callbacks = {
   onCopyId: noop,
   onOpenSession: noop,
   onRetry: noop,
+  onSummarize: noop,
   onDismissAttention: noop,
 };
 
@@ -1057,6 +1058,52 @@ test('session menu shows raw session metadata, with the links reachable from it'
   await expect
     .element(dialog.getByRole('link', { name: 'pr' }))
     .toHaveAttribute('href', 'https://forge.example/justyns/tsugite/pulls/608');
+});
+
+function cancelledTurn(extra: Partial<SessionRow> = {}) {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'do the thing', timestamp: '2026-07-21T06:00:00Z' },
+    { type: 'model_response', raw_content: 'Starting…', thought: 'Starting…' },
+    { type: 'session_cancelled', status: 'cancelled' },
+  ]);
+  const row = {
+    status: 'cancelled',
+    title: 'c',
+    metadata: {},
+    pinned: false,
+    is_primary: false,
+    busy: false,
+    ...extra,
+  } as unknown as SessionRow;
+  return { ctrl, row };
+}
+
+test('a failed turn and the session menu both summarize the chat into a new one', async () => {
+  const onSummarize = vi.fn();
+  render(Conversation, { ...cancelledTurn(), railCollapsed: false, ...callbacks, onSummarize });
+
+  await page.getByTestId(TESTID.chatSummarize).click();
+  expect(onSummarize).toHaveBeenCalledTimes(1);
+
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await page.getByRole('menuitem', { name: 'Summarize into new chat' }).click();
+  expect(onSummarize).toHaveBeenCalledTimes(2);
+});
+
+test.each([
+  ['a superseded chat', { superseded_by: 'session-next' }],
+  ['a chat with a run in flight', { busy: true }],
+  ['a chat that is compacting', { compacting: true }],
+])('%s offers no Summarize into new chat', async (_name, extra) => {
+  render(Conversation, { ...cancelledTurn(extra), railCollapsed: false, ...callbacks });
+
+  await expect.element(page.getByTestId('chat-retry')).toBeVisible();
+  await expect.element(page.getByTestId(TESTID.chatSummarize)).not.toBeInTheDocument();
+  await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
+  await expect.element(page.getByRole('menuitem', { name: 'Edit display name' })).toBeVisible();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Summarize into new chat' }))
+    .not.toBeInTheDocument();
 });
 
 test('raw metadata shows the session fields that live outside the metadata block', async () => {

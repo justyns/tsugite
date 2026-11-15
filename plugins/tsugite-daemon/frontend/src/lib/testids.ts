@@ -157,6 +157,7 @@ export const TESTID = {
   chatLinkPreviewPopover: 'chat-link-preview-popover',
   /** Prominent, always-visible Retry on a failed turn (re-sends the last message). */
   chatRetry: 'chat-retry',
+  chatSummarize: 'chat-summarize',
   chatTurnOrigin: 'chat-turn-origin',
   chatTurnReplyTo: 'chat-turn-reply-to',
   chatTurnModel: 'chat-turn-model',

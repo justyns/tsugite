@@ -1398,10 +1398,12 @@ class BaseAdapter(ABC):
         instructions: str | None = None,
         reason: str | None = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        retain_recent: bool = True,
     ) -> Optional[Session]:
         """Compact a session by summarizing older events and rotating to a new
         session whose first body event is a `compaction` summary, followed by
-        the retained recent events.
+        the retained recent events. With `retain_recent=False` every event is
+        summarized and none are retained.
 
         Returns the new `Session` on success, or `None` when nothing was
         rotated (all events already fit in the retention budget). Callers must
@@ -1417,7 +1419,7 @@ class BaseAdapter(ABC):
         saved_session_store_limit = self.session_store.get_context_limit()
         saved_runtime_limit = self.runtime.context_limit
         try:
-            return await self._compact_session_inner(session_id, instructions, reason, progress_callback)
+            return await self._compact_session_inner(session_id, instructions, reason, progress_callback, retain_recent)
         finally:
             self.session_store.update_context_limit(saved_session_store_limit)
             self.runtime.context_limit = saved_runtime_limit
@@ -1428,6 +1430,7 @@ class BaseAdapter(ABC):
         instructions: str | None,
         reason: str | None,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]],
+        retain_recent: bool,
     ) -> Optional[Session]:
         if instructions is None:
             instructions = self._DEFAULT_COMPACT_INSTRUCTIONS
@@ -1468,7 +1471,11 @@ class BaseAdapter(ABC):
         context_limit = get_context_limit(model, fallback=session_limit_fallback)
         retention_budget = int(context_limit * RETENTION_BUDGET_RATIO)
 
-        old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
+        if retain_recent:
+            old_events, recent_events = split_events_for_compaction(all_events, model, retention_budget)
+        else:
+            old_events = all_events if any(e.type == "user_input" for e in all_events) else []
+            recent_events = []
 
         if not old_events:
             logger.info("All events fit in retention budget, skipping compaction")

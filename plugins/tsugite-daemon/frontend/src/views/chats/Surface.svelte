@@ -181,16 +181,26 @@
 
   // Lifecycle actions must land visibly: a toast on success, a toast on failure
   // (an unawaited rejection would otherwise vanish and the menu looks like a no-op).
-  async function lifecycle(action: () => Promise<void>, okMsg: string, errMsg: string) {
+  async function lifecycle<T>(action: () => Promise<T>, okMsg: string, errMsg: string) {
     try {
-      await action();
+      const result = await action();
       toasts.push('ok', okMsg);
       await afterMutation();
+      return result;
     } catch (err) {
       toasts.push('err', errMsg, {
         body: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  async function summarizeIntoNew(id: string) {
+    const successorId = await lifecycle(
+      () => sessions.summarizeIntoNew(id),
+      'Summarized into a new chat',
+      'Could not summarize',
+    );
+    if (successorId && selectedId === id) selectSession(successorId);
   }
 
   const queued = $derived(selectedRow?.queued ?? []);
@@ -345,6 +355,7 @@
     soloLinks={solo ? undefined : { open: openSolo, copy: copySoloLink }}
     onOpenSession={selectSession}
     onRetry={(text) => void onSend(text, { uploadedFiles: [] })}
+    onSummarize={() => selectedId && void summarizeIntoNew(selectedId)}
     onQuote={(text, sourceId) => composer?.insertQuote(text, sourceId)}
     onDismissAttention={(deliveryId) =>
       selectedId && void sessions.dismissAttention(selectedId, deliveryId)}

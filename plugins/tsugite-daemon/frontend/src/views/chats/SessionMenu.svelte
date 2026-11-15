@@ -40,6 +40,7 @@
     onComplete,
     onCancel,
     onRestart,
+    onSummarize,
   }: {
     /** Reasoning-effort control, shown as a group above the actions. A phone
      *  header has no room for it beside the model chip. */
@@ -68,6 +69,7 @@
     onComplete: () => void;
     onCancel: () => void;
     onRestart: () => void;
+    onSummarize?: () => void;
   } = $props();
 
   let open = $state(false);
@@ -128,6 +130,16 @@
       : []),
     ...(canRestart
       ? [{ id: 'restart', label: 'Restart', icon: 'retry' as IconName, run: onRestart }]
+      : []),
+    ...(onSummarize
+      ? [
+          {
+            id: 'summarize',
+            label: 'Summarize into new chat',
+            icon: 'compress' as IconName,
+            run: onSummarize,
+          },
+        ]
       : []),
   ]);
 

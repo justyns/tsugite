@@ -406,6 +406,14 @@ export class SessionsStore {
     await api.post(`/api/sessions/${encodeURIComponent(id)}/restart`);
   }
 
+  async summarizeIntoNew(id: string): Promise<string> {
+    const res = await api.post<{ new_conversation_id: string }>('/api/chat/compact', {
+      session_id: id,
+      retain_recent: false,
+    });
+    return res.new_conversation_id;
+  }
+
   async pin(id: string, position?: number): Promise<void> {
     await api.post(
       `/api/sessions/${encodeURIComponent(id)}/pin`,
