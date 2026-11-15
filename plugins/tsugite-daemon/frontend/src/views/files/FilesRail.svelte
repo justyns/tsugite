@@ -46,6 +46,20 @@
     void filesWorkspace.ensure();
   });
 
+  // Pick up files written outside the UI whenever the user comes back to it.
+  $effect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && !filesWorkspace.loading)
+        void filesWorkspace.reload();
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  });
+
   // Expand the focused file's ancestors so the tree shows it.
   $effect(() => {
     const parts = focusedFilePath?.split('/').slice(0, -1) ?? [];

@@ -9,6 +9,7 @@ vi.mock('$lib/api/client', () => ({ authHeaders: () => ({}), api: WORKSPACE.api 
 vi.mock('../chats/attachRecord', () => ({ copyReference: vi.fn() }));
 
 beforeEach(async () => {
+  WORKSPACE.reset();
   await page.viewport(1440, 900);
   const { filesShowIgnored } = await import('$lib/stores/filesShowIgnored.svelte');
   filesShowIgnored.set(false);
@@ -38,6 +39,18 @@ test('lists the workspace tree with directories collapsed', async () => {
   expect(page.getByTestId('file-node-ops/alpha.md').elements()).toHaveLength(0);
 
   await openDir('ops');
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+});
+
+test('regaining window focus lists new files and keeps open directories expanded', async () => {
+  await mountRail();
+  await openDir('ops');
+  await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
+
+  WORKSPACE.addOpsFile('gamma.md');
+  window.dispatchEvent(new Event('focus'));
+
+  await expect.element(page.getByTestId('file-node-ops/gamma.md')).toBeInTheDocument();
   await expect.element(page.getByTestId('file-node-ops/alpha.md')).toBeInTheDocument();
 });
 

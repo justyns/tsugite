@@ -89,8 +89,13 @@ export const WORKSPACE = {
   setContent: (path: string, content: string) => {
     CONTENT[path] = content;
   },
+  /** Stand in for a file appearing on disk under `ops/`. */
+  addOpsFile: (name: string) => {
+    DIRS.ops!.push({ path: `ops/${name}`, name, is_dir: false, size: 1 });
+  },
   reset: () => {
     CONTENT = { ...INITIAL_CONTENT };
+    DIRS.ops = DIRS.ops!.filter((e) => ['alpha.md', 'beta.md'].includes(e.name));
   },
   api: {
     get: async (path: string) => {
