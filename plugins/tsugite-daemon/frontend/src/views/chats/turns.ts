@@ -236,6 +236,7 @@ export interface Compaction {
   sourceId?: string;
   /** The retained summary text the compaction wrote in place of the folded turns. */
   summary?: string;
+  turnIndex: number;
 }
 
 /** A still-open interactive prompt, derived purely from the durable event log: an
@@ -1111,6 +1112,7 @@ class Builder {
           retainedCount: num(e.retained_count),
           sourceId: str(e.source_session_id) ?? str(e.successor_id),
           summary: str(e.summary),
+          turnIndex: this.turns.length,
         });
         return;
       }

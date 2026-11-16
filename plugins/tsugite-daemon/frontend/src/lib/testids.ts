@@ -141,7 +141,7 @@ export const TESTID = {
   chatSessionMenu: 'chat-session-menu',
   chatMetaLink: 'chat-meta-link',
   chatRawMetadata: 'chat-raw-metadata',
-  chatCompactionBanner: 'chat-compaction-banner',
+  chatCompactionSummary: 'chat-compaction-summary',
   chatLoadEarlier: 'chat-load-earlier',
   chatEmpty: 'chat-empty',
   chatLocalEcho: 'chat-local-echo',

@@ -495,47 +495,71 @@ test('a resume_reset renders a calm notice line, not a red error alert', async (
   expect(document.querySelector('[role="alert"]')).toBeFalsy();
 });
 
-test('a compaction event renders the compaction banner', async () => {
+test('a compaction summary renders as the first message, as markdown', async () => {
   const ctrl = controllerWith([
-    { type: 'user_input', text: 'q', timestamp: 'z' },
-    { type: 'final_result', result: 'a' },
-    { type: 'compaction', replaced_count: 40, retained_count: 6 },
-  ]);
-  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
-  expect(document.querySelector('[data-testid="chat-compaction-banner"]')).toBeTruthy();
-});
-
-test('a compaction with no summary shows the counts line and no disclosure', async () => {
-  const ctrl = controllerWith([
-    { type: 'user_input', text: 'q', timestamp: 'z' },
-    { type: 'final_result', result: 'a' },
-    { type: 'compaction', replaced_count: 40, retained_count: 6 },
-  ]);
-  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
-  await expect.element(page.getByText(/40 turns/)).toBeInTheDocument();
-  // Older compactions carry no summary text: the banner stays static, never an
-  // expandable disclosure.
-  expect(page.getByRole('button', { name: /context compacted/ }).query()).toBeNull();
-});
-
-test('a compaction summary is hidden until its disclosure is expanded', async () => {
-  const ctrl = controllerWith([
-    { type: 'user_input', text: 'q', timestamp: 'z' },
-    { type: 'final_result', result: 'a' },
     {
       type: 'compaction',
       replaced_count: 40,
       retained_count: 6,
-      summary: 'Refactored the auth module and added backoff to the retry client.',
+      summary: 'Refactored the **auth module** and added backoff.',
+      source_session_id: 'session-old',
+    },
+    { type: 'user_input', text: 'next step?', timestamp: 'z' },
+    { type: 'final_result', result: 'a' },
+  ]);
+  const onOpenSession = vi.fn();
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks, onOpenSession });
+
+  const summary = page.getByTestId(TESTID.chatCompactionSummary);
+  await expect.element(summary).toBeVisible();
+  await expect.element(summary.getByText('auth module')).toHaveProperty('tagName', 'STRONG');
+  await expect.element(summary.getByText(/40 turns → 6 kept/)).toBeVisible();
+  const messages = document.querySelectorAll('article.t-msg');
+  expect(messages[0]!.contains(summary.element())).toBe(true);
+  expect(messages[1]!.textContent).toContain('next step?');
+
+  await summary.getByRole('button', { name: 'view source' }).click();
+  expect(onOpenSession).toHaveBeenCalledWith('session-old');
+});
+
+test('a compaction later in the log renders at its place among the turns', async () => {
+  const ctrl = controllerWith([
+    { type: 'user_input', text: 'first question', timestamp: 'z' },
+    { type: 'final_result', result: 'first answer' },
+    { type: 'compaction', summary: 'Mid-log summary.' },
+    { type: 'user_input', text: 'second question', timestamp: 'z' },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  await expect.element(page.getByText('Mid-log summary.')).toBeVisible();
+  const texts = [...document.querySelectorAll('article.t-msg')].map((m) => m.textContent ?? '');
+  expect(texts.findIndex((t) => t.includes('Mid-log summary.'))).toBe(2);
+  expect(texts[3]).toContain('second question');
+});
+
+test('a compaction with no summary shows only the counts line', async () => {
+  const ctrl = controllerWith([
+    { type: 'compaction', replaced_count: 40, retained_count: 6 },
+    { type: 'user_input', text: 'q', timestamp: 'z' },
+    { type: 'final_result', result: 'a' },
+  ]);
+  render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
+  const summary = page.getByTestId(TESTID.chatCompactionSummary);
+  await expect.element(summary.getByText(/40 turns → 6 kept/)).toBeVisible();
+  expect(summary.element().querySelector('.t-prose')).toBeNull();
+});
+
+test('a chat summarized into a fresh one shows the summary instead of the empty state', async () => {
+  const ctrl = controllerWith([
+    {
+      type: 'compaction',
+      replaced_count: 12,
+      retained_count: 0,
+      summary: 'Picked the SQLite backend.',
     },
   ]);
   render(Conversation, { ctrl, row: null, railCollapsed: false, ...callbacks });
-  const toggle = page.getByRole('button', { name: /context compacted/ });
-  await expect.element(toggle).toBeInTheDocument();
-  // Collapsed by default: the summary prose isn't rendered yet.
-  expect(page.getByText(/Refactored the auth module/).query()).toBeNull();
-  await toggle.click();
-  await expect.element(page.getByText(/Refactored the auth module/)).toBeVisible();
+  await expect.element(page.getByText('Picked the SQLite backend.')).toBeVisible();
+  expect(page.getByTestId(TESTID.chatEmpty).query()).toBeNull();
 });
 
 test('the context meter opens a prompt inspector with per-category tokens and total', async () => {

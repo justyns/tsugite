@@ -1,10 +1,11 @@
 <script lang="ts">
   // The conversation pane: header (rail toggle, title w/ inline rename, type
-  // badge, live pill, context meter, session menu), a compaction banner, the
-  // turn timeline built from replay + live events, the ask_user prompt, and an
-  // auto-follow "jump to live" affordance. Turns render through the chatturns
-  // library components (Msg/Prose/Think/CodeBlock/ExecBlock); everything is fed
-  // from the ConversationController's $derived timeline.
+  // badge, live pill, context meter, session menu), a supersession banner, the
+  // turn timeline with its compaction summaries built from replay + live events,
+  // the ask_user prompt, and an auto-follow "jump to live" affordance. Turns
+  // render through the chatturns library components (Msg/Prose/Think/CodeBlock/
+  // ExecBlock); everything is fed from the ConversationController's $derived
+  // timeline.
   import Icon from '$lib/components/icon/Icon.svelte';
   import Button from '$lib/components/buttons/Button.svelte';
   import Pill from '$lib/components/buttons/Pill.svelte';
@@ -32,7 +33,7 @@
     type TurnOrigin,
   } from './turns';
   import { isValidAlias, suggestAlias } from './alias';
-  import { clockTime, formatAgo } from '$lib/relativeTime';
+  import { clockTime } from '$lib/relativeTime';
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
@@ -236,19 +237,9 @@
       c.replacedCount != null && c.retainedCount != null
         ? ` · ${c.replacedCount} turns → ${c.retainedCount} kept`
         : '';
-    const when = formatAgo(c.at);
-    return `context compacted${when ? ` ${when}` : ''}${counts} · summary retained`;
+    return `context compacted${counts}`;
   }
-  let openSummary = $state<Record<string, boolean>>({});
-  function toggleSummary(id: string) {
-    openSummary = { ...openSummary, [id]: !openSummary[id] };
-  }
-  // Fold disclosures shut when the pane switches sessions (compaction ids can
-  // repeat across sessions, so a stale open flag must not leak in).
-  $effect(() => {
-    void ctrl.sessionId;
-    openSummary = {};
-  });
+  const empty = $derived(timeline.turns.length === 0 && timeline.compactions.length === 0);
 
   const lastTurn = $derived(timeline.turns[timeline.turns.length - 1]);
 
@@ -471,6 +462,22 @@
   });
 </script>
 
+{#snippet compactionMsg(c: Compaction)}
+  <Msg role="ai" who="summary" at={clockTime(c.at)}>
+    <div class="t-compact" data-testid={TESTID.chatCompactionSummary}>
+      <div class="t-compact-meta">
+        <Icon name="compress" size={11} />{compactLabel(c)}
+        {#if c.sourceId}<button
+            type="button"
+            class="cbn-link"
+            onclick={() => onOpenSession(c.sourceId!)}>view source</button
+          >{/if}
+      </div>
+      {#if c.summary?.trim()}<Prose content={c.summary.trim()} />{/if}
+    </div>
+  </Msg>
+{/snippet}
+
 <section
   class="convo"
   data-testid={TESTID.chatConversation}
@@ -621,37 +628,6 @@
     {/if}
   </header>
 
-  {#each timeline.compactions as c (c.id)}
-    {@const summary = c.summary?.trim() ? c.summary.trim() : null}
-    {@const isOpen = openSummary[c.id] ?? false}
-    <div class="t-compactbn cbn" role="status" data-testid={TESTID.chatCompactionBanner}>
-      <div class="cbn-hd">
-        <Icon name="compress" />
-        {#if summary}
-          <button
-            type="button"
-            class="cbn-disc"
-            aria-expanded={isOpen}
-            onclick={() => toggleSummary(c.id)}
-          >
-            <span class="chev" class:is-open={isOpen}><Icon name="chev-r" size={10} /></span>
-            <span class="cbn-txt">{compactLabel(c)}</span>
-          </button>
-        {:else}
-          <span class="cbn-txt">{compactLabel(c)}</span>
-        {/if}
-        {#if c.sourceId}<button
-            type="button"
-            class="cbn-link"
-            onclick={() => onOpenSession(c.sourceId!)}>view source</button
-          >{/if}
-      </div>
-      {#if summary && isOpen}
-        <div class="cbn-summary">{summary}</div>
-      {/if}
-    </div>
-  {/each}
-
   {#if row?.superseded_by}
     <div class="t-compactbn" role="status">
       <Icon name="fork" />
@@ -689,11 +665,11 @@
     oncontextmenu={() => isTouch() && readQuote()}
     onscroll={() => (quote = null)}
   >
-    {#if ctrl.loading && timeline.turns.length === 0}
+    {#if ctrl.loading && empty}
       <div class="convo-loading"><PaneState kind="loading" label="Loading conversation" /></div>
-    {:else if ctrl.error && timeline.turns.length === 0}
+    {:else if ctrl.error && empty}
       <p class="convo-empty is-err">{ctrl.error}</p>
-    {:else if timeline.turns.length === 0}
+    {:else if empty}
       <div class="convo-empty" data-testid={TESTID.chatEmpty}>
         <Icon name="chat" size={22} />
         <p>No messages yet. Say something to start the conversation.</p>
@@ -713,6 +689,9 @@
         </button>
       {/if}
       {#each turnRows as { turn, i, day } (turn.id)}
+        {#each timeline.compactions.filter((c) => c.turnIndex === i) as c (c.id)}
+          {@render compactionMsg(c)}
+        {/each}
         {#if day}<div class="convo-day">{day}</div>{/if}
         {@const isLastAi = turn.role === 'ai' && i === turnRows.length - 1}
         <!-- A dead-end turn gets the prominent Retry: an errored turn (its error
@@ -916,6 +895,9 @@
             </div>
           {/if}
         </Msg>
+      {/each}
+      {#each timeline.compactions.filter((c) => c.turnIndex >= turnRows.length) as c (c.id)}
+        {@render compactionMsg(c)}
       {/each}
 
       {#if waiting}
@@ -1143,7 +1125,7 @@
   .convo-topic-edit:focus {
     outline: none;
   }
-  /* t-compactbn - compaction / supersession banner. */
+  /* t-compactbn - supersession banner. */
   .t-compactbn {
     display: flex;
     align-items: center;
@@ -1168,62 +1150,16 @@
   .cbn-link:hover {
     text-decoration: underline;
   }
-  /* Compaction banner with an expandable summary: the header stays the row the
-     base .t-compactbn draws; .cbn stacks the revealed summary beneath it. */
-  .cbn {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
+  .t-compact {
+    display: grid;
+    gap: 6px;
   }
-  .cbn-hd {
+  .t-compact-meta {
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-  .cbn-disc {
-    display: inline-flex;
-    align-items: center;
     gap: 6px;
-    min-width: 0;
-    background: none;
-    border: 0;
-    padding: 0;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-  }
-  .cbn-disc:hover {
-    color: var(--tx1);
-  }
-  .cbn-txt {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .cbn .chev {
-    display: inline-flex;
-    flex: none;
-    transition: rotate var(--t-2) var(--ease);
-  }
-  .cbn .chev.is-open {
-    rotate: 90deg;
-  }
-  .cbn-summary {
-    max-height: 220px;
-    overflow-y: auto;
-    padding: 2px 0 4px 26px;
     color: var(--tx3);
-    font: 400 var(--fs-xs) / 1.55 var(--font-ui);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .cbn .chev {
-      transition: none;
-    }
+    font: 500 var(--fs-2xs) / 1.4 var(--font-mono);
   }
   .quote-pop {
     position: fixed;
