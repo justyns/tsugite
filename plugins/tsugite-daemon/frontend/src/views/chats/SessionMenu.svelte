@@ -40,6 +40,7 @@
     onComplete,
     onCancel,
     onRestart,
+    onCompact,
     onSummarize,
   }: {
     /** Reasoning-effort control, shown as a group above the actions. A phone
@@ -69,6 +70,7 @@
     onComplete: () => void;
     onCancel: () => void;
     onRestart: () => void;
+    onCompact?: () => void;
     onSummarize?: () => void;
   } = $props();
 
@@ -130,6 +132,9 @@
       : []),
     ...(canRestart
       ? [{ id: 'restart', label: 'Restart', icon: 'retry' as IconName, run: onRestart }]
+      : []),
+    ...(onCompact
+      ? [{ id: 'compact', label: 'Compact', icon: 'compress' as IconName, run: onCompact }]
       : []),
     ...(onSummarize
       ? [

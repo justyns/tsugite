@@ -42,6 +42,11 @@ export function isEndedSession(row: SessionRow): boolean {
   return isFinishedSession(row) && !isResumableSession(row);
 }
 
+/** The daemon refuses to compact a busy, compacting, or already-compacted session. */
+export function canCompact(row: SessionRow): boolean {
+  return !row.busy && !row.compacting && !row.superseded_by;
+}
+
 /** A busy session is "thinking" while the daemon reports it waiting on the LLM,
  *  else "running" (a tool/turn is active). Read from the progress status_text
  *  the daemon already computes (session_store._progress_status_text). */

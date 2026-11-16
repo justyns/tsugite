@@ -42,6 +42,7 @@
     isFinishedSession,
     formatWhen,
     sessionTopic,
+    canCompact,
   } from './sessionModel';
   import { sessionStateMeta } from '$lib/components/rows/rowState';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
@@ -135,6 +136,17 @@
       });
     }
   }
+  async function compactRow(id: string, retainRecent: boolean) {
+    try {
+      const successorId = await sessions.compact(id, retainRecent);
+      toasts.push('ok', retainRecent ? 'Chat compacted' : 'Summarized into a new chat');
+      if (selectedId === id) onSelect(successorId);
+    } catch (err) {
+      toasts.push('err', retainRecent ? 'Could not compact' : 'Could not summarize', {
+        body: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   const menuItems = $derived.by<ContextMenuItem[]>(() => {
     if (!menu) return [];
     if ('room' in menu) {
@@ -161,6 +173,12 @@
       { label: 'Copy session id', run: () => void copyId(row.id) },
       { label: 'Add to chat', run: () => void attachRecordToChat('session', row.id) },
       { label: 'Copy reference', run: () => void copyReference('session', row.id) },
+      ...(canCompact(row)
+        ? [
+            { label: 'Compact', run: () => void compactRow(row.id, true) },
+            { label: 'Summarize into new chat', run: () => void compactRow(row.id, false) },
+          ]
+        : []),
       ...(!isFinishedSession(row)
         ? [{ label: 'Mark complete', run: () => void completeRow(row.id) }]
         : []),

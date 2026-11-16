@@ -7,6 +7,7 @@ import { spaces } from '$lib/stores/spaces.svelte';
 import { collectLeaves } from '$lib/shell/mux/layout';
 import { TESTID } from '$lib/testids';
 import { sessions } from '$lib/stores/sessions.svelte';
+import { api } from '$lib/api/client';
 import { agent, sessionRow as row } from './__fixtures__/sessionRow';
 import type { Room } from '$lib/stores/rooms.svelte';
 import '../../styles/tokens.css';
@@ -55,6 +56,62 @@ test('"Open in new tab" docks the session as a fresh chat tab', async () => {
   const docked = tabs[tabs.length - 1]!;
   expect(docked.kind).toBe('chat');
   expect(docked.params.sessionId).toBe('s2');
+});
+
+test.each([
+  ['Compact', true],
+  ['Summarize into new chat', false],
+])('"%s" compacts the open session and opens the successor', async (label, retainRecent) => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ new_conversation_id: 's3-next' } as never);
+  const onSelect = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    selectedId: 's3',
+    onSelect,
+    rows: [row('s3', { title: 'long thread' })],
+  });
+
+  await page.getByRole('button', { name: /long thread/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: label, exact: true }).click();
+
+  expect(post).toHaveBeenCalledWith('/api/chat/compact', {
+    session_id: 's3',
+    retain_recent: retainRecent,
+  });
+  await vi.waitFor(() => expect(onSelect).toHaveBeenCalledWith('s3-next'));
+});
+
+test('compacting a session that is not open leaves the selection alone', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ new_conversation_id: 's5-next' } as never);
+  const onSelect = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    selectedId: 'other',
+    onSelect,
+    rows: [row('s5', { title: 'side thread' }), row('other', { title: 'open thread' })],
+  });
+
+  await page.getByRole('button', { name: /side thread/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Compact', exact: true }).click();
+
+  await vi.waitFor(() => expect(post).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 0));
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['busy', { busy: true }],
+  ['compacting', { compacting: true }],
+])('a %s session offers no compaction in the row menu', async (_, extra) => {
+  render(SessionsRail, { ...base, rows: [row('s4', { title: 'mid turn', ...extra })] });
+  await page.getByRole('button', { name: /mid turn/ }).click({ button: 'right' });
+  await expect.element(page.getByRole('menuitem', { name: 'Copy session id' })).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Compact', exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Summarize into new chat' }))
+    .not.toBeInTheDocument();
 });
 
 test('finished sessions tuck into a collapsed "ended" section with a count', async () => {

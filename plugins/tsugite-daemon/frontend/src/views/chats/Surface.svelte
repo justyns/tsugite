@@ -194,11 +194,11 @@
     }
   }
 
-  async function summarizeIntoNew(id: string) {
+  async function compactSession(id: string, retainRecent: boolean) {
     const successorId = await lifecycle(
-      () => sessions.summarizeIntoNew(id),
-      'Summarized into a new chat',
-      'Could not summarize',
+      () => sessions.compact(id, retainRecent),
+      retainRecent ? 'Chat compacted' : 'Summarized into a new chat',
+      retainRecent ? 'Could not compact' : 'Could not summarize',
     );
     if (successorId && selectedId === id) selectSession(successorId);
   }
@@ -355,7 +355,7 @@
     soloLinks={solo ? undefined : { open: openSolo, copy: copySoloLink }}
     onOpenSession={selectSession}
     onRetry={(text) => void onSend(text, { uploadedFiles: [] })}
-    onSummarize={() => selectedId && void summarizeIntoNew(selectedId)}
+    onCompact={(retainRecent) => selectedId && void compactSession(selectedId, retainRecent)}
     onQuote={(text, sourceId) => composer?.insertQuote(text, sourceId)}
     onDismissAttention={(deliveryId) =>
       selectedId && void sessions.dismissAttention(selectedId, deliveryId)}

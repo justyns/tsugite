@@ -430,7 +430,7 @@ test.each([
   expect(writeText).toHaveBeenCalledWith(url);
 });
 
-async function summarizeFromMenu() {
+async function compactFromMenu(label = 'Summarize into new chat', retainRecent = false) {
   roster('smoke');
   stubInfo('smoke', { job_host: true });
   sessions.rows = [
@@ -450,22 +450,28 @@ async function summarizeFromMenu() {
   const view = await render(Surface, { params: { sessionId: 'session-a' } });
   await vi.waitFor(() => expect(headerTitle()).toBe('long chat'));
   await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
-  await page.getByRole('menuitem', { name: 'Summarize into new chat' }).click();
+  await page.getByRole('menuitem', { name: label, exact: true }).click();
   expect(post).toHaveBeenCalledWith('/api/chat/compact', {
     session_id: 'session-a',
-    retain_recent: false,
+    retain_recent: retainRecent,
   });
   return { view, load, resolve: () => resolve({ new_conversation_id: 'session-a2' }) };
 }
 
 test('summarizing into a new chat summarizes every turn and opens the successor', async () => {
-  const { resolve } = await summarizeFromMenu();
+  const { resolve } = await compactFromMenu();
+  resolve();
+  await vi.waitFor(() => expect(headerTitle()).toBe('fresh chat'));
+});
+
+test('compacting from the header menu keeps recent turns and opens the successor', async () => {
+  const { resolve } = await compactFromMenu('Compact', true);
   resolve();
   await vi.waitFor(() => expect(headerTitle()).toBe('fresh chat'));
 });
 
 test('summarizing does not switch the pane when the user opened another chat meanwhile', async () => {
-  const { view, load, resolve } = await summarizeFromMenu();
+  const { view, load, resolve } = await compactFromMenu();
   await view.rerender({ params: { sessionId: 'session-b' } });
   await vi.waitFor(() => expect(headerTitle()).toBe('other chat'));
   resolve();

@@ -38,7 +38,7 @@ const callbacks = {
   onCopyId: noop,
   onOpenSession: noop,
   onRetry: noop,
-  onSummarize: noop,
+  onCompact: noop,
   onDismissAttention: noop,
 };
 
@@ -1079,22 +1079,23 @@ function cancelledTurn(extra: Partial<SessionRow> = {}) {
 }
 
 test('a failed turn and the session menu both summarize the chat into a new one', async () => {
-  const onSummarize = vi.fn();
-  render(Conversation, { ...cancelledTurn(), railCollapsed: false, ...callbacks, onSummarize });
+  const onCompact = vi.fn();
+  render(Conversation, { ...cancelledTurn(), railCollapsed: false, ...callbacks, onCompact });
 
   await page.getByTestId(TESTID.chatSummarize).click();
-  expect(onSummarize).toHaveBeenCalledTimes(1);
+  expect(onCompact).toHaveBeenLastCalledWith(false);
 
   await page.getByTestId(TESTID.chatSessionMenuTrigger).click();
   await page.getByRole('menuitem', { name: 'Summarize into new chat' }).click();
-  expect(onSummarize).toHaveBeenCalledTimes(2);
+  expect(onCompact).toHaveBeenCalledTimes(2);
+  expect(onCompact).toHaveBeenLastCalledWith(false);
 });
 
 test.each([
   ['a superseded chat', { superseded_by: 'session-next' }],
   ['a chat with a run in flight', { busy: true }],
   ['a chat that is compacting', { compacting: true }],
-])('%s offers no Summarize into new chat', async (_name, extra) => {
+])('%s offers no Compact or Summarize into new chat', async (_name, extra) => {
   render(Conversation, { ...cancelledTurn(extra), railCollapsed: false, ...callbacks });
 
   await expect.element(page.getByTestId('chat-retry')).toBeVisible();
@@ -1103,6 +1104,9 @@ test.each([
   await expect.element(page.getByRole('menuitem', { name: 'Edit display name' })).toBeVisible();
   await expect
     .element(page.getByRole('menuitem', { name: 'Summarize into new chat' }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Compact', exact: true }))
     .not.toBeInTheDocument();
 });
 

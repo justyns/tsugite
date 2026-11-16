@@ -36,7 +36,12 @@
   import { buildHash } from '$lib/router.svelte';
   import { contextProvider } from '$lib/context/contextProviders';
   import type { IconName } from '$lib/components/icon/icons';
-  import { sessionSourceType, isFinishedSession, isResumableSession } from './sessionModel';
+  import {
+    sessionSourceType,
+    isFinishedSession,
+    isResumableSession,
+    canCompact,
+  } from './sessionModel';
   import { formatTokens } from '$lib/components/chatturns/chatturns.util';
   import { expandThinking } from '$lib/stores/expandThinking.svelte';
   import { hardLineBreaks } from '$lib/stores/hardLineBreaks.svelte';
@@ -77,7 +82,7 @@
     soloLinks,
     onOpenSession,
     onRetry,
-    onSummarize,
+    onCompact,
     onQuote,
     onDismissAttention,
   }: {
@@ -107,7 +112,8 @@
     soloLinks?: { open: () => void; copy: () => void };
     onOpenSession: (id: string) => void;
     onRetry: (text: string) => void;
-    onSummarize: () => void;
+    /** `retainRecent: false` summarizes every turn into the successor. */
+    onCompact: (retainRecent: boolean) => void;
     /** Quote selected message prose into the composer; `sourceId` is the message's storage id. */
     onQuote?: (text: string, sourceId?: number) => void;
     onDismissAttention: (deliveryId?: string) => void;
@@ -146,9 +152,9 @@
   // what clears `resumable` server-side and drops it into the ended bucket.
   const canComplete = $derived(row != null && (!isFinishedSession(row) || isResumableSession(row)));
   const canCancel = $derived(ctrl.streaming || (row?.busy ?? false));
-  const summarize = $derived(
-    canCancel || row?.compacting || row?.superseded_by ? undefined : onSummarize,
-  );
+  const compactable = $derived(row != null && !ctrl.streaming && canCompact(row));
+  const compact = $derived(compactable ? () => onCompact(true) : undefined);
+  const summarize = $derived(compactable ? () => onCompact(false) : undefined);
   const jobCount = $derived(
     timeline.turns.reduce((n, t) => n + t.blocks.filter((b) => b.kind === 'job').length, 0),
   );
@@ -609,6 +615,7 @@
         {onComplete}
         {onCancel}
         {onRestart}
+        onCompact={compact}
         onSummarize={summarize}
       />
     {/if}

@@ -406,10 +406,11 @@ export class SessionsStore {
     await api.post(`/api/sessions/${encodeURIComponent(id)}/restart`);
   }
 
-  async summarizeIntoNew(id: string): Promise<string> {
+  /** `retainRecent: false` summarizes every turn into the successor. */
+  async compact(id: string, retainRecent: boolean): Promise<string> {
     const res = await api.post<{ new_conversation_id: string }>('/api/chat/compact', {
       session_id: id,
-      retain_recent: false,
+      retain_recent: retainRecent,
     });
     return res.new_conversation_id;
   }
