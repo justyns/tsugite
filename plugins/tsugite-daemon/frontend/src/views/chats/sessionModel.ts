@@ -112,6 +112,7 @@ export interface SessionRowDisplay {
 function livenessState(row: SessionRow): SessionState {
   if (row.status === 'failed') return 'failed';
   if (DONE_STATUSES.has(row.status) && !isResumableSession(row)) return 'done';
+  if (row.compacting) return 'compacting';
   if (row.busy) return busyState(row);
   return 'idle';
 }
@@ -145,7 +146,7 @@ export function groupSessions(rows: SessionRow[], hints: GroupHints): SessionGro
   for (const row of rows) {
     if (row.pinned) pinned.push(row);
     else if (isEndedSession(row)) ended.push(row);
-    else if (row.busy || hints.attn.has(row.id)) active.push(row);
+    else if (row.busy || row.compacting || hints.attn.has(row.id)) active.push(row);
     else recent.push(row);
   }
   return { pinned, active, recent, ended };

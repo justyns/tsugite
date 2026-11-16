@@ -4,7 +4,7 @@ import type { IconName } from '$lib/components/icon/icons';
 
 // ---------- SessionRow ----------
 
-export type SessionState = 'running' | 'thinking' | 'idle' | 'done' | 'failed';
+export type SessionState = 'running' | 'thinking' | 'compacting' | 'idle' | 'done' | 'failed';
 export type SessionSourceType = 'ops' | 'code' | 'research' | 'chat' | 'room';
 
 export type SessionStateMeta = {
@@ -19,6 +19,7 @@ export type SessionStateMeta = {
 const SESSION_STATE_META: Record<SessionState, SessionStateMeta> = {
   running: { label: 'running', color: 'var(--st-ok)', spin: true },
   thinking: { label: 'thinking', color: 'var(--st-info)', spin: true },
+  compacting: { label: 'compacting', color: 'var(--st-info)', spin: true },
   idle: { label: 'idle', color: 'var(--tx3)', spin: false, icon: 'ring' },
   done: { label: 'done', color: 'var(--st-mute)', spin: false, icon: 'check' },
   failed: { label: 'failed', color: 'var(--st-err)', spin: false, icon: 'x' },

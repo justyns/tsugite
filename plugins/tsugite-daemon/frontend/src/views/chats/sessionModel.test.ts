@@ -97,6 +97,10 @@ describe('sessionRowState', () => {
     expect(sessionRowState(waiting).state).toBe('thinking');
     expect(sessionRowState(tooling).state).toBe('running');
   });
+  it('shows compacting for a session being compacted, busy or not', () => {
+    expect(sessionRowState(base({ compacting: true })).state).toBe('compacting');
+    expect(sessionRowState(base({ compacting: true, busy: true })).state).toBe('compacting');
+  });
   it('falls back to idle for an active-but-quiet session', () => {
     expect(sessionRowState(base({ status: 'active', busy: false })).state).toBe('idle');
   });
@@ -120,13 +124,14 @@ describe('groupSessions', () => {
       base({ id: 'p', pinned: true }),
       base({ id: 'busy', busy: true }),
       base({ id: 'attn', status: 'active' }),
+      base({ id: 'compacting', compacting: true }),
       base({ id: 'quiet', status: 'active' }),
       base({ id: 'done', status: 'completed' }),
     ];
     const g = groupSessions(rows, { attn: new Set(['attn']) });
     expect(g.pinned.map((r) => r.id)).toEqual(['p']);
-    // busy + needs-you land in active; a quiet live row is recent
-    expect(g.active.map((r) => r.id).sort()).toEqual(['attn', 'busy']);
+    // busy, compacting and needs-you rows land in active, a quiet live row in recent
+    expect(g.active.map((r) => r.id).sort()).toEqual(['attn', 'busy', 'compacting']);
     expect(g.recent.map((r) => r.id)).toEqual(['quiet']);
     // a finished row leaves the recency flow for its own bucket
     expect(g.ended.map((r) => r.id)).toEqual(['done']);
