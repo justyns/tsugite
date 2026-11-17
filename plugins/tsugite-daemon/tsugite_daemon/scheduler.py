@@ -60,7 +60,7 @@ def is_auth_failure(entry: "ScheduleEntry") -> bool:
 class ScheduleEntry:
     id: str
     prompt: str
-    schedule_type: str  # "cron" | "once"
+    schedule_type: str  # "cron" | "once" | "manual" (never armed; runs only via fire_now)
     cron_expr: str | None = None
     run_at: str | None = None  # ISO datetime for one-off
     enabled: bool = True
@@ -139,12 +139,14 @@ class ScheduleEntry:
     def __post_init__(self):
         if not self.created_at:
             self.created_at = datetime.now(timezone.utc).isoformat()
-        if self.schedule_type not in ("cron", "once"):
-            raise ValueError(f"schedule_type must be 'cron' or 'once', got '{self.schedule_type}'")
+        if self.schedule_type not in ("cron", "once", "manual"):
+            raise ValueError(f"schedule_type must be 'cron', 'once' or 'manual', got '{self.schedule_type}'")
         if self.schedule_type == "cron" and not self.cron_expr:
             raise ValueError("cron_expr required for cron schedules")
         if self.schedule_type == "once" and not self.run_at:
             raise ValueError("run_at required for one-off schedules")
+        if self.schedule_type == "manual" and (self.cron_expr or self.run_at):
+            raise ValueError("manual schedules take neither cron_expr nor run_at")
         if self.execution_type not in EXECUTION_TYPES:
             raise ValueError(f"execution_type must be one of {', '.join(EXECUTION_TYPES)}, got '{self.execution_type}'")
         if self.execution_type == EXECUTION_SCRIPT and not self.command:
@@ -746,7 +748,7 @@ class Scheduler:
     def fire_now(self, schedule_id: str) -> None:
         """Fire a schedule immediately in the background."""
         entry = self.get(schedule_id)
-        if not entry.enabled:
+        if not entry.enabled and entry.schedule_type != "manual":
             raise ValueError(f"Schedule '{schedule_id}' is disabled")
         task = asyncio.create_task(self._fire_schedule(entry, manual=True), context=contextvars.Context())
         self._active_tasks.add(task)

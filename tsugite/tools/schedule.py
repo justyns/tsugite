@@ -102,6 +102,7 @@ def schedule_create(
     incident_title: Optional[str] = None,
     skip_hooks: Optional[list[str]] = None,
     hooks: bool = True,
+    manual: bool = False,
 ) -> dict:
     """Create a recurring (cron) or one-off schedule to run an agent or script.
 
@@ -149,14 +150,13 @@ def schedule_create(
         incident_title: Title for the incident session (default: "Incident: <id>").
         skip_hooks: Hook names or phases (e.g. "pre_context_build") to skip on every run. Plugin tools still load.
         hooks: Set to false to skip all workspace and plugin hooks on every run.
+        manual: Install a schedule that is never armed and runs only through schedule_run, even while disabled. Takes neither cron nor run_at.
 
     Returns:
         Created schedule details including computed next_run
     """
-    if not cron and not run_at:
-        raise ValueError("Provide either 'cron' or 'run_at'")
-    if cron and run_at:
-        raise ValueError("Provide 'cron' or 'run_at', not both")
+    if sum(map(bool, (cron, run_at, manual))) != 1:
+        raise ValueError("Provide exactly one of 'cron', 'run_at' or 'manual'")
 
     if execution_type == "script":
         if not command:
@@ -178,7 +178,7 @@ def schedule_create(
     entry = ScheduleEntry(
         id=id,
         prompt=prompt,
-        schedule_type="once" if run_at else "cron",
+        schedule_type="manual" if manual else "once" if run_at else "cron",
         cron_expr=cron,
         run_at=run_at,
         notify=notify or [],

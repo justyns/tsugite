@@ -90,6 +90,17 @@ class TestFireNow:
         with pytest.raises(ValueError, match="not found"):
             scheduler.fire_now("nope")
 
+    @pytest.mark.asyncio
+    async def test_manual_entry_is_never_armed_and_fires_while_disabled(self, scheduler, run_callback):
+        scheduler.add(ScheduleEntry(id="job1", prompt="hi", schedule_type="manual"))
+        assert scheduler.get("job1").next_run is None
+        scheduler.disable("job1")
+
+        scheduler.fire_now("job1")
+        await asyncio.gather(*scheduler._active_tasks)
+
+        run_callback.assert_awaited_once()
+
 
 class TestAutoReplyField:
     def test_defaults_to_false(self):
@@ -153,6 +164,31 @@ class TestScheduleCreateValidation:
 
         with pytest.raises(ValueError, match="Invalid alias"):
             schedule_create(id="t1", prompt="hi", cron="0 9 * * *", target_session="name:not a slug")
+
+    def test_manual_creates_a_manual_entry(self, tool_loop):
+        from tsugite.tools.schedule import schedule_create, set_scheduler
+
+        mock_sched = MagicMock()
+        mock_sched.add.side_effect = lambda entry: entry
+        set_scheduler(mock_sched, tool_loop)
+
+        result = schedule_create(id="t1", prompt="hi", manual=True, target_session="primary")
+        assert result["schedule_type"] == "manual"
+
+    @pytest.mark.parametrize("kwargs", [{"manual": True, "cron": "0 9 * * *"}, {}])
+    def test_manual_requires_exactly_one_trigger(self, tool_loop, kwargs):
+        from tsugite.tools.schedule import schedule_create, set_scheduler
+
+        set_scheduler(MagicMock(), tool_loop)
+
+        with pytest.raises(ValueError, match="exactly one"):
+            schedule_create(id="t1", prompt="hi", **kwargs)
+
+    def test_manual_entry_rejects_cron_expr_and_run_at(self):
+        with pytest.raises(ValueError, match="neither"):
+            ScheduleEntry(id="t1", prompt="hi", schedule_type="manual", cron_expr="0 9 * * *")
+        with pytest.raises(ValueError, match="neither"):
+            ScheduleEntry(id="t1", prompt="hi", schedule_type="manual", run_at="2030-01-01T00:00:00+00:00")
 
     def test_schedule_update_clears_target_session_with_empty_string(self, tool_loop):
         from tsugite.tools.schedule import schedule_update, set_scheduler
