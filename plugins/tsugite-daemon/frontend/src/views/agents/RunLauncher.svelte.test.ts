@@ -50,7 +50,7 @@ const MODELS = {
 const onOpen = vi.fn();
 const onClose = vi.fn();
 
-function mount(props: { initialAgent?: string | null } = {}) {
+function mount(props: { initialAgent?: string | null; initialAgentId?: string | null } = {}) {
   return render(RunLauncher, { open: true, onOpen, onClose, ...props });
 }
 
@@ -142,6 +142,18 @@ test('the chosen daemon agent is sent as agent_id, even when names collide', asy
   await page.getByLabelText('Daemon agent', { exact: true }).selectOptions('reviewer');
   await page.getByTestId('launcher-start').click();
   await vi.waitFor(() => expect(onOpen).toHaveBeenCalledTimes(2));
+  expect(api.post).toHaveBeenLastCalledWith('/api/chat/sessions/new', { agent_id: 'reviewer' });
+});
+
+test('opened for a daemon agent it starts the chat on that agent', async () => {
+  const row = (id: string, is_default: boolean) =>
+    ({ id, name: id, is_default }) as unknown as (typeof agents.list)[number];
+  agents.list = [row('main', true), row('reviewer', false)];
+  vi.spyOn(agents, 'load').mockResolvedValue(undefined);
+  mount({ initialAgentId: 'reviewer' });
+  await vi.waitFor(() => expect(optionTexts()).toContain('hollis'));
+  await page.getByTestId('launcher-start').click();
+  await vi.waitFor(() => expect(onOpen).toHaveBeenCalledTimes(1));
   expect(api.post).toHaveBeenLastCalledWith('/api/chat/sessions/new', { agent_id: 'reviewer' });
 });
 

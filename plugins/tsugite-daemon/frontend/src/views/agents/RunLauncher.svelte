@@ -16,12 +16,15 @@
   let {
     open = false,
     initialAgent = null,
+    initialAgentId = null,
     onOpen,
     onClose,
   }: {
     open?: boolean;
     /** Path of the agent file to preselect. */
     initialAgent?: string | null;
+    /** Daemon agent id to preselect as the identity. */
+    initialAgentId?: string | null;
     onOpen: (sessionId: string) => void;
     onClose: () => void;
   } = $props();
@@ -53,7 +56,7 @@
   $effect(() => {
     if (open && !wasOpen) {
       void agents.load();
-      identityId = '';
+      identityId = initialAgentId ?? '';
       agentsMeta.loadAgentFiles().catch((err) => {
         toasts.push('err', 'Could not load agents', {
           body: err instanceof Error ? err.message : String(err),

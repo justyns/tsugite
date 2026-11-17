@@ -681,6 +681,7 @@
   <RunLauncher
     open={launcher.isOpen}
     initialAgent={launcher.agent}
+    initialAgentId={launcher.agentId}
     onOpen={(id) => selectChat(id)}
     onClose={() => launcher.close()}
   />

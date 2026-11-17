@@ -102,6 +102,7 @@
   onSelect={select}
   onNew={() => launcher.open()}
   onOpenAgent={openAgent}
+  onNewChat={(agentId) => launcher.open(undefined, agentId)}
   onServerSearch={serverSearch}
   onOpenSchedule={(id) => navigate('schedules', { id })}
 />

@@ -34,6 +34,7 @@
   import {
     collapseScheduleRuns,
     groupByAgent,
+    type AgentGroup,
     groupSessions,
     agentSessionList,
     UNKNOWN_AGENT,
@@ -66,6 +67,7 @@
     onSelect,
     onNew,
     onOpenAgent,
+    onNewChat,
     onServerSearch,
     onOpenSchedule,
   }: {
@@ -88,6 +90,8 @@
     onSelect: (id: string) => void;
     onNew: () => void;
     onOpenAgent?: (agentId: string) => void;
+    /** Opens the new-chat launcher with this agent preselected. */
+    onNewChat?: (agentId: string) => void;
     /** Free-text portion of the query, for the store's server-merge search. */
     onServerSearch: (q: string) => void;
     /** Opens the Schedules view with this schedule's drawer open. */
@@ -101,10 +105,10 @@
   let quick = $state<'all' | 'needs-you' | 'pinned'>('all');
   let lastServerQuery = '';
 
-  // Right-click menu on a row: tab-independent actions (open elsewhere, pin,
-  // copy id, lifecycle). Rename/topic stay in the conversation header menu -
-  // they need its inline edit field.
-  type MenuTarget = { row: Row } | { room: Room };
+  // Right-click menu on a row, room or agent header: tab-independent actions
+  // (open elsewhere, pin, copy id, lifecycle). Rename/topic stay in the
+  // conversation header menu - they need its inline edit field.
+  type MenuTarget = { row: Row } | { room: Room } | { group: AgentGroup };
   let menu = $state<({ x: number; y: number } & MenuTarget) | null>(null);
   function openRowMenu(event: MouseEvent, target: MenuTarget) {
     event.preventDefault();
@@ -117,12 +121,12 @@
       title: row.title ?? 'Chat',
     });
   }
-  async function copyId(id: string) {
+  async function copyId(id: string, what = 'Session') {
     try {
-      await navigator.clipboard?.writeText(id);
-      toasts.push('ok', 'Session id copied', { body: id });
+      await navigator.clipboard.writeText(id);
+      toasts.push('ok', `${what} id copied`, { body: id });
     } catch {
-      toasts.push('err', 'Could not copy session id');
+      toasts.push('err', `Could not copy ${what.toLowerCase()} id`);
     }
   }
   async function completeRow(id: string) {
@@ -147,6 +151,17 @@
       });
     }
   }
+  const pinItem = (row: Row): ContextMenuItem =>
+    row.pinned
+      ? { label: 'Unpin', run: () => void sessions.unpin(row.id) }
+      : { label: 'Pin', run: () => void sessions.pin(row.id) };
+  const compactItems = (row: Row): ContextMenuItem[] =>
+    canCompact(row)
+      ? [
+          { label: 'Compact', run: () => void compactRow(row.id, true) },
+          { label: 'Summarize into new chat', run: () => void compactRow(row.id, false) },
+        ]
+      : [];
   const menuItems = $derived.by<ContextMenuItem[]>(() => {
     if (!menu) return [];
     if ('room' in menu) {
@@ -158,27 +173,41 @@
         },
       ];
     }
+    if ('group' in menu) {
+      const { agent, main } = menu.group;
+      const open = agentOpen(agent);
+      return [
+        ...(agent.id
+          ? [
+              { label: 'New chat with this agent', run: () => onNewChat?.(agent.id) },
+              { label: 'Copy agent id', run: () => void copyId(agent.id, 'Agent') },
+            ]
+          : []),
+        ...(main
+          ? [
+              { label: 'Open main session', run: () => onOpenAgent?.(agent.id) },
+              { label: 'Open in new tab', run: () => openInNewTab(main) },
+              pinItem(main),
+              ...compactItems(main),
+            ]
+          : []),
+        { label: open ? 'Collapse' : 'Expand', run: () => toggleAgent(agent) },
+      ];
+    }
     const { row } = menu;
     return [
       {
         label: 'Open in new tab',
         run: () => openInNewTab(row),
       },
-      row.pinned
-        ? { label: 'Unpin', run: () => void sessions.unpin(row.id) }
-        : { label: 'Pin', run: () => void sessions.pin(row.id) },
+      pinItem(row),
       ...(row.needs_attention === true
         ? [{ label: 'Dismiss attention', run: () => void sessions.dismissAttention(row.id) }]
         : []),
       { label: 'Copy session id', run: () => void copyId(row.id) },
       { label: 'Add to chat', run: () => void attachRecordToChat('session', row.id) },
       { label: 'Copy reference', run: () => void copyReference('session', row.id) },
-      ...(canCompact(row)
-        ? [
-            { label: 'Compact', run: () => void compactRow(row.id, true) },
-            { label: 'Summarize into new chat', run: () => void compactRow(row.id, false) },
-          ]
-        : []),
+      ...compactItems(row),
       ...(!isFinishedSession(row)
         ? [{ label: 'Mark complete', run: () => void completeRow(row.id) }]
         : []),
@@ -515,7 +544,13 @@
           {#if shown.length > 0 || mainShown || !isActiveFilter(filter)}
             {@const open = agentOpen(group.agent)}
             {@const active = group.main !== undefined && group.main.id === selectedRowId}
-            <div class="agent-hd" class:is-open={open} class:is-active={active}>
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="agent-hd"
+              class:is-open={open}
+              class:is-active={active}
+              oncontextmenu={(e) => openRowMenu(e, { group })}
+            >
               <button
                 type="button"
                 class="agent-toggle"
@@ -582,7 +617,7 @@
   <ContextMenu
     x={menu.x}
     y={menu.y}
-    label="Session actions"
+    label={'group' in menu ? 'Agent actions' : 'Session actions'}
     items={menuItems}
     onclose={() => (menu = null)}
   />

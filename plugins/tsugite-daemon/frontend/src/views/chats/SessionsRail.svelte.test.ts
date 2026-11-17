@@ -293,6 +293,47 @@ test('expanding an agent shows its sessions and the choice persists', async () =
   await expect.element(page.getByRole('button', { name: /nas scrub/ })).toBeInTheDocument();
 });
 
+const agentMenuRows = [
+  row('m1', { title: 'atlas main', agent_id: 'main', is_primary: true }),
+  row('o1', { title: 'homelab main', agent_id: 'ops', is_primary: true }),
+];
+
+test('right-clicking an agent header offers its actions, and Compact acts on its main session', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ new_conversation_id: 'o1-next' } as never);
+  const onNewChat = vi.fn();
+  render(SessionsRail, {
+    ...base,
+    selectedId: 'm1',
+    onNewChat,
+    agents: twoAgents,
+    rows: agentMenuRows,
+  });
+
+  await page.getByRole('button', { name: /^homelab/ }).click({ button: 'right' });
+  await expect.element(page.getByRole('menu', { name: 'Agent actions' })).toBeInTheDocument();
+  await page.getByRole('menuitem', { name: 'New chat with this agent' }).click();
+  expect(onNewChat).toHaveBeenCalledWith('ops');
+
+  await page.getByRole('button', { name: /^homelab/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Compact', exact: true }).click();
+  expect(post).toHaveBeenCalledWith('/api/chat/compact', {
+    session_id: 'o1',
+    retain_recent: true,
+  });
+});
+
+test('an agent with no main session hides the entries that need one', async () => {
+  render(SessionsRail, { ...base, agents: twoAgents, rows: [row('o1', { agent_id: 'ops' })] });
+  await page.getByRole('button', { name: /^homelab/ }).click({ button: 'right' });
+  await expect.element(page.getByRole('menuitem', { name: 'Copy agent id' })).toBeInTheDocument();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Compact', exact: true }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(page.getByRole('menuitem', { name: 'Open main session' }))
+    .not.toBeInTheDocument();
+});
+
 test('a collapsed agent row shows busy and needs-you from its sessions', async () => {
   render(SessionsRail, {
     ...base,
