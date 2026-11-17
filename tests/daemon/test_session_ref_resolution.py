@@ -24,6 +24,8 @@ SESSION_TOOLS = (
     "session_reply",
     "session_notify",
     "session_metadata",
+    "pin_session",
+    "unpin_session",
 )
 
 
@@ -329,3 +331,46 @@ class TestToolsAddressAnAlias:
 
         with _calling_session(chat.id), pytest.raises(ValueError, match="No session holds alias"):
             session_tools.rename_session(title="Feature X", session_id="name:lead")
+
+
+class TestPinTools:
+    def _pins(self, store):
+        return {s.id: s.pin_position for s in store.list_sessions() if s.pinned}
+
+    def test_pin_appends_then_inserts_at_a_position(self, store, runner):
+        a, b, c = (_chat(store, sid) for sid in "abc")
+        session_tools.pin_session(session_id=a.id)
+        session_tools.pin_session(session_id=b.id)
+        result = session_tools.pin_session(session_id=c.id, position=0)
+
+        assert result == {"session_id": c.id, "pinned": True, "pin_position": 0}
+        assert self._pins(store) == {c.id: 0, a.id: 1, b.id: 2}
+
+    def test_unpin_densifies_the_remaining_pins(self, store, runner):
+        a, b, c = (_chat(store, sid) for sid in "abc")
+        for s in (a, b, c):
+            session_tools.pin_session(session_id=s.id)
+        result = session_tools.unpin_session(session_id=a.id)
+
+        assert result == {"session_id": a.id, "pinned": False, "pin_position": None}
+        assert self._pins(store) == {b.id: 0, c.id: 1}
+
+    def test_reorder_rewrites_positions(self, store, runner):
+        a, b = _chat(store, "a"), _chat(store, "b")
+        session_tools.pin_session(session_id=a.id)
+        session_tools.pin_session(session_id=b.id)
+
+        assert session_tools.reorder_pinned_sessions([b.id, a.id]) == {"ordered": [b.id, a.id]}
+        assert self._pins(store) == {b.id: 0, a.id: 1}
+
+    def test_pinning_the_current_session_emits_an_update(self, store, runner):
+        chat = _chat(store)
+        runner._event_bus = MagicMock()
+        with _calling_session(chat.id):
+            session_tools.pin_session()
+
+        runner._event_bus.emit.assert_called_once_with("session_update", {"action": "pinned", "id": chat.id})
+
+    def test_an_unknown_session_raises(self, store, runner):
+        with pytest.raises(ValueError, match="not found"):
+            session_tools.pin_session(session_id="nope")

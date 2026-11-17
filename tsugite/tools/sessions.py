@@ -294,6 +294,52 @@ def rename_session(title: str, session_id: Optional[str] = None) -> dict:
 
 
 @tool(require_daemon=True)
+def pin_session(session_id: Optional[str] = None, position: Optional[int] = None) -> dict:
+    """Pin a session to the top of the user's session list.
+
+    Use sparingly. Pinned sessions stay at the top of the user's list.
+
+    Args:
+        session_id: Session to pin. Defaults to the current session; "current" means the same.
+        position: Index in the pinned list. Appends to the end when omitted.
+
+    Returns:
+        Dict with session_id, pinned and pin_position.
+    """
+    session = _call(_session_runner.set_pin, _resolve_session_arg(session_id), True, position=position)
+    return {"session_id": session.id, "pinned": session.pinned, "pin_position": session.pin_position}
+
+
+@tool(require_daemon=True)
+def unpin_session(session_id: Optional[str] = None) -> dict:
+    """Unpin a session.
+
+    Args:
+        session_id: Session to unpin. Defaults to the current session; "current" means the same.
+
+    Returns:
+        Dict with session_id, pinned and pin_position.
+    """
+    session = _call(_session_runner.set_pin, _resolve_session_arg(session_id), False)
+    return {"session_id": session.id, "pinned": session.pinned, "pin_position": session.pin_position}
+
+
+@tool(require_daemon=True)
+def reorder_pinned_sessions(ids: list[str]) -> dict:
+    """Set the order of pinned sessions. Unknown or unpinned ids are skipped.
+
+    Args:
+        ids: Pinned session ids or name:<alias> refs in the order they should appear. An unheld alias raises;
+            unknown or unpinned ids are skipped.
+
+    Returns:
+        Dict with ordered, the pinned session ids in their new order.
+    """
+    ordered = _call(_session_runner.reorder_pins, [_resolve_session_arg(i) for i in ids])
+    return {"ordered": [s.id for s in ordered]}
+
+
+@tool(require_daemon=True)
 def session_metadata(key: str, value: Optional[str] = None, session_id: Optional[str] = None) -> dict:
     """Set, update, or delete a metadata key on a session.
 
