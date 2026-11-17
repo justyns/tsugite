@@ -1017,14 +1017,22 @@ class TestWebhookEndpoint:
         data = resp.json()
         assert data["status"] == "accepted"
 
-        inbox_dir = tmp_workspace / "inbox" / "webhooks"
-        assert inbox_dir.exists()
-        files = list(inbox_dir.glob("*.json"))
+        files = list((tmp_workspace / "inbox" / "webhooks" / "forgejo").glob("*.json"))
         assert len(files) == 1
+        assert files[0].name == data["file"]
 
         stored = json.loads(files[0].read_text())
         assert stored["source"] == "forgejo"
         assert stored["payload"]["event"] == "push"
+
+    @pytest.mark.parametrize("source", ["..", "."])
+    def test_webhook_dot_only_source_stays_in_webhooks_dir(self, client, webhook_store, tmp_workspace, source):
+        webhook_store.add(source=source, token="whk_dots")
+        resp = client.post("/webhook/whk_dots", json={"event": "push"})
+        assert resp.status_code == 202
+
+        files = list((tmp_workspace / "inbox" / "webhooks" / "webhook").glob("*.json"))
+        assert [f.name for f in files] == [resp.json()["file"]]
 
     def test_webhook_invalid_token(self, client):
         resp = client.post("/webhook/bad-token", json={"data": 1})

@@ -115,14 +115,15 @@ class WebhooksMixin:
             event_type or "unknown",
         )
 
-        inbox_dir = self.adapter.runtime.workspace_dir / "inbox" / "webhooks"
-        inbox_dir.mkdir(parents=True, exist_ok=True)
-
         now = datetime.now(timezone.utc)
         # Sanitize defensively (pre-validation legacy records may carry anything)
         # and suffix a nonce: bursty sources deliver multiple events in the same
         # second, and write_text would silently clobber the earlier file.
-        safe_source = re.sub(r"[^A-Za-z0-9._-]", "_", webhook.source)[:64] or "webhook"
+        safe_source = re.sub(r"[^A-Za-z0-9._-]", "_", webhook.source)[:64]
+        if not safe_source.strip("."):
+            safe_source = "webhook"
+        inbox_dir = self.adapter.runtime.workspace_dir / "inbox" / "webhooks" / safe_source
+        inbox_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{now.strftime('%Y%m%dT%H%M%S')}-{safe_source}-{uuid4().hex[:8]}.json"
         envelope = {
             "source": webhook.source,
