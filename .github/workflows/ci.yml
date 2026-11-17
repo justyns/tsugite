@@ -9,6 +9,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         run: |
@@ -30,7 +35,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        run: uv sync --dev --all-extras --python ${{ env.PRIMARY_PYTHON }}
+        run: uv sync --dev --all-extras --python "$PRIMARY_PYTHON"
 
       - name: Run ruff check
         run: uv run ruff check --show-fixes .
@@ -53,6 +58,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         run: |
@@ -60,7 +67,9 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
-        run: uv sync --dev --all-extras --python ${{ matrix.python-version }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv sync --dev --all-extras --python "$PYTHON_VERSION"
 
       - name: Run tests
         run: uv run pytest -v
@@ -84,6 +93,8 @@ jobs:
         working-directory: plugins/tsugite-daemon/frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
