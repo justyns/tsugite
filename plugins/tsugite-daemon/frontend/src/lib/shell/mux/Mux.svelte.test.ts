@@ -74,10 +74,10 @@ async function mountMux(initial: Layout, content?: MuxContent) {
   };
 }
 
-function dropSurface(el: HTMLElement, ref: SurfaceRef, fracX: number) {
+function dropSurface(el: HTMLElement, ref: SurfaceRef, fracX: number, fracY = 0.5) {
   const r = el.getBoundingClientRect();
   const clientX = r.left + r.width * fracX;
-  const clientY = r.top + r.height * 0.5;
+  const clientY = r.top + r.height * fracY;
   const dataTransfer = new DataTransfer();
   writeSurfaceDrag(dataTransfer, ref);
   for (const type of ['dragover', 'drop']) {
@@ -103,6 +103,16 @@ test('dropping a surface on the right third splits and places the new pane last'
   dropSurface(mux.panes()[0]!, { kind: 'terminal' }, 0.9);
   await expect.poll(() => mux.panes().length).toBe(2);
   expect(mux.panes()[0]!.textContent?.toLowerCase()).toContain('chat');
+  expect(mux.panes()[1]!.textContent?.toLowerCase()).toContain('terminal');
+});
+
+test('dropping a surface on the bottom third stacks the new pane below', async () => {
+  const mux = await mountMux(seeded({ kind: 'chat' }));
+  dropSurface(mux.panes()[0]!, { kind: 'terminal' }, 0.5, 0.9);
+  await expect.poll(() => mux.panes().length).toBe(2);
+  expect(mux.layout.root).toMatchObject({ dir: 'col' });
+  const [top, bottom] = mux.panes().map((p) => p.getBoundingClientRect());
+  expect(bottom!.top).toBeGreaterThanOrEqual(top!.bottom);
   expect(mux.panes()[1]!.textContent?.toLowerCase()).toContain('terminal');
 });
 

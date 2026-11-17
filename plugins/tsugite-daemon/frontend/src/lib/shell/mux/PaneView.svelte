@@ -82,6 +82,8 @@
   const DROP_LABEL: Record<DropZone, string> = {
     left: 'split left',
     right: 'split right',
+    top: 'split up',
+    bottom: 'split down',
     center: 'dock as tab',
   };
 
@@ -100,7 +102,7 @@
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     const r = slotEl?.getBoundingClientRect();
     if (!r) return;
-    dropZone = dropZoneAt(r.width, e.clientX - r.left);
+    dropZone = dropZoneAt(r.width, r.height, e.clientX - r.left, e.clientY - r.top);
   }
 
   function ondragleave(e: DragEvent) {
@@ -286,13 +288,11 @@
     color: var(--tx3);
   }
 
-  /* Drop-zone affordance: the target region highlights (left/right half or the
+  /* Drop-zone affordance: the target region highlights (a half of the pane or the
      whole pane) with a dashed accent border and a text label of the action. */
   .mux-drop {
     position: absolute;
     z-index: 40;
-    top: 0;
-    bottom: 0;
     display: grid;
     place-items: center;
     pointer-events: none;
@@ -301,16 +301,19 @@
     background: color-mix(in oklab, var(--acc) 12%, transparent);
   }
   .mux-drop[data-zone='left'] {
-    left: 0;
-    width: 50%;
+    inset: 0 50% 0 0;
   }
   .mux-drop[data-zone='right'] {
-    right: 0;
-    width: 50%;
+    inset: 0 0 0 50%;
+  }
+  .mux-drop[data-zone='top'] {
+    inset: 0 0 50% 0;
+  }
+  .mux-drop[data-zone='bottom'] {
+    inset: 50% 0 0 0;
   }
   .mux-drop[data-zone='center'] {
-    left: 0;
-    right: 0;
+    inset: 0;
   }
   .mux-drop-lb {
     background: var(--bg3);
