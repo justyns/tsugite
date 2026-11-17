@@ -262,3 +262,17 @@ def test_focusing_the_artifact_pane_beside_a_two_tab_chat_keeps_both_panes(
         "([a, b]) => a === b", [conversation_before, page.locator(CONVERSATION).element_handle()]
     )
     assert same_frame and same_conversation
+
+
+def test_copy_button_puts_the_markdown_source_on_the_clipboard(chat_open, agent_tool):
+    page = chat_open
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    source = "# Copy me\n\n```\nfenced\n```\n"
+
+    agent_tool(content=source, content_type="markdown", title="Copy me")
+    expect(page.frame_locator(ARTIFACT_FRAME).locator("h1")).to_have_text("Copy me")
+
+    page.locator('[data-testid="artifact-copy"]').click()
+
+    expect(page.get_by_text("Copied", exact=True)).to_be_visible()
+    assert page.evaluate("navigator.clipboard.readText()") == source

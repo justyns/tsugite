@@ -15,6 +15,7 @@
   import Button from '$lib/components/buttons/Button.svelte';
   import PaneState from '$lib/components/connstates/PaneState.svelte';
   import HtmlPreview from '$lib/components/media/HtmlPreview.svelte';
+  import { toasts } from '$lib/components/feedback/toast-store.svelte';
   import { markdownDoc } from '$lib/media/markdownDoc';
   import { readDocTheme } from '$lib/media/docTheme';
   import { artifacts, type AgentArtifact } from '$lib/stores/artifacts.svelte';
@@ -94,6 +95,15 @@
     loading = false;
   }
 
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(body!);
+      toasts.push('ok', 'Copied');
+    } catch {
+      toasts.push('err', 'Could not copy');
+    }
+  }
+
   function dismiss() {
     if (!tabId) return;
     spaces.closeSurfaceTab(tabId);
@@ -115,6 +125,9 @@
         <Seg options={['rendered', 'source']} bind:value={mode} ariaLabel="Artifact view" />
       </span>
     {/if}
+    <Button size="sm" disabled={body === null} data-testid={TESTID.artifactCopy} onclick={copy}
+      >Copy</Button
+    >
     <button
       type="button"
       class="art-x"

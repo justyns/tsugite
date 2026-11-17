@@ -268,3 +268,15 @@ test('a slow read never overwrites a newer artifact', async () => {
   expect(doc).not.toContain('Stale');
   read.mockRestore();
 });
+
+test('a denied clipboard write raises a toast', async () => {
+  const { toasts } = await import('$lib/components/feedback/toast-store.svelte');
+  toasts.items = [];
+  vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+  await openArtifact({ path: null, content: '# Doc\n', title: 'Doc' });
+  await mount();
+
+  await page.getByTestId(TESTID.artifactCopy).click();
+
+  await vi.waitFor(() => expect(toasts.items.map((t) => t.title)).toEqual(['Could not copy']));
+});

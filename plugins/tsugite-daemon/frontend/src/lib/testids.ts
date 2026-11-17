@@ -189,6 +189,7 @@ export const TESTID = {
   artifactModeSeg: 'artifact-mode-seg',
   artifactHtmlFrame: 'artifact-html-frame',
   artifactClose: 'artifact-close',
+  artifactCopy: 'artifact-copy',
   // Agents builder view
   agentsRoster: 'agents-roster',
   agentsSearch: 'agents-search',
