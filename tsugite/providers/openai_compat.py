@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any, AsyncIterator
 
 import httpx
@@ -72,6 +73,7 @@ _OPENAI_MODELS: dict[str, ModelInfo] = {
 _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
     "openai": {
         "api_base": "https://api.openai.com/v1",
+        "api_base_env": "OPENAI_BASE_URL",
         "api_key_env": "OPENAI_API_KEY",
     },
     "together": {
@@ -281,7 +283,12 @@ def create_provider(name: str = "openai", **kwargs: Any) -> OpenAICompatProvider
     """Factory function — same interface as external plugin entry points."""
     config = _PROVIDER_CONFIGS.get(name, {})
 
-    api_base = kwargs.get("api_base") or config.get("api_base") or "https://api.openai.com/v1"
+    api_base = (
+        kwargs.get("api_base")
+        or os.getenv(config.get("api_base_env", ""))
+        or config.get("api_base")
+        or "https://api.openai.com/v1"
+    )
 
     extra_headers = {**config.get("extra_headers", {}), **kwargs.get("extra_headers", {})}
 

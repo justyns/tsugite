@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any, AsyncIterator
 
@@ -382,5 +383,5 @@ def create_provider(name: str = "anthropic", **kwargs: Any) -> AnthropicProvider
     return AnthropicProvider(
         name=name,
         api_key=kwargs.get("api_key"),
-        api_base=kwargs.get("api_base"),
+        api_base=kwargs.get("api_base") or os.getenv("ANTHROPIC_BASE_URL"),
     )

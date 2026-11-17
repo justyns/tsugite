@@ -142,3 +142,19 @@ def test_configured_binary_that_does_not_exist_is_not_found(tmp_path, monkeypatc
 def test_unconfigured_binary_missing_from_path_is_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     assert resolve_binary("claude_code", "claude") is None
+
+
+@pytest.mark.parametrize(
+    ("provider", "env_var", "default"),
+    [
+        ("anthropic", "ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+        ("openai", "OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        ("openrouter", "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+    ],
+)
+def test_base_url_env_var_overrides_the_default(monkeypatch, provider, env_var, default):
+    monkeypatch.delenv(env_var, raising=False)
+    assert get_provider(provider).api_base == default
+    clear_cache()
+    monkeypatch.setenv(env_var, "https://gateway.example.test/v1")
+    assert get_provider(provider).api_base == "https://gateway.example.test/v1"
