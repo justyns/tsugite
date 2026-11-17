@@ -87,3 +87,20 @@ def test_relative_paths_use_cwd_when_no_workspace(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # Intentionally do NOT call set_workspace_dir
     assert read_file("local.txt", with_metadata=False).strip() == "local"
+
+
+def test_leading_tilde_expands_to_home(workspace, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    set_workspace_dir(workspace)
+    write_file("~/note.txt", "hi")
+    assert (home / "note.txt").read_text() == "hi"
+    assert not (workspace / "~").exists()
+
+
+def test_tilde_prefixed_name_stays_in_workspace(workspace):
+    set_workspace_dir(workspace)
+    write_file("~draft.txt", "hi")
+    assert (workspace / "~draft.txt").read_text() == "hi"

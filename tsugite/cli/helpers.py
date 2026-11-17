@@ -517,9 +517,11 @@ def set_workspace_dir(path: Optional[Union[str, Path]]) -> contextvars.Token:
 
 
 def resolve_workspace_path(path: Union[str, Path]) -> Path:
-    """Resolve a path against the workspace CV. Absolute paths pass through; relative
-    paths are joined against the workspace when one is bound, else process cwd."""
+    """Resolve a path against the workspace CV. `~` and `~/...` expand to home.
+    Absolute paths pass through. Relative paths join the workspace, else process cwd."""
     p = Path(path)
+    if p.parts and p.parts[0] == "~":
+        p = p.expanduser()
     if p.is_absolute():
         return p
     ws = _workspace_dir_cv.get()
