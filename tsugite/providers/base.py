@@ -62,6 +62,8 @@ class ModelInfo:
     # budget_tokens and sampling params are rejected with 400). None when the
     # model has neither or the style is unknown.
     thinking_style: str | None = None
+    # models.dev "knowledge" value, "YYYY-MM-DD" or "YYYY-MM".
+    knowledge_cutoff: str | None = None
 
 
 @runtime_checkable

@@ -22,7 +22,7 @@ def test_strict_tools_frontmatter_defaults_false_and_toggles():
     assert AgentConfig(name="x", strict_tools=True).strict_tools is True
 
 
-def _prepare_default():
+def _prepare_default(model_override=None):
     from tsugite.agent_preparation import AgentPreparer
     from tsugite.md_agents import parse_agent_file
     from tsugite.tools import tool
@@ -32,7 +32,7 @@ def _prepare_default():
     tool(parent_only=True)(list_secrets)
 
     agent = parse_agent_file(Path(tsugite.__file__).parent / "builtin_agents" / "default.md")
-    return AgentPreparer().prepare(agent=agent, prompt="hi", context={})
+    return AgentPreparer().prepare(agent=agent, prompt="hi", context={}, model_override=model_override)
 
 
 def test_default_system_prompt_does_not_teach_final_answer():
@@ -56,3 +56,25 @@ def test_response_patterns_skill_uses_existing_tools():
     text = (Path(tsugite.__file__).parent / "builtin_skills" / "response-patterns" / "SKILL.md").read_text()
     assert "final_answer" not in text
     assert "search_code" not in text
+
+
+def test_default_prompt_states_knowledge_cutoff_only_when_known():
+    known = _prepare_default("anthropic:claude-haiku-4-5")
+    assert "training data runs to about 2025-02-28" in known.rendered_prompt
+    assert "Recency" not in _prepare_default("anthropic:no-such-model").rendered_prompt
+
+
+def test_prepare_step_forwards_model_override_to_knowledge_cutoff():
+    from tsugite.agent_runner.runner import _prepare_step, _RunSetup
+    from tsugite.options import ExecutionOptions
+
+    agent = parse_agent("---\nname: demo\nextends: none\nmodel: anthropic:no-such-model\n---\nbody")
+    setup = _RunSetup(
+        exec_options=ExecutionOptions(model_override="anthropic:claude-haiku-4-5"),
+        hooks_dir=Path("."),
+        hook_message="",
+        hook_vars={},
+        agent_stem="demo",
+    )
+    prepared = _prepare_step(agent, "hi", {}, setup)
+    assert prepared.context["knowledge_cutoff"] == "2025-02-28"

@@ -160,6 +160,10 @@ def entry_to_model_info(key: str, entry: dict, provider: str) -> str:
     thinking_style = _thinking_style(entry, provider)
     if thinking_style:
         parts.append(f'thinking_style="{thinking_style}"')
+    if entry.get("knowledge"):
+        if not re.fullmatch(r"\d{4}-\d{2}(-\d{2})?", str(entry["knowledge"])):
+            raise ValueError(f"{provider}/{key}: unexpected knowledge value {entry['knowledge']!r}")
+        parts.append(f'knowledge_cutoff="{entry["knowledge"]}"')
 
     return f"ModelInfo({', '.join(parts)})"
 

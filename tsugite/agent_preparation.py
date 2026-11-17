@@ -372,13 +372,18 @@ class AgentPreparer:
         attachment_bindings: Dict[str, Any],
         interactive_mode: bool,
         paths: Dict[str, Optional[str]],
+        model_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Assemble the Jinja context every agent template renders against.
 
         Framework flags default here rather than in the template so a caller that
         supplies none of them still renders under StrictUndefined.
         """
+        from tsugite.models import resolve_effective_model, resolve_model_info
         from tsugite.tools import list_tools
+
+        model = resolve_effective_model(model_override, agent_config.model)
+        model_info = resolve_model_info(model) if model else None
 
         full_context = {
             **context,
@@ -401,6 +406,7 @@ class AgentPreparer:
             "is_subagent": context.get("is_subagent", False),
             "parent_agent": context.get("parent_agent", None),
             "chat_history": context.get("chat_history", []),
+            "knowledge_cutoff": model_info.knowledge_cutoff if model_info else None,
             **paths,
         }
 
@@ -423,6 +429,7 @@ class AgentPreparer:
         attachments: Optional[List[Attachment]] = None,
         event_bus: Optional[Any] = None,
         path_context: Optional["PathContext"] = None,
+        model_override: Optional[str] = None,
     ) -> PreparedAgent:
         """Prepare agent with all context, tools, and instructions.
 
@@ -435,6 +442,7 @@ class AgentPreparer:
             attachments: List of Attachment objects for multi-modal inputs
             event_bus: Optional event bus for emitting skill load events
             path_context: Optional PathContext with invoked_from, workspace_dir, effective_cwd
+            model_override: Model chosen at run time, used for the knowledge_cutoff template variable
 
         Returns:
             PreparedAgent ready for execution or display
@@ -490,6 +498,7 @@ class AgentPreparer:
             attachment_bindings=attachment_bindings,
             interactive_mode=interactive_mode,
             paths=paths,
+            model_override=model_override,
         )
 
         renderer = AgentRenderer()

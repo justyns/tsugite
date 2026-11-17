@@ -8,6 +8,8 @@ mapping so a refresh can't silently regress capabilities.
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from tsugite.providers.base import ModelInfo
 
 _SCRIPT = Path(__file__).parent.parent / "scripts" / "update_model_registry.py"
@@ -41,6 +43,16 @@ class TestSource:
 
 
 class TestFieldMapping:
+    @pytest.mark.parametrize("knowledge", ["2026-01-31", "2026-01", None])
+    def test_knowledge_maps_to_cutoff(self, knowledge):
+        entry = _entry() if knowledge is None else _entry(knowledge=knowledge)
+        assert _info("m", entry, "openai").knowledge_cutoff == knowledge
+
+    @pytest.mark.parametrize("knowledge", ['2026-01"); import os #', "unknown"])
+    def test_knowledge_rejects_non_date(self, knowledge):
+        with pytest.raises(ValueError, match="knowledge"):
+            umr.entry_to_model_info("m", _entry(knowledge=knowledge), "openai")
+
     def test_limits_and_costs_map_per_million(self):
         info = _info("m", _entry(), "openai")
         assert info.max_input_tokens == 200_000

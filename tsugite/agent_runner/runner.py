@@ -878,6 +878,7 @@ def _prepare_step(agent: Any, prompt: str, context: Dict[str, Any], setup: "_Run
         context=context,
         attachments=setup.attachments,
         path_context=setup.path_context,
+        model_override=setup.exec_options.model_override,
     )
 
 
