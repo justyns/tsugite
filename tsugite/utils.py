@@ -317,8 +317,9 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List["Atta
     """Expand @filename references in prompt by reading file contents.
 
     Finds patterns like @filename or @"path with spaces.txt", reads their contents,
-    and returns them as Attachment objects. The @filename references in the prompt are
-    replaced with just the filename (without @).
+    and returns them as Attachment objects. @filename:40:100 reads lines 40-100 and
+    @filename:N reads one line. The @filename references in the prompt are replaced
+    with just the filename (without @).
 
     Args:
         prompt: User prompt potentially containing @filename references
@@ -337,20 +338,27 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List["Atta
     from tsugite.attachments.base import Attachment, AttachmentContentType
 
     # Pattern matches @filename or @"quoted filename"
-    # Group 1: quoted path, Group 2: unquoted path
+    # Group 1: quoted path, Group 2: line range after the closing quote, Group 3: unquoted path
     # Unquoted paths must start with valid filename characters (not special symbols like #, $, etc.)
-    pattern = r'@(?:"([^"]+)"|([a-zA-Z0-9_./\-][^\s]*))'
+    pattern = r'@(?:"([^"]+)"((?::-?\d+){1,2}(?![\w-]))?|([a-zA-Z0-9_./\-][^\s]*))'
 
     file_attachments = []
 
     def collect_file_ref(match: re.Match) -> str:
-        # Extract filename from either quoted or unquoted group
-        filename = match.group(1) or match.group(2)
-        file_path = Path(filename)
+        filename = match.group(1) or match.group(3)
+        suffix = match.group(2) or ""
+        reference = filename + suffix
 
-        # Resolve relative paths from base_dir
-        if not file_path.is_absolute():
-            file_path = base_dir / file_path
+        line_range = None
+        if suffix:
+            numbers = [int(n) for n in suffix[1:].split(":")]
+            line_range = (numbers[0], numbers[-1])
+        else:
+            range_match = re.fullmatch(r"(.+?):(-?\d+)(?::(-?\d+))?", filename)
+            if range_match and not (base_dir / filename).exists():
+                filename, start, end = range_match.groups()
+                line_range = (int(start), int(end or start))
+        file_path = base_dir / filename
 
         # Check if file exists and is readable
         if not file_path.exists():
@@ -368,10 +376,19 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List["Atta
         except Exception as e:
             raise ValueError(f"Failed to read file {filename}: {e}") from e
 
+        name = filename
+        if line_range:
+            start, end = line_range
+            lines = re.findall(r"[^\n]*\n|[^\n]+", content)
+            if not 1 <= start <= end <= len(lines):
+                raise ValueError(f"Line range {start}-{end} is out of range for {filename} ({len(lines)} lines)")
+            content = "".join(lines[start - 1 : end])
+            name = f"{filename}:{start}-{end}"
+
         # Store as Attachment object
         file_attachments.append(
             Attachment(
-                name=filename,
+                name=name,
                 content=content,
                 content_type=AttachmentContentType.TEXT,
                 mime_type="text/plain",
@@ -379,7 +396,7 @@ def expand_file_references(prompt: str, base_dir: Path) -> Tuple[str, List["Atta
         )
 
         # Replace @filename with just the filename in the prompt
-        return filename
+        return reference
 
     # Replace all @filename references and collect contents as Attachments
     updated_prompt = re.sub(pattern, collect_file_ref, prompt)

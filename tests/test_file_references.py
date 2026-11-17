@@ -220,3 +220,65 @@ class TestExpandFileReferences:
         prompt = "Contact @user123"
         with pytest.raises(ValueError, match="File not found: user123"):
             expand_file_references(prompt, tmp_path)
+
+
+class TestLineRangeReferences:
+    @pytest.mark.parametrize(
+        "filename, ref, prompt, name, content",
+        [
+            ("lines.txt", "@lines.txt:2:3", "See lines.txt:2:3", "lines.txt:2-3", "two\nthree\n"),
+            ("lines.txt", "@lines.txt:4", "See lines.txt:4", "lines.txt:4-4", "four\n"),
+            ("my lines.txt", '@"my lines.txt:1:2"', "See my lines.txt:1:2", "my lines.txt:1-2", "one\ntwo\n"),
+            ("my lines.txt", '@"my lines.txt":2:3', "See my lines.txt:2:3", "my lines.txt:2-3", "two\nthree\n"),
+        ],
+    )
+    def test_line_range(self, tmp_path, filename, ref, prompt, name, content):
+        (tmp_path / filename).write_text("one\ntwo\nthree\nfour\n")
+
+        updated_prompt, attachments = expand_file_references(f"See {ref}", tmp_path)
+
+        assert updated_prompt == prompt
+        assert [(a.name, a.content) for a in attachments] == [(name, content)]
+
+    def test_line_range_counts_only_newlines(self, tmp_path):
+        (tmp_path / "f.txt").write_text("a\fb\nc\u2028d\ne\n")
+
+        _, attachments = expand_file_references("@f.txt:2:2", tmp_path)
+
+        assert attachments[0].content == "c\u2028d\n"
+
+    @pytest.mark.parametrize(
+        "ref", ["@lines.txt:5", "@lines.txt:2:9", "@lines.txt:3:2", "@lines.txt:0:1", "@lines.txt:-1"]
+    )
+    def test_line_range_out_of_range(self, tmp_path, ref):
+        (tmp_path / "lines.txt").write_text("one\ntwo\nthree\nfour\n")
+
+        with pytest.raises(ValueError, match="out of range"):
+            expand_file_references(ref, tmp_path)
+
+    def test_existing_filename_with_colon_is_whole_file(self, tmp_path):
+        (tmp_path / "a:1").write_text("whole")
+
+        _, attachments = expand_file_references("@a:1", tmp_path)
+
+        assert [(a.name, a.content) for a in attachments] == [("a:1", "whole")]
+
+    def test_quoted_range_keeps_quoted_filename(self, tmp_path):
+        (tmp_path / "a").write_text("x\ny\n")
+        (tmp_path / "a:1").write_text("p\nq\n")
+
+        _, attachments = expand_file_references('@"a:1":2', tmp_path)
+
+        assert [(a.name, a.content) for a in attachments] == [("a:1:2-2", "q\n")]
+
+    def test_quoted_filename_followed_by_date_is_whole_file(self, tmp_path):
+        (tmp_path / "report.txt").write_text("short\n")
+
+        updated_prompt, attachments = expand_file_references('@"report.txt":2026-11-18', tmp_path)
+
+        assert updated_prompt == "report.txt:2026-11-18"
+        assert [(a.name, a.content) for a in attachments] == [("report.txt", "short\n")]
+
+    def test_range_on_missing_file_reports_file_without_range(self, tmp_path):
+        with pytest.raises(ValueError, match="File not found: nope.txt$"):
+            expand_file_references("@nope.txt:1:2", tmp_path)
