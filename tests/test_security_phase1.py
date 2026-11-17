@@ -49,10 +49,11 @@ class TestParentOnlyFlag:
         importlib.reload(agents_mod)
         assert getattr(agents_mod.spawn_agent, "_parent_only", False) is True
 
-    def test_parent_only_on_load_skill(self):
-        from tsugite.tools.skills import load_skill
+    @pytest.mark.parametrize("name", ["load_skill", "list_available_skills"])
+    def test_parent_only_on_skill_tools(self, name):
+        from tsugite.tools import skills
 
-        assert getattr(load_skill, "_parent_only", False) is True
+        assert getattr(getattr(skills, name), "_parent_only", False) is True
 
 
 # ============================================================================

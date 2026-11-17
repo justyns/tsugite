@@ -379,7 +379,7 @@ def unload_skill(skill_name: str) -> str:
     return manager.unload_skill(skill_name)
 
 
-@tool
+@tool(parent_only=True)
 def list_available_skills() -> str:
     """List all discoverable skills.
 

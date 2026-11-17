@@ -498,7 +498,7 @@ def skill_tools(reset_tool_registry):
 
     # Re-register the tools after registry reset
     tool(parent_only=True)(load_skill)
-    tool(list_available_skills)
+    tool(parent_only=True)(list_available_skills)
     tool(get_skills_for_template)
 
 
