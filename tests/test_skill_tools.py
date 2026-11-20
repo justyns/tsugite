@@ -46,7 +46,7 @@ def _register_skill_tools():
 
     tool(parent_only=True)(load_skill)
     tool(parent_only=True)(unload_skill)
-    tool(list_available_skills)
+    tool(parent_only=True)(list_available_skills)
 
 
 class TestLoadSkillTool:
